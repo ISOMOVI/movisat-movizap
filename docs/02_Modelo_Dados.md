@@ -139,6 +139,7 @@ conectado há, reconexões nas últimas 24h.
 | `atendente_id` | FK NULL — quem é o dono agora |
 | `prompt_versao_id` | FK NULL — **qual versão da IA atendeu esta conversa** |
 | `classificacao_id` | FK NULL — preenchida no fechamento |
+| ⚠️ `classificacao_texto` | **acrescentado na implementação.** A v2 exige comentário quando a classificação é `Outro`, mas não disse onde ele fica. É aqui |
 | `adiada_ate` | timestamptz NULL |
 | `criada_em` / `atualizada_em` | timestamptz |
 | 🆕 `ultima_atividade_em` | timestamptz — **base do repasse por inatividade** |
@@ -237,6 +238,7 @@ Arquivo em disco, não no banco. `hash` evita guardar duas vezes o mesmo áudio.
 | `email` | |
 | `senha_hash` NULL / `google_sub` NULL | login local na Fase 1; as colunas do Google já nascem para a Fase 2 não exigir migração |
 | `ativo` | |
+| ⚠️ `owner` | **acrescentado na implementação, não estava na v2 aprovada.** O `auth.py` já trata owner como conceito (enxerga todas as telas, independente do que estiver gravado). Sem a coluna, esse conceito viveria só no `.env` e não sobreviveria ao `CAD_2.1` |
 | `convite_token` / `convite_expira_em` | NULL |
 | 🆕 `estado` | enum(`disponivel`,`ausente`,`nao_perturbe`) |
 | 🆕 `fuso` | text default `America/Sao_Paulo` |
@@ -369,6 +371,30 @@ FPSL passa a ler dela. Sem isso viram três bases com três idades.
 | 🆕 `conversa (estado, ultima_atividade_em)` | varredura do repasse por inatividade |
 | 🆕 `conversa (resolvida_em)` | relatório e a tela de Histórico |
 | 🆕 `cliente.harmonit_id` / `contato.harmonit_id` UNIQUE parcial | upsert do sync |
+
+### 🚨 Postgres NÃO indexa chave estrangeira sozinho
+
+Só PK e UNIQUE ganham índice automático. É engano comum supor que FK também
+ganha. A auditoria de 05/08 achou **16 FKs sem índice** logo depois da
+migração 001.
+
+A **002** indexou cinco — as que têm padrão de leitura real:
+
+| Índice | A consulta que ele serve |
+|---|---|
+| `conversa.atendente_id` | "minhas conversas", o dia inteiro |
+| `midia.conversa_id` | abrir conversa carrega as mídias |
+| `atendente_time.time_id` | quem é do time X |
+| `atendente_time_permissao.time_id` | filtro da fila |
+| `transferencia.para_time_id` | relatório por time |
+
+⚠️ **As outras 11 ficaram de fora de propósito.** Índice pesa em todo INSERT,
+e `mensagem` é a tabela que mais cresce — três índices a mais ali seriam
+pagos em toda entrega de webhook, para junções que quase não acontecem.
+
+O outro motivo clássico para indexar FK — DELETE no pai varrendo a filha
+inteira — **não se aplica**: o princípio do modelo é *nada se apaga,
+inativa-se*.
 
 ---
 
