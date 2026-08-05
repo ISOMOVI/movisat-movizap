@@ -1,0 +1,217 @@
+/* ============================================================================
+   MoviZap — sistema de design: COMPONENTES
+   ----------------------------------------------------------------------------
+   As peças que se repetem. Toda tela monta com estas classes; se precisar de
+   uma peça nova, ela nasce AQUI, não dentro de um .vue.
+
+   Nomes em português, como o resto do projeto.
+   ============================================================================ */
+
+/* ── botão ────────────────────────────────────────────────────────────── */
+.botao {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--e-2);
+  padding: 9px var(--e-4);
+  border: 1.5px solid transparent;   /* = .btn do MoviChat */
+  border-radius: var(--r-sm);
+  touch-action: manipulation;
+  background: var(--superficie-2);
+  color: var(--texto);
+  font-size: var(--txt-md);
+  font-weight: var(--peso-medio);
+  line-height: 1.2;
+  white-space: nowrap;
+  transition: background var(--tempo-rapido) var(--curva),
+              border-color var(--tempo-rapido) var(--curva),
+              color var(--tempo-rapido) var(--curva);
+}
+.botao:hover:not(:disabled) { background: var(--superficie-3); }
+.botao:disabled { opacity: .5; }
+
+.botao--primario {
+  background: var(--acento);
+  color: var(--acento-texto);
+}
+.botao--primario:hover:not(:disabled) { background: var(--acento-hover); }
+
+.botao--contorno {
+  background: transparent;
+  border-color: var(--borda);
+  color: var(--texto-fraco);
+}
+.botao--contorno:hover:not(:disabled) {
+  background: var(--superficie-2);
+  border-color: var(--borda-forte);
+  color: var(--texto);
+}
+
+.botao--perigo {
+  background: transparent;
+  border-color: var(--erro-borda);
+  color: var(--erro);
+}
+.botao--perigo:hover:not(:disabled) { background: var(--erro-suave); }
+
+.botao--fantasma {
+  background: transparent;
+  color: var(--texto-fraco);
+  padding: 6px var(--e-2);
+}
+.botao--fantasma:hover:not(:disabled) { background: var(--superficie-2); color: var(--texto); }
+
+.botao--largo { width: 100%; }
+.botao--pequeno { padding: 5px var(--e-3); font-size: var(--txt-sm); }
+
+/* ── campo de formulário ──────────────────────────────────────────────── */
+.campo { display: block; margin-bottom: var(--e-4); }
+
+.campo__rotulo {
+  display: block;
+  margin-bottom: var(--e-2);
+  font-size: var(--txt-sm);
+  font-weight: var(--peso-medio);
+  color: var(--texto-fraco);
+}
+
+.campo__entrada {
+  display: block;
+  width: 100%;
+  /* 16px e 44px não são estética: abaixo de 16px o iOS dá zoom sozinho ao
+     focar o campo, e 44px é o alvo de toque mínimo. Iguais aos do MoviChat. */
+  min-height: var(--altura-toque);
+  padding: 11px var(--e-4);
+  border: 1.5px solid var(--borda);
+  border-radius: var(--r-md);
+  background: var(--superficie);
+  color: var(--texto);
+  font-size: var(--txt-campo);
+  -webkit-appearance: none;
+  transition: border-color var(--tempo-rapido) var(--curva);
+}
+
+/* Campo de login: maior que o padrão, a pedido. */
+.campo--grande .campo__entrada { min-height: var(--altura-campo); padding: 13px var(--e-4); }
+.campo--grande .campo__rotulo { font-size: var(--txt-md); }
+.campo__entrada::placeholder { color: var(--texto-apagado); }
+.campo__entrada:hover:not(:disabled) { border-color: var(--borda-forte); }
+.campo__entrada:focus-visible { border-color: var(--acento); box-shadow: var(--foco); }
+.campo__entrada:disabled { background: var(--superficie-2); color: var(--texto-apagado); }
+
+.campo__ajuda { margin-top: var(--e-1); font-size: var(--txt-sm); color: var(--texto-apagado); }
+.campo--erro .campo__entrada { border-color: var(--erro); }
+.campo--erro .campo__ajuda { color: var(--erro); }
+
+/* ── cartão ───────────────────────────────────────────────────────────── */
+.cartao {
+  background: var(--superficie);
+  border: var(--borda-fina) solid var(--borda);
+  border-radius: var(--r-lg);
+  box-shadow: var(--sombra-1);
+}
+.cartao__cabecalho {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--e-3);
+  padding: var(--e-3) var(--e-4);
+  border-bottom: var(--borda-fina) solid var(--borda);
+  background: var(--superficie-2);
+  border-radius: var(--r-lg) var(--r-lg) 0 0;
+  font-size: var(--txt-sm);
+  font-weight: var(--peso-forte);
+  color: var(--texto-fraco);
+  letter-spacing: .02em;
+}
+.cartao__corpo { padding: var(--e-4); }
+
+/* ── chip / etiqueta ──────────────────────────────────────────────────── */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--e-1);
+  padding: 2px var(--e-2);
+  border: var(--borda-fina) solid var(--borda);
+  border-radius: var(--r-full);
+  background: var(--superficie-2);
+  font-size: var(--txt-xs);
+  font-weight: var(--peso-medio);
+  color: var(--texto-fraco);
+  white-space: nowrap;
+}
+.chip--acento { background: var(--acento-suave); border-color: var(--acento-borda); color: var(--acento); }
+.chip--ok     { background: var(--ok-suave);     border-color: var(--ok-borda);     color: var(--ok); }
+.chip--aviso  { background: var(--aviso-suave);  border-color: var(--aviso-borda);  color: var(--aviso); }
+.chip--erro   { background: var(--erro-suave);   border-color: var(--erro-borda);   color: var(--erro); }
+.chip--codigo { font-family: var(--fonte-mono); letter-spacing: .02em; }
+
+/* ── aviso ────────────────────────────────────────────────────────────── */
+.aviso {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--e-2);
+  padding: var(--e-3) var(--e-4);
+  border: var(--borda-fina) solid;
+  border-radius: var(--r-md);
+  font-size: var(--txt-sm);
+}
+.aviso__icone { flex: none; line-height: 1.5; }
+.aviso--info  { background: var(--info-suave);  border-color: var(--info-borda);  color: var(--info); }
+.aviso--ok    { background: var(--ok-suave);    border-color: var(--ok-borda);    color: var(--ok); }
+.aviso--atencao { background: var(--aviso-suave); border-color: var(--aviso-borda); color: var(--aviso); }
+.aviso--erro  { background: var(--erro-suave);  border-color: var(--erro-borda);  color: var(--erro); }
+
+/* ── tabela ───────────────────────────────────────────────────────────── */
+.tabela { width: 100%; border-collapse: collapse; font-size: var(--txt-md); }
+.tabela th {
+  padding: var(--e-2) var(--e-4);
+  border-bottom: var(--borda-fina) solid var(--borda);
+  background: var(--superficie-2);
+  text-align: left;
+  font-size: var(--txt-xs);
+  font-weight: var(--peso-forte);
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  color: var(--texto-apagado);
+  white-space: nowrap;
+}
+.tabela td {
+  padding: var(--e-3) var(--e-4);
+  border-bottom: var(--borda-fina) solid var(--borda);
+  vertical-align: middle;
+}
+.tabela tbody tr:last-child td { border-bottom: 0; }
+.tabela tbody tr:hover td { background: var(--superficie-2); }
+.tabela--rolavel { display: block; overflow-x: auto; }
+
+/* ── estado vazio ─────────────────────────────────────────────────────── */
+.vazio {
+  padding: var(--e-8) var(--e-5);
+  border: var(--borda-fina) dashed var(--borda-forte);
+  border-radius: var(--r-lg);
+  text-align: center;
+  color: var(--texto-fraco);
+}
+.vazio__icone { font-size: 30px; color: var(--texto-apagado); display: block; margin-bottom: var(--e-3); }
+.vazio__titulo { font-size: var(--txt-lg); font-weight: var(--peso-forte); color: var(--texto); margin-bottom: var(--e-2); }
+
+/* ── carregando ───────────────────────────────────────────────────────── */
+.girando {
+  display: inline-block;
+  width: 15px; height: 15px;
+  border: 2px solid var(--borda-forte);
+  border-top-color: var(--acento);
+  border-radius: var(--r-full);
+  animation: girar .7s linear infinite;
+}
+@keyframes girar { to { transform: rotate(360deg); } }
+
+/* ── utilitários mínimos ──────────────────────────────────────────────── */
+.mono   { font-family: var(--fonte-mono); }
+.fraco  { color: var(--texto-fraco); }
+.apagado{ color: var(--texto-apagado); }
+.pequeno{ font-size: var(--txt-sm); }
+.pilha  { display: flex; flex-direction: column; gap: var(--e-3); }
+.linha  { display: flex; align-items: center; gap: var(--e-2); }
+.espaco { flex: 1 1 auto; }

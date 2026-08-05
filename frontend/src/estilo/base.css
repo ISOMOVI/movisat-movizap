@@ -1,0 +1,83 @@
+/* ============================================================================
+   MoviZap — sistema de design: BASE
+   Reset curto e o comportamento padrão dos elementos. Sem componente aqui.
+   ============================================================================ */
+
+*,
+*::before,
+*::after { box-sizing: border-box; }
+
+html, body, #app { height: 100%; }
+
+body {
+  margin: 0;
+  background: var(--fundo);
+  color: var(--texto);
+  font-family: var(--fonte);
+  font-size: var(--txt-md);
+  line-height: var(--entrelinha);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+h1, h2, h3, h4, p, figure, blockquote, dl, dd { margin: 0; }
+
+h1 { font-size: var(--txt-xl);  font-weight: var(--peso-forte); letter-spacing: -.02em;
+     line-height: var(--entrelinha-apertada); }
+h2 { font-size: var(--txt-lg);  font-weight: var(--peso-forte); letter-spacing: -.01em; }
+h3 { font-size: var(--txt-md);  font-weight: var(--peso-forte); }
+
+a { color: var(--acento); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+ul, ol { margin: 0; padding: 0; list-style: none; }
+
+button, input, select, textarea {
+  font: inherit;
+  color: inherit;
+}
+
+button { cursor: pointer; }
+button:disabled { cursor: not-allowed; }
+
+code, kbd, samp, pre { font-family: var(--fonte-mono); font-size: .92em; }
+
+hr { border: 0; border-top: var(--borda-fina) solid var(--borda); margin: var(--e-5) 0; }
+
+/* Foco visível só para teclado: o clique não precisa de anel, o Tab precisa. */
+:focus { outline: none; }
+:focus-visible {
+  outline: none;
+  box-shadow: var(--foco);
+  border-radius: var(--r-sm);
+}
+
+::selection { background: var(--acento-suave); }
+
+/* Barra de rolagem discreta, mesma cor nos dois temas. */
+* { scrollbar-width: thin; scrollbar-color: var(--borda-forte) transparent; }
+*::-webkit-scrollbar { width: 10px; height: 10px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb {
+  background: var(--borda-forte);
+  border: 3px solid transparent;
+  background-clip: content-box;
+  border-radius: var(--r-full);
+}
+
+[hidden] { display: none !important; }
+
+/* Só para leitor de tela. */
+.so-leitor {
+  position: absolute; width: 1px; height: 1px;
+  padding: 0; margin: -1px; overflow: hidden;
+  clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+  }
+}

@@ -11,9 +11,10 @@ from contextlib import asynccontextmanager
 from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from . import auth
+from . import ratelimit
 from . import telas as registro_telas
 from .config import RAIZ, settings, silenciar_clientes_http
 
@@ -83,19 +84,42 @@ async def identificar_requisicao(request: Request, call_next):
 # ---------------------------------------------------------------- sessão
 
 class Credenciais(BaseModel):
-    login: str
-    senha: str
+    # Teto de tamanho: sem ele, um POST de 10 MB no campo senha vira trabalho
+    # de bcrypt em cima de lixo. O bcrypt já ignora além de 72 bytes.
+    login: str = Field(min_length=1, max_length=64)
+    senha: str = Field(min_length=1, max_length=256)
 
 
 @app.post("/api/sessao/login")
-def login(dados: Credenciais):
+def login(dados: Credenciais, request: Request):
+    """🚨 Rota mais atacada de qualquer painel. Três defesas, nesta ordem:
+
+    1. limite de tentativas ANTES do bcrypt -- senão a própria verificação
+       (250ms) vira o custo do ataque, e ele fica de graça para o atacante;
+    2. mensagem única, que não entrega se errou o login ou a senha;
+    3. teto de tamanho no corpo, acima.
+    """
+    chave = ratelimit.chave_de(ratelimit.ip_do_cliente(request), dados.login)
+
+    resta = ratelimit.bloqueado_por(chave)
+    if resta:
+        log.warning("req=%s login bloqueado: %s (%ss restantes)",
+                    request.state.req_id, chave, resta)
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=f"Muitas tentativas. Tente de novo em {resta // 60 + 1} min.",
+        )
+
     usuario = auth.validar_login(dados.login, dados.senha)
     if not usuario:
+        ratelimit.registrar_falha(chave)
         # mensagem única de propósito: não entrega se o erro foi o login ou a senha
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Login ou senha inválidos.",
         )
+
+    ratelimit.registrar_sucesso(chave)
     return {
         "token": auth.criar_token(usuario["login"]),
         "expira_em_horas": auth.TOKEN_EXPIRA_HORAS,
@@ -153,7 +177,16 @@ if FRONTEND.exists():
     @app.get("/{caminho:path}")
     def spa(caminho: str):
         """Toda rota que não é /api cai no index -- o roteamento é do Vue."""
-        arquivo = FRONTEND / caminho
-        if caminho and arquivo.is_file():
+        # /api que não casou com rota real NÃO pode virar index.html: o fetch
+        # receberia HTML com status 200 e quebraria num JSON.parse longe da
+        # causa. 404 em JSON diz a verdade onde o erro nasceu.
+        if caminho == "api" or caminho.startswith("api/"):
+            raise HTTPException(status_code=404, detail="Rota de API inexistente.")
+
+        # `caminho` vem do cliente. Sem esta trava, "../../.env" seria servido
+        # como arquivo estático: resolver e exigir que fique dentro do dist.
+        raiz = FRONTEND.resolve()
+        arquivo = (FRONTEND / caminho).resolve()
+        if caminho and arquivo.is_file() and arquivo.is_relative_to(raiz):
             return FileResponse(arquivo)
         return FileResponse(FRONTEND / "index.html")

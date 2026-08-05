@@ -1,0 +1,189 @@
+/* ============================================================================
+   MoviZap — sistema de design: TOKENS
+   ----------------------------------------------------------------------------
+   Item 17 do escopo da Fase 1. Existe desde a primeira tela de propósito:
+   improvisar cor e espaçamento tela a tela é exatamente o que dá cara de
+   painel interno feito às pressas.
+
+   REGRA: nenhuma tela escreve cor, tamanho de fonte, raio ou espaçamento na
+   mão. Se um valor não existe aqui, ou ele vira token, ou não entra.
+
+   O tema é resolvido em JS e gravado em <html data-tema="claro|escuro"> antes
+   da primeira pintura (ver o script no index.html). Por isso aqui não há
+   @media prefers-color-scheme: um valor só, num lugar só.
+   ============================================================================ */
+
+:root {
+  /* ---- tipografia ---------------------------------------------------- */
+  /* Mesma pilha do MoviChat, que é o padrão visual da casa. */
+  --fonte: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --fonte-mono: ui-monospace, "SF Mono", "Cascadia Mono", "Consolas", monospace;
+
+  --txt-xs:   11px;   /* etiqueta de tabela, barra de status */
+  --txt-sm:   12.5px; /* apoio, legenda */
+  --txt-md:   14px;   /* corpo — o padrão */
+  --txt-lg:   16px;
+  --txt-xl:   20px;   /* título de tela */
+  --txt-2xl:  26px;   /* marca */
+
+  /* 🚨 Campo de formulário NÃO usa --txt-md. Abaixo de 16px o iOS dá zoom
+     sozinho ao focar o campo, e o usuário fica com a tela torta. 44px é o
+     alvo de toque mínimo. Os dois vêm do MoviChat. */
+  --txt-campo:      16px;
+  --altura-toque:   44px;
+  --altura-campo:   48px;   /* login: maior que o padrão, a pedido */
+
+  --peso-normal: 400;
+  --peso-medio:  500;
+  --peso-forte:  600;
+
+  --entrelinha-apertada: 1.25;
+  --entrelinha:          1.55;
+
+  /* ---- espaçamento (base 4) ------------------------------------------ */
+  --e-1:  4px;
+  --e-2:  8px;
+  --e-3:  12px;
+  --e-4:  16px;
+  --e-5:  22px;
+  --e-6:  30px;
+  --e-7:  40px;
+  --e-8:  56px;
+
+  /* ---- forma (raios do MoviChat) ------------------------------------- */
+  --r-sm:   6px;
+  --r-md:   8px;
+  --r-lg:   8px;
+  --r-full: 999px;
+
+  --borda-fina: 1px;
+
+  /* ---- movimento ------------------------------------------------------ */
+  --tempo-rapido: 90ms;
+  --tempo:        160ms;
+  --curva: cubic-bezier(.2, .6, .3, 1);
+
+  /* ---- estrutura ------------------------------------------------------ */
+  --largura-menu:  240px;   /* = --sidebar-w do MoviChat */
+  --altura-barra:  30px;   /* barra de status, rodapé fixo */
+  --largura-texto: 68ch;   /* medida de leitura confortável */
+
+  /* ---- camadas -------------------------------------------------------- */
+  --z-conteudo: 1;
+  --z-barra:    50;
+  --z-flutuante: 100;
+  --z-modal:    200;
+}
+
+/* ==========================================================================
+   TEMA CLARO — o padrão
+   --------------------------------------------------------------------------
+   🚨 Os valores são os do `theme.css` do MoviChat, não uma aproximação. Ele é
+   o padrão visual da casa; três painéis com "quase a mesma cor" é pior que
+   três painéis diferentes, porque parece defeito em vez de escolha.
+   ========================================================================== */
+:root,
+:root[data-tema="claro"] {
+  color-scheme: light;
+
+  --fundo:        #F8FAFC;  /* = --bg  do MoviChat */
+  --superficie:   #FFFFFF;  /* = --card */
+  --superficie-2: #F1F5F9;  /* = --bg2  · hover, cabeçalho de tabela */
+  --superficie-3: #E2E8F0;  /* = --bg3  · pressionado */
+
+  --borda:        #E2E8F0;  /* = --border */
+  --borda-forte:  #CBD5E1;
+
+  --texto:        #0F172A;  /* = --text  */
+  --texto-fraco:  #64748B;  /* = --text2 */
+  --texto-apagado:#94A3B8;
+
+  --acento:        #2563EB;  /* = --blue */
+  --acento-hover:  #1D4ED8;
+  --acento-suave:  #EFF6FF;  /* = --blue-dim */
+  --acento-borda:  #BFDBFE;  /* = --blue-mid */
+  --acento-texto:  #FFFFFF;  /* texto POR CIMA do acento */
+
+  --ok:        #16A34A;      /* = --green */
+  --ok-suave:  #F0FDF4;      /* = --green-dim */
+  --ok-borda:  rgba(22, 163, 74, .35);
+
+  --aviso:       #D97706;    /* = --yellow */
+  --aviso-suave: #FFFBEB;    /* = --yellow-dim */
+  --aviso-borda: rgba(217, 119, 6, .35);
+
+  --erro:        #DC2626;    /* = --red */
+  --erro-suave:  #FEF2F2;    /* = --red-dim */
+  --erro-borda:  rgba(220, 38, 38, .35);
+
+  --info:        #2563EB;
+  --info-suave:  #EFF6FF;
+  --info-borda:  #BFDBFE;
+
+  /* ---- menu lateral: ESCURO mesmo no tema claro ----------------------- */
+  /* É a assinatura do MoviChat, e o que mais distingue os painéis à
+     primeira vista. Tokens próprios porque não seguem o tema. */
+  --menu-fundo:       #0F172A;  /* = --sidebar-bg */
+  --menu-texto:       #94A3B8;  /* = --sidebar-tx */
+  --menu-texto-forte: #FFFFFF;
+  --menu-hover:       rgba(255, 255, 255, .06);
+  --menu-borda:       rgba(255, 255, 255, .10);
+
+  --sombra-1: 0 1px 3px rgba(0, 0, 0, .08), 0 1px 2px rgba(0, 0, 0, .04);
+  --sombra-2: 0 8px 24px rgba(15, 23, 42, .12), 0 2px 6px rgba(15, 23, 42, .06);
+
+  --foco: 0 0 0 3px rgba(37, 99, 235, .28);
+}
+
+/* ==========================================================================
+   TEMA ESCURO — herda a paleta já validada no painel do MoviServer
+   ========================================================================== */
+:root[data-tema="escuro"] {
+  color-scheme: dark;
+
+  --fundo:        #0d1117;
+  --superficie:   #161b22;
+  --superficie-2: #1c222b;
+  --superficie-3: #262d38;
+
+  --borda:        #30363d;
+  --borda-forte:  #48505b;
+
+  --texto:        #e6edf3;
+  --texto-fraco:  #9aa4b1;
+  --texto-apagado:#6e7781;
+
+  --acento:        #2f81f7;
+  --acento-hover:  #4b95fb;
+  --acento-suave:  rgba(47, 129, 247, .16);
+  --acento-borda:  rgba(47, 129, 247, .45);
+  --acento-texto:  #04122a;
+
+  --ok:        #3fb950;
+  --ok-suave:  rgba(63, 185, 80, .16);
+  --ok-borda:  rgba(63, 185, 80, .40);
+
+  --aviso:       #d29922;
+  --aviso-suave: rgba(210, 153, 34, .15);
+  --aviso-borda: rgba(210, 153, 34, .42);
+
+  --erro:        #f85149;
+  --erro-suave:  rgba(248, 81, 73, .14);
+  --erro-borda:  rgba(248, 81, 73, .42);
+
+  --info:        #58a6ff;
+  --info-suave:  rgba(88, 166, 255, .14);
+  --info-borda:  rgba(88, 166, 255, .42);
+
+  /* No escuro o menu já é escuro: segue a superfície, sem contraste extra. */
+  --menu-fundo:       #0d1117;
+  --menu-texto:       #9aa4b1;
+  --menu-texto-forte: #e6edf3;
+  --menu-hover:       rgba(255, 255, 255, .06);
+  --menu-borda:       #30363d;
+
+  --sombra-1: 0 1px 2px rgba(0, 0, 0, .40);
+  --sombra-2: 0 8px 24px rgba(0, 0, 0, .48);
+
+  --foco: 0 0 0 3px rgba(47, 129, 247, .40);
+}

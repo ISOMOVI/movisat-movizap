@@ -34,8 +34,13 @@ def buscar_usuario(login: str) -> dict | None:
     """Único ponto que conhece a origem dos usuários.
 
     Hoje: o .env. Depois: a tabela `atendente`. Nada além daqui precisa saber.
+
+    🚨 A comparação do login IGNORA MAIÚSCULA. Em 05/08 o painel recusou o
+    acesso em 1ms -- rápido demais para ter chegado no bcrypt -- porque o nome
+    digitado não era idêntico ao gravado. Login é identificador de pessoa, não
+    segredo: quem protege é a senha. Exigir a caixa exata só rende chamado.
     """
-    if not settings.admin_login or login != settings.admin_login:
+    if not settings.admin_login or login.casefold() != settings.admin_login.casefold():
         return None
     return {
         "login": settings.admin_login,

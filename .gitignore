@@ -12,6 +12,13 @@ __pycache__/
 *.pyc
 *.pyo
 node_modules/
+.vite/
+
+# ---- gerado pelo build do frontend ----
+# `dist` e reconstruivel com `npm ci && npm run build`. Versionar bundle
+# minificado suja todo diff e mente sobre o que mudou de verdade.
+frontend/dist/
+.pytest_cache/
 
 # ---- dados e runtime ----
 data/
@@ -29,3 +36,10 @@ backups/
 *.bak2_*
 *.bak3_*
 .DS_Store
+
+# ---- satelites do SQLite em modo WAL ----
+# `*.db` NAO casa com estes. Sao estado de runtime e, no caso do contador de
+# tentativas de login, carregam IP e nome de conta.
+*.db-wal
+*.db-shm
+*.db-journal

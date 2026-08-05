@@ -127,3 +127,36 @@ class TestBuscaDeUsuario:
 
     def test_login_desconhecido_nao_autentica(self):
         assert auth.validar_login("ninguem", "qualquer") is None
+
+
+class TestLoginIgnoraCaixa:
+    """05/08: o painel recusou o acesso em 1ms.
+
+    Rápido demais para ter chegado no bcrypt -- a verificação leva dezenas de
+    milissegundos. O nome digitado não era idêntico ao gravado, só na caixa.
+    Login identifica a pessoa; quem protege é a senha.
+
+    Os testes não fixam o nome: leem do .env. Trocar o login do painel não
+    pode exigir mexer em teste.
+    """
+
+    def test_encontra_o_usuario_em_qualquer_caixa(self):
+        nome = settings.admin_login
+        for variante in (nome, nome.upper(), nome.lower(), nome.swapcase()):
+            assert auth.buscar_usuario(variante) is not None, f"recusou {variante!r}"
+
+    def test_devolve_sempre_o_login_canonico(self):
+        # O token e a auditoria usam este valor. Se ele variasse conforme o
+        # que foi digitado, a mesma pessoa viraria duas no log.
+        u = auth.buscar_usuario(settings.admin_login.upper())
+        assert u["login"] == settings.admin_login
+
+    def test_nome_diferente_continua_recusado(self):
+        assert auth.buscar_usuario(settings.admin_login + "x") is None
+        assert auth.buscar_usuario("") is None
+
+    def test_ignorar_caixa_no_nome_nao_afrouxa_a_senha(self):
+        # a senha continua sensível à caixa -- é ela que protege
+        h = auth.hash_senha("Segredo123!")
+        assert not auth.pwd_ctx.verify("segredo123!", h)
+        assert not auth.pwd_ctx.verify("SEGREDO123!", h)
