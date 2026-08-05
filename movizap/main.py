@@ -14,6 +14,9 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from . import auth
+from . import banco
+from . import canais as registro_canais
+from . import evolution
 from . import ratelimit
 from . import telas as registro_telas
 from .config import RAIZ, settings, silenciar_clientes_http
@@ -34,12 +37,19 @@ async def ciclo_de_vida(app: FastAPI):
     if faltando:
         # falhar no arranque é melhor que subir sem autenticação
         raise RuntimeError(f"Configuração ausente no .env: {', '.join(faltando)}")
+    banco.abrir()
+    for aviso in settings.avisos():
+        # não derruba: a CFG_1.1 sem Evolution é uma tela quebrada, não um
+        # painel quebrado
+        log.warning("%s", aviso)
     log.info(
-        "MoviZap subindo | ambiente=%s | telas ativas=%d",
+        "MoviZap subindo | ambiente=%s | telas ativas=%d | banco=%s",
         settings.ambiente,
         len(registro_telas.ativas()),
+        settings.dsn_seguro(),   # sem a senha
     )
     yield
+    banco.fechar()
     log.info("MoviZap encerrando")
 
 
@@ -156,6 +166,71 @@ def registro_completo(usuario: dict = Depends(auth.requer_tela("CFG_9.1"))):
     }
 
 
+# ---------------------------------------------------------------- canais
+
+@app.get("/api/canais")
+def listar_canais(usuario: dict = Depends(auth.requer_tela("CFG_1.1"))):
+    """CFG_1.1 — os canais do banco com o estado ao vivo do Evolution.
+
+    O banco diz o que EXISTE; o Evolution diz o que está ACONTECENDO. Guardar
+    estado no banco e confiar nele é como se descobre três dias depois que
+    parou de chegar mensagem.
+    """
+    return registro_canais.listar()
+
+
+@app.get("/api/canais/{canal_id}/eventos")
+def eventos_do_canal(canal_id: int,
+                     usuario: dict = Depends(auth.requer_tela("CFG_1.1"))):
+    """O histórico que responde 'desde quando parou de chegar mensagem?'."""
+    if not registro_canais.por_id(canal_id):
+        raise HTTPException(status_code=404, detail="Canal não encontrado.")
+    return registro_canais.eventos(canal_id)
+
+
+@app.post("/api/canais/{canal_id}/conectar")
+def conectar_canal(canal_id: int, request: Request,
+                   usuario: dict = Depends(auth.requer_tela("CFG_1.1"))):
+    """Pede um QR novo. O do Baileys expira em ~60s — a tela chama de novo."""
+    try:
+        return registro_canais.conectar(canal_id, usuario["login"])
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except evolution.ErroEvolution as e:
+        log.warning("req=%s conectar canal %s: %s",
+                    request.state.req_id, canal_id, e)
+        raise HTTPException(status_code=502, detail=f"Evolution: {e}")
+
+
+@app.post("/api/canais/{canal_id}/confirmar")
+def confirmar_canal(canal_id: int, request: Request,
+                    usuario: dict = Depends(auth.requer_tela("CFG_1.1"))):
+    """A tela viu que conectou. É AQUI que as settings da Fase 1 entram."""
+    try:
+        return {"settings": registro_canais.confirmar_pareamento(
+            canal_id, usuario["login"])}
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except evolution.ErroEvolution as e:
+        log.warning("req=%s confirmar canal %s: %s",
+                    request.state.req_id, canal_id, e)
+        raise HTTPException(status_code=502, detail=f"Evolution: {e}")
+
+
+@app.post("/api/canais/{canal_id}/desconectar")
+def desconectar_canal(canal_id: int, request: Request,
+                      usuario: dict = Depends(auth.requer_tela("CFG_1.1"))):
+    try:
+        registro_canais.desconectar(canal_id, usuario["login"])
+        return {"ok": True}
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except evolution.ErroEvolution as e:
+        log.warning("req=%s desconectar canal %s: %s",
+                    request.state.req_id, canal_id, e)
+        raise HTTPException(status_code=502, detail=f"Evolution: {e}")
+
+
 # ---------------------------------------------------------------- saúde
 
 @app.get("/api/saude")
@@ -166,6 +241,7 @@ def saude(request: Request):
         "ambiente": settings.ambiente,
         "req_id": request.state.req_id,
         "telas_ativas": len(registro_telas.ativas()),
+        "banco": banco.saude(),
     }
 
 

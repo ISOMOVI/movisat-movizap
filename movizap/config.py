@@ -46,14 +46,49 @@ class Settings:
 
     fpsl_base_url: str = _ler("FPSL_BASE_URL", "http://127.0.0.1:8005")
 
+    # ---- banco (migração 001, 2026-08-05) ----
+    db_host: str = _ler("MOVIZAP_DB_HOST", "127.0.0.1")
+    db_porta: str = _ler("MOVIZAP_DB_PORTA", "5432")
+    db_nome: str = _ler("MOVIZAP_DB_NOME", "movizap")
+    db_usuario: str = _ler("MOVIZAP_DB_USUARIO", "movizap")
+    db_senha: str = _ler("MOVIZAP_DB_SENHA")
+
+    # ---- Evolution (CFG_1.1) ----
+    evolution_base_url: str = _ler("EVOLUTION_BASE_URL", "http://localhost:8081")
+    evolution_api_key: str = _ler("EVOLUTION_API_KEY")
+    evolution_instancia: str = _ler("EVOLUTION_INSTANCIA_ATENDIMENTO", "atendimento")
+
+    def dsn(self) -> str:
+        """String de conexão do Postgres.
+
+        🚨 Nunca imprimir nem logar: carrega a senha. Para exibir, use
+        `dsn_seguro()`.
+        """
+        return (f"host={self.db_host} port={self.db_porta} dbname={self.db_nome} "
+                f"user={self.db_usuario} password={self.db_senha}")
+
+    def dsn_seguro(self) -> str:
+        """O mesmo, sem a senha. É este que pode aparecer em log ou tela."""
+        return f"{self.db_usuario}@{self.db_host}:{self.db_porta}/{self.db_nome}"
+
     def faltando(self) -> list[str]:
         """O que impede o app de subir. Falhar cedo é melhor que falhar em uso."""
         obrigatorios = {
             "MOVIZAP_JWT_SECRET": self.jwt_secret,
             "MOVIZAP_ADMIN_LOGIN": self.admin_login,
             "MOVIZAP_ADMIN_SENHA_HASH": self.admin_senha_hash,
+            "MOVIZAP_DB_SENHA": self.db_senha,
         }
         return [k for k, v in obrigatorios.items() if not v]
+
+    def avisos(self) -> list[str]:
+        """O que não impede subir, mas deixa uma tela sem funcionar.
+
+        Separado de `faltando` de propósito: derrubar o painel inteiro porque
+        a CFG_1.1 não vai funcionar seria trocar um problema por um maior.
+        """
+        return ([] if self.evolution_api_key
+                else ["EVOLUTION_API_KEY ausente -- a CFG_1.1 não vai conectar"])
 
 
 settings = Settings()

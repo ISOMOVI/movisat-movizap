@@ -18,6 +18,7 @@ import { sessao, autenticado, codigosPermitidos, restaurar } from '../estado/ses
 import { temToken } from '../api/cliente.js'
 
 import Login from '../telas/Login.vue'
+import Canais from '../telas/Canais.vue'
 import RegistroDeTelas from '../telas/RegistroDeTelas.vue'
 import EmConstrucao from '../telas/EmConstrucao.vue'
 import SemPermissao from '../telas/SemPermissao.vue'
@@ -89,9 +90,8 @@ const rotas = [
   {
     path: '/config/canais',
     name: 'CFG_1.1',
-    ...emObra('CFG_1.1', 'Canais',
-      'O pareamento do WhatsApp por QR. A instância `atendimento` já existe no '
-      + 'Evolution, em estado close, esperando ser pareada por aqui.'),
+    component: Canais,
+    meta: { codigo: 'CFG_1.1', titulo: 'Canais' },
   },
   {
     path: '/config/ia/prompt',
