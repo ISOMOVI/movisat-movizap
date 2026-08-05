@@ -28,6 +28,12 @@ logs/
 *.sqlite3
 *.sql
 *.sql.gz
+# ...MENOS as migracoes. A regra "*.sql" acima existe para dump de dados, e
+# em 05/08 ela engoliu o 001_inicial.sql -- justamente o arquivo que DEFINE
+# o banco, e que quase foi commitado sem ninguem notar.
+# Dump e dado descartavel; migracao e codigo e tem que estar no historico.
+!migracoes/
+!migracoes/*.sql
 
 # ---- lixo de edicao ----
 backups/
