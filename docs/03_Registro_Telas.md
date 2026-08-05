@@ -74,6 +74,33 @@ telas.py  →  código · título · rota · arquivo · permissão · fase · at
 
 ---
 
+## 🚨 Mexeu na tela? Atualiza o registro NO MESMO COMMIT
+
+Regra pedida pelo usuário em 2026-08-05, e a mais fácil de esquecer.
+
+Mudou **rota, título, ícone, permissão ou fase** de uma tela, o
+`movizap/telas.py` muda junto — não no dia seguinte, não "depois que
+estabilizar". No mesmo commit.
+
+**Por que isto não é burocracia:**
+
+| Se o registro desatualizar | O que quebra |
+|---|---|
+| rota mudou, registro não | o menu leva ao **lugar errado** — e o frontend desenha o que vem, então ele obedece o registro errado sem reclamar |
+| permissão mudou, registro não | alguém enxerga o que não devia, ou perde acesso sem motivo aparente |
+| título mudou, registro não | o log de auditoria descreve uma tela que **já não é aquela** |
+| tela saiu, código reaproveitado | 🚨 **o log antigo passa a mentir** — aponta para uma tela que nunca visitou |
+
+**Código aposentado nunca volta.** Tela removida deixa o código queimado para
+sempre; a próxima usa número novo. É barato: são três dígitos.
+
+**Como conferir:** `CFG_9.1` mostra o registro inteiro, e
+`tests/teste_telas.py` reprova código duplicado, rota duplicada e permissão
+vazando. Se o teste passar e a tela estiver errada, é porque o registro
+mentiu junto — por isso a atualização é no mesmo commit, não depois.
+
+---
+
 ## Barra de status
 
 Fixa no rodapé de **toda** tela principal. Modelo mental: barra do Excel / bloco de notas.
