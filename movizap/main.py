@@ -3,6 +3,7 @@
 Fase 1: esqueleto. Login, registro de telas, barra de status.
 Sem banco ainda -- ver `auth.buscar_usuario`.
 """
+import asyncio
 import logging
 import secrets
 import time
@@ -19,6 +20,7 @@ from . import canais as registro_canais
 from . import evolution
 from . import ratelimit
 from . import telas as registro_telas
+from . import vigia
 from .config import RAIZ, settings, silenciar_clientes_http
 
 logging.basicConfig(
@@ -48,7 +50,19 @@ async def ciclo_de_vida(app: FastAPI):
         len(registro_telas.ativas()),
         settings.dsn_seguro(),   # sem a senha
     )
+    # 🚨 O vigia existe porque `canal_evento` só era escrito quando alguém
+    # abria a CFG_1.1 -- e essa tabela responde "desde quando parou de chegar
+    # mensagem?". Histórico que só avança quando observado não é histórico.
+    parar_vigia = asyncio.Event()
+    tarefa_vigia = asyncio.create_task(vigia.rodar(parar_vigia))
+
     yield
+
+    parar_vigia.set()
+    try:
+        await asyncio.wait_for(tarefa_vigia, timeout=5)
+    except asyncio.TimeoutError:
+        tarefa_vigia.cancel()
     banco.fechar()
     log.info("MoviZap encerrando")
 
