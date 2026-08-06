@@ -25,6 +25,8 @@ import { temToken } from '../api/cliente.js'
 
 import Login from '../telas/Login.vue'
 import Canais from '../telas/Canais.vue'
+import Clientes from '../telas/Clientes.vue'
+import Contatos from '../telas/Contatos.vue'
 import Sincronizacao from '../telas/Sincronizacao.vue'
 import RegistroDeTelas from '../telas/RegistroDeTelas.vue'
 import EmConstrucao from '../telas/EmConstrucao.vue'
@@ -78,14 +80,16 @@ const rotas = [
   {
     path: '/cadastro/clientes',
     name: 'CAD_1.1',
-    ...emObra('CAD_1.1', 'Clientes',
-      'Clientes sincronizados do Harmonit ou criados aqui. Depende do banco.'),
+    component: Clientes,
+    meta: { codigo: 'CAD_1.1', titulo: 'Clientes' },
   },
   {
+    // As abas CAD_1.2.1/.2/.3 vivem DENTRO desta tela e não têm rota própria.
+    // O código delas existe só como âncora de auditoria — ver o registro.
     path: '/cadastro/contatos',
     name: 'CAD_1.2',
-    ...emObra('CAD_1.2', 'Contatos',
-      'Pessoas, telefones em E.164 com o bruto preservado, e seus papéis.'),
+    component: Contatos,
+    meta: { codigo: 'CAD_1.2', titulo: 'Contatos' },
   },
   {
     path: '/cadastro/atendentes',

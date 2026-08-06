@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field
 
 from . import auth
 from . import banco
+from . import cadastro
 from . import canais as registro_canais
 from . import evolution
 from . import ratelimit
@@ -244,6 +245,61 @@ def desconectar_canal(canal_id: int, request: Request,
         log.warning("req=%s desconectar canal %s: %s",
                     request.state.req_id, canal_id, e)
         raise HTTPException(status_code=502, detail=f"Evolution: {e}")
+
+
+# ------------------------------------------------------ cadastro (CAD_1.1/1.2)
+
+@app.get("/api/clientes")
+def listar_clientes(busca: str = "", pagina: int = 1, por_pagina: int = 50,
+                    apenas_ativos: bool = False,
+                    usuario: dict = Depends(auth.requer_tela("CAD_1.1"))):
+    """CAD_1.1 — os clientes, com busca que entende telefone.
+
+    🚨 A busca não é por igualdade do que foi digitado. `18 99811-6168`,
+    `(18) 9811-6168` e `5518998116168` acham a mesma pessoa, porque o termo
+    passa pelo normalizador antes de virar consulta. A interpretação volta
+    junto na resposta: quem procurou um telefone precisa saber se foi isso que
+    o sistema entendeu.
+    """
+    return cadastro.listar_clientes(busca, pagina, por_pagina, apenas_ativos)
+
+
+@app.get("/api/clientes/{cliente_id}")
+def ver_cliente(cliente_id: int,
+                usuario: dict = Depends(auth.requer_tela("CAD_1.1"))):
+    achado = cadastro.cliente(cliente_id)
+    if not achado:
+        raise HTTPException(status_code=404, detail="Cliente não encontrado.")
+    return achado
+
+
+@app.get("/api/contatos")
+def listar_contatos(busca: str = "", pagina: int = 1, por_pagina: int = 50,
+                    apenas_ativos: bool = False,
+                    usuario: dict = Depends(auth.requer_tela("CAD_1.2"))):
+    return cadastro.listar_contatos(busca, pagina, por_pagina, apenas_ativos)
+
+
+@app.get("/api/contatos/{contato_id}")
+def ver_contato(contato_id: int,
+                usuario: dict = Depends(auth.requer_tela("CAD_1.2"))):
+    achado = cadastro.contato(contato_id)
+    if not achado:
+        raise HTTPException(status_code=404, detail="Contato não encontrado.")
+    return achado
+
+
+@app.get("/api/contatos/por-telefone/{numero}")
+def contatos_por_telefone(numero: str,
+                          usuario: dict = Depends(auth.requer_tela("CAD_1.2"))):
+    """Quem responde por um número. É o que o webhook vai usar no passo 4.
+
+    ⚠️ Devolve LISTA. Dez números da base estão em mais de um contato -- um
+    deles em oito -- porque são centrais de empresa repetidas no cadastro de
+    cada filial. Escolher um arbitrariamente aqui esconderia a ambiguidade de
+    quem vai atender.
+    """
+    return cadastro.por_telefone(numero)
 
 
 # ---------------------------------------------------------------- sync (CFG_3.1)
