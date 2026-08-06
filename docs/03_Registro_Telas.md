@@ -40,6 +40,7 @@ MOD_a.b[.c]
 | `ATD_1.2` | Conversa | `/atendimento/{id}` | `atendimento` | 1 |
 | `ATD_1.3` | Fila | `/atendimento/fila` | `atendimento` | 1 |
 | `ATD_2.1` | Ficha do contato (painel lateral) | componente | `atendimento` | 1 |
+| `ATD_5.1` | Histórico | `/atendimento/historico` | `atendimento` | 1 |
 | `CAD_1.1` | Clientes | `/cadastro/clientes` | `cadastro` | 1 |
 | `CAD_1.2` | Contatos | `/cadastro/contatos` | `cadastro` | 1 |
 | `CAD_1.2.1` | Contato — dados | aba | `cadastro` | 1 |
@@ -55,6 +56,22 @@ MOD_a.b[.c]
 
 **Reservados, não implementar na Fase 1:**
 `ATD_3.1` Informativos · `ATD_4.1` E-mail · `CFG_2.2` IA — analytics · `REL_1.1` Relatórios
+
+⚠️ **Por que o Histórico é `ATD_5.1` e não `ATD_2.2`.** Acrescentado em
+2026-08-06. O submódulo `ATD_2` é a ficha do contato, e `ATD_3`/`ATD_4` já
+estão reservados acima. Poderia ter virado `ATD_2.2`, mas ficaria pendurado no
+submódulo da ficha, com quem não tem parentesco nenhum. Histórico é assunto
+próprio, então ganha submódulo próprio. **Custo: nenhum — são três dígitos.**
+
+⚠️ **Aba e componente não entram no `telas.py`.** A tabela acima tem três
+granularidades, e a coluna *Rota* diz qual é qual: rota de verdade, `aba` ou
+`componente`. O `telas.py` é o registro das **rotas** — é ele que gera menu e
+resolve permissão, e nem aba nem componente têm menu ou rota própria. Por isso
+a tabela tem 17 linhas e o `telas.py` tem 13 telas de Fase 1 — a diferença são
+exatamente `ATD_2.1` e as três abas. **Não é drift.**
+`ATD_2.1` e `CAD_1.2.1/.2/.3` vivem dentro da tela que os hospeda e herdam a
+permissão dela. Continuam valendo como âncora de auditoria: o log grava
+`CAD_1.2.2` quando o erro foi na aba de telefones, e isso é o que se procura.
 
 ---
 

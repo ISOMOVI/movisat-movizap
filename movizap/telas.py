@@ -45,6 +45,17 @@ TELAS = [
         "permissao": "atendimento",
         "fase": 1,
     },
+    {
+        # Submódulo 5 porque 2 é a ficha do contato e 3/4 estão reservados
+        # (Informativos e E-mail). Código não se reaproveita -- ver o doc.
+        "codigo": "ATD_5.1",
+        "titulo": "Histórico",
+        "rota": "/atendimento/historico",
+        "icone": "bi-clock-history",
+        "descricao": "Conversas encerradas, pesquisáveis.",
+        "permissao": "atendimento",
+        "fase": 1,
+    },
     # ---- CAD: cadastro ----
     {
         "codigo": "CAD_1.1",

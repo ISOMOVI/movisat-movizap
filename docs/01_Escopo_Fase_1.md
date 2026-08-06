@@ -46,6 +46,20 @@ Se uma mensagem entra pelo WhatsApp, a IA responde, transfere para um humano, o 
 | 15 | **Barra de status** | logado · duração da sessão · data/hora · código da tela · id da requisição |
 | 16 | **Registro de telas** | códigos imutáveis servindo navegação, permissão e auditoria |
 | 17 | **Sistema de design** | tokens, tipografia, claro/escuro — desde a primeira tela |
+| 18 | **Notas internas na conversa** | visíveis só para a equipe. **Nunca saem para o cliente** |
+| 19 | **Resumo na transferência** | quem transfere escreve o contexto; quem recebe lê antes de assumir |
+| 20 | **Histórico** (`ATD_5.1`) | conversas encerradas, pesquisáveis |
+| 21 | **Jornada do atendente** | dentro da `CAD_2.1`: horário de atendimento, pausa e dias da semana |
+
+> ⚠️ **Emenda de 2026-08-06, autorizada pelo usuário.** Os itens **18 a 21**
+> alargam a Fase 1 em relação ao que foi fechado em 04/08. Estão escritos aqui
+> porque **a borda é este documento**: item que entra sem passar por ele não é
+> escopo, é penduricalho — e daqui a três semanas ninguém sabe qual era qual.
+>
+> O item 21 tem uma consequência que não é óbvia: **jornada vira insumo da
+> fila**. Saber quem está em horário é o que separa "conversa esperando" de
+> "conversa esperando alguém que só volta segunda". Por isso a `CAD_2.1` é
+> construída **antes** da `ATD_1.3`.
 
 ## ❌ Fica fora — e está escrito
 
@@ -82,8 +96,26 @@ A Fase 1 está pronta quando **todos** forem verdade:
 9. A ficha lateral mostra os veículos do cliente vindos do FPSL.
 10. Toda tela mostra a barra de status com um código válido.
 11. Os testes do item 6 da metodologia passam.
+12. Uma **nota interna** escrita na conversa **não chega ao cliente** — conferido no WhatsApp real, não no banco.
+13. Uma conversa transferida chega ao time de destino **com o resumo legível antes de assumir**.
+14. Uma conversa encerrada é encontrada no **Histórico** pelo telefone do cliente.
+15. Um atendente **fora de jornada não recebe atribuição automática**.
+
+*(12 a 15 acrescentados na emenda de 06/08, junto com os itens 18 a 21. Item de escopo sem critério de pronto é item que ninguém sabe dizer se ficou pronto.)*
 
 **Não conta como pronto:** funcionar no teste unitário e não ter passado por WhatsApp real. Foi assim que o MoviBot ficou 6 semanas "pronto" sem nunca ter atendido ninguém.
+
+🚨 **Todos os 15 critérios só podem ser verificados depois do pareamento do
+chip**, que por decisão de 06/08 é o **último** passo. É risco assumido, e a
+mitigação está no MIOLO do `Proximos_Passos.md`: parser defensivo, payload
+bruto gravado desde a primeira mensagem, e conferência do primeiro payload real
+no minuto seguinte ao pareamento.
+
+⚠️ **Sobre o item 5 (`tem_whatsapp`):** o campo só pode ser preenchido pelo
+Evolution com a instância conectada, então fica `NULL` até o pareamento. Isso
+**não** viola a regra "sem WhatsApp, não envia": na Fase 1 só se responde a
+quem escreveu, e quem escreveu tem WhatsApp por demonstração. `NULL` é "não
+verificado" e nunca deve ser lido como `false`.
 
 ---
 
