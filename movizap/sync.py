@@ -26,9 +26,16 @@ O QUE CADA CONTADOR SIGNIFICA (a separação ok / vazio / erro):
   lidos        clientes recebidos do Harmonit
   criados      clientes que ainda não existiam aqui
   atualizados  clientes que já existiam
-  inativados   clientes que sumiram do Harmonit, ou vieram com ativo = false
+  inativados   clientes que **passaram** de ativo para inativo NESTA execução
   vazios       campos de telefone que vieram em branco -- **não é erro**
   erros        campos de telefone preenchidos que a normalização recusou
+
+  🚨 `inativados` é FLUXO, não estoque. A primeira versão contava todo cliente
+  que chegasse com `ativo = false`, e por isso as duas primeiras execuções
+  completas devolveram 106 -- exatamente o total de inativos no banco. Um
+  número que não muda entre execuções não responde "o que mudou desde ontem?",
+  que é a única pergunta que ele existe para responder. Achado auditando em
+  06/08, corrigido no mesmo dia.
 
   Sem essa separação o painel acusa "76% de falha" num sistema saudável. Em
   400 clientes medidos, 712 dos 1.200 campos de telefone vêm vazios: é o
@@ -187,10 +194,38 @@ def _gravar_contato(cur, cliente_id: int, bruto: dict) -> int:
     return linha["id"]
 
 
+def _escolher_principal(validos: list[tuple[str, str, str]]) -> str | None:
+    """Qual dos telefones responde "o número do cliente".
+
+    🚨 A primeira versão marcava principal só o campo `celular`, e deixou
+    **659 dos 1.050 contatos sem nenhum principal** -- justamente os que têm
+    fixo e não têm celular. Quando o atendimento perguntar "qual é o número
+    deste cliente", 63% da base não tinha resposta. Achado auditando em 06/08.
+
+    A ordem é a que o atendimento usaria na mão:
+      1. o que veio no campo `celular`;
+      2. qualquer móvel (o Harmonit guarda celular no campo `telefone` também);
+      3. o primeiro que houver -- fixo responde melhor que nada.
+    """
+    if not validos:
+        return None
+    for campo, e164, _ in validos:
+        if campo == "celular":
+            return e164
+    for _campo, e164, tipo in validos:
+        if tipo == telefone.MOVEL:
+            return e164
+    return validos[0][1]
+
+
 def _gravar_telefones(cur, contato_id: int, bruto: dict, cont: Contadores) -> None:
     contato_principal = bruto.get("contatoPrincipal")
     if not isinstance(contato_principal, dict):
         return
+
+    # Coleta antes de gravar: só dá para escolher o principal vendo todos.
+    validos: list[tuple[str, str, str]] = []   # (campo, e164, tipo)
+    brutos: dict[str, str] = {}                # e164 -> grafia original
 
     for campo in CAMPOS_TELEFONE:
         parte = contato_principal.get(campo)
@@ -213,13 +248,17 @@ def _gravar_telefones(cur, contato_id: int, bruto: dict, cont: Contadores) -> No
                       contato_id, campo, analise.motivo)
             continue
 
+        validos.append((campo, analise.e164, analise.tipo))
         # Grafia original, para o `bruto` guardar o que veio de verdade.
-        original = "+{} {} {}".format(
+        brutos[analise.e164] = "+{} {} {}".format(
             str(parte.get("ddi") or "").strip(),
             str(parte.get("ddd") or "").strip(),
             crua,
         ).replace("+  ", "+").strip()
 
+    principal = _escolher_principal(validos)
+
+    for campo, e164, _tipo in validos:
         cur.execute(
             """
             INSERT INTO contato_telefone
@@ -227,11 +266,19 @@ def _gravar_telefones(cur, contato_id: int, bruto: dict, cont: Contadores) -> No
             VALUES (%s, %s, %s, %s, %s)
             ON CONFLICT (contato_id, e164) DO UPDATE SET
                 bruto        = EXCLUDED.bruto,
-                origem_campo = EXCLUDED.origem_campo
+                origem_campo = EXCLUDED.origem_campo,
+                principal    = EXCLUDED.principal
             """,
             # 🚨 tem_whatsapp e verificado_em FICAM DE FORA do UPDATE de
             # propósito: são do Evolution. Incluí-los apagaria verificação real.
-            (contato_id, analise.e164, original, campo, campo == "celular"),
+            #
+            # ⚠️ `principal` ENTRA no UPDATE, e isso tem um custo conhecido:
+            # quando a CAD_1.2.2 (aba telefones) deixar alguém escolher o
+            # principal na mão, o sync das 12h vai desfazer a escolha. Cai
+            # quando existir uma marca de "escolhido por gente" para o sync
+            # respeitar -- hoje não existe tela nenhuma, então não há escolha
+            # manual para preservar.
+            (contato_id, e164, brutos[e164], campo, e164 == principal),
         )
 
 
@@ -297,6 +344,15 @@ def _executar(origem: str, atendente_id: int | None,
     log.info("sync %s iniciado (origem=%s, apenas_id=%s, limite=%s)",
              execucao_id, origem, apenas_id, limite)
 
+    # 🚨 Quem estava ativo ANTES. É o que torna `inativados` um fluxo:
+    # sem essa foto, o contador vira estoque e devolve o mesmo número toda
+    # execução, sem responder "o que mudou desde ontem?".
+    ativos_antes = {
+        linha["harmonit_id"] for linha in banco.varios(
+            "SELECT harmonit_id FROM cliente "
+            " WHERE origem = 'harmonit' AND ativo AND harmonit_id IS NOT NULL")
+    }
+
     try:
         if apenas_id:
             bruto = harmonit.obter_cliente(apenas_id)
@@ -321,7 +377,8 @@ def _executar(origem: str, atendente_id: int | None,
                     else:
                         cont.atualizados += 1
 
-                    if not bruto.get("ativo"):
+                    # Só conta quem VIROU inativo agora, não quem já estava.
+                    if not bruto.get("ativo") and str(bruto["id"]) in ativos_antes:
                         cont.inativados += 1
 
                     contato_id = _gravar_contato(cur, cliente_id, bruto)

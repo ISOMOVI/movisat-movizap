@@ -16,7 +16,7 @@ sys.path.insert(0, "/home/claude/movizap_painel")
 psycopg = pytest.importorskip("psycopg")
 from psycopg.rows import dict_row  # noqa: E402
 
-from movizap import harmonit, sync  # noqa: E402
+from movizap import harmonit, sync, telefone  # noqa: E402
 
 ENV = Path("/home/claude/movizap_painel/.env")
 
@@ -55,6 +55,13 @@ def cur():
 # ── Payload REAL, copiado da API em 06/08 ────────────────────────────────────
 # Velasco: telefone é fixo no DDD 68, celular é o WhatsApp conhecido no 18,
 # telefone2 vem inteiramente em branco. Os três casos num registro só.
+#
+# 🚨 O `contatoPrincipalId` é DERIVADO do harmonit_id de teste, nunca o real
+# (1603978). Enquanto o banco estava vazio, usar o id verdadeiro passava; assim
+# que o sync gravou os 1.050 clientes de verdade, três testes passaram a
+# enxergar a LINHA DE PRODUÇÃO da Velasco e liam os telefones dela. Teste que
+# escreve em tabela de produção precisa da própria linha -- inclusive da
+# própria chave estrangeira.
 def velasco(harmonit_id="9990001"):
     return {
         "id": harmonit_id,
@@ -66,7 +73,7 @@ def velasco(harmonit_id="9990001"):
         "situacaoClienteId": 331,
         "ativo": True,
         "contatoPrincipal": {
-            "contatoPrincipalId": 1603978,
+            "contatoPrincipalId": f"teste-{harmonit_id}",
             "email": "pastelaria.velasco@geradornv.com.br",
             "telefone": {"ddd": "68", "ddi": "55", "phone": "37148157"},
             "telefone2": {"ddd": "", "ddi": "", "phone": ""},
@@ -171,11 +178,11 @@ class TestOrigemMovizapEIntocavel:
 
 class TestContato:
     def test_usa_o_contato_principal_id_como_chave(self, cur):
-        bruto = velasco()
+        bruto = velasco("9990020")
         cliente_id, _ = sync._gravar_cliente(cur, bruto)
         contato_id = sync._gravar_contato(cur, cliente_id, bruto)
         cur.execute("SELECT harmonit_id FROM contato WHERE id=%s", (contato_id,))
-        assert cur.fetchone()["harmonit_id"] == "1603978"
+        assert cur.fetchone()["harmonit_id"] == "teste-9990020"
 
     def test_sem_contato_principal_id_usa_chave_estavel(self, cur):
         """🚨 ~8% vêm sem o id. Sem chave estável, o contato seria recriado
@@ -287,6 +294,87 @@ class TestTelefones:
         cont = sync.Contadores()
         sync._gravar_telefones(cur, contato_id, bruto, cont)
         assert cont.erros == 0 and cont.vazios == 0
+
+
+class TestPrincipal:
+    """🔴 Achado na auditoria de 06/08.
+
+    A regra "principal = campo celular" deixou 659 dos 1.050 contatos sem
+    nenhum telefone principal -- os que têm fixo e não têm celular. Quando o
+    atendimento perguntasse "qual é o número deste cliente", 63% da base não
+    tinha resposta.
+    """
+
+    def _telefones(self, cur, bruto):
+        cliente_id, _ = sync._gravar_cliente(cur, bruto)
+        contato_id = sync._gravar_contato(cur, cliente_id, bruto)
+        sync._gravar_telefones(cur, contato_id, bruto, sync.Contadores())
+        cur.execute("SELECT e164, origem_campo, principal FROM contato_telefone "
+                    "WHERE contato_id=%s", (contato_id,))
+        return contato_id, cur.fetchall()
+
+    def test_celular_ganha_quando_existe(self, cur):
+        _, linhas = self._telefones(cur, velasco("9990010"))
+        principais = [l["e164"] for l in linhas if l["principal"]]
+        assert principais == ["+5518998116168"]
+
+    def test_SO_FIXO_ainda_assim_tem_principal(self, cur):
+        """O caso dos 659. Fixo responde melhor que nada."""
+        bruto = velasco("9990011")
+        bruto["contatoPrincipal"]["celular"] = {"ddd": "", "ddi": "", "phone": ""}
+        _, linhas = self._telefones(cur, bruto)
+        principais = [l["e164"] for l in linhas if l["principal"]]
+        assert principais == ["+556837148157"], "contato com fixo ficou sem principal"
+
+    def test_movel_no_campo_telefone_ganha_do_fixo(self, cur):
+        """O Harmonit guarda celular no campo `telefone` também."""
+        bruto = velasco("9990012")
+        bruto["contatoPrincipal"]["celular"] = {"ddd": "", "ddi": "", "phone": ""}
+        bruto["contatoPrincipal"]["telefone"] = {
+            "ddd": "18", "ddi": "55", "phone": "32214455"}     # fixo
+        bruto["contatoPrincipal"]["telefone2"] = {
+            "ddd": "18", "ddi": "55", "phone": "997776666"}    # movel
+        _, linhas = self._telefones(cur, bruto)
+        principais = [l["e164"] for l in linhas if l["principal"]]
+        assert principais == ["+5518997776666"]
+
+    def test_nunca_ha_dois_principais(self, cur):
+        _, linhas = self._telefones(cur, velasco("9990013"))
+        assert sum(1 for l in linhas if l["principal"]) == 1
+
+    def test_sem_telefone_nenhum_nao_estoura(self, cur):
+        bruto = velasco("9990014")
+        for campo in ("telefone", "telefone2", "celular"):
+            bruto["contatoPrincipal"][campo] = {"ddd": "", "ddi": "", "phone": ""}
+        _, linhas = self._telefones(cur, bruto)
+        assert linhas == []
+
+    def test_escolha_e_estavel_entre_execucoes(self, cur):
+        bruto = velasco("9990015")
+        contato_id, _ = self._telefones(cur, bruto)
+        for _ in range(3):
+            sync._gravar_telefones(cur, contato_id, bruto, sync.Contadores())
+        cur.execute("SELECT count(*) AS n FROM contato_telefone "
+                    "WHERE contato_id=%s AND principal", (contato_id,))
+        assert cur.fetchone()["n"] == 1
+
+
+class TestEscolherPrincipalPuro:
+    """A regra isolada, sem banco -- é onde o erro de ordem apareceria."""
+
+    def test_ordem_de_preferencia(self):
+        escolher = sync._escolher_principal
+        assert escolher([]) is None
+        assert escolher([("telefone", "+551832214455", telefone.FIXO)]) \
+            == "+551832214455"
+        assert escolher([
+            ("telefone", "+551832214455", telefone.FIXO),
+            ("celular", "+5518998116168", telefone.MOVEL),
+        ]) == "+5518998116168"
+        assert escolher([
+            ("telefone", "+551832214455", telefone.FIXO),
+            ("telefone2", "+5518997776666", telefone.MOVEL),
+        ]) == "+5518997776666"
 
 
 class TestClienteHarmonit:
