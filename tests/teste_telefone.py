@@ -144,6 +144,29 @@ class TestDePartes:
         # ⚠️ Acontece no Harmonit.
         assert telefone.de_partes(ddi="55", ddd="", numero="18998116168").e164 == VELASCO
 
+    def test_ddd_com_zero_de_discagem_colado(self):
+        """⚠️ Achado varrendo 400 clientes em 06/08: o Harmonit grava "021".
+
+        É o DDD 21, do Rio, com o zero de discagem junto. Lido como "02", o
+        cliente era recusado e ficava sem telefone nenhum.
+        """
+        assert telefone.de_partes(
+            ddi="55", ddd="021", numero="24233503").e164 == "+552124233503"
+        assert telefone.de_partes(
+            ddi="55", ddd="018", numero="998116168").e164 == VELASCO
+
+    def test_ddd_de_dois_digitos_comecando_em_zero_continua_recusado(self):
+        """"03" + 8 dígitos não dá para salvar: tirar o zero deixa 1 dígito, e
+        chutar o resto seria inventar telefone."""
+        analise = telefone.de_partes(ddi="55", ddd="03", numero="72613422")
+        assert analise.e164 is None
+        assert "DDD 03" in analise.motivo
+
+    def test_ddd_00_continua_recusado(self):
+        analise = telefone.de_partes(ddi="55", ddd="00", numero="00001058")
+        assert analise.e164 is None
+        assert "DDD 00" in analise.motivo
+
     def test_numero_vazio(self):
         analise = telefone.de_partes(ddi="55", ddd="18", numero="")
         assert analise.e164 is None

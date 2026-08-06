@@ -19,6 +19,7 @@ from . import banco
 from . import canais as registro_canais
 from . import evolution
 from . import ratelimit
+from . import sync as sync_harmonit
 from . import telas as registro_telas
 from . import vigia
 from .config import RAIZ, settings, silenciar_clientes_http
@@ -243,6 +244,44 @@ def desconectar_canal(canal_id: int, request: Request,
         log.warning("req=%s desconectar canal %s: %s",
                     request.state.req_id, canal_id, e)
         raise HTTPException(status_code=502, detail=f"Evolution: {e}")
+
+
+# ---------------------------------------------------------------- sync (CFG_3.1)
+
+@app.get("/api/sync")
+def estado_do_sync(usuario: dict = Depends(auth.requer_tela("CFG_3.1"))):
+    """CFG_3.1 — o que o banco tem, quando foi a última leitura, e se a API está de pé.
+
+    🚨 As três coisas são perguntas diferentes. "1.050 clientes" não diz nada
+    sobre o Harmonit estar respondendo, e é assim que se descobre tarde demais
+    que a base parou de atualizar há uma semana.
+    """
+    return sync_harmonit.resumo()
+
+
+@app.post("/api/sync/agora")
+async def sincronizar_agora(request: Request,
+                            usuario: dict = Depends(auth.requer_tela("CFG_3.1"))):
+    """O botão "sincronizar agora" do escopo, item 3.
+
+    🚨 `asyncio.to_thread` recebe uma função NORMAL. Com `async def` ele roda a
+    corrotina dentro da thread, ninguém a aguarda, e o único sinal é um
+    `RuntimeWarning` invisível em produção. `sync_harmonit.executar` é `def`
+    de propósito, e é o que torna isso seguro.
+
+    ⚠️ `atendente_id` vai None: o cadastro de atendentes é a CAD_2.1, que ainda
+    não existe. A coluna tem FK, então gravar um id inventado quebraria.
+    """
+    try:
+        resultado = await asyncio.to_thread(
+            sync_harmonit.executar, "manual", None, None, None)
+    except sync_harmonit.SyncJaEmAndamento as e:
+        raise HTTPException(status_code=409, detail=str(e))
+
+    if resultado.get("erro"):
+        log.warning("req=%s sync manual terminou com erro: %s",
+                    request.state.req_id, resultado["erro"])
+    return resultado
 
 
 # ---------------------------------------------------------------- saúde

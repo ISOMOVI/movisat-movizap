@@ -58,6 +58,12 @@ class Settings:
     evolution_api_key: str = _ler("EVOLUTION_API_KEY")
     evolution_instancia: str = _ler("EVOLUTION_INSTANCIA_ATENDIMENTO", "atendimento")
 
+    # ---- Harmonit (CFG_3.1, 2026-08-06) ----
+    # Copiadas do .env do FPSL por script no servidor, nunca por linha de comando.
+    harmonit_base_url: str = _ler("HARMONIT_BASE_URL")
+    harmonit_client_id: str = _ler("HARMONIT_CLIENT_ID")
+    harmonit_secret_id: str = _ler("HARMONIT_SECRET_ID")
+
     def dsn(self) -> str:
         """String de conexão do Postgres.
 
@@ -87,8 +93,12 @@ class Settings:
         Separado de `faltando` de propósito: derrubar o painel inteiro porque
         a CFG_1.1 não vai funcionar seria trocar um problema por um maior.
         """
-        return ([] if self.evolution_api_key
-                else ["EVOLUTION_API_KEY ausente -- a CFG_1.1 não vai conectar"])
+        avisos = []
+        if not self.evolution_api_key:
+            avisos.append("EVOLUTION_API_KEY ausente -- a CFG_1.1 não vai conectar")
+        if not (self.harmonit_client_id and self.harmonit_secret_id):
+            avisos.append("credenciais do Harmonit ausentes -- a CFG_3.1 não vai sincronizar")
+        return avisos
 
 
 settings = Settings()

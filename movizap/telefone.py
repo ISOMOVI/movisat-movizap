@@ -168,6 +168,14 @@ def de_partes(ddi=None, ddd=None, numero=None) -> Analise:
     d_ddd = _SO_DIGITOS.sub("", str(ddd or ""))
     d_ddi = _SO_DIGITOS.sub("", str(ddi or "")) or DDI_BR
 
+    # ⚠️ O campo `ddd` do Harmonit às vezes traz o zero de discagem colado:
+    # "021" é o DDD 21, não o DDD 02. Achado em 06/08 varrendo 400 clientes --
+    # sem isto, o Rio inteiro nessa grafia era recusado como "DDD 02".
+    # Só o caso de 3 dígitos começando em 0: "03" continua recusado, porque
+    # tirar o zero deixaria 1 dígito e chutar o resto seria inventar telefone.
+    if len(d_ddd) == 3 and d_ddd.startswith("0"):
+        d_ddd = d_ddd[1:]
+
     if not d_ddd and len(d_numero) in (10, 11):
         return analisar("+" + d_ddi + d_numero)
     return analisar("+" + d_ddi + d_ddd + d_numero)
