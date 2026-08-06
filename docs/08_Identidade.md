@@ -93,15 +93,34 @@ independentes que por acaso aparecem juntos no `+551932780637`.
 
 ---
 
-## O que foi decidido
+## O que foi decidido — confirmado pelo usuário em 06/08
 
 ```
 Objetivo:     o número identifica quem ele realmente identifica
-Hoje:         (a) resolve sozinho; (b) e (c) vão para revisão humana
-Por quê:      a regra automática acerta 21% e chuta 79%. Chutar aqui produz
-              ficha errada na tela do atendente, que é pior que ficha nenhuma
-Reavaliar se: o usuário validar os 64 vínculos e o padrão ficar previsível
+Hoje:         (a) resolve sozinho; o duvidoso NAO SOBE -- fica em arquivo
+Por quê:      a regra automática acerta 21% e chuta 79%. "Não sobe ainda,
+              pode sujar a base nova" -- decisão do usuário em 06/08
+Reavaliar se: o usuário validar os 96 vínculos caso a caso
 ```
+
+**"Não cadastre os duvidosos ainda."** O vínculo duvidoso não entra em
+`contato_telefone` e é listado em `revisao/`, para validação caso a caso.
+
+| | |
+|---|---|
+| Números compartilhados | **44** |
+| Resolvidos sozinho (mesmo cliente) | **12** |
+| **Esperando validação** | **32** |
+| Vínculos que ficaram de fora | **96** |
+
+⚠️ **Os números da lista são maiores que os da auditoria** (96 contra 81). A
+auditoria contou o excedente por número — quantos vínculos passariam do
+primeiro. A lista conta **todos** os vínculos de um número duvidoso, porque
+quando o caso vai para revisão **ninguém** recebe o número, nem o mais antigo.
+São medidas de coisas diferentes, e a da lista é a que vale.
+
+A lista é **gerada** por `scripts/listar_revisao.py` e não se edita à mão. O
+sync relê o Harmonit inteiro a cada 12 h: corrigir lá muda a lista sozinho.
 
 | Caso | O que o sync faz |
 |---|---|
