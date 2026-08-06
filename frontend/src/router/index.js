@@ -8,9 +8,15 @@
    (sem permissão, não encontrada). Uma tela nova só entra aqui DEPOIS de
    existir no registro do backend — senão a guarda a barra na hora.
 
-   As rotas listadas são as 12 telas de FASE 1. As reservadas (ATD_3.1,
-   ATD_4.1, CFG_2.2, REL_1.1) não têm rota de propósito: o código está
-   ocupado, a tela não existe.
+   As rotas listadas são as telas de FASE 1, e são exatamente as mesmas do
+   `movizap/telas.py`. As reservadas (ATD_3.1, ATD_4.1, CFG_2.2, REL_1.1) não
+   têm rota de propósito: o código está ocupado, a tela não existe.
+
+   🚨 REGISTRO E ROTEADOR TÊM QUE ANDAR JUNTOS. O menu é gerado do registro do
+   backend, então uma tela registrada lá e ausente daqui aparece no menu e
+   leva para "não encontrada" -- e ninguém descobre até alguém clicar.
+   Aconteceu em 06/08 com a ATD_5.1. O `teste_telas.py` agora compara os dois
+   lados e reprova a divergência.
    ============================================================================ */
 import { createRouter, createWebHistory } from 'vue-router'
 
@@ -19,6 +25,7 @@ import { temToken } from '../api/cliente.js'
 
 import Login from '../telas/Login.vue'
 import Canais from '../telas/Canais.vue'
+import Sincronizacao from '../telas/Sincronizacao.vue'
 import RegistroDeTelas from '../telas/RegistroDeTelas.vue'
 import EmConstrucao from '../telas/EmConstrucao.vue'
 import SemPermissao from '../telas/SemPermissao.vue'
@@ -52,6 +59,13 @@ const rotas = [
     name: 'ATD_1.3',
     ...emObra('ATD_1.3', 'Fila',
       'As conversas que a IA transferiu e ainda esperam um atendente assumir.'),
+  },
+  {
+    // antes de /atendimento/:id, pela mesma razão que a fila
+    path: '/atendimento/historico',
+    name: 'ATD_5.1',
+    ...emObra('ATD_5.1', 'Histórico',
+      'As conversas já encerradas, pesquisáveis pelo telefone do cliente.'),
   },
   {
     path: '/atendimento/:id',
@@ -102,8 +116,8 @@ const rotas = [
   {
     path: '/config/sync',
     name: 'CFG_3.1',
-    ...emObra('CFG_3.1', 'Sincronização',
-      'Leitura do Harmonit a cada 12h e sob demanda, com registro de cada execução.'),
+    component: Sincronizacao,
+    meta: { codigo: 'CFG_3.1', titulo: 'Sincronização' },
   },
   {
     path: '/config/classificacoes',
