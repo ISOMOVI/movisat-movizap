@@ -64,6 +64,12 @@ class Settings:
     harmonit_client_id: str = _ler("HARMONIT_CLIENT_ID")
     harmonit_secret_id: str = _ler("HARMONIT_SECRET_ID")
 
+    # ---- webhook (passo 4, 2026-08-06) ----
+    # 🚨 O endpoint é público: o Evolution roda em container e não alcança o
+    # 127.0.0.1 do host, então a chamada entra pelo nginx. Este segredo no
+    # caminho da URL é o que o protege.
+    webhook_segredo: str = _ler("MOVIZAP_WEBHOOK_SEGREDO")
+
     def dsn(self) -> str:
         """String de conexão do Postgres.
 
@@ -98,6 +104,8 @@ class Settings:
             avisos.append("EVOLUTION_API_KEY ausente -- a CFG_1.1 não vai conectar")
         if not (self.harmonit_client_id and self.harmonit_secret_id):
             avisos.append("credenciais do Harmonit ausentes -- a CFG_3.1 não vai sincronizar")
+        if not self.webhook_segredo:
+            avisos.append("MOVIZAP_WEBHOOK_SEGREDO ausente -- o webhook recusa tudo")
         return avisos
 
 

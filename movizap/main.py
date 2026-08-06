@@ -23,6 +23,7 @@ from . import ratelimit
 from . import sync as sync_harmonit
 from . import telas as registro_telas
 from . import vigia
+from . import webhook as registro_webhook
 from .config import RAIZ, settings, silenciar_clientes_http
 
 logging.basicConfig(
@@ -245,6 +246,63 @@ def desconectar_canal(canal_id: int, request: Request,
         log.warning("req=%s desconectar canal %s: %s",
                     request.state.req_id, canal_id, e)
         raise HTTPException(status_code=502, detail=f"Evolution: {e}")
+
+
+# ---------------------------------------------------------------- webhook
+
+@app.post("/api/webhook/evolution/{segredo}")
+async def receber_webhook(segredo: str, request: Request):
+    """O Evolution empurra os eventos aqui. SEM sessão -- quem chama é máquina.
+
+    🚨 Este endpoint é PÚBLICO. O Evolution roda em container e não alcança o
+    `127.0.0.1` do host, então a chamada entra pelo nginx. O que o protege é o
+    `segredo` no caminho, de 43 caracteres, que sai do `.env`.
+
+    🚨 Responder 200 rápido é a regra número um do projeto. Se demorar, o
+    Evolution considera falha e reenvia -- e o problema piora sozinho. Aqui só
+    se grava o corpo cru; interpretar é outro passo, lendo da tabela.
+
+    🚨 E responde 200 mesmo quando algo dá errado do nosso lado. Devolver 500
+    faria o Evolution reenviar a mesma mensagem indefinidamente contra um
+    sistema que já falhou nela. O erro fica no log, com o req_id.
+    """
+    if not settings.webhook_segredo or not secrets.compare_digest(
+            segredo, settings.webhook_segredo):
+        # 404 e não 403: quem errou o segredo não precisa saber que acertou a rota.
+        raise HTTPException(status_code=404, detail="Não encontrado.")
+
+    try:
+        corpo = await request.json()
+    except Exception:
+        corpo = {"corpo_ilegivel": (await request.body()).decode(
+            "utf-8", "replace")[:4000]}
+
+    try:
+        # `def` normal numa thread: o banco é bloqueante, e a regra do
+        # `asyncio.to_thread` com `async def` já custou caro neste projeto.
+        return await asyncio.to_thread(registro_webhook.registrar, corpo)
+    except Exception as e:
+        log.exception("req=%s webhook falhou ao gravar", request.state.req_id)
+        return {"ok": False, "erro": type(e).__name__}
+
+
+@app.get("/api/webhook/eventos")
+def eventos_do_webhook(limite: int = 20,
+                       usuario: dict = Depends(auth.requer_tela("CFG_1.1"))):
+    """Os últimos eventos, para conferir o formato real depois do pareamento."""
+    return {"resumo": registro_webhook.resumo(),
+            "eventos": registro_webhook.ultimos(limite)}
+
+
+@app.get("/api/webhook/eventos/{evento_id}")
+def payload_do_webhook(evento_id: int,
+                       usuario: dict = Depends(auth.requer_tela("CFG_1.1"))):
+    """O corpo cru de um evento. É o que se lê depois da primeira mensagem
+    real, para saber se o formato bate com o que os parsers supõem."""
+    achado = registro_webhook.payload(evento_id)
+    if not achado:
+        raise HTTPException(status_code=404, detail="Evento não encontrado.")
+    return achado
 
 
 # ------------------------------------------------------ cadastro (CAD_1.1/1.2)

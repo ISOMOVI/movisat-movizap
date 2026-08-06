@@ -60,7 +60,7 @@ import logging
 import threading
 from datetime import datetime, timezone
 
-from . import banco, harmonit, telefone
+from . import banco, harmonit, identidade, telefone
 
 log = logging.getLogger("movizap.sync")
 
@@ -91,12 +91,19 @@ class Contadores:
         self.inativados = 0
         self.vazios = 0
         self.erros = 0
+        # Não vai para sync_execucao: é diagnóstico da regra de identidade,
+        # não do sync. Aparece no log e no retorno.
+        self.nao_atribuidos = 0
+        self.em_revisao = 0
+        self.removidos = 0
 
     def como_dict(self) -> dict:
         return {
             "lidos": self.lidos, "criados": self.criados,
             "atualizados": self.atualizados, "inativados": self.inativados,
             "vazios": self.vazios, "erros": self.erros,
+            "nao_atribuidos": self.nao_atribuidos, "em_revisao": self.em_revisao,
+            "removidos": self.removidos,
         }
 
 
@@ -114,21 +121,27 @@ def _gravar_cliente(cur, bruto: dict) -> tuple[int, bool]:
     if not isinstance(contato_principal, dict):
         contato_principal = {}
 
+    motivo = identidade.motivo_de_revisao(bruto)
+
     cur.execute(
         """
         INSERT INTO cliente
             (nome, nome_fantasia, documento, tipo_pessoa, email,
-             origem, harmonit_id, ativo, atualizado_em)
-        VALUES (%s, %s, %s, %s, %s, 'harmonit', %s, %s, now())
+             origem, harmonit_id, ativo, cadastrado_em, revisar,
+             motivo_revisao, atualizado_em)
+        VALUES (%s, %s, %s, %s, %s, 'harmonit', %s, %s, %s, %s, %s, now())
         ON CONFLICT (harmonit_id) WHERE harmonit_id IS NOT NULL
         DO UPDATE SET
-            nome          = EXCLUDED.nome,
-            nome_fantasia = EXCLUDED.nome_fantasia,
-            documento     = EXCLUDED.documento,
-            tipo_pessoa   = EXCLUDED.tipo_pessoa,
-            email         = EXCLUDED.email,
-            ativo         = EXCLUDED.ativo,
-            atualizado_em = now()
+            nome           = EXCLUDED.nome,
+            nome_fantasia  = EXCLUDED.nome_fantasia,
+            documento      = EXCLUDED.documento,
+            tipo_pessoa    = EXCLUDED.tipo_pessoa,
+            email          = EXCLUDED.email,
+            ativo          = EXCLUDED.ativo,
+            cadastrado_em  = EXCLUDED.cadastrado_em,
+            revisar        = EXCLUDED.revisar,
+            motivo_revisao = EXCLUDED.motivo_revisao,
+            atualizado_em  = now()
         WHERE cliente.origem = 'harmonit'
         RETURNING id, (xmax = 0) AS criado
         """,
@@ -140,6 +153,11 @@ def _gravar_cliente(cur, bruto: dict) -> tuple[int, bool]:
             _texto(contato_principal.get("email")),
             harmonit_id,
             bool(bruto.get("ativo")),
+            # 🚨 O sentinela 0001-01-01 do .NET vira NULL aqui. Gravado como
+            # data, ele venceria toda disputa de antiguidade.
+            identidade.data_cadastro(bruto),
+            motivo is not None,
+            motivo,
         ),
     )
     linha = cur.fetchone()
@@ -218,15 +236,17 @@ def _escolher_principal(validos: list[tuple[str, str, str]]) -> str | None:
     return validos[0][1]
 
 
-def _gravar_telefones(cur, contato_id: int, bruto: dict, cont: Contadores) -> None:
+def extrair_telefones(bruto: dict, cont: Contadores) -> list[tuple[str, str, str, str]]:
+    """Os telefones aproveitáveis de um cliente: (campo, e164, tipo, grafia).
+
+    Separado da gravação porque a decisão de QUEM fica com um número
+    compartilhado precisa ver a base inteira antes de qualquer escrita.
+    """
     contato_principal = bruto.get("contatoPrincipal")
     if not isinstance(contato_principal, dict):
-        return
+        return []
 
-    # Coleta antes de gravar: só dá para escolher o principal vendo todos.
-    validos: list[tuple[str, str, str]] = []   # (campo, e164, tipo)
-    brutos: dict[str, str] = {}                # e164 -> grafia original
-
+    validos: list[tuple[str, str, str, str]] = []
     for campo in CAMPOS_TELEFONE:
         parte = contato_principal.get(campo)
         if not isinstance(parte, dict):
@@ -244,21 +264,38 @@ def _gravar_telefones(cur, contato_id: int, bruto: dict, cont: Contadores) -> No
         if not analise:
             # Preenchido mas irrecuperável (DDD 00 aparece de verdade na base).
             cont.erros += 1
-            log.debug("telefone recusado no contato %s (%s): %s",
-                      contato_id, campo, analise.motivo)
+            log.debug("telefone recusado (%s) em %s: %s",
+                      campo, bruto.get("id"), analise.motivo)
             continue
 
-        validos.append((campo, analise.e164, analise.tipo))
-        # Grafia original, para o `bruto` guardar o que veio de verdade.
-        brutos[analise.e164] = "+{} {} {}".format(
+        grafia = "+{} {} {}".format(
             str(parte.get("ddi") or "").strip(),
             str(parte.get("ddd") or "").strip(),
             crua,
         ).replace("+  ", "+").strip()
+        validos.append((campo, analise.e164, analise.tipo, grafia))
 
-    principal = _escolher_principal(validos)
+    return validos
 
-    for campo, e164, _tipo in validos:
+
+def _gravar_telefones(cur, contato_id: int, harmonit_id: str,
+                      telefones: list[tuple[str, str, str, str]],
+                      donos: dict[str, str], cont: Contadores) -> None:
+    """Grava só os números cujo dono é ESTE cliente.
+
+    🚨 Número em revisão não entra em ninguém. Decisão do usuário em 06/08:
+    "não cadastre os duvidosos ainda, pode sujar a base nova". Nada é perdido
+    -- o vínculo continua no Harmonit e entra assim que a regra mudar.
+    """
+    validos = [(campo, e164, tipo, grafia)
+               for campo, e164, tipo, grafia in telefones
+               if donos.get(e164) == harmonit_id]
+
+    cont.nao_atribuidos += len(telefones) - len(validos)
+
+    principal = _escolher_principal([(c, e, t) for c, e, t, _g in validos])
+
+    for campo, e164, _tipo, grafia in validos:
         cur.execute(
             """
             INSERT INTO contato_telefone
@@ -278,8 +315,83 @@ def _gravar_telefones(cur, contato_id: int, bruto: dict, cont: Contadores) -> No
             # quando existir uma marca de "escolhido por gente" para o sync
             # respeitar -- hoje não existe tela nenhuma, então não há escolha
             # manual para preservar.
-            (contato_id, e164, brutos[e164], campo, e164 == principal),
+            (contato_id, e164, grafia, campo, e164 == principal),
         )
+
+
+def _decidir_donos(todos: dict, telefones_de: dict,
+                   apenas_id: str | None) -> tuple[dict, dict]:
+    """De quem é cada número. Ver `identidade.decidir_donos`.
+
+    ⚠️ Com `apenas_id` não há contexto: um cliente só não revela se o número
+    dele é compartilhado. Aí a pergunta vai para o BANCO -- se o número já
+    pertence a outro contato, este não o recebe. É menos completo que a
+    varredura inteira, e é o melhor que 1 registro permite saber.
+    """
+    numeros_de = {hid: {e164 for _c, e164, _t, _g in tels}
+                  for hid, tels in telefones_de.items()}
+
+    if not apenas_id:
+        return identidade.decidir_donos(todos, numeros_de)
+
+    donos, em_revisao = {}, {}
+    for harmonit_id, numeros in numeros_de.items():
+        for e164 in numeros:
+            outro = banco.um(
+                """SELECT c.harmonit_id FROM contato_telefone t
+                     JOIN contato c ON c.id = t.contato_id
+                    WHERE t.e164 = %s AND c.harmonit_id IS DISTINCT FROM %s
+                    LIMIT 1""",
+                (e164, f"cli:{harmonit_id}"))
+            if outro:
+                em_revisao[e164] = "já pertence a outro contato no banco"
+            else:
+                donos[e164] = harmonit_id
+    return donos, em_revisao
+
+
+def _limpar_em_revisao(cur, em_revisao: dict) -> tuple[int, int]:
+    """Tira do banco os números que a regra nova diz que não deviam estar lá.
+
+    🚨 Por que isto existe: o sync só INSERE. Quando a regra de identidade
+    mudou, em 06/08, os 96 vínculos duvidosos gravados pelas execuções
+    anteriores continuaram no banco -- a regra nova valia para o que entrava,
+    e a base já estava suja. Sem esta limpeza, "não cadastre os duvidosos"
+    valeria só para uma base virgem.
+
+    🚨 NUNCA apaga telefone com WhatsApp verificado. Verificação é do
+    Evolution, custa uma chamada e não se reconstrói relendo o Harmonit --
+    diferente do vínculo, que volta na próxima sincronização. Se houver algum
+    verificado, ele fica e é registrado no log para alguém olhar.
+
+    Devolve (apagados, preservados_por_verificacao).
+    """
+    if not em_revisao:
+        return 0, 0
+
+    numeros = list(em_revisao)
+
+    cur.execute(
+        """SELECT count(*) AS n FROM contato_telefone t
+             JOIN contato c ON c.id = t.contato_id
+            WHERE t.e164 = ANY(%s) AND c.origem = 'harmonit'
+              AND t.tem_whatsapp IS NOT NULL""",
+        (numeros,))
+    preservados = cur.fetchone()["n"]
+    if preservados:
+        log.warning(
+            "%s telefones em revisão têm WhatsApp verificado e NÃO foram "
+            "removidos -- verificação do Evolution não se reconstrói", preservados)
+
+    cur.execute(
+        """DELETE FROM contato_telefone t
+            USING contato c
+            WHERE c.id = t.contato_id
+              AND c.origem = 'harmonit'
+              AND t.e164 = ANY(%s)
+              AND t.tem_whatsapp IS NULL""",
+        (numeros,))
+    return cur.rowcount, preservados
 
 
 def _inativar_sumidos(cur, vistos: set[str]) -> int:
@@ -360,14 +472,25 @@ def _executar(origem: str, atendente_id: int | None,
         else:
             paginas = harmonit.paginar_clientes(limite=limite)
 
+        # ── PASSAGEM 1: cliente e contato, e a coleta dos telefones ─────────
+        #
+        # 🚨 Nenhum telefone é gravado aqui. Decidir de quem é um número
+        # compartilhado exige ver TODOS os clientes -- gravar durante a leitura
+        # faria a decisão depender da ordem das páginas.
+        todos: dict[str, dict] = {}
+        contato_de: dict[str, int] = {}
+        telefones_de: dict[str, list] = {}
+
         for _pagina, lista in paginas:
             with banco.cursor() as cur:
                 for bruto in lista:
                     if not isinstance(bruto, dict) or bruto.get("id") is None:
                         cont.erros += 1
                         continue
+                    harmonit_id = str(bruto["id"])
                     cont.lidos += 1
-                    vistos.add(str(bruto.get("id")))
+                    vistos.add(harmonit_id)
+                    todos[harmonit_id] = bruto
 
                     cliente_id, criado = _gravar_cliente(cur, bruto)
                     if not cliente_id:
@@ -378,12 +501,34 @@ def _executar(origem: str, atendente_id: int | None,
                         cont.atualizados += 1
 
                     # Só conta quem VIROU inativo agora, não quem já estava.
-                    if not bruto.get("ativo") and str(bruto["id"]) in ativos_antes:
+                    if not bruto.get("ativo") and harmonit_id in ativos_antes:
                         cont.inativados += 1
 
                     contato_id = _gravar_contato(cur, cliente_id, bruto)
                     if contato_id:
-                        _gravar_telefones(cur, contato_id, bruto, cont)
+                        contato_de[harmonit_id] = contato_id
+                        telefones_de[harmonit_id] = extrair_telefones(bruto, cont)
+
+        # ── PASSAGEM 2: de quem é cada número, e só então gravar ────────────
+        donos, em_revisao = _decidir_donos(todos, telefones_de, apenas_id)
+        cont.em_revisao = len(em_revisao)
+        if em_revisao:
+            log.warning(
+                "%s números ficaram SEM dono e não foram gravados -- ver "
+                "revisao/ e docs/08_Identidade.md", len(em_revisao))
+
+        with banco.cursor() as cur:
+            for harmonit_id, contato_id in contato_de.items():
+                _gravar_telefones(cur, contato_id, harmonit_id,
+                                  telefones_de.get(harmonit_id, []), donos, cont)
+
+            # O sync só insere: sem isto, vínculo gravado antes da regra de
+            # 06/08 ficaria no banco para sempre.
+            apagados, preservados = _limpar_em_revisao(cur, em_revisao)
+            cont.removidos = apagados
+            if apagados or preservados:
+                log.info("limpeza da revisão: %s removidos, %s preservados por "
+                         "terem WhatsApp verificado", apagados, preservados)
 
         if not apenas_id and limite is None:
             with banco.cursor() as cur:

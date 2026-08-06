@@ -16,7 +16,22 @@ sys.path.insert(0, "/home/claude/movizap_painel")
 psycopg = pytest.importorskip("psycopg")
 from psycopg.rows import dict_row  # noqa: E402
 
-from movizap import harmonit, sync, telefone  # noqa: E402
+from movizap import harmonit, identidade, sync, telefone  # noqa: E402
+
+
+def gravar_telefones(cur, contato_id, bruto, cont=None):
+    """O fluxo real em duas passagens, para um cliente só.
+
+    Existe porque o sync deixou de gravar telefone durante a leitura: decidir
+    de quem é um número compartilhado exige ver todos os clientes antes. Sem
+    este atalho, cada teste teria que remontar as duas passagens à mão.
+    """
+    cont = cont or sync.Contadores()
+    harmonit_id = str(bruto["id"])
+    telefones = sync.extrair_telefones(bruto, cont)
+    donos = {e164: harmonit_id for _c, e164, _t, _g in telefones}
+    sync._gravar_telefones(cur, contato_id, harmonit_id, telefones, donos, cont)
+    return cont
 
 ENV = Path("/home/claude/movizap_painel/.env")
 
@@ -212,8 +227,7 @@ class TestTelefones:
     def _gravar(self, cur, bruto):
         cliente_id, _ = sync._gravar_cliente(cur, bruto)
         contato_id = sync._gravar_contato(cur, cliente_id, bruto)
-        cont = sync.Contadores()
-        sync._gravar_telefones(cur, contato_id, bruto, cont)
+        cont = gravar_telefones(cur, contato_id, bruto)
         return contato_id, cont
 
     def test_grava_fixo_e_celular_e_ignora_o_vazio(self, cur):
@@ -257,7 +271,7 @@ class TestTelefones:
         cliente_id, _ = sync._gravar_cliente(cur, bruto)
         contato_id = sync._gravar_contato(cur, cliente_id, bruto)
         for _ in range(3):
-            sync._gravar_telefones(cur, contato_id, bruto, sync.Contadores())
+            gravar_telefones(cur, contato_id, bruto)
         cur.execute("SELECT count(*) AS n FROM contato_telefone WHERE contato_id=%s",
                     (contato_id,))
         assert cur.fetchone()["n"] == 2
@@ -272,13 +286,13 @@ class TestTelefones:
         bruto = velasco("9990008")
         cliente_id, _ = sync._gravar_cliente(cur, bruto)
         contato_id = sync._gravar_contato(cur, cliente_id, bruto)
-        sync._gravar_telefones(cur, contato_id, bruto, sync.Contadores())
+        gravar_telefones(cur, contato_id, bruto)
 
         cur.execute(
             "UPDATE contato_telefone SET tem_whatsapp=true, verificado_em=now() "
             "WHERE contato_id=%s AND origem_campo='celular'", (contato_id,))
 
-        sync._gravar_telefones(cur, contato_id, bruto, sync.Contadores())
+        gravar_telefones(cur, contato_id, bruto)
 
         cur.execute("SELECT tem_whatsapp, verificado_em FROM contato_telefone "
                     "WHERE contato_id=%s AND origem_campo='celular'", (contato_id,))
@@ -291,8 +305,7 @@ class TestTelefones:
         bruto["contatoPrincipal"] = None
         cliente_id, _ = sync._gravar_cliente(cur, bruto)
         contato_id = sync._gravar_contato(cur, cliente_id, bruto)
-        cont = sync.Contadores()
-        sync._gravar_telefones(cur, contato_id, bruto, cont)
+        cont = gravar_telefones(cur, contato_id, bruto)
         assert cont.erros == 0 and cont.vazios == 0
 
 
@@ -308,7 +321,7 @@ class TestPrincipal:
     def _telefones(self, cur, bruto):
         cliente_id, _ = sync._gravar_cliente(cur, bruto)
         contato_id = sync._gravar_contato(cur, cliente_id, bruto)
-        sync._gravar_telefones(cur, contato_id, bruto, sync.Contadores())
+        gravar_telefones(cur, contato_id, bruto)
         cur.execute("SELECT e164, origem_campo, principal FROM contato_telefone "
                     "WHERE contato_id=%s", (contato_id,))
         return contato_id, cur.fetchall()
@@ -353,7 +366,7 @@ class TestPrincipal:
         bruto = velasco("9990015")
         contato_id, _ = self._telefones(cur, bruto)
         for _ in range(3):
-            sync._gravar_telefones(cur, contato_id, bruto, sync.Contadores())
+            gravar_telefones(cur, contato_id, bruto)
         cur.execute("SELECT count(*) AS n FROM contato_telefone "
                     "WHERE contato_id=%s AND principal", (contato_id,))
         assert cur.fetchone()["n"] == 1
@@ -375,6 +388,113 @@ class TestEscolherPrincipalPuro:
             ("telefone", "+551832214455", telefone.FIXO),
             ("telefone2", "+5518997776666", telefone.MOVEL),
         ]) == "+5518997776666"
+
+
+class TestIdentidade:
+    """A regra medida em docs/08_Identidade.md, auditada em 06/08."""
+
+    def test_sentinela_do_dotnet_nao_e_data(self):
+        """🚨 `0001-01-01` parseia sem erro e vira o ano 1. Gravado como data,
+        o registro SEM data ganharia toda disputa de antiguidade -- a regra
+        ficaria invertida e nada acusaria."""
+        assert identidade.data_cadastro({"dataCadastro": "0001-01-01T00:00:00"}) is None
+        assert identidade.data_cadastro({"dataCadastro": ""}) is None
+        assert identidade.data_cadastro({}) is None
+        real = identidade.data_cadastro({"dataCadastro": "2017-11-16T00:00:00"})
+        assert real and real.year == 2017
+
+    def test_sufixo_societario_nao_distingue_empresa(self):
+        assert identidade.mesma_empresa(
+            "FAXT TELECOMUNICACOES LTDA.", "FAXT TELECOMUNICACOES LTDA")
+        assert identidade.mesma_empresa(
+            "MOTO HELP ENTREGAS (MATRIZ)", "MOTO HELP ENTREGAS RAPIDAS LTDA")
+
+    def test_empresas_diferentes_nao_se_confundem(self):
+        assert not identidade.mesma_empresa(
+            "ALPHA CLICHERIA E SOLUCOES GRAFICAS LTDA", "SMART CLICHERIA LIMITADA ME")
+        assert not identidade.mesma_empresa(
+            "GM ENERGIA SOLAR LTDA", "FOTOVOLTEC SOLUCOES EM ENERGIA LTDA")
+        assert not identidade.mesma_empresa("DANIEL MATIAS", "EDUARDO GONCALVES")
+
+    def test_nome_vazio_nunca_casa(self):
+        """Dois nomes vazios não são 'a mesma empresa' -- seriam TODAS."""
+        assert not identidade.mesma_empresa("", "")
+        assert not identidade.mesma_empresa("LTDA", "ME")
+
+    def test_mesmo_cliente_o_mais_antigo_fica_com_o_numero(self):
+        brutos = {
+            "100": {"id": 100, "nome": "FAXT TELECOM LTDA",
+                    "dataCadastro": "2020-01-01T00:00:00"},
+            "200": {"id": 200, "nome": "FAXT TELECOM LTDA.",
+                    "dataCadastro": "2024-01-01T00:00:00"},
+        }
+        donos, revisao = identidade.decidir_donos(
+            brutos, {"100": {"+5519999990000"}, "200": {"+5519999990000"}})
+        assert donos == {"+5519999990000": "100"}
+        assert revisao == {}
+
+    def test_quem_nao_tem_data_perde_o_desempate(self):
+        """🚨 O oposto do que o sentinela faria."""
+        brutos = {
+            "100": {"id": 100, "nome": "FAXT TELECOM LTDA", "dataCadastro": None},
+            "200": {"id": 200, "nome": "FAXT TELECOM LTDA.",
+                    "dataCadastro": "2024-01-01T00:00:00"},
+        }
+        donos, _ = identidade.decidir_donos(
+            brutos, {"100": {"+5519999990000"}, "200": {"+5519999990000"}})
+        assert donos == {"+5519999990000": "200"}, "quem não tem data ganhou"
+
+    def test_EMPRESAS_DIFERENTES_NINGUEM_RECEBE(self):
+        """🚨 A decisão do usuário em 06/08: o duvidoso não sobe."""
+        brutos = {
+            "100": {"id": 100, "nome": "GM ENERGIA SOLAR LTDA",
+                    "dataCadastro": "2020-01-01T00:00:00"},
+            "200": {"id": 200, "nome": "FOTOVOLTEC SOLUCOES LTDA",
+                    "dataCadastro": "2024-01-01T00:00:00"},
+        }
+        donos, revisao = identidade.decidir_donos(
+            brutos, {"100": {"+5538999990000"}, "200": {"+5538999990000"}})
+        assert donos == {}, "atribuiu um número disputado por empresas distintas"
+        assert "+5538999990000" in revisao
+
+    def test_misto_tambem_vai_para_revisao(self):
+        """Grupo econômico + um estranho: ninguém recebe."""
+        brutos = {
+            "100": {"id": 100, "nome": "FAZENDA DA TOCA LTDA", "dataCadastro": None},
+            "200": {"id": 200, "nome": "FAZENDA DA TOCA LTDA", "dataCadastro": None},
+            "300": {"id": 300, "nome": "MANTIQUEIRA ALIMENTOS LTDA.",
+                    "dataCadastro": None},
+        }
+        donos, revisao = identidade.decidir_donos(
+            brutos, {k: {"+5521999990000"} for k in ("100", "200", "300")})
+        assert donos == {}
+        assert revisao
+
+    def test_numero_de_um_dono_so_nao_vira_revisao(self):
+        brutos = {"100": {"id": 100, "nome": "SOZINHA LTDA", "dataCadastro": None}}
+        donos, revisao = identidade.decidir_donos(brutos, {"100": {"+5519888880000"}})
+        assert donos == {"+5519888880000": "100"}
+        assert revisao == {}
+
+    def test_marca_de_revisao_no_nome(self):
+        assert identidade.motivo_de_revisao({"nome": "[NÃO USAR] MOTO HELP"})
+        assert identidade.motivo_de_revisao({"nome": "CENTRO LOGISTICO (INATIVADO)"})
+        assert identidade.motivo_de_revisao({"nome": "EMPRESA NORMAL LTDA"}) is None
+
+
+class TestTelefoneEmRevisaoNaoEGravado:
+    def test_numero_de_outro_dono_nao_entra(self, cur):
+        bruto = velasco("9990030")
+        cliente_id, _ = sync._gravar_cliente(cur, bruto)
+        contato_id = sync._gravar_contato(cur, cliente_id, bruto)
+        cont = sync.Contadores()
+        telefones = sync.extrair_telefones(bruto, cont)
+        # ninguém é dono: é o caso "em revisão"
+        sync._gravar_telefones(cur, contato_id, "9990030", telefones, {}, cont)
+        cur.execute("SELECT count(*) AS n FROM contato_telefone WHERE contato_id=%s",
+                    (contato_id,))
+        assert cur.fetchone()["n"] == 0
+        assert cont.nao_atribuidos == len(telefones)
 
 
 class TestClienteHarmonit:

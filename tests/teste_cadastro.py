@@ -33,6 +33,43 @@ def pool():
     banco.fechar()
 
 
+@pytest.fixture(scope="module")
+def celular_com_dono():
+    """Um celular que pertence a UM contato só.
+
+    🚨 Escolhido do banco, não fixo no código. O celular da Pastelaria Velasco
+    (+5518998116168) era o candidato óbvio -- e em 06/08 ele foi para revisão,
+    porque é compartilhado com o cadastro de "IAGO SANTOS DO O SOUZA". Fixar
+    um número no teste é fixar uma suposição sobre o dado, e o dado muda.
+    """
+    linha = banco.um(r"""
+        SELECT t.e164 FROM contato_telefone t
+         -- 🚨 `9[6-9]` e não só `9`. Celular brasileiro nasceu com 8 dígitos
+         -- começando em 6-9, e a migração de 2016 prefixou o 9 -- então a
+         -- forma real é 9[6-9]xxxxxxx. A base tem números como
+         -- +5511905430604, que passam pela normalização (leitura tolerante,
+         -- de propósito) mas cuja grafia de 8 dígitos seria `05430604`, que
+         -- não é telefone. Testar as três grafias com um desses testaria uma
+         -- premissa falsa, não o código.
+         WHERE t.e164 ~ '^\+55[0-9]{2}9[6-9][0-9]{7}$'
+         GROUP BY t.e164 HAVING count(DISTINCT t.contato_id) = 1
+         LIMIT 1
+    """)
+    if not linha:
+        pytest.skip("nenhum celular com dono único na base")
+    return linha["e164"]
+
+
+def grafias(e164):
+    """As três grafias que uma pessoa digitaria do mesmo número."""
+    ddd, assinante = e164[3:5], e164[5:]
+    return [
+        e164,                                        # +5519998887766
+        f"{ddd} {assinante[:5]}-{assinante[5:]}",    # 19 99888-7766
+        f"({ddd}) {assinante[1:5]}-{assinante[5:]}", # (19) 9888-7766, sem o 9
+    ]
+
+
 class TestInterpretarBusca:
     """A tela mostra a interpretação de volta. Quando alguém procura um
     telefone e não acha, a diferença entre "não existe" e "procurei pelo nome"
@@ -87,22 +124,21 @@ class TestBuscaDeCliente:
         assert r["total"] == 1
         assert "Velasco" in r["itens"][0]["nome"]
 
-    @pytest.mark.parametrize("termo", [
-        "18 99811-6168", "(18) 9811-6168", "5518998116168", "18 9811 6168",
-    ])
-    def test_AS_TRES_GRAFIAS_ACHAM_O_MESMO(self, termo):
+    def test_AS_TRES_GRAFIAS_ACHAM_O_MESMO(self, celular_com_dono):
         """🚨 O teste que justifica o módulo existir."""
-        r = cadastro.listar_clientes(busca=termo)
-        assert r["total"] >= 1, f"{termo!r} não achou ninguém"
-        assert r["busca"]["e164"] == "+5518998116168"
+        for termo in grafias(celular_com_dono):
+            r = cadastro.listar_clientes(busca=termo)
+            assert r["total"] >= 1, f"{termo!r} não achou ninguém"
+            assert r["busca"]["e164"] == celular_com_dono
 
-    def test_grafias_diferentes_dao_o_MESMO_conjunto(self):
+    def test_grafias_diferentes_dao_o_MESMO_conjunto(self, celular_com_dono):
         """Não basta cada uma achar alguém: têm que achar os mesmos."""
-        a = {i["id"] for i in cadastro.listar_clientes(busca="18 99811-6168")["itens"]}
-        b = {i["id"] for i in cadastro.listar_clientes(busca="18 9811-6168")["itens"]}
-        c = {i["id"] for i in cadastro.listar_clientes(busca="5518998116168")["itens"]}
-        assert a == b == c
-        assert a, "as três acharam o mesmo... nada"
+        conjuntos = [
+            frozenset(i["id"] for i in cadastro.listar_clientes(busca=t)["itens"])
+            for t in grafias(celular_com_dono)
+        ]
+        assert len(set(conjuntos)) == 1, "as grafias acharam clientes diferentes"
+        assert conjuntos[0], "as três acharam o mesmo... nada"
 
     def test_termo_que_nao_existe_devolve_vazio_sem_estourar(self):
         r = cadastro.listar_clientes(busca="zzzzznaoexistezzzzz")
@@ -139,11 +175,21 @@ class TestDetalhe:
         return r["itens"][0]["id"]
 
     def test_cliente_traz_contatos_com_telefones(self):
+        """⚠️ A Velasco tem só o FIXO desde 06/08.
+
+        O celular dela (+5518998116168) é compartilhado com o cadastro de
+        "IAGO SANTOS DO O SOUZA" -- nomes distintos, então o número foi para
+        revisão e **ninguém** o recebeu. Ver docs/08_Identidade.md.
+        """
         c = cadastro.cliente(self._velasco())
         assert c["nome"] == "Velasco Leite Pastelaria ME"
         assert c["contatos"], "cliente sem contato"
         telefones = c["contatos"][0]["telefones"]
-        assert {t["e164"] for t in telefones} == {"+5518998116168", "+556837148157"}
+        assert {t["e164"] for t in telefones} == {"+556837148157"}
+
+    def test_o_celular_compartilhado_nao_foi_para_ninguem(self):
+        """🚨 A regra de 06/08 em cima do dado real, não de fixture."""
+        assert cadastro.por_telefone("+5518998116168") == []
 
     def test_o_principal_vem_primeiro(self):
         c = cadastro.cliente(self._velasco())
@@ -171,18 +217,23 @@ class TestDetalhe:
 class TestPorTelefone:
     """O que o webhook vai chamar no passo 4."""
 
-    def test_acha_por_qualquer_grafia(self):
-        a = cadastro.por_telefone("5518998116168")
-        b = cadastro.por_telefone("18 9811-6168")
-        assert a and {x["id"] for x in a} == {x["id"] for x in b}
+    def test_acha_por_qualquer_grafia(self, celular_com_dono):
+        conjuntos = [
+            frozenset(x["id"] for x in cadastro.por_telefone(t))
+            for t in grafias(celular_com_dono)
+        ]
+        assert conjuntos[0], "nem a grafia canônica achou"
+        assert len(set(conjuntos)) == 1
 
-    def test_devolve_LISTA_porque_numero_pode_ter_varios_donos(self):
-        """🚨 Dez números da base estão em mais de um contato, um deles em 8.
+    def test_devolve_LISTA_e_nao_um_contato(self, celular_com_dono):
+        """🚨 44 números da base estavam em mais de um contato, um em 8.
 
-        Devolver `contato | None` obrigaria a escolher arbitrariamente, e a
-        escolha arbitrária é o que não se pode esconder de quem vai atender.
+        Hoje esses vão para revisão e ninguém os recebe -- mas a assinatura
+        continua devolvendo lista. Quando o usuário validar os 32 casos, um
+        número pode legitimamente pertencer a um grupo econômico, e um
+        `contato | None` obrigaria a escolher arbitrariamente ali.
         """
-        assert isinstance(cadastro.por_telefone("5518998116168"), list)
+        assert isinstance(cadastro.por_telefone(celular_com_dono), list)
 
     def test_numero_desconhecido_devolve_lista_vazia(self):
         assert cadastro.por_telefone("+5511999998888") == []
