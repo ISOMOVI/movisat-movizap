@@ -359,6 +359,90 @@ FPSL passa a ler dela. Sem isso viram três bases com três idades.
 
 ---
 
+
+---
+
+## 🆕 Migrações 006 e 007 (2026-08-06)
+
+### `cliente` — três colunas novas
+
+| Coluna | Para quê |
+|---|---|
+| `cadastrado_em` | `dataCadastro` do Harmonit. **NULL em 29% da base** |
+| `revisar` | cadastro que precisa de olho humano. Não esconde nem apaga |
+| `motivo_revisao` | por quê. Hoje: nome marcado `[NÃO USAR]` / `(INATIVADO)` |
+
+🚨 **Por que `cadastrado_em` existe, se já há `harmonit_id`.** Ordenar por data
+dá resultado **diferente** de ordenar por id em **665 de 747** clientes. O id
+*parece* ordem de cadastro e não é — e a regra do número compartilhado depende
+de saber quem é o mais antigo.
+
+🚨 **E por que ele é NULL-ável.** O Harmonit manda o campo vazio em 291
+clientes e manda `0001-01-01T00:00:00` — **o vazio do .NET** — em outros 12.
+Esse sentinela **parseia sem erro e vira o ano 1**: gravado como data, o
+registro *sem* data ganharia toda disputa de antiguidade, e a regra ficaria
+exatamente invertida sem nada acusar. O sync converte para NULL, e NULL aqui
+significa *"o Harmonit não sabe"* — quem não sabe perde o desempate.
+
+Depois de gravar: **747 com data, 303 sem, e a mais antiga é 12/08/1967**.
+
+### `canal` — o interruptor da IA
+
+| Coluna | Para quê |
+|---|---|
+| `ia_ligada` | **nasce `false`**. Por canal, nunca global |
+| `ia_ligada_em` · `ia_ligada_por` | desde quando, e por quem |
+
+Por canal e não global porque global obrigaria alguém a lembrar de desligar
+antes de cada disparo do informativo — e "lembrar" é o que falha. Ver
+`04_Contrato_IA.md`.
+
+O canal `informativo` entrou aqui (a migração 003 o deixou de fora de
+propósito). 🚨 **Disparo em massa continua fora da Fase 1**: conectar e receber
+não é disparar, e este canal existir não cria rota de envio em lote.
+
+### 🆕 `webhook_evento` — o corpo cru, antes de interpretar
+
+| Coluna | |
+|---|---|
+| `payload` | **jsonb com o corpo inteiro**, como chegou |
+| `instancia` · `evento` · `id_externo` · `de_mim` · `telefone` | extraídos, para consultar |
+| `processado` · `processado_em` · `erro` | o que já foi tratado, e por que algo foi ignorado |
+
+🚨 **Por que guardar o corpo inteiro.** Todo parser deste projeto foi escrito
+contra a **documentação** do Evolution 2.3.7, não contra o que ele manda.
+Guardar antes de interpretar permite conferir o formato real com **uma**
+mensagem — em vez de descobrir a divergência com catorze telas construídas em
+cima da suposição. É a mitigação escrita do risco de parear o chip por último.
+
+🚨 **`ux_webhook_externo (instancia, id_externo)` é a trava da reentrega.** O
+Evolution reenvia e não garante ordem: a idempotência é **do banco, não da
+disciplina**. Reentrega é conflito esperado — ignora e responde 200. **Nunca
+deduplicar por conteúdo ou timestamp**: o cliente manda "ok" duas vezes de
+propósito, e isso é legítimo.
+
+O índice é **parcial** porque nem todo evento tem id — os de conexão não têm, e
+não se deduplica por um NULL.
+
+⚠️ Mensagem em canal **informativo** e mensagem de **grupo** são gravadas e
+marcadas como processadas, com o motivo em `erro`. Não viram conversa e não
+acionam IA. Grupo é Fase 3; informativo não atende. Mas as duas **chegam**, e
+descartar sem registro faria a resposta de um cliente sumir sem rastro.
+
+### `contato_telefone` — o que a regra de identidade mudou
+
+O sync deixou de gravar telefone durante a leitura. Decidir de quem é um número
+compartilhado exige ver **todos** os clientes antes — gravar durante a varredura
+faria a decisão depender da ordem das páginas.
+
+🚨 **E o sync passou a REMOVER.** Ele só inseria, então os vínculos duvidosos
+gravados antes da regra de 06/08 continuavam no banco: a regra nova valia só
+para o que entrava. `_limpar_em_revisao` fecha isso — **1.248 → 1.152**
+telefones, exatamente os 96 que a lista de revisão previu.
+
+🚨 **Mas nunca apaga telefone com `tem_whatsapp` verificado.** O vínculo se
+reconstrói relendo o Harmonit; a verificação, não — ela é do Evolution e custa
+uma chamada. Se houver algum, ele fica e vai para o log.
 ## Índices que não são opcionais
 
 | Índice | Por quê |

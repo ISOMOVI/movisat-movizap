@@ -109,6 +109,90 @@ Reaproveita o insumo que já existe: **as 168 perguntas reais** da regressão do
 
 ---
 
+
+---
+
+## 🚨 O interruptor — ela nasce desligada
+
+**Decisão do usuário em 2026-08-06.** A IA tem um interruptor **por canal**, e
+ele nasce em `false`. Ninguém liga por acidente; ligar é um ato.
+
+```
+Objetivo:     a IA só fala quando alguém decidiu que ela devia falar
+Hoje:         = o objetivo. canal.ia_ligada, false por padrão (migração 007)
+Por quê:      pedido do usuário -- a ordem é validar conexão, depois o bot, e
+              só então ligar. Um sistema que já nasce respondendo ao cliente
+              não tem ensaio: o primeiro erro dele é em público
+Reavaliar se: -- fechado
+```
+
+### Por que por canal e não global
+
+| | |
+|---|---|
+| **Global** | obriga alguém a lembrar de desligar antes de cada disparo do informativo. **"Lembrar" é exatamente o que falha.** |
+| **Por canal** | o informativo não tem como ligar. Não é disciplina, é a coluna |
+
+**Somente o canal `atendimento` tem IA.** O `informativo` não recebe mensagem
+como conversa — o que chegar nele é gravado em `webhook_evento` e marcado como
+processado, sem virar conversa e sem acionar a IA.
+
+⚠️ E vai chegar mensagem nele: **gente responde boleto.** Fingir que não chega
+faria a resposta do cliente sumir sem rastro. Guardar sem atender é o meio
+termo honesto.
+
+### A sequência de ativação
+
+```
+1. parear o chip                     CFG_1.1
+2. confirmar que mensagem chega      conferir webhook_evento
+3. validar o bot respondendo         em conversa de teste
+4. LIGAR O INTERRUPTOR               ato deliberado, na CFG_1.1
+```
+
+O banco registra `ia_ligada_em` e `ia_ligada_por`. Não é burocracia: quando
+alguém perguntar *"desde quando a IA está respondendo os clientes?"*, a
+resposta não pode ser um encolher de ombros.
+
+---
+
+## Os dados que ela pode consultar
+
+**Só leitura, e só o que está no banco do MoviZap.** A IA não fala com o
+Harmonit nem com a WESO: fala com o cadastro que o sync já trouxe. Isso não é
+economia de código — é o que impede uma pergunta em linguagem natural de virar
+carga na API de terceiro, e o que garante que ela vê o mesmo dado que o
+atendente vê na ficha.
+
+| Tabela | O que ela enxerga | O que ela NUNCA enxerga |
+|---|---|---|
+| `cliente` | nome, fantasia, documento, situação | — |
+| `contato` | nome, relação, e-mail | — |
+| `contato_telefone` | E.164, `tem_whatsapp` | o `bruto`, que não acrescenta nada a ela |
+| `contato_papel` | papéis | — |
+| `conversa`, `mensagem` | **só a conversa em andamento** | conversa de outro contato |
+| FPSL | veículos, contratos, faturas | qualquer escrita |
+
+🚨 **Ela nunca enxerga `config`, `atendente`, `prompt_versao` nem
+`webhook_evento`.** Não é só privacidade: uma IA que lê a própria configuração
+é uma IA que pode ser convencida a descrevê-la para quem estiver do outro lado.
+
+🚨 **Nunca escreve no cadastro.** Se a conversa revelar que o cadastro está
+errado — telefone de outra empresa, nome trocado — ela **registra na conversa**
+e não corrige nada. Correção de cadastro é ato de gente, com rastro.
+
+### O caso do número compartilhado
+
+44 números da base estavam em mais de um cliente (`08_Identidade.md`). Os
+duvidosos ficaram **sem dono**, então `identificar_contato` vai devolver
+**vazio** para eles — e isso é o comportamento certo.
+
+Quando isso acontecer, a IA **pergunta**: *"você está falando em nome de qual
+empresa?"*, e registra a resposta na conversa para um humano confirmar.
+
+🚨 **É a única fonte que sabe a verdade — a pessoa do outro lado.** Nenhuma
+regra automática resolve isso, e chutar produziria ficha errada na tela do
+atendente, que é pior que ficha nenhuma.
 ## Chave e custo
 
 - Chave lida do `.env` por **um único gateway**. Nenhum outro módulo sabe que ela existe.

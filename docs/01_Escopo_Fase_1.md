@@ -50,6 +50,9 @@ Se uma mensagem entra pelo WhatsApp, a IA responde, transfere para um humano, o 
 | 19 | **Resumo na transferência** | quem transfere escreve o contexto; quem recebe lê antes de assumir |
 | 20 | **Histórico** (`ATD_5.1`) | conversas encerradas, pesquisáveis |
 | 21 | **Jornada do atendente** | dentro da `CAD_2.1`: horário de atendimento, pausa e dias da semana |
+| 22 | **Segundo canal: Informativos** | conectar e **receber**. Mensagem que chegar é gravada e **não vira conversa** |
+| 23 | **Interruptor da IA, por canal** | nasce **desligado**. Só o `atendimento` tem IA |
+| 24 | **Registro cru do webhook** | `webhook_evento` guarda o corpo inteiro antes de qualquer interpretação |
 
 > ⚠️ **Emenda de 2026-08-06, autorizada pelo usuário.** Os itens **18 a 21**
 > alargam a Fase 1 em relação ao que foi fechado em 04/08. Estão escritos aqui
@@ -60,12 +63,26 @@ Se uma mensagem entra pelo WhatsApp, a IA responde, transfere para um humano, o 
 > fila**. Saber quem está em horário é o que separa "conversa esperando" de
 > "conversa esperando alguém que só volta segunda". Por isso a `CAD_2.1` é
 > construída **antes** da `ATD_1.3`.
+>
+> **Itens 22 a 24, emenda de 06/08 (mesmo dia, mais tarde).** O usuário tem
+> chip para o Informativos e pediu para subir os dois e tratar depois.
+>
+> 🚨 **O item 22 NÃO reabre o disparo em massa**, que continua na lista de
+> Fase 2 abaixo. Conectar e receber não é disparar, e nenhuma rota de envio em
+> lote existe neste projeto. O que muda é que o canal passa a existir.
+>
+> ⚠️ O informativo **vai receber mensagem** mesmo não devendo — gente responde
+> boleto. Ela é gravada em `webhook_evento` e marcada como processada, sem
+> virar conversa e sem IA: honra o "não recebe" sem jogar fora o que chegou.
+>
+> O item 24 é a **mitigação escrita** do risco de parear o chip por último,
+> declarado no fim deste documento.
 
 ## ❌ Fica fora — e está escrito
 
 | Item | Volta em |
 |---|---|
-| Canal **Informativos** e disparo em massa | Fase 2 |
+| ~~Canal Informativos~~ **e disparo em massa** | ⚠️ **O canal entrou em 06/08 (item 22) — o DISPARO continua Fase 2** |
 | **Envio** de arquivo/mídia pela API | Fase 2 |
 | Leitura de e-mail e dashboard de não lidos | Fase 2 (depende de Workspace, já confirmado como viável) |
 | Google OAuth e convite por e-mail | Fase 2 |
@@ -106,10 +123,14 @@ A Fase 1 está pronta quando **todos** forem verdade:
 **Não conta como pronto:** funcionar no teste unitário e não ter passado por WhatsApp real. Foi assim que o MoviBot ficou 6 semanas "pronto" sem nunca ter atendido ninguém.
 
 🚨 **Todos os 15 critérios só podem ser verificados depois do pareamento do
-chip**, que por decisão de 06/08 é o **último** passo. É risco assumido, e a
-mitigação está no MIOLO do `Proximos_Passos.md`: parser defensivo, payload
-bruto gravado desde a primeira mensagem, e conferência do primeiro payload real
-no minuto seguinte ao pareamento.
+chip**, que por decisão de 06/08 é o **último** passo. É risco assumido.
+
+✅ **A mitigação foi implementada em 06/08, antes das telas** (item 24). A
+tabela `webhook_evento` guarda o corpo inteiro de todo evento **antes de
+qualquer interpretação**, e as duas instâncias do Evolution já apontam para
+ela. Assim o formato real é conferido com **uma** mensagem, em vez de com
+catorze telas construídas em cima da documentação do Evolution 2.3.7 — que é
+contra o que todo parser deste projeto foi escrito.
 
 ⚠️ **Sobre o item 5 (`tem_whatsapp`):** o campo só pode ser preenchido pelo
 Evolution com a instância conectada, então fica `NULL` até o pareamento. Isso
