@@ -49,6 +49,54 @@ log = logging.getLogger("movizap.webhook")
 # gravado igual, mas não tem id de mensagem para deduplicar.
 EVENTOS_DE_MENSAGEM = {"messages.upsert", "messages.update", "send.message"}
 
+# 🚨 MEDIDO EM 07/08, NA PRIMEIRA MENSAGEM REAL: o Evolution manda a PRÓPRIA
+# CHAVE DE API dentro do corpo, em `apikey` — nos 70 primeiros eventos, todos.
+# "Gravar cru" não pode significar guardar credencial: a chave que comanda o
+# canal ficaria no banco, nos backups e em qualquer exportação, para sempre.
+#
+# ⚠️ O campo é trocado por um marcador em vez de sumir. Campo ausente e campo
+# omitido de propósito são coisas diferentes na hora de conferir o formato, e
+# a conferência é a razão de esta tabela existir.
+CAMPOS_SIGILOSOS = ("apikey",)
+MARCADOR = "[removido pelo MoviZap -- credencial nao se guarda]"
+
+
+def _sem_segredo(corpo: dict) -> dict:
+    """Devolve o corpo sem as credenciais que o Evolution embute nele.
+
+    Só no topo, de propósito: descer recursivamente em payload arbitrário é
+    caro por mensagem e o Evolution põe a chave num lugar só. Se aparecer em
+    outro nível, o teste `teste_webhook` acusa.
+    """
+    if not any(c in corpo for c in CAMPOS_SIGILOSOS):
+        return corpo
+    limpo = dict(corpo)
+    for campo in CAMPOS_SIGILOSOS:
+        if campo in limpo:
+            limpo[campo] = MARCADOR
+    return limpo
+
+
+def _jid_do_cliente(chave: dict) -> str:
+    """O JID que É um telefone.
+
+    🚨 MEDIDO EM 07/08: as mensagens vieram com `addressingMode: "lid"`, que
+    não existe na documentação do 2.3.7 contra a qual este parser foi escrito.
+    No modo LID o WhatsApp identifica a pessoa por um número interno
+    (`...@lid`) que NÃO é telefone — e o telefone vem no `remoteJidAlt`.
+
+    Nos 7 primeiros casos o `remoteJid` ainda veio como `@s.whatsapp.net`, mas
+    tratar isto agora é barato; descobrir depois seria uma conversa ligada ao
+    contato errado, em silêncio.
+    """
+    if not isinstance(chave, dict):
+        return ""
+    principal = chave.get("remoteJid") or ""
+    alternativo = chave.get("remoteJidAlt") or ""
+    if principal.endswith("@lid") and alternativo:
+        return alternativo
+    return principal or alternativo
+
 
 def _cavar(corpo: dict, *caminho, padrao=None):
     """Desce por um caminho de chaves sem estourar em nenhum nível.
@@ -83,11 +131,12 @@ def registrar(corpo: dict) -> dict:
     evento = _cavar(corpo, "event") or ""
 
     id_externo = _cavar(corpo, "data", "key", "id")
-    jid = _cavar(corpo, "data", "key", "remoteJid") or ""
+    jid = _jid_do_cliente(_cavar(corpo, "data", "key", padrao={}))
     de_mim = _cavar(corpo, "data", "key", "fromMe")
 
     # O JID vem como `5518998116168@s.whatsapp.net`. O normalizador já trata,
     # e é por ele que a busca vai casar com o cadastro.
+    # ⚠️ `@lid` nunca chega aqui: `_jid_do_cliente` já trocou pelo telefone.
     numero = telefone.normalizar(jid) if jid else None
 
     canal = _canal_da_instancia(instancia) if instancia else None
@@ -102,7 +151,7 @@ def registrar(corpo: dict) -> dict:
         """
         INSERT INTO webhook_evento
             (canal_id, instancia, evento, id_externo, de_mim, telefone,
-             payload, processado, processado_em, erro)
+             payload, processado, processado_em, motivo_ignorado)
         VALUES (%s, %s, %s, %s, %s, %s, %s, %s,
                 CASE WHEN %s THEN now() ELSE NULL END, %s)
         ON CONFLICT (instancia, id_externo) WHERE id_externo IS NOT NULL
@@ -116,9 +165,15 @@ def registrar(corpo: dict) -> dict:
             id_externo,
             de_mim,
             numero,
-            json.dumps(corpo, ensure_ascii=False, default=str),
+            json.dumps(_sem_segredo(corpo), ensure_ascii=False, default=str),
             ignorar,
             ignorar,
+            # 🚨 VAI EM `motivo_ignorado`, NÃO EM `erro`. Descartar de propósito
+            # não é falhar. Enquanto isto morava no campo `erro`, o painel
+            # acusava 16 falhas num sistema em que nada falhou -- e alarme
+            # falso é o que faz alguém parar de olhar o painel. Corrigido na
+            # migração 009. É a mesma lição do `ok`/`vazio`/`erro` do sync,
+            # cometida de novo em outro lugar.
             "grupo: fora da Fase 1" if e_grupo else
             ("canal informativo: não vira conversa" if informativo else None),
         ),

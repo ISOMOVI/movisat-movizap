@@ -55,9 +55,24 @@ class TestBusca:
             assert t["fase"] <= telas.FASE_ATUAL
 
     def test_telas_reservadas_existem_mas_nao_sobem(self):
+        """⚠️ A `ATD_3.1` SAIU desta lista em 07/08: o usuário decidiu que o
+        informativo entra na Fase 1 ("é o que vai enviar, sem resposta de
+        cliente"), o canal foi pareado no mesmo dia e a tela subiu.
+
+        A guarda continua valendo para as que seguem reservadas -- e foi ela
+        que acusou a mudança, que é exatamente o trabalho dela."""
         codigos_ativos = {t["codigo"] for t in telas.ativas()}
-        assert "ATD_3.1" in telas.CODIGOS_VALIDOS, "o código precisa estar reservado"
-        assert "ATD_3.1" not in codigos_ativos, "tela de fase 2 não pode subir na fase 1"
+        for reservada in ("ATD_4.1", "CFG_2.2", "REL_1.1"):
+            assert reservada in telas.CODIGOS_VALIDOS, \
+                f"{reservada}: o código precisa continuar reservado"
+            assert reservada not in codigos_ativos, \
+                f"{reservada}: tela de fase futura não pode subir na fase 1"
+
+    def test_informativo_subiu_para_fase_1(self):
+        """🚨 É a única tela que alcança cliente de verdade EM LOTE, e o canal
+        é irreversível. Se ela sumir das ativas sem decisão, alguém mexeu na
+        fase sem querer."""
+        assert "ATD_3.1" in {t["codigo"] for t in telas.ativas()}
 
 
 class TestPermissao:

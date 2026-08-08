@@ -175,3 +175,76 @@ Por quê:      sem a linha inicial o histórico começaria na primeira consulta
 Reavaliar se: houver mais de um canal por semana entrando -- hoje são dois no
               total, e um deles é Fase 2
 ```
+
+---
+
+## O que a PRIMEIRA MENSAGEM REAL ensinou (2026-08-07)
+
+O chip do Atendimento foi pareado em 07/08. Em poucas horas: 13 conversas, 69
+mensagens. Duas coisas apareceram no payload que **não estão na documentação
+do Evolution 2.3.7** — contra a qual todos os parsers foram escritos.
+
+> É exatamente para isto que o `webhook_evento` guarda o corpo cru antes de
+> interpretar: descobrir a divergência com **uma** mensagem, não com catorze
+> telas construídas em cima da suposição.
+
+### 🚨 O Evolution manda a PRÓPRIA API KEY dentro do corpo
+
+Os 72 primeiros payloads guardaram, no campo `apikey`, a chave que comanda o
+canal. Ela iria para o banco, para os backups e para qualquer exportação, para
+sempre.
+
+**Correção:** `webhook._sem_segredo` troca por marcador **antes** do INSERT.
+O campo continua existindo, com `[removido pelo MoviZap -- credencial nao se
+guarda]`: campo ausente e campo omitido de propósito são coisas diferentes na
+hora de conferir formato, e conferir formato é a razão da tabela existir.
+
+As 72 linhas antigas foram limpas com `scripts/limpar_apikey_webhook.py`
+(`jsonb_set`, nenhum evento apagado, conferido relendo).
+
+> "Gravar cru" não pode significar guardar credencial.
+
+**Rotação:** não foi feita, e no meu julgamento não é necessária — a chave
+ficou no nosso banco, no nosso servidor, mesma fronteira de confiança do
+`.env`. Decisão do usuário se quiser rotacionar.
+
+### 🚨 `addressingMode: "lid"` — o `remoteJid` pode não ser telefone
+
+Não existe na doc do 2.3.7. Nesse modo o WhatsApp identifica a pessoa por um
+id interno (`...@lid`), e **o telefone vai no `remoteJidAlt`**.
+
+```json
+"key": {
+  "id": "3EB00D6F60EDEC1EE754C3",
+  "remoteJid": "5511982049709@s.whatsapp.net",
+  "remoteJidAlt": "5511982049709@s.whatsapp.net",
+  "addressingMode": "lid"
+}
+```
+
+Nos 7 primeiros casos o `remoteJid` ainda veio como `@s.whatsapp.net`. Tratado
+mesmo assim em `webhook._jid_do_cliente`: se o principal terminar em `@lid` e
+houver alternativo, usa o alternativo.
+
+⚠️ Sem isso, um dia a conversa se ligaria ao **contato errado, em silêncio** —
+o normalizador receberia um número interno e o trataria como telefone.
+
+### O que bateu com a documentação
+
+`data.key.id`, `data.key.fromMe`, `data.messageTimestamp`, `data.messageType`,
+`data.message.conversation`. Os parsers acertaram no resto.
+
+### 🚨 A identificação é o achado de projeto
+
+**12 das 13 primeiras conversas não foram identificadas.** Quem escreve quase
+nunca está no cadastro do Harmonit.
+
+Isso **não é defeito** — é como a operação realmente é, e muda o desenho:
+
+- "não identificado" é caso **normal e frequente**, não exceção;
+- a tela distingue dois motivos, que pedem ações diferentes: *"não está no
+  cadastro"* (pode não ser cliente, ou o telefone estar velho lá) × *"o número
+  responde por N cadastros"* (central de empresa — e aí **ninguém** é
+  escolhido, porque chutar produz ficha errada, que é pior que ficha nenhuma);
+- ⚠️ **quando a IA entrar, ela vai precisar PERGUNTAR quem é** na maioria das
+  conversas, em vez de assumir que já sabe.

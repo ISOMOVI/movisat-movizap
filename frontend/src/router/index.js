@@ -27,6 +27,14 @@ import Login from '../telas/Login.vue'
 import Canais from '../telas/Canais.vue'
 import Clientes from '../telas/Clientes.vue'
 import Contatos from '../telas/Contatos.vue'
+import CaixaDeEntrada from '../telas/CaixaDeEntrada.vue'
+import Fila from '../telas/Fila.vue'
+import Informativos from '../telas/Informativos.vue'
+import Historico from '../telas/Historico.vue'
+import Atendentes from '../telas/Atendentes.vue'
+import Times from '../telas/Times.vue'
+import Classificacoes from '../telas/Classificacoes.vue'
+import IaPrompt from '../telas/IaPrompt.vue'
 import Sincronizacao from '../telas/Sincronizacao.vue'
 import RegistroDeTelas from '../telas/RegistroDeTelas.vue'
 import EmConstrucao from '../telas/EmConstrucao.vue'
@@ -52,28 +60,39 @@ const rotas = [
   {
     path: '/atendimento',
     name: 'ATD_1.1',
-    ...emObra('ATD_1.1', 'Caixa de entrada',
-      'A lista de conversas por canal e por time, com a conversa aberta ao lado.'),
+    component: CaixaDeEntrada,
+    meta: { codigo: 'ATD_1.1', titulo: 'Caixa de entrada' },
   },
   {
     // antes de /atendimento/:id — senão "fila" vira um id
     path: '/atendimento/fila',
     name: 'ATD_1.3',
-    ...emObra('ATD_1.3', 'Fila',
-      'As conversas que a IA transferiu e ainda esperam um atendente assumir.'),
+    component: Fila,
+    meta: { codigo: 'ATD_1.3', titulo: 'Fila' },
   },
   {
     // antes de /atendimento/:id, pela mesma razão que a fila
     path: '/atendimento/historico',
     name: 'ATD_5.1',
-    ...emObra('ATD_5.1', 'Histórico',
-      'As conversas já encerradas, pesquisáveis pelo telefone do cliente.'),
+    component: Historico,
+    meta: { codigo: 'ATD_5.1', titulo: 'Histórico' },
   },
   {
+    // Mesmo componente da ATD_1.1: a conversa abre AO LADO da lista, como o
+    // 06_Conteudo_das_Telas desenha. Esta rota só entra já com uma escolhida.
     path: '/atendimento/:id',
     name: 'ATD_1.2',
-    ...emObra('ATD_1.2', 'Conversa',
-      'A conversa, com a ficha do cliente ao lado — o motivo de o Chatwoot sair.'),
+    component: CaixaDeEntrada,
+    meta: { codigo: 'ATD_1.2', titulo: 'Conversa' },
+  },
+
+  {
+    // 🚨 Subiu para fase 1 em 07/08. É a única tela que alcança cliente de
+    // verdade em lote — o canal é irreversível.
+    path: '/informativos',
+    name: 'ATD_3.1',
+    component: Informativos,
+    meta: { codigo: 'ATD_3.1', titulo: 'Informativos' },
   },
 
   // ---- CAD: cadastro ----
@@ -94,14 +113,14 @@ const rotas = [
   {
     path: '/cadastro/atendentes',
     name: 'CAD_2.1',
-    ...emObra('CAD_2.1', 'Atendentes',
-      'Contas do painel. Hoje existe um usuário só, vindo do .env.'),
+    component: Atendentes,
+    meta: { codigo: 'CAD_2.1', titulo: 'Atendentes' },
   },
   {
     path: '/cadastro/times',
     name: 'CAD_2.2',
-    ...emObra('CAD_2.2', 'Times',
-      'Os times que recebem transferência da IA e entre atendentes.'),
+    component: Times,
+    meta: { codigo: 'CAD_2.2', titulo: 'Times' },
   },
 
   // ---- CFG: configuração ----
@@ -114,8 +133,8 @@ const rotas = [
   {
     path: '/config/ia/prompt',
     name: 'CFG_2.1',
-    ...emObra('CFG_2.1', 'IA — prompt',
-      'As versões do prompt. A conversa grava qual versão a atendeu.'),
+    component: IaPrompt,
+    meta: { codigo: 'CFG_2.1', titulo: 'IA — prompt' },
   },
   {
     path: '/config/sync',
@@ -126,8 +145,8 @@ const rotas = [
   {
     path: '/config/classificacoes',
     name: 'CFG_4.1',
-    ...emObra('CFG_4.1', 'Classificações',
-      'Os motivos de fechamento. É o que alimenta analytics na Fase 2.'),
+    component: Classificacoes,
+    meta: { codigo: 'CFG_4.1', titulo: 'Classificações' },
   },
   {
     path: '/config/telas',

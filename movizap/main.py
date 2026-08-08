@@ -18,7 +18,11 @@ from . import auth
 from . import banco
 from . import cadastro
 from . import canais as registro_canais
+from . import conversas
 from . import evolution
+from . import informativos
+from . import operacao
+from . import prompt as prompt_ia
 from . import ratelimit
 from . import sync as sync_harmonit
 from . import telas as registro_telas
@@ -59,13 +63,21 @@ async def ciclo_de_vida(app: FastAPI):
     parar_vigia = asyncio.Event()
     tarefa_vigia = asyncio.create_task(vigia.rodar(parar_vigia))
 
+    # 🚨 O webhook grava cru e responde 200 rápido; quem interpreta é este
+    # laço, lendo a tabela depois. Sem ele a mensagem chega, fica guardada, e
+    # não aparece em tela nenhuma -- foi exatamente o estado de 07/08.
+    parar_conversas = asyncio.Event()
+    tarefa_conversas = asyncio.create_task(conversas.rodar(parar_conversas))
+
     yield
 
     parar_vigia.set()
-    try:
-        await asyncio.wait_for(tarefa_vigia, timeout=5)
-    except asyncio.TimeoutError:
-        tarefa_vigia.cancel()
+    parar_conversas.set()
+    for tarefa in (tarefa_vigia, tarefa_conversas):
+        try:
+            await asyncio.wait_for(tarefa, timeout=5)
+        except asyncio.TimeoutError:
+            tarefa.cancel()
     banco.fechar()
     log.info("MoviZap encerrando")
 
@@ -396,6 +408,478 @@ async def sincronizar_agora(request: Request,
         log.warning("req=%s sync manual terminou com erro: %s",
                     request.state.req_id, resultado["erro"])
     return resultado
+
+
+# ------------------------------------------------ atendimento (ATD_1.1/1.2/1.3)
+
+@app.get("/api/conversas/resumo")
+def resumo_das_conversas(usuario: dict = Depends(auth.requer_tela("ATD_1.1"))):
+    """🚨 `eventos_pendentes` e `eventos_com_erro` vêm junto de propósito. Sem
+    eles, uma fila parada parece "nenhuma mensagem nova" — e é assim que se
+    descobre tarde demais que o processamento morreu."""
+    return conversas.resumo()
+
+
+@app.get("/api/conversas")
+def listar_conversas(estado: str | None = None, sem_dono: bool = False,
+                     minhas: bool = False, busca: str = "",
+                     usuario: dict = Depends(auth.requer_tela("ATD_1.1"))):
+    return conversas.listar(
+        estado=estado, sem_dono=sem_dono, busca=busca,
+        atendente_id=_atendente_do_usuario(usuario) if minhas else None)
+
+
+@app.get("/api/conversas/{conversa_id}")
+def ver_conversa(conversa_id: int,
+                 usuario: dict = Depends(auth.requer_tela("ATD_1.2"))):
+    achada = conversas.conversa(conversa_id)
+    if not achada:
+        raise HTTPException(status_code=404, detail="Conversa não encontrada.")
+    return achada
+
+
+@app.post("/api/conversas/{conversa_id}/assumir")
+def assumir_conversa(conversa_id: int,
+                     usuario: dict = Depends(auth.requer_tela("ATD_1.1"))):
+    """🚨 Atômico: dois cliques simultâneos, um ganha e o outro é avisado."""
+    eu = _atendente_do_usuario(usuario)
+    if not eu:
+        raise HTTPException(
+            status_code=409,
+            detail="Sua conta não tem linha em `atendente` -- é a conta do "
+                   ".env. Cadastre-se na CAD_2.1 para poder assumir conversa.")
+    resultado = conversas.assumir(conversa_id, eu)
+    if not resultado["ok"]:
+        raise HTTPException(status_code=409, detail=resultado["motivo"])
+    return resultado
+
+
+class TransferenciaEntrada(BaseModel):
+    time_id: int | None = None
+    para_atendente_id: int | None = None
+    # ⚠️ `motivo` no banco é vocabulário fechado (CHECK). O que a pessoa
+    # escreve é `observacao`, e vai para `transferencia.resumo` -- que é onde o
+    # doc manda o resumo da transferência ficar.
+    observacao: str | None = Field(default=None, max_length=2000)
+
+
+class EncerramentoEntrada(BaseModel):
+    classificacao_id: int
+    comentario: str | None = Field(default=None, max_length=2000)
+
+
+# ------------------------------------------------------ informativos (ATD_3.1)
+#
+# 🚨 O canal é irreversível: o que sai daqui alcança cliente de verdade. Nada
+# dispara sozinho — o disparo nasce rascunho e só sai por ação explícita.
+
+class DisparoEntrada(BaseModel):
+    titulo: str = Field(min_length=1, max_length=200)
+    corpo: str = Field(min_length=1, max_length=4000)
+    intervalo_seg: int = Field(default=5, ge=1, le=300)
+    teto_por_hora: int = Field(default=200, ge=1, le=2000)
+
+
+class TesteEntrada(BaseModel):
+    telefone: str | None = Field(default=None, max_length=32)
+
+
+@app.get("/api/informativos/cobertura")
+def cobertura_do_informativo(usuario: dict = Depends(auth.requer_tela("ATD_3.1"))):
+    """🚨 Medido em 07/08: 369 dos 944 clientes ativos são alcançáveis, e
+    **483 estão fora por cadastro incompleto**, não por não usarem WhatsApp.
+    Disparar para 369 achando que falou com 944 é o erro que esta tela existe
+    para não deixar acontecer."""
+    return informativos.cobertura()
+
+
+@app.get("/api/informativos")
+def listar_disparos(usuario: dict = Depends(auth.requer_tela("ATD_3.1"))):
+    return informativos.listar()
+
+
+@app.get("/api/informativos/respostas")
+def respostas_do_informativo(usuario: dict = Depends(auth.requer_tela("ATD_3.1"))):
+    """Cliente responde boleto. Não vira conversa — mas para de ser invisível."""
+    return informativos.respostas_recebidas()
+
+
+@app.get("/api/informativos/{disparo_id}")
+def ver_disparo(disparo_id: int,
+                usuario: dict = Depends(auth.requer_tela("ATD_3.1"))):
+    achado = informativos.ver(disparo_id)
+    if not achado:
+        raise HTTPException(status_code=404, detail="Disparo não encontrado.")
+    return achado
+
+
+@app.post("/api/informativos", status_code=201)
+def criar_disparo(dados: DisparoEntrada,
+                  usuario: dict = Depends(auth.requer_tela("ATD_3.1"))):
+    """Cria em RASCUNHO, com a lista de destinos congelada. Não envia nada."""
+    return informativos.criar(
+        dados.titulo, dados.corpo, criado_por=_atendente_do_usuario(usuario),
+        intervalo_seg=dados.intervalo_seg, teto_por_hora=dados.teto_por_hora)
+
+
+@app.post("/api/informativos/{disparo_id}/teste")
+def testar_disparo(disparo_id: int, dados: TesteEntrada,
+                   usuario: dict = Depends(auth.requer_tela("ATD_3.1"))):
+    """🚨 O "começa com 1" da metodologia. Manda para UM e para."""
+    return informativos.enviar_teste(disparo_id, dados.telefone)
+
+
+@app.post("/api/informativos/{disparo_id}/enviar")
+def enviar_disparo(disparo_id: int, quantos: int = 20,
+                   usuario: dict = Depends(auth.requer_tela("ATD_3.1"))):
+    """Envia o próximo pedaço, respeitando intervalo e teto por hora."""
+    return informativos.enviar_lote(disparo_id, quantos)
+
+
+@app.post("/api/informativos/{disparo_id}/pausar")
+def pausar_disparo(disparo_id: int,
+                   usuario: dict = Depends(auth.requer_tela("ATD_3.1"))):
+    return informativos.pausar(disparo_id)
+
+
+class RespostaEntrada(BaseModel):
+    texto: str = Field(min_length=1, max_length=4000)
+
+
+@app.post("/api/conversas/{conversa_id}/responder")
+def responder_conversa(conversa_id: int, dados: RespostaEntrada,
+                       usuario: dict = Depends(auth.requer_tela("ATD_1.2"))):
+    """🚨 A ÚNICA rota do sistema que manda mensagem para cliente real.
+
+    O destinatário NÃO é parâmetro: sai da conversa. Não existe caminho para
+    escolher para quem enviar, e é isso que impede o painel de virar
+    ferramenta de disparo -- que é Fase 2, com decisão própria.
+    """
+    resultado = conversas.responder(conversa_id, dados.texto,
+                                    _atendente_do_usuario(usuario))
+    if not resultado["ok"]:
+        raise HTTPException(status_code=409, detail=resultado["motivo"])
+    return resultado
+
+
+@app.post("/api/conversas/{conversa_id}/nota")
+def anotar_conversa(conversa_id: int, dados: RespostaEntrada,
+                    usuario: dict = Depends(auth.requer_tela("ATD_1.2"))):
+    """Nota interna — fica na conversa e nunca sai para o cliente."""
+    resultado = conversas.anotar(conversa_id, dados.texto,
+                                 _atendente_do_usuario(usuario))
+    if not resultado["ok"]:
+        raise HTTPException(status_code=409, detail=resultado["motivo"])
+    return resultado
+
+
+@app.get("/api/fila")
+def ver_fila(usuario: dict = Depends(auth.requer_tela("ATD_1.3"))):
+    """ATD_1.3 — quem está esperando, por time.
+
+    🚨 O balde "sem triagem" vem primeiro porque a triagem é a IA, que está
+    desligada: todas as conversas de hoje têm `time_id` NULL. Agrupar só por
+    time faria a tela parecer vazia com gente real esperando.
+    """
+    return conversas.fila()
+
+
+@app.post("/api/conversas/{conversa_id}/transferir")
+def transferir_conversa(conversa_id: int, dados: TransferenciaEntrada,
+                        usuario: dict = Depends(auth.requer_tela("ATD_1.2"))):
+    """Enquanto a IA não existe, ISTO é a triagem — feita por gente."""
+    resultado = conversas.transferir(
+        conversa_id, dados.time_id, dados.para_atendente_id, "manual",
+        de_atendente_id=_atendente_do_usuario(usuario),
+        texto_resumo=dados.observacao)
+    if not resultado["ok"]:
+        raise HTTPException(status_code=409, detail=resultado["motivo"])
+    return resultado
+
+
+@app.post("/api/conversas/{conversa_id}/devolver")
+def devolver_conversa(conversa_id: int,
+                      usuario: dict = Depends(auth.requer_tela("ATD_1.2"))):
+    resultado = conversas.devolver_para_fila(
+        conversa_id, _atendente_do_usuario(usuario))
+    if not resultado["ok"]:
+        raise HTTPException(status_code=409, detail=resultado["motivo"])
+    return resultado
+
+
+@app.post("/api/conversas/{conversa_id}/encerrar")
+def encerrar_conversa(conversa_id: int, dados: EncerramentoEntrada,
+                      usuario: dict = Depends(auth.requer_tela("ATD_1.2"))):
+    """🚨 Classificar é obrigatório para fechar (escopo, item 11)."""
+    resultado = conversas.encerrar(conversa_id, dados.classificacao_id,
+                                   dados.comentario)
+    if not resultado["ok"]:
+        raise HTTPException(status_code=409, detail=resultado["motivo"])
+    return resultado
+
+
+@app.get("/api/historico")
+def ver_historico(busca: str = "", classificacao_id: int | None = None,
+                  usuario: dict = Depends(auth.requer_tela("ATD_5.1"))):
+    """ATD_5.1 — conversas encerradas, pesquisáveis por nome ou telefone."""
+    return conversas.historico(busca, classificacao_id)
+
+
+@app.post("/api/conversas/processar")
+def processar_agora(usuario: dict = Depends(auth.requer_tela("ATD_1.1"))):
+    """O laço já roda a cada 5s; este botão existe para depois de corrigir um
+    parser, quando se quer reprocessar sem esperar."""
+    return conversas.processar_pendentes()
+
+
+# ----------------------------------------------- operação (CAD_2.1/2.2, CFG_4.1)
+#
+# 🚨 Nenhuma rota daqui APAGA. Time, atendente e classificação são apontados
+# por `conversa` e `transferencia`: sumir com a linha faz o histórico mentir
+# sobre o que aconteceu. O que a tela chama de excluir é `ativo = false`.
+
+@app.exception_handler(operacao.DadoInvalido)
+async def _dado_invalido(request: Request, exc: operacao.DadoInvalido):
+    """400 com a frase que o usuário lê. A validação mora no módulo, não na
+    rota: assim o teste cobre a regra sem subir HTTP."""
+    return JSONResponse(status_code=400, content={"detail": str(exc)},
+                        headers={"X-Request-Id": getattr(request.state, "req_id", "")})
+
+
+@app.exception_handler(operacao.EmUso)
+async def _em_uso(request: Request, exc: operacao.EmUso):
+    return JSONResponse(status_code=409, content={"detail": str(exc)},
+                        headers={"X-Request-Id": getattr(request.state, "req_id", "")})
+
+
+class TimeEntrada(BaseModel):
+    nome: str = Field(min_length=1, max_length=200)
+    descricao: str | None = Field(default=None, max_length=1000)
+    time_transbordo_id: int | None = None
+    ativo: bool = True
+
+
+class AtendenteEntrada(BaseModel):
+    nome: str = Field(min_length=1, max_length=200)
+    login: str = Field(min_length=1, max_length=60)
+    email: str | None = Field(default=None, max_length=200)
+    perfil: str = "atendimento"
+    estado: str = "disponivel"
+    max_conversas: int | None = None
+    fuso: str = "America/Sao_Paulo"
+    ativo: bool = True
+
+
+class SenhaEntrada(BaseModel):
+    # 10 é o mínimo que `operacao.definir_senha` exige; o teto existe pela
+    # mesma razão do login: bcrypt em cima de megabyte é trabalho de graça
+    # para quem ataca.
+    senha: str = Field(min_length=10, max_length=256)
+
+
+class TimesDoAtendente(BaseModel):
+    times: list[int] = []
+
+
+class FaixaJornada(BaseModel):
+    dia_semana: int = Field(ge=0, le=6)
+    inicio: str
+    fim: str
+
+
+class JornadaEntrada(BaseModel):
+    faixas: list[FaixaJornada] = []
+
+
+class ClassificacaoEntrada(BaseModel):
+    nome: str = Field(min_length=1, max_length=80)
+    exige_comentario: bool = False
+    ativo: bool = True
+    ordem: int = 0
+
+
+class PromptEntrada(BaseModel):
+    conteudo: str = Field(min_length=50)
+    publicar: bool = False
+
+
+@app.get("/api/operacao/alertas")
+def alertas_da_operacao(usuario: dict = Depends(auth.requer_tela("CAD_2.2"))):
+    """O que está montado de um jeito que só cobra depois.
+
+    🚨 Três dos sete times vieram do Chatwoot SEM NENHUM MEMBRO. Conversa
+    transferida para eles não chega em ninguém, e nada falha para avisar.
+    """
+    return operacao.alertas()
+
+
+@app.get("/api/times")
+def listar_times(incluir_inativos: bool = False,
+                 usuario: dict = Depends(auth.requer_tela("CAD_2.2"))):
+    return operacao.listar_times(incluir_inativos)
+
+
+@app.post("/api/times", status_code=201)
+def criar_time(dados: TimeEntrada,
+               usuario: dict = Depends(auth.requer_tela("CAD_2.2"))):
+    return operacao.criar_time(dados.nome, dados.descricao, dados.time_transbordo_id)
+
+
+@app.put("/api/times/{time_id}")
+def atualizar_time(time_id: int, dados: TimeEntrada,
+                   usuario: dict = Depends(auth.requer_tela("CAD_2.2"))):
+    return operacao.atualizar_time(time_id, dados.nome, dados.descricao,
+                                   dados.time_transbordo_id, dados.ativo)
+
+
+@app.get("/api/atendentes")
+def listar_atendentes(incluir_inativos: bool = False,
+                      usuario: dict = Depends(auth.requer_tela("CAD_2.1"))):
+    return operacao.listar_atendentes(incluir_inativos)
+
+
+@app.get("/api/atendentes/{atendente_id}")
+def ver_atendente(atendente_id: int,
+                  usuario: dict = Depends(auth.requer_tela("CAD_2.1"))):
+    achado = operacao.atendente(atendente_id)
+    if not achado:
+        raise HTTPException(status_code=404, detail="Atendente não encontrado.")
+    return achado
+
+
+@app.post("/api/atendentes", status_code=201)
+def criar_atendente(dados: AtendenteEntrada,
+                    usuario: dict = Depends(auth.requer_tela("CAD_2.1"))):
+    """A conta nasce SEM SENHA e, por isso, sem conseguir entrar.
+
+    ⚠️ `auth.validar_login` recusa `senha_hash IS NULL` antes do bcrypt, então
+    conta criada e esquecida não é porta aberta.
+    """
+    return operacao.criar_atendente(
+        dados.nome, dados.login, dados.email, dados.perfil, dados.estado,
+        dados.max_conversas, dados.fuso)
+
+
+@app.put("/api/atendentes/{atendente_id}")
+def atualizar_atendente(atendente_id: int, dados: AtendenteEntrada,
+                        usuario: dict = Depends(auth.requer_tela("CAD_2.1"))):
+    return operacao.atualizar_atendente(
+        atendente_id, dados.nome, dados.login, dados.email, dados.perfil,
+        dados.estado, dados.max_conversas, dados.ativo, dados.fuso,
+        quem_edita=usuario["login"])
+
+
+@app.post("/api/atendentes/{atendente_id}/senha")
+def definir_senha(atendente_id: int, dados: SenhaEntrada,
+                  usuario: dict = Depends(auth.requer_tela("CAD_2.1"))):
+    return operacao.definir_senha(atendente_id, dados.senha)
+
+
+@app.put("/api/atendentes/{atendente_id}/times")
+def definir_times(atendente_id: int, dados: TimesDoAtendente,
+                  usuario: dict = Depends(auth.requer_tela("CAD_2.1"))):
+    return operacao.definir_times(atendente_id, dados.times)
+
+
+@app.put("/api/atendentes/{atendente_id}/jornada")
+def definir_jornada(atendente_id: int, dados: JornadaEntrada,
+                    usuario: dict = Depends(auth.requer_tela("CAD_2.1"))):
+    """🚨 A pausa do almoço é o intervalo ENTRE duas faixas do mesmo dia."""
+    return operacao.definir_jornada(
+        atendente_id, [f.model_dump() for f in dados.faixas])
+
+
+@app.get("/api/classificacoes")
+def listar_classificacoes(incluir_inativas: bool = False,
+                          usuario: dict = Depends(auth.requer_tela("CFG_4.1"))):
+    return operacao.listar_classificacoes(incluir_inativas)
+
+
+@app.post("/api/classificacoes", status_code=201)
+def criar_classificacao(dados: ClassificacaoEntrada,
+                        usuario: dict = Depends(auth.requer_tela("CFG_4.1"))):
+    return operacao.criar_classificacao(dados.nome, dados.exige_comentario,
+                                        dados.ordem or None)
+
+
+@app.put("/api/classificacoes/{classificacao_id}")
+def atualizar_classificacao(classificacao_id: int, dados: ClassificacaoEntrada,
+                            usuario: dict = Depends(auth.requer_tela("CFG_4.1"))):
+    return operacao.atualizar_classificacao(
+        classificacao_id, dados.nome, dados.exige_comentario, dados.ativo,
+        dados.ordem)
+
+
+# ------------------------------------------------------------- IA (CFG_2.1)
+#
+# 🚨 NENHUMA destas rotas fala com modelo nenhum. São texto versionado. O
+# motor é o passo 8, e `canal.ia_ligada` continua false nos dois canais.
+
+def _atendente_do_usuario(usuario: dict) -> int | None:
+    """O id na tabela `atendente` de quem está logado, quando existe.
+
+    ⚠️ A conta do .env não tem linha na tabela. Autor NULL é honesto: melhor
+    "autor desconhecido" do que atribuir a versão a outra pessoa.
+    """
+    linha = banco.um("SELECT id FROM atendente WHERE lower(login) = lower(%s)",
+                     (usuario["login"],))
+    return linha["id"] if linha else None
+
+
+@app.get("/api/ia/prompt")
+def estado_do_prompt(usuario: dict = Depends(auth.requer_tela("CFG_2.1"))):
+    """🚨 Prompt publicado NÃO significa IA no ar. Quem decide é
+    `canal.ia_ligada`, por canal — e vem junto na resposta por isso."""
+    return prompt_ia.estado()
+
+
+@app.get("/api/ia/prompt/sugestao")
+def sugestao_de_prompt(usuario: dict = Depends(auth.requer_tela("CFG_2.1"))):
+    return {"conteudo": prompt_ia.SUGESTAO_INICIAL}
+
+
+@app.get("/api/ia/prompt/versoes")
+def listar_versoes(usuario: dict = Depends(auth.requer_tela("CFG_2.1"))):
+    return prompt_ia.listar()
+
+
+@app.get("/api/ia/prompt/versoes/{versao_id}")
+def ver_versao(versao_id: int,
+               usuario: dict = Depends(auth.requer_tela("CFG_2.1"))):
+    achado = prompt_ia.ver(versao_id)
+    if not achado:
+        raise HTTPException(status_code=404, detail="Versão não encontrada.")
+    return achado
+
+
+@app.post("/api/ia/prompt/versoes", status_code=201)
+def criar_versao(dados: PromptEntrada,
+                 usuario: dict = Depends(auth.requer_tela("CFG_2.1"))):
+    try:
+        return prompt_ia.criar(dados.conteudo, _atendente_do_usuario(usuario),
+                               dados.publicar)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/api/ia/prompt/versoes/{versao_id}/publicar")
+def publicar_versao(versao_id: int,
+                    usuario: dict = Depends(auth.requer_tela("CFG_2.1"))):
+    """Também é o "voltar para a versão anterior" — publicar a antiga."""
+    try:
+        return prompt_ia.publicar(versao_id)
+    except prompt_ia.SemVersao as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@app.get("/api/ia/prompt/montado")
+def prompt_montado(versao_id: int | None = None,
+                   usuario: dict = Depends(auth.requer_tela("CFG_2.1"))):
+    """O texto como a IA receberia, com a camada 5 preenchida do CAD_2.2."""
+    try:
+        return prompt_ia.montado(versao_id)
+    except prompt_ia.SemVersao as e:
+        raise HTTPException(status_code=404, detail=str(e))
 
 
 # ---------------------------------------------------------------- saúde

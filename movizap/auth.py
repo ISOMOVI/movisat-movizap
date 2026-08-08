@@ -5,19 +5,25 @@ Espelha `moviserver/painel/auth.py`, que já está validado em produção:
   - a permissão é aplicada no BACKEND, em toda rota, via `requer_tela`;
   - conta nova nasce sem nenhuma permissão: falha fechado.
 
-⚠️ FASE 1 SEM BANCO. Existe um usuário só, vindo do .env, e ele é o owner.
-Quando o `02_Modelo_Dados` for aprovado, a tabela `atendente` assume e este
-módulo passa a consultá-la -- `buscar_usuario` é o único ponto que muda.
+✅ 07/08: a tabela `atendente` assumiu, como o `02_Modelo_Dados` previa, e
+`buscar_usuario` foi mesmo o único ponto que mudou. A conta do .env continua
+existindo e continua sendo consultada primeiro -- ela é a saída de emergência
+para quando a tabela estiver errada, vazia ou fora do ar.
 """
+import logging
 from datetime import datetime, timedelta, timezone
 
+import psycopg
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 
+from . import banco
 from . import telas as registro_telas
 from .config import settings
+
+log = logging.getLogger("movizap.auth")
 
 ALGORITMO = "HS256"
 TOKEN_EXPIRA_HORAS = 8
@@ -33,22 +39,63 @@ def hash_senha(senha: str) -> str:
 def buscar_usuario(login: str) -> dict | None:
     """Único ponto que conhece a origem dos usuários.
 
-    Hoje: o .env. Depois: a tabela `atendente`. Nada além daqui precisa saber.
+    Duas origens, nesta ordem: a conta do .env e a tabela `atendente`.
 
     🚨 A comparação do login IGNORA MAIÚSCULA. Em 05/08 o painel recusou o
     acesso em 1ms -- rápido demais para ter chegado no bcrypt -- porque o nome
     digitado não era idêntico ao gravado. Login é identificador de pessoa, não
     segredo: quem protege é a senha. Exigir a caixa exata só rende chamado.
+
+    🚨 A CONTA DO .env É CONSULTADA PRIMEIRO, E NÃO MUDOU NADA NELA. Foi assim
+    de propósito: a tabela `atendente` passou a ser fonte em 07/08, e um erro
+    nessa consulta não pode tirar o dono de dentro do próprio painel. Se o
+    banco cair, o owner ainda entra.
+
+    ⚠️ Quem vem da tabela e está com `senha_hash` NULL não entra -- e é o
+    estado em que os 4 atendentes importados do Chatwoot nasceram.
+    `validar_login` barra isso antes do bcrypt.
     """
-    if not settings.admin_login or login.casefold() != settings.admin_login.casefold():
+    # ⚠️ 07/08: `.strip()` nos quatro painéis. A caixa já era ignorada aqui
+    # desde 05/08, mas ` iago` com espaço -- que gerenciador de senha e
+    # copiar-colar produzem sozinhos -- ainda recusava sem chegar no bcrypt.
+    login = (login or "").strip()
+
+    if settings.admin_login and login.casefold() == settings.admin_login.casefold():
+        return {
+            "login": settings.admin_login,
+            "nome": "Administrador",
+            "senha_hash": settings.admin_senha_hash,
+            "owner": True,
+            "ativo": True,
+            "permissoes": sorted(registro_telas.PERMISSOES_VALIDAS),
+        }
+
+    # 🚨 Banco fora do ar NÃO pode virar 500 na tela de login. Sem este
+    # try, um login desconhecido com o pool fechado levantava RuntimeError e
+    # o usuário via "erro interno" onde a resposta certa é "login ou senha
+    # inválidos". Falha fechado: sem banco, só a conta do .env entra.
+    try:
+        linha = banco.um(
+            """SELECT id, login, nome, senha_hash, ativo, owner, perfil
+                 FROM atendente WHERE lower(login) = lower(%s)""",
+            (login,),
+        )
+    except (psycopg.Error, RuntimeError) as e:
+        log.error("busca de usuário sem banco (%s): só a conta do .env entra",
+                  e.__class__.__name__)
+        return None
+    if not linha:
         return None
     return {
-        "login": settings.admin_login,
-        "nome": "Administrador",
-        "senha_hash": settings.admin_senha_hash,
-        "owner": True,
-        "ativo": True,
-        "permissoes": sorted(registro_telas.PERMISSOES_VALIDAS),
+        "id": linha["id"],
+        "login": linha["login"],
+        "nome": linha["nome"],
+        "senha_hash": linha["senha_hash"],
+        "owner": linha["owner"],
+        "ativo": linha["ativo"],
+        # Conta nova nasce sem nada: perfil desconhecido devolve conjunto
+        # vazio, e conjunto vazio é menu vazio. Falha fechado.
+        "permissoes": sorted(registro_telas.permissoes_do_perfil(linha["perfil"])),
     }
 
 

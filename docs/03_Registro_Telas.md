@@ -52,10 +52,22 @@ MOD_a.b[.c]
 | `CFG_2.1` | IA — prompt | `/config/ia/prompt` | `admin` | 1 |
 | `CFG_3.1` | Sincronização Harmonit | `/config/sync` | `admin` | 1 |
 | `CFG_4.1` | Classificações | `/config/classificacoes` | `admin` | 1 |
+| `ATD_3.1` | Informativos | `/informativos` | `informativos` | 1 |
 | `CFG_9.1` | Registro de telas | `/config/telas` | `owner` | 1 |
 
 **Reservados, não implementar na Fase 1:**
-`ATD_3.1` Informativos · `ATD_4.1` E-mail · `CFG_2.2` IA — analytics · `REL_1.1` Relatórios
+`ATD_4.1` E-mail · `CFG_2.2` IA — analytics · `REL_1.1` Relatórios
+
+🚨 **`ATD_3.1` SAIU DA RESERVA EM 2026-08-07** e subiu para a Fase 1.
+Decisão do usuário: *"o informativo é o que vai enviar, sem resposta de
+cliente"*. O chip foi pareado no mesmo dia e o canal já entrega (TESTE
+BOT com `DELIVERY_ACK` em 2 s).
+
+⚠️ **É a única tela do sistema que alcança cliente de verdade EM LOTE**, e
+o canal é irreversível. Por isso a permissão dela é `informativos`, que
+**não está em nenhum perfil** além do owner: disparo em massa não é coisa
+que se libera por padrão. Para dar a alguém, é acrescentar `informativos`
+ao perfil em `telas.PERFIS` — decisão consciente, não efeito colateral.
 
 ⚠️ **Por que o Histórico é `ATD_5.1` e não `ATD_2.2`.** Acrescentado em
 2026-08-06. O submódulo `ATD_2` é a ficha do contato, e `ATD_3`/`ATD_4` já

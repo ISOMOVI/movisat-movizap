@@ -6,8 +6,13 @@ Evolution 2.3.7, em `http://localhost:8081` dentro do host.
 do config já cala httpx/httpcore em DEBUG — foi assim que a chave da WESO
 apareceu num log em julho.
 
-O que este módulo NÃO faz de propósito: enviar mensagem. Fase 1 é receber.
-Quando o envio entrar, entra aqui, com ritmo e teto — nunca em rajada.
+✅ 07/08: O ENVIO ENTROU, por decisão do usuário, e entrou como estava
+previsto — aqui, e só para responder conversa que existe.
+
+🚨 NÃO EXISTE ENVIO PARA DESTINATÁRIO ARBITRÁRIO, e isso é a trava que impede
+o painel de virar ferramenta de disparo. `enviar_texto` recebe o número, mas
+quem o chama é `conversas.responder`, que o lê da CONVERSA — nunca de algo
+digitado. Disparo em massa continua sendo Fase 2, com decisão própria.
 """
 import logging
 
@@ -74,6 +79,35 @@ def _pedir(metodo: str, caminho: str, corpo: dict | None = None) -> dict:
         return r.json()
     except ValueError:
         return {}
+
+
+def enviar_texto(instancia: str, numero_e164: str, texto: str) -> dict:
+    """Manda uma mensagem de texto e devolve a chave que o WhatsApp deu a ela.
+
+    🚨 O `key.id` DA RESPOSTA É O QUE EVITA A MENSAGEM DUPLICADA. O Evolution
+    devolve pelo webhook a nossa própria mensagem, com `fromMe: true` e o mesmo
+    id. Se ela não for gravada AGORA com esse id, o eco chega depois e vira uma
+    segunda mensagem igual na tela do atendente. Com o id gravado, o
+    `ux_mensagem_id_externo` transforma o eco em conflito ignorado.
+
+    ⚠️ O número vai sem o `+`: o Evolution quer só dígitos.
+    """
+    numero = "".join(c for c in (numero_e164 or "") if c.isdigit())
+    if not numero:
+        raise ErroEvolution("Sem número para enviar.", 0)
+    if not (texto or "").strip():
+        raise ErroEvolution("Mensagem vazia.", 0)
+
+    resposta = _pedir("POST", f"/message/sendText/{instancia}",
+                      {"number": numero, "text": texto})
+
+    chave = (resposta or {}).get("key") or {}
+    log.info("enviado por %s (id=%s)", instancia, chave.get("id"))
+    return {
+        "id_externo": chave.get("id"),
+        "status": (resposta or {}).get("status"),
+        "bruto": resposta,
+    }
 
 
 # --------------------------------------------------------------- consulta

@@ -139,16 +139,22 @@ TELAS = [
         "permissao": "owner",
         "fase": 1,
     },
-    # ---- reservados: código já ocupado, tela ainda não existe ----
     {
+        # 🚨 SUBIU PARA FASE 1 EM 07/08. Decisão do usuário: "o informativo é o
+        # que vai enviar, sem resposta de cliente". O canal foi pareado no
+        # mesmo dia e já entrega (TESTE BOT com DELIVERY_ACK em 2s).
+        #
+        # ⚠️ É a única tela do sistema que ALCANÇA CLIENTE DE VERDADE em lote.
+        # O canal é irreversível: mensagem enviada não volta.
         "codigo": "ATD_3.1",
         "titulo": "Informativos",
         "rota": "/informativos",
         "icone": "bi-megaphone",
-        "descricao": "Disparo de boleto e aviso.",
+        "descricao": "Disparo de boleto e aviso, com ritmo e teto por hora.",
         "permissao": "informativos",
-        "fase": 2,
+        "fase": 1,
     },
+    # ---- reservados: código já ocupado, tela ainda não existe ----
     {
         "codigo": "ATD_4.1",
         "titulo": "E-mail",

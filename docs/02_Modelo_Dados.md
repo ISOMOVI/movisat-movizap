@@ -547,3 +547,74 @@ Por quê:      duas cópias com idades diferentes é pior que nenhuma: ninguém
               sabe qual está certa e as duas são consultadas
 Reavaliar se: cai quando o FPSL passar a ler do banco movizap
 ```
+
+---
+
+## O CHECK do banco é contrato — e eu quebrei dois num dia (2026-08-07)
+
+### `transferencia.motivo` é vocabulário fechado, não texto livre
+
+```sql
+CHECK (motivo IN ('manual', 'inatividade', 'ia_triagem', 'sem_time'))
+```
+
+Gravar a frase que o atendente escreveu ali levanta `CheckViolation`. O texto
+livre vai no **`transferencia.resumo`** — que é onde o
+`06_Conteudo_das_Telas.md` manda o resumo da transferência ficar, de qualquer
+forma.
+
+O `motivo` existe para o analytics conseguir separar *o que* transferiu: a IA
+na triagem, um humano, inatividade, ou time sem gente. Frase livre não agrupa.
+
+### 🚨 `information_schema.table_constraints` NÃO enxerga índice único
+
+Consultei as constraints da tabela `atendente`, não vi unicidade em `login`, e
+**quase criei um índice que já existia**. O `ux_atendente_login` estava lá o
+tempo todo — como **índice**, não como constraint, e por isso invisível
+naquela consulta.
+
+Para ver os dois mundos:
+
+```sql
+-- constraints (PK, FK, UNIQUE declarada, CHECK)
+SELECT conname, pg_get_constraintdef(oid) FROM pg_constraint
+ WHERE conrelid = 'atendente'::regclass;
+
+-- índices (inclusive UNIQUE criado por CREATE INDEX, e os parciais)
+SELECT indexname, indexdef FROM pg_indexes WHERE tablename = 'atendente';
+```
+
+⚠️ Vale para os índices **parciais** também, que este projeto usa bastante:
+`ux_conversa_aberta`, `ux_prompt_ativo`, `ux_atendente_origem`.
+
+### Os índices parciais que carregam regra de negócio
+
+Não são otimização — são a regra, aplicada pelo banco:
+
+| Índice | O que impede |
+|---|---|
+| `ux_conversa_aberta (canal_id, telefone_e164) WHERE estado <> 'resolvida'` | duas conversas abertas para a mesma pessoa. Sem ele, a fala dela apareceria partida em duas telas |
+| `ux_mensagem_id_externo (id_externo) WHERE NOT NULL` | mensagem duplicada na reentrega do webhook — **e o eco da própria mensagem enviada** |
+| `ux_prompt_ativo (ativo) WHERE ativo` | duas versões de prompt ativas ao mesmo tempo |
+| `ux_atendente_login (lower(login))` | dois logins que diferem só por maiúscula |
+| `ux_atendente_origem (origem) WHERE NOT NULL` | reimportar o Chatwoot duplicar os atendentes |
+
+🚨 **`ux_conversa_aberta` é parcial de propósito:** depois de encerrada, a
+mesma pessoa voltar a falar abre conversa **nova**. Se fosse único absoluto, o
+histórico juntaria dois assuntos diferentes na mesma conversa.
+
+🚨 **`ux_mensagem_id_externo` é o que evita a mensagem em dobro no envio.** O
+Evolution devolve pelo webhook a nossa própria mensagem, com `fromMe: true` e
+o mesmo `key.id`. `conversas.responder` grava esse id no envio; quando o eco
+chega, o índice transforma em conflito ignorado. Sem isso, tudo que o
+atendente mandasse apareceria duas vezes na tela dele.
+
+### `mensagem`: o CHECK que impede nota interna de vazar
+
+```sql
+CHECK ((tipo = 'nota') = (direcao = 'interna'))
+```
+
+Amarra os dois campos: não existe nota que não seja interna, nem mensagem
+interna que não seja nota. É o banco impedindo que uma anotação do atendente
+saia para o cliente por erro de código.
