@@ -647,6 +647,24 @@ function carregarMidiasDaConversa(c) {
             <!-- SEM vínculo: o caso comum. Buscar e vincular. -->
             <template v-else>
               <p class="chip chip--aviso">Não está no cadastro</p>
+
+              <!-- 🚨 SELO AMARELO: informação sem afirmação. Diz que a pessoa
+                   aparece no Bitrix, sem dizer que ela é cliente. -->
+              <div v-if="aberta.bitrix" class="gaveta__bitrix">
+                <strong class="pequeno">Aparece no Bitrix</strong>
+                <span v-if="aberta.bitrix.nome">{{ aberta.bitrix.nome }}</span>
+                <span v-if="aberta.bitrix.empresa" class="apagado pequeno">
+                  {{ aberta.bitrix.empresa }}
+                </span>
+                <span class="linha pequeno">
+                  <span v-if="aberta.bitrix.tipo" class="chip">{{ aberta.bitrix.tipo }}</span>
+                  <span v-if="aberta.bitrix.cargo" class="apagado">{{ aberta.bitrix.cargo }}</span>
+                </span>
+                <span class="apagado pequeno">
+                  Sistema antigo — <strong>não é vínculo</strong>. Confirme abaixo
+                  se for a mesma empresa.
+                </span>
+              </div>
               <p class="apagado pequeno">
                 Procure a empresa e vincule este número. O telefone entra no
                 cadastro marcado como vindo do atendimento.
@@ -946,6 +964,13 @@ function carregarMidiasDaConversa(c) {
 .gaveta__dados dd {
   margin: 0;
   overflow-wrap: anywhere;
+}
+.gaveta__bitrix {
+  display: flex; flex-direction: column; gap: 2px;
+  padding: var(--e-2);
+  border-left: 3px solid var(--aviso);
+  background: var(--aviso-suave);
+  border-radius: var(--r-sm);
 }
 .gaveta__bloco {
   display: flex;

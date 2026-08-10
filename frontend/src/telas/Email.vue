@@ -550,7 +550,15 @@ onMounted(async () => {
           <p v-if="aberta.cliente_nome" class="chip chip--acento">
             <i class="bi bi-building" aria-hidden="true"></i> {{ aberta.cliente_nome }}
           </p>
-          <div v-else class="email__vincular">
+          <div v-if="aberta.bitrix" class="gaveta__bitrix">
+            <strong class="pequeno">Aparece no Bitrix</strong>
+            <span v-if="aberta.bitrix.nome">{{ aberta.bitrix.nome }}</span>
+            <span v-if="aberta.bitrix.empresa" class="apagado pequeno">{{ aberta.bitrix.empresa }}</span>
+            <span v-if="aberta.bitrix.tipo" class="chip">{{ aberta.bitrix.tipo }}</span>
+            <span class="apagado pequeno">Sistema antigo — <strong>não é vínculo</strong>.</span>
+          </div>
+
+          <div v-if="!aberta.cliente_nome" class="email__vincular">
             <p class="apagado pequeno">
               Este remetente ainda não está ligado a nenhum cliente.
               Vincule e <strong>todas</strong> as mensagens dele passam a ser
@@ -718,6 +726,13 @@ onMounted(async () => {
   border-radius: var(--r-sm);
   padding: var(--e-2);
   background: var(--superficie-2);
+}
+.gaveta__bitrix {
+  display: flex; flex-direction: column; gap: 2px;
+  padding: var(--e-2); margin: var(--e-2) 0;
+  border-left: 3px solid var(--aviso);
+  background: var(--aviso-suave);
+  border-radius: var(--r-sm);
 }
 .email__vincular { display: flex; flex-direction: column; gap: var(--e-2); margin: var(--e-2) 0; }
 .gaveta__lista { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--e-1); max-height: 200px; overflow-y: auto; }

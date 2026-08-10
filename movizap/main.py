@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field
 
 from . import auth
 from . import banco
+from . import bitrix
 from . import cadastro
 from . import canais as registro_canais
 from . import conversas
@@ -535,6 +536,8 @@ def email_mensagem(mensagem_id: int,
         raise HTTPException(status_code=404, detail="Mensagem não encontrada.")
     # `bruto` nunca vai para a tela: ela desenha com texto/html.
     linha.pop("bruto", None)
+    linha["bitrix"] = (None if linha.get("cliente_id")
+                       else bitrix.observacao(email=linha.get("remetente")))
     return linha
 
 

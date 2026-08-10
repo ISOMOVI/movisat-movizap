@@ -25,7 +25,7 @@ import asyncio
 import logging
 from datetime import datetime, timezone
 
-from . import banco, cadastro, midia as midia_mod, telefone as tel
+from . import banco, bitrix, cadastro, midia as midia_mod, telefone as tel
 
 log = logging.getLogger("movizap.conversas")
 
@@ -440,6 +440,11 @@ def conversa(conversa_id: int) -> dict | None:
     # Os dados da empresa, quando há vínculo. É o conteúdo do painel lateral:
     # o mesmo que se vê ao clicar no contato dentro do WhatsApp.
     linha["empresa"] = _empresa_da_conversa(linha)
+    # ⚠️ Só quando NÃO há vínculo: com cliente identificado, mostrar o que o
+    # Bitrix acha seria ruído -- e poderia contradizer o cadastro na cara do
+    # atendente.
+    linha["bitrix"] = (None if linha.get("contato_id")
+                       else bitrix.observacao(telefone_e164=linha["telefone_e164"]))
     # 🚨 Quem NÃO foi identificado precisa dizer por quê: "não é cliente" e
     # "o número responde por 8 cadastros" pedem ações diferentes de quem atende.
     if not linha["contato_id"]:
