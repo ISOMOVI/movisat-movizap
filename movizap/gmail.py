@@ -218,6 +218,64 @@ def sincronizar_marcadores(conta: dict, cliente: httpx.Client) -> int:
     return n
 
 
+def vincular(mensagem_id: int, cliente_id: int) -> dict:
+    """Diz de quem é este remetente, e faz o cadastro crescer pelo uso.
+
+    🚨 É O OBJETIVO DECLARADO PELO USUÁRIO. Hoje o painel identifica só quem
+    casa sozinho -- 11 de 25. Os outros 14 não têm o que fazer, e é aí que o
+    e-mail deixa de somar cadastro e vira só caixa de mensagem.
+
+    ⚠️ O vínculo alcança TODAS as mensagens daquele remetente, passadas e
+    futuras: gravar só nesta faria a próxima chegar órfã de novo, e a pessoa
+    vincularia a mesma empresa toda semana.
+
+    O endereço entra em `contato.email` com `email_origem = 'atendimento'` --
+    separado para sempre do que veio do sync, como o telefone já faz.
+    """
+    msg = banco.um(
+        "SELECT id, remetente, remetente_nome FROM email_mensagem WHERE id = %s",
+        (mensagem_id,))
+    if not msg or not msg["remetente"]:
+        return {"ok": False, "motivo": "Mensagem sem remetente."}
+
+    cliente = banco.um("SELECT id, nome FROM cliente WHERE id = %s", (cliente_id,))
+    if not cliente:
+        return {"ok": False, "motivo": "Empresa não encontrada."}
+
+    endereco = msg["remetente"].strip().lower()
+
+    # Um contato desta empresa com este e-mail, ou um novo com o nome que veio
+    # no cabeçalho -- é o melhor nome disponível sem inventar.
+    contato = banco.um(
+        "SELECT id FROM contato WHERE cliente_id = %s AND lower(email) = %s",
+        (cliente_id, endereco))
+    if contato:
+        contato_id = contato["id"]
+    else:
+        contato_id = banco.um(
+            """INSERT INTO contato (cliente_id, nome, email, email_origem,
+                                    origem, ativo)
+               VALUES (%s, %s, %s, 'atendimento', 'movizap', true)
+               RETURNING id""",
+            (cliente_id, msg["remetente_nome"] or endereco, endereco))["id"]
+
+    # 🚨 TODAS as mensagens deste remetente, não só esta.
+    alcancadas = banco.executar(
+        """UPDATE email_mensagem SET cliente_id = %s, contato_id = %s
+            WHERE lower(remetente) = %s""",
+        (cliente_id, contato_id, endereco))
+
+    banco.executar(
+        """UPDATE cliente SET ultimo_email_em = (
+               SELECT max(enviado_em) FROM email_mensagem WHERE cliente_id = %s)
+            WHERE id = %s""", (cliente_id, cliente_id))
+
+    log.info("remetente %s vinculado a %s (%s mensagens)",
+             endereco, cliente["nome"], alcancadas)
+    return {"ok": True, "cliente": cliente["nome"], "mensagens": alcancadas,
+            "contato_id": contato_id}
+
+
 def marcar_lida(mensagem_id: int) -> dict:
     """Tira o `UNREAD` no Gmail, não só na nossa base.
 
@@ -303,6 +361,22 @@ def ler(conta_id: int | None = None, limite: int = TETO_POR_EXECUCAO) -> dict:
                 nome, endereco = parseaddr(de)
                 cliente_id, contato_id = _identificar(endereco)
 
+                # 🚨 É AQUI QUE O E-MAIL SOMA CADASTRO. `ultimo_email_em`
+                # responde "por onde essa pessoa responde?", ao lado do
+                # `tem_whatsapp`. Só carimba quando houve CERTEZA de quem é --
+                # sem certeza, fica NULL, mesma regra da conversa.
+                quando = _quando(_cabecalho(cabecalhos, "Date"))
+                if cliente_id and quando:
+                    banco.executar(
+                        "UPDATE cliente SET ultimo_email_em = %s WHERE id = %s "
+                        "  AND (ultimo_email_em IS NULL OR ultimo_email_em < %s)",
+                        (quando, cliente_id, quando))
+                if contato_id and quando:
+                    banco.executar(
+                        "UPDATE contato SET ultimo_email_em = %s WHERE id = %s "
+                        "  AND (ultimo_email_em IS NULL OR ultimo_email_em < %s)",
+                        (quando, contato_id, quando))
+
                 import json
                 banco.executar(
                     """INSERT INTO email_mensagem
@@ -313,7 +387,9 @@ def ler(conta_id: int | None = None, limite: int = TETO_POR_EXECUCAO) -> dict:
                        ON CONFLICT (conta_id, id_externo) DO NOTHING""",
                     (conta["id"], m["id"], m.get("threadId"),
                      endereco.lower() or None, nome or None,
-                     _cabecalho(cabecalhos, "To") or None,
+                     ", ".join(x for x in (_cabecalho(cabecalhos, "To"),
+                                           _cabecalho(cabecalhos, "Cc")) if x)
+                     or None,
                      _cabecalho(cabecalhos, "Subject") or None,
                      _quando(_cabecalho(cabecalhos, "Date")),
                      acumulado["texto"] or None, acumulado["html"] or None,

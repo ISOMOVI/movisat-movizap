@@ -32,7 +32,174 @@ const menuAberto = ref(localStorage.getItem('movizap.email.menu') !== 'fechado')
 /* ⚠️ SÓ LEITURA HOJE. O escopo concedido é `gmail.readonly`: escrever exige
    outro consentimento. Os botões aparecem para a tela ser a tela final, e
    dizem por que não funcionam -- em vez de sumirem e a pessoa procurar. */
-const SO_LEITURA = 'Ainda não disponível: a caixa está conectada só para leitura.'
+/* ---- escrever -------------------------------------------------------------
+   🚨 UMA MENSAGEM POR VEZ, de propósito. Não existe campo de lista nem rota
+   que receba vários destinatários: e-mail enviado não volta, e disparo é
+   outro produto -- a mesma regra que já vale no WhatsApp. */
+const escrevendo = ref(false)
+const rascunho = ref({ para: '', cc: '', cco: '', assunto: '', corpo: '', responder_a: null })
+/* Cc e Cco começam escondidos, como no Gmail: a maioria dos e-mails não usa,
+   e dois campos vazios a mais atrapalham quem só quer responder. */
+const mostrarCopias = ref(false)
+const editor = ref(null)
+const anexos = ref([])
+const subindo = ref(false)
+
+async function anexar(evento) {
+  const arquivos = Array.from(evento.target.files || [])
+  subindo.value = true
+  for (const f of arquivos) {
+    const dados = new FormData()
+    dados.append('arquivo', f)
+    try {
+      /* Sobe direto por fetch: `api.post` manda JSON, e FormData precisa que
+         o navegador monte o `boundary` sozinho -- definir Content-Type à mão
+         quebra o upload de um jeito que só aparece no servidor. */
+      const r = await fetch('/api/email/anexo', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${localStorage.getItem('movizap.token')}` },
+        body: dados,
+      })
+      if (!r.ok) throw new Error()
+      anexos.value.push(await r.json())
+    } catch {
+      erro.value = `Não consegui subir ${f.name}.`
+    }
+  }
+  subindo.value = false
+  evento.target.value = ''
+}
+
+function tirarAnexo(id) {
+  anexos.value = anexos.value.filter((a) => a.id !== id)
+}
+
+function tamanho(bytes) {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1048576) return `${Math.round(bytes / 1024)} KB`
+  return `${(bytes / 1048576).toFixed(1)} MB`
+}
+
+/* ⚠️ `execCommand` está marcado como obsoleto há anos, mas funciona em todos
+   os navegadores atuais e não tem substituto padronizado -- o `Editing API`
+   nunca saiu do papel. A alternativa seria uma biblioteca de editor, que
+   sozinha pesa mais que todo o nosso bundle. Quando quebrar, troca-se. */
+function formatar(comando, valor = null) {
+  document.execCommand(comando, false, valor)
+  editor.value?.focus()
+}
+
+function inserirLink() {
+  const url = prompt('Endereço do link:')
+  if (url) formatar('createLink', url)
+}
+
+/* O que vai no envio: HTML do editor + versão em texto, na mesma mensagem.
+   Quem lê sem HTML recebe o texto; ninguém recebe tag crua. */
+function corpoDoEditor() {
+  const el = editor.value
+  if (!el) return { html: '', texto: rascunho.value.corpo || '' }
+  return { html: el.innerHTML, texto: el.innerText }
+}
+
+const FERRAMENTAS = [
+  { i: 'bi-type-bold', c: 'bold', t: 'Negrito' },
+  { i: 'bi-type-italic', c: 'italic', t: 'Itálico' },
+  { i: 'bi-type-underline', c: 'underline', t: 'Sublinhado' },
+  { sep: true },
+  { i: 'bi-list-ul', c: 'insertUnorderedList', t: 'Lista' },
+  { i: 'bi-list-ol', c: 'insertOrderedList', t: 'Lista numerada' },
+  { sep: true },
+  { i: 'bi-text-left', c: 'justifyLeft', t: 'Alinhar à esquerda' },
+  { i: 'bi-text-center', c: 'justifyCenter', t: 'Centralizar' },
+  { i: 'bi-text-right', c: 'justifyRight', t: 'Alinhar à direita' },
+  { sep: true },
+  { i: 'bi-quote', c: 'formatBlock', v: 'blockquote', t: 'Citação' },
+  { i: 'bi-eraser', c: 'removeFormat', t: 'Limpar formatação' },
+]
+const enviando = ref(false)
+
+function novaMensagem() {
+  rascunho.value = { para: '', cc: '', cco: '', assunto: '', corpo: '', responder_a: null }
+  mostrarCopias.value = false
+  escrevendo.value = true
+}
+
+function responder(encaminhar = false) {
+  if (!aberta.value) return
+  const a = aberta.value
+  mostrarCopias.value = false
+  rascunho.value = {
+    cc: '', cco: '',
+    para: encaminhar ? '' : (a.remetente || ''),
+    assunto: (encaminhar ? 'Enc: ' : 'Re: ') + (a.assunto || '').replace(/^(Re|Enc):\s*/i, ''),
+    corpo: `\n\n--- Em ${new Date(a.enviado_em).toLocaleString('pt-BR')}, ${a.remetente} escreveu:\n${a.texto || ''}`,
+    // Só a resposta encaixa na conversa existente; encaminhar abre fio novo.
+    responder_a: encaminhar ? null : a.id,
+  }
+  escrevendo.value = true
+}
+
+async function mandar() {
+  enviando.value = true
+  erro.value = ''
+  try {
+    const c = corpoDoEditor()
+    await api.post('/api/email/enviar',
+                   { ...rascunho.value, corpo: c.texto, html: c.html,
+                     anexos: anexos.value.map((a) => a.id) })
+    anexos.value = []
+    recado.value = 'Enviado.'
+    escrevendo.value = false
+    await carregar()
+  } catch (e) {
+    erro.value = e instanceof ErroDeApi ? e.message : 'Não consegui enviar.'
+  } finally {
+    enviando.value = false
+  }
+}
+
+/* ---- vincular ao cadastro -------------------------------------------------
+   🚨 É O OBJETIVO: o e-mail existir aqui para SOMAR CADASTRO. Sem isto o
+   painel identifica só quem casa sozinho e o resto morre como mensagem. */
+const buscaEmpresa = ref('')
+const achados = ref([])
+
+async function procurarEmpresa() {
+  if (buscaEmpresa.value.trim().length < 2) { achados.value = []; return }
+  try {
+    const r = await api.get(
+      `/api/conversas/buscar-empresa?termo=${encodeURIComponent(buscaEmpresa.value)}`)
+    achados.value = r.itens || []
+  } catch { achados.value = [] }
+}
+
+async function vincular(clienteId) {
+  try {
+    const r = await api.post(`/api/email/mensagens/${aberta.value.id}/vincular`,
+                             { cliente_id: clienteId })
+    recado.value = `Vinculado a ${r.cliente} — ${r.mensagens} mensagem(ns) deste remetente.`
+    buscaEmpresa.value = ''
+    achados.value = []
+    await abrir(aberta.value.id)
+    await carregar()
+  } catch (e) {
+    erro.value = e instanceof ErroDeApi ? e.message : 'Não consegui vincular.'
+  }
+}
+
+/* ---- assinatura ---------------------------------------------------------- */
+const assinatura = ref('')
+const editandoAssinatura = ref(false)
+
+async function carregarAssinatura() {
+  try { assinatura.value = (await api.get('/api/eu/assinatura')).html || '' } catch {}
+}
+async function salvarAssinatura() {
+  await api.put('/api/eu/assinatura', { html: assinatura.value })
+  editandoAssinatura.value = false
+  recado.value = 'Assinatura salva.'
+}
 
 function alternarMenu() {
   menuAberto.value = !menuAberto.value
@@ -155,6 +322,7 @@ function quando(iso) {
 onMounted(async () => {
   await carregarMarcadores()
   await carregar()
+  await carregarAssinatura()
 })
 </script>
 
@@ -192,29 +360,132 @@ onMounted(async () => {
       </div>
 
       <div class="linha email__acoes">
-        <button class="botao botao--pequeno botao--acento" type="button"
-                :title="SO_LEITURA" disabled>
+        <button class="botao botao--pequeno botao--acento" type="button" @click="novaMensagem">
           <i class="bi bi-pencil-square" aria-hidden="true"></i> Nova mensagem
         </button>
         <span class="email__separador" aria-hidden="true"></span>
         <button class="botao botao--pequeno botao--fantasma" type="button"
-                :title="SO_LEITURA" :disabled="true">
+                :disabled="!aberta" @click="responder(false)">
           <i class="bi bi-reply" aria-hidden="true"></i> Responder
         </button>
         <button class="botao botao--pequeno botao--fantasma" type="button"
-                :title="SO_LEITURA" :disabled="true">
+                :disabled="!aberta" @click="responder(true)">
           <i class="bi bi-arrow-right" aria-hidden="true"></i> Encaminhar
         </button>
+        <span class="email__separador" aria-hidden="true"></span>
         <button class="botao botao--pequeno botao--fantasma" type="button"
-                :title="SO_LEITURA" :disabled="true">
-          <i class="bi bi-folder-symlink" aria-hidden="true"></i> Mover
-        </button>
-        <button class="botao botao--pequeno botao--fantasma" type="button"
-                :title="SO_LEITURA" :disabled="true">
-          <i class="bi bi-trash" aria-hidden="true"></i> Excluir
+                title="Sua assinatura, usada nos e-mails que você enviar"
+                @click="editandoAssinatura = !editandoAssinatura">
+          <i class="bi bi-vector-pen" aria-hidden="true"></i> Assinatura
         </button>
       </div>
     </div>
+
+    <!-- assinatura: HTML colado da que a pessoa já usa -->
+    <section v-if="editandoAssinatura" class="cartao email__painel">
+      <h2 class="inicio__titulo">Sua assinatura</h2>
+      <p class="apagado pequeno">
+        Cole aqui o HTML da assinatura que você já usa. ⚠️ A configurada no
+        Gmail <strong>não</strong> se aplica ao que sai por esta tela.
+      </p>
+      <textarea v-model="assinatura" class="campo__entrada email__area" rows="6"
+                placeholder="<div>Seu nome<br>Movisat</div>"></textarea>
+      <div v-if="assinatura" class="email__previa" v-html="assinatura"></div>
+      <div class="linha">
+        <button class="botao botao--pequeno botao--acento" type="button" @click="salvarAssinatura">
+          Salvar
+        </button>
+        <button class="botao botao--pequeno botao--fantasma" type="button"
+                @click="editandoAssinatura = false">Fechar</button>
+      </div>
+    </section>
+
+    <!-- escrever: UMA mensagem, nunca lista -->
+    <section v-if="escrevendo" class="cartao email__painel">
+      <h2 class="inicio__titulo">
+        {{ rascunho.responder_a ? 'Responder' : 'Nova mensagem' }}
+      </h2>
+      <div class="campo email__para">
+        <span class="campo__rotulo">Para</span>
+        <div class="linha">
+          <input v-model="rascunho.para" class="campo__entrada" type="email"
+                 placeholder="alguem@empresa.com.br" />
+          <button class="email__quadrado" type="button"
+                  :class="{ 'email__quadrado--ligado': mostrarCopias }"
+                  title="Cópia e cópia oculta"
+                  @click="mostrarCopias = !mostrarCopias">Cc</button>
+        </div>
+      </div>
+
+      <template v-if="mostrarCopias">
+        <label class="campo">
+          <span class="campo__rotulo">Cc <span class="apagado">— todos veem quem recebeu</span></span>
+          <input v-model="rascunho.cc" class="campo__entrada" type="text"
+                 placeholder="separe por vírgula" />
+        </label>
+        <label class="campo">
+          <span class="campo__rotulo">Cco <span class="apagado">— ninguém vê quem recebeu</span></span>
+          <input v-model="rascunho.cco" class="campo__entrada" type="text"
+                 placeholder="separe por vírgula" />
+        </label>
+      </template>
+
+      <label class="campo">
+        <span class="campo__rotulo">Assunto</span>
+        <input v-model="rascunho.assunto" class="campo__entrada" type="text" />
+      </label>
+      <div class="campo">
+        <span class="campo__rotulo">Mensagem</span>
+        <div class="email__ferramentas">
+          <template v-for="(f, i) in FERRAMENTAS" :key="i">
+            <span v-if="f.sep" class="email__separador" aria-hidden="true"></span>
+            <button v-else class="email__quadrado" type="button" :title="f.t"
+                    @mousedown.prevent="formatar(f.c, f.v)">
+              <i class="bi" :class="f.i" aria-hidden="true"></i>
+            </button>
+          </template>
+          <select class="email__tamanho" title="Tamanho"
+                  @change="formatar('fontSize', $event.target.value)">
+            <option value="">Tamanho</option>
+            <option value="2">Pequeno</option>
+            <option value="3">Normal</option>
+            <option value="5">Grande</option>
+          </select>
+          <button class="email__quadrado" type="button" title="Inserir link"
+                  @mousedown.prevent="inserirLink">
+            <i class="bi bi-link-45deg" aria-hidden="true"></i>
+          </button>
+        </div>
+        <div ref="editor" class="email__editor" contenteditable="true"
+             v-html="rascunho.corpo.replace(/\n/g, '<br>')"></div>
+      </div>
+      <p class="apagado pequeno">
+        Sai de <strong>{{ marcadorAtual ? '' : '' }}sua caixa</strong>, com a sua
+        assinatura. Um destinatário por vez.
+      </p>
+      <div class="linha linha--quebra email__anexos">
+        <label class="botao botao--pequeno botao--contorno">
+          <i class="bi bi-paperclip" aria-hidden="true"></i>
+          {{ subindo ? 'subindo…' : 'Anexar' }}
+          <input type="file" multiple hidden @change="anexar" />
+        </label>
+        <span v-for="a in anexos" :key="a.id" class="chip">
+          {{ a.nome }} <span class="apagado">{{ tamanho(a.tamanho) }}</span>
+          <button class="email__tirar" type="button" title="Remover"
+                  @click="tirarAnexo(a.id)">×</button>
+        </span>
+      </div>
+
+      <div class="linha">
+        <button class="botao botao--acento" type="button" :disabled="enviando" @click="mandar">
+          <i class="bi bi-send" aria-hidden="true"></i>
+          {{ enviando ? 'enviando…' : 'Enviar' }}
+        </button>
+        <button class="botao botao--fantasma" type="button" @click="escrevendo = false">
+          Cancelar
+        </button>
+      </div>
+    </section>
 
     <div class="email" :class="{ 'email--sem-menu': !menuAberto }">
       <!-- marcadores: a navegação, como no Gmail -->
@@ -279,9 +550,25 @@ onMounted(async () => {
           <p v-if="aberta.cliente_nome" class="chip chip--acento">
             <i class="bi bi-building" aria-hidden="true"></i> {{ aberta.cliente_nome }}
           </p>
-          <p v-else class="apagado pequeno">
-            Este remetente ainda não está ligado a nenhum cliente.
-          </p>
+          <div v-else class="email__vincular">
+            <p class="apagado pequeno">
+              Este remetente ainda não está ligado a nenhum cliente.
+              Vincule e <strong>todas</strong> as mensagens dele passam a ser
+              identificadas.
+            </p>
+            <input v-model="buscaEmpresa" class="campo__entrada" type="search"
+                   placeholder="Buscar empresa por nome ou CNPJ"
+                   @input="procurarEmpresa" />
+            <ul v-if="achados.length" class="gaveta__lista">
+              <li v-for="c in achados" :key="c.id">
+                <button class="botao botao--pequeno botao--contorno gaveta__achado"
+                        type="button" @click="vincular(c.id)">
+                  <span>{{ c.nome }}</span>
+                  <span class="apagado pequeno mono">{{ c.documento }}</span>
+                </button>
+              </li>
+            </ul>
+          </div>
 
           <div v-if="aberta.anexos && aberta.anexos.length" class="linha pequeno">
             <span v-for="a in aberta.anexos" :key="a.nome" class="chip">
@@ -368,6 +655,73 @@ onMounted(async () => {
 /* Não lida em negrito e com barra: é o que a pessoa procura ao abrir. */
 .email__item--nova { border-left: 3px solid var(--acento); }
 .email__item--nova .email__de { font-weight: 700; }
+
+/* Botão quadrado: ocupa o mínimo. Espaço de tela é caro, e formatação é
+   coisa que se reconhece pelo ícone, não pelo rótulo. */
+.email__quadrado {
+  width: 30px; height: 30px; flex: none;
+  display: grid; place-items: center;
+  border: var(--borda-fina) solid var(--borda);
+  border-radius: var(--r-sm);
+  background: var(--superficie);
+  color: var(--texto-fraco);
+  cursor: pointer;
+  font-size: var(--txt-sm);
+  font-family: var(--fonte);
+}
+.email__quadrado:hover { background: var(--superficie-2); color: var(--texto); }
+.email__quadrado--ligado { background: var(--acento-suave); color: var(--acento); border-color: var(--acento-borda); }
+
+.email__ferramentas {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 2px;
+  padding: var(--e-1);
+  border: var(--borda-fina) solid var(--borda);
+  border-bottom: none;
+  border-radius: var(--r-sm) var(--r-sm) 0 0;
+  background: var(--superficie-2);
+}
+.email__tamanho {
+  height: 30px; border: var(--borda-fina) solid var(--borda);
+  border-radius: var(--r-sm); background: var(--superficie);
+  font-size: var(--txt-sm); font-family: var(--fonte); color: var(--texto-fraco);
+}
+
+.email__editor {
+  min-height: 190px; max-height: 40vh; overflow-y: auto;
+  padding: var(--e-3);
+  border: var(--borda-fina) solid var(--borda);
+  border-radius: 0 0 var(--r-sm) var(--r-sm);
+  background: var(--superficie);
+  font-size: var(--txt-md);
+  line-height: 1.55;
+}
+.email__editor:focus { outline: none; box-shadow: var(--foco); }
+.email__editor blockquote {
+  margin: 0 0 0 var(--e-2); padding-left: var(--e-2);
+  border-left: 3px solid var(--borda-forte); color: var(--texto-fraco);
+}
+.email__para .linha { gap: var(--e-1); }
+.email__para .campo__entrada { flex: 1; }
+
+.email__anexos { gap: var(--e-2); align-items: center; }
+.email__tirar {
+  border: none; background: transparent; cursor: pointer;
+  color: var(--texto-fraco); font-size: var(--txt-md); line-height: 1;
+  padding: 0 0 0 4px;
+}
+.email__tirar:hover { color: var(--erro); }
+
+.email__painel { padding: var(--e-4); margin-bottom: var(--e-3); display: flex; flex-direction: column; gap: var(--e-2); }
+.email__area { font-family: var(--fonte-mono); font-size: var(--txt-sm); resize: vertical; }
+.email__previa {
+  border: var(--borda-fina) dashed var(--borda-forte);
+  border-radius: var(--r-sm);
+  padding: var(--e-2);
+  background: var(--superficie-2);
+}
+.email__vincular { display: flex; flex-direction: column; gap: var(--e-2); margin: var(--e-2) 0; }
+.gaveta__lista { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--e-1); max-height: 200px; overflow-y: auto; }
+.gaveta__achado { width: 100%; display: flex; justify-content: space-between; gap: var(--e-2); text-align: left; }
 
 .email__vazio {
   display: flex; flex-direction: column; align-items: center; gap: var(--e-1);

@@ -9,7 +9,7 @@ import secrets
 import time
 from contextlib import asynccontextmanager
 
-from fastapi import Depends, FastAPI, HTTPException, Request, status
+from fastapi import Depends, FastAPI, File, HTTPException, Request, UploadFile, status
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -21,6 +21,7 @@ from . import canais as registro_canais
 from . import conversas
 from . import evolution
 from . import agenda as agenda_google
+from . import enviar as enviar_email
 from . import gmail
 from . import google_auth
 from . import inicio as tela_inicial
@@ -535,6 +536,99 @@ def email_mensagem(mensagem_id: int,
     # `bruto` nunca vai para a tela: ela desenha com texto/html.
     linha.pop("bruto", None)
     return linha
+
+
+class VinculoEmail(BaseModel):
+    cliente_id: int
+
+
+class EmailNovo(BaseModel):
+    para: str
+    assunto: str
+    corpo: str
+    responder_a: int | None = None
+    cc: str | None = None
+    cco: str | None = None
+    html: str | None = None
+    anexos: list[str] | None = None
+
+
+class Assinatura(BaseModel):
+    html: str = ""
+
+
+@app.post("/api/email/mensagens/{mensagem_id}/vincular")
+def email_vincular(mensagem_id: int, corpo: VinculoEmail,
+                   usuario: dict = Depends(auth.requer_tela("EML_1.1"))):
+    """Diz de quem é o remetente — e o cadastro cresce pelo uso."""
+    r = gmail.vincular(mensagem_id, corpo.cliente_id)
+    if not r.get("ok"):
+        raise HTTPException(status_code=400, detail=r.get("motivo"))
+    return r
+
+
+@app.post("/api/email/anexo")
+async def email_anexo(arquivo: UploadFile = File(...),
+                      usuario: dict = Depends(auth.requer_tela("EML_1.1"))):
+    """Sobe um anexo de rascunho e devolve o ID que o envio vai usar.
+
+    🚨 A tela recebe um ID, nunca um caminho. Se ela mandasse caminho no
+    envio, `../../.env` viraria anexo e o e-mail sairia com o segredo dentro.
+    """
+    try:
+        return enviar_email.guardar_anexo(arquivo.filename or "arquivo",
+                                          await arquivo.read())
+    except enviar_email.EnvioRecusado as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/api/email/enviar")
+def email_enviar(corpo: EmailNovo,
+                 usuario: dict = Depends(auth.requer_tela("EML_1.1"))):
+    """Manda UMA mensagem, do endereço do atendente.
+
+    🚨 E-MAIL ENVIADO NÃO VOLTA. Não existe rota que receba lista de
+    destinatários -- disparo é outro produto, com outra decisão, como já vale
+    para o WhatsApp.
+    """
+    conta = banco.um("SELECT id FROM email_conta WHERE ativa LIMIT 1")
+    if not conta:
+        raise HTTPException(status_code=503, detail="Nenhuma caixa conectada.")
+    try:
+        return enviar_email.enviar(
+            conta_id=conta["id"], para=corpo.para, assunto=corpo.assunto,
+            corpo=corpo.corpo, atendente_id=_atendente_do_usuario(usuario),
+            responder_a=corpo.responder_a, cc=corpo.cc, cco=corpo.cco,
+            html=corpo.html, anexos=corpo.anexos)
+    except enviar_email.EnvioRecusado as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/api/eu/assinatura")
+def ver_assinatura(usuario: dict = Depends(auth.get_usuario)):
+    eu = _atendente_do_usuario(usuario)
+    if not eu:
+        return {"html": ""}
+    linha = banco.um("SELECT assinatura_html FROM atendente WHERE id = %s", (eu,))
+    return {"html": (linha or {}).get("assinatura_html") or ""}
+
+
+@app.put("/api/eu/assinatura")
+def salvar_assinatura(dados: Assinatura,
+                      usuario: dict = Depends(auth.get_usuario)):
+    """A assinatura é de quem está logado — ninguém edita a de outro.
+
+    ⚠️ A do Gmail não se aplica a envio por API: ele a insere no compositor da
+    web. Sem esta, o e-mail sai pelado.
+    """
+    eu = _atendente_do_usuario(usuario)
+    if not eu:
+        raise HTTPException(status_code=409,
+                            detail="Sua conta não tem linha em `atendente`.")
+    banco.executar(
+        "UPDATE atendente SET assinatura_html = %s, atualizado_em = now() "
+        " WHERE id = %s", (dados.html or None, eu))
+    return {"ok": True}
 
 
 @app.post("/api/email/mensagens/{mensagem_id}/lida")
