@@ -24,6 +24,20 @@ const aberta = ref(null)
 const marcadorAtual = ref('INBOX')
 const busca = ref('')
 const carregando = ref(false)
+
+/* O menu de pastas recolhe, como no Gmail. Fica guardado porque quem recolhe
+   quer que continue recolhido amanhã -- e não é preferência que valha uma
+   coluna no banco. */
+const menuAberto = ref(localStorage.getItem('movizap.email.menu') !== 'fechado')
+/* ⚠️ SÓ LEITURA HOJE. O escopo concedido é `gmail.readonly`: escrever exige
+   outro consentimento. Os botões aparecem para a tela ser a tela final, e
+   dizem por que não funcionam -- em vez de sumirem e a pessoa procurar. */
+const SO_LEITURA = 'Ainda não disponível: a caixa está conectada só para leitura.'
+
+function alternarMenu() {
+  menuAberto.value = !menuAberto.value
+  localStorage.setItem('movizap.email.menu', menuAberto.value ? 'aberto' : 'fechado')
+}
 const erro = ref('')
 const recado = ref('')
 
@@ -158,9 +172,46 @@ onMounted(async () => {
     <p v-if="erro" class="aviso aviso--erro">{{ erro }}</p>
     <p v-if="recado" class="apagado pequeno">{{ recado }}</p>
 
-    <div class="email">
+    <!-- barra de orientação: onde estou, quantas há, e o que dá para fazer -->
+    <div class="email__barra">
+      <div class="linha">
+        <button class="botao botao--pequeno botao--fantasma" type="button"
+                :aria-expanded="menuAberto" title="Mostrar ou esconder as pastas"
+                @click="alternarMenu">
+          <i class="bi bi-list" aria-hidden="true"></i>
+        </button>
+        <strong>{{ NOMES[marcadorAtual] || marcadorAtual || 'Todas' }}</strong>
+        <span class="apagado pequeno">{{ mensagens.length }} mensagens</span>
+      </div>
+
+      <div class="linha email__acoes">
+        <button class="botao botao--pequeno botao--acento" type="button"
+                :title="SO_LEITURA" disabled>
+          <i class="bi bi-pencil-square" aria-hidden="true"></i> Nova mensagem
+        </button>
+        <span class="email__separador" aria-hidden="true"></span>
+        <button class="botao botao--pequeno botao--fantasma" type="button"
+                :title="SO_LEITURA" :disabled="true">
+          <i class="bi bi-reply" aria-hidden="true"></i> Responder
+        </button>
+        <button class="botao botao--pequeno botao--fantasma" type="button"
+                :title="SO_LEITURA" :disabled="true">
+          <i class="bi bi-arrow-right" aria-hidden="true"></i> Encaminhar
+        </button>
+        <button class="botao botao--pequeno botao--fantasma" type="button"
+                :title="SO_LEITURA" :disabled="true">
+          <i class="bi bi-folder-symlink" aria-hidden="true"></i> Mover
+        </button>
+        <button class="botao botao--pequeno botao--fantasma" type="button"
+                :title="SO_LEITURA" :disabled="true">
+          <i class="bi bi-trash" aria-hidden="true"></i> Excluir
+        </button>
+      </div>
+    </div>
+
+    <div class="email" :class="{ 'email--sem-menu': !menuAberto }">
       <!-- marcadores: a navegação, como no Gmail -->
-      <nav class="cartao email__lado">
+      <nav v-show="menuAberto" class="cartao email__lado">
         <button
           v-for="m in visiveis"
           :key="m.id"
@@ -197,17 +248,11 @@ onMounted(async () => {
           <span class="email__inicial" :style="{ background: corDaInicial(m) }" aria-hidden="true">
             {{ iniciais(m) }}
           </span>
-          <span class="email__corpo-item">
-            <span class="linha linha--entre">
-              <strong class="email__de">{{ m.remetente_nome || m.remetente }}</strong>
-              <span class="apagado pequeno">{{ quando(m.enviado_em) }}</span>
-            </span>
-            <span class="email__assunto">{{ m.assunto || '(sem assunto)' }}</span>
-            <span class="linha pequeno">
-              <span v-if="m.cliente_nome" class="chip">{{ m.cliente_nome }}</span>
-              <span v-if="m.tem_anexo" class="apagado"><i class="bi bi-paperclip"></i></span>
-            </span>
-          </span>
+          <span class="email__de">{{ m.remetente_nome || m.remetente }}</span>
+          <span class="email__assunto">{{ m.assunto || '(sem assunto)' }}</span>
+          <span v-if="m.cliente_nome" class="chip email__cliente">{{ m.cliente_nome }}</span>
+          <i v-if="m.tem_anexo" class="bi bi-paperclip apagado" aria-hidden="true"></i>
+          <span class="apagado pequeno email__quando">{{ quando(m.enviado_em) }}</span>
         </button>
       </div>
 
@@ -245,26 +290,73 @@ onMounted(async () => {
 </template>
 
 <style scoped>
+/* A barra fica GRUDADA acima das colunas, com respiro embaixo: sem a margem
+   o botão de recolher parecia flutuando solto sobre a lista. */
+.email__barra {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--e-2);
+  padding: var(--e-2) var(--e-3);
+  margin-bottom: var(--e-3);
+  background: var(--superficie);
+  border: var(--borda-fina) solid var(--borda);
+  border-radius: var(--r-lg);
+  box-shadow: var(--sombra-1);
+}
+.email__acoes { flex-wrap: wrap; gap: var(--e-1); }
+.email__separador {
+  width: 1px; height: 20px;
+  background: var(--borda);
+  margin: 0 var(--e-1);
+}
+/* Desabilitado tem que PARECER desabilitado, senão vira clique frustrado. */
+.email__acoes .botao:disabled { opacity: .45; cursor: not-allowed; }
+
+/* 🚨 AS TRES AREAS DIVIDEM A MESMA ALTURA e rolam por dentro. Antes cada
+   cartao terminava onde o conteudo dele acabava, e o desalinhamento aparecia
+   de cara -- lista curta ao lado de leitura longa. */
 .email {
   display: grid;
-  grid-template-columns: 180px 320px 1fr;
+  grid-template-columns: 190px minmax(280px, 360px) 1fr;
   gap: var(--e-3);
-  align-items: start;
+  align-items: stretch;
+  height: calc(100vh - 250px);   /* desconta cabeçalho + barra de ações */
+  min-height: 420px;
 }
-@media (max-width: 900px) {
-  .email { grid-template-columns: 1fr; }
+.email--sem-menu { grid-template-columns: minmax(280px, 360px) 1fr; }
+
+/* Abaixo de 1100px o painel ja tem o menu lateral dele: dois menus lado a
+   lado espremem a leitura. A lista some e fica só o que se está lendo. */
+@media (max-width: 1100px) {
+  .email { grid-template-columns: minmax(260px, 320px) 1fr; }
+  .email__lado { display: none; }
+}
+@media (max-width: 760px) {
+  .email { grid-template-columns: 1fr; height: auto; }
+  .email__lista, .email__leitura { max-height: 60vh; }
 }
 
 .email__lado { padding: var(--e-2); display: flex; flex-direction: column; gap: 2px; }
 
 .email__inicial {
-  width: 34px; height: 34px; flex: none;
+  width: 26px; height: 26px; flex: none;
   display: grid; place-items: center;
   border-radius: var(--r-full);
   color: #fff; font-size: var(--txt-sm); font-weight: 600;
 }
-.email__corpo-item { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
-.email__de { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.email__de {
+  width: 150px; flex: none;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.email__assunto {
+  flex: 1; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--texto-fraco);
+}
+.email__cliente { flex: none; max-width: 130px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.email__quando { flex: none; width: 46px; text-align: right; font-variant-numeric: tabular-nums; }
 
 /* Não lida em negrito e com barra: é o que a pessoa procura ao abrir. */
 .email__item--nova { border-left: 3px solid var(--acento); }
@@ -293,11 +385,20 @@ onMounted(async () => {
 .email__marcador:hover { background: var(--superficie-2); }
 .email__marcador--ativo { background: var(--acento-suave); color: var(--acento); font-weight: 600; }
 
-.email__lista { padding: var(--e-2); max-height: 70vh; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
+.email__lista {
+  padding: var(--e-2);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-height: 0;   /* sem isto o filho de grid não encolhe e a rolagem não nasce */
+}
+/* Uma linha, como no Gmail: mostra o dobro de mensagens na mesma altura. */
 .email__item {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: var(--e-2);
+  min-width: 0;
   padding: var(--e-2);
   border: none;
   border-bottom: var(--borda-fina) solid var(--borda);
@@ -310,13 +411,18 @@ onMounted(async () => {
 .email__item--aberta { background: var(--acento-suave); }
 .email__assunto { font-size: var(--txt-sm); color: var(--texto-fraco); overflow-wrap: anywhere; }
 
-.email__leitura { padding: var(--e-4); max-height: 70vh; overflow-y: auto; }
+.email__leitura { padding: var(--e-4); overflow-y: auto; min-height: 0; }
+.email__lado { overflow-y: auto; min-height: 0; }
 .email__titulo { font-size: var(--txt-lg); margin: 0 0 var(--e-1); }
+/* Largura de leitura confortável. Texto esticado até a borda de uma tela
+   larga cansa: o olho perde a linha na volta. */
 .email__corpo {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   font-family: var(--fonte);
   font-size: var(--txt-md);
+  line-height: 1.55;
+  max-width: 65ch;
   margin-top: var(--e-3);
 }
 </style>

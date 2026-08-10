@@ -15,6 +15,20 @@ class TestIntegridadeDoRegistro:
         codigos = [t["codigo"] for t in telas.TELAS]
         assert len(codigos) == len(set(codigos)), "código repetido no registro"
 
+    def test_doc_conhece_todas_as_telas(self):
+        """🚨 O DOC É O TERCEIRO LUGAR, e era o único sem teste.
+
+        `telas.py` e `router/index.js` já se comparavam; o doc ficou para trás
+        e não acusou `INI_1.1` nem `EML_1.1` até 10/08. Escrever as linhas que
+        faltavam não conserta -- este teste é que conserta.
+        """
+        import pathlib
+
+        doc = (pathlib.Path(__file__).parent.parent
+               / "docs" / "03_Registro_Telas.md").read_text(encoding="utf-8")
+        faltando = [t["codigo"] for t in telas.TELAS if t["codigo"] not in doc]
+        assert not faltando, f"telas fora do doc: {faltando}"
+
     def test_codigo_aposentado_nunca_volta(self):
         """🚨 Reaproveitar código faria o log antigo mentir.
 

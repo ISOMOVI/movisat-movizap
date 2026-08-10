@@ -18,6 +18,7 @@ from datetime import datetime, time, timedelta, timezone
 import httpx
 
 from . import banco, gmail
+from .config import settings
 
 log = logging.getLogger("movizap.agenda")
 
@@ -40,10 +41,22 @@ def hoje(conta_id: int | None = None) -> dict:
     if not conta:
         return {"eventos": [], "motivo": "nenhuma conta conectada"}
 
+    # 🚨 NÃO USA `gmail._token_de_acesso`: aquela função marca a conta como
+    # INATIVA quando o Google recusa o refresh. Uma instabilidade ao buscar
+    # COMPROMISSO desligaria a leitura de E-MAIL -- dois recursos diferentes,
+    # um derrubando o outro. Aqui a falha só faz a faixa sumir.
     try:
-        token = gmail._token_de_acesso(conta)
-    except gmail.GmailIndisponivel as e:
-        return {"eventos": [], "motivo": str(e)}
+        r = httpx.post(gmail.TROCAR, timeout=20, data={
+            "client_id": settings.google_client_id,
+            "client_secret": settings.google_client_secret,
+            "refresh_token": conta["refresh_token"],
+            "grant_type": "refresh_token",
+        })
+        if r.status_code != 200:
+            return {"eventos": [], "motivo": "autorização da agenda expirada"}
+        token = r.json()["access_token"]
+    except httpx.HTTPError:
+        return {"eventos": [], "motivo": "Google fora do ar"}
 
     agora = datetime.now(timezone.utc).astimezone()
     fim_do_dia = datetime.combine(agora.date(), time(23, 59, 59), agora.tzinfo)

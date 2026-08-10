@@ -497,6 +497,17 @@ def email_mensagens(marcador: str = "", busca: str = "", limite: int = 60,
     """
     condicoes = ["NOT e.arquivada"]
     params: list = []
+
+    # 🚨 O PARÂMETRO EXISTIA E ERA IGNORADO. A tela mandava `?marcador=SENT` e
+    # recebia a caixa de entrada -- defeito que parece funcionamento, porque a
+    # lista muda de qualquer jeito quando chega mensagem nova.
+    if marcador.strip():
+        condicoes.append(
+            "EXISTS (SELECT 1 FROM email_mensagem_marcador mm "
+            "          JOIN email_marcador mk ON mk.id = mm.marcador_id "
+            "         WHERE mm.mensagem_id = e.id AND mk.id_externo = %s)")
+        params.append(marcador.strip())
+
     if busca.strip():
         condicoes.append("(e.assunto ILIKE %s OR e.remetente ILIKE %s)")
         params += [f"%{busca.strip()}%"] * 2

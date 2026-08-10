@@ -225,6 +225,31 @@ def ler(conta_id: int | None = None, limite: int = TETO_POR_EXECUCAO) -> dict:
                      bool(acumulado["anexos"]),
                      json.dumps(acumulado["anexos"]),
                      cliente_id, contato_id))
+
+                # 🚨 SEM ISTO O FILTRO DA TELA NÃO TEM COMO FUNCIONAR. O
+                # `labelIds` diz em quais pastas a mensagem está -- e uma
+                # mensagem está em várias ao mesmo tempo (INBOX + IMPORTANT +
+                # UNREAD). Jogar fora deixava a lateral toda zerada.
+                nova = banco.um(
+                    "SELECT id FROM email_mensagem "
+                    " WHERE conta_id = %s AND id_externo = %s",
+                    (conta["id"], m["id"]))
+                for etiqueta in m.get("labelIds") or []:
+                    banco.executar(
+                        """INSERT INTO email_mensagem_marcador
+                                (mensagem_id, marcador_id)
+                           SELECT %s, id FROM email_marcador
+                            WHERE conta_id = %s AND id_externo = %s
+                           ON CONFLICT DO NOTHING""",
+                        (nova["id"], conta["id"], etiqueta))
+
+                # `UNREAD` é marcador no Gmail, não coluna. Traduzir aqui
+                # evita a tela ter que conhecer o vocabulário da API.
+                if "UNREAD" not in (m.get("labelIds") or []):
+                    banco.executar(
+                        "UPDATE email_mensagem SET lida = true WHERE id = %s",
+                        (nova["id"],))
+
                 total["novas"] += 1
 
         banco.executar(

@@ -23,7 +23,7 @@ MOD_a.b[.c]
 
 | Parte | Significado |
 |---|---|
-| `MOD` | módulo — `ATD` atendimento · `CAD` cadastro · `CFG` configuração · `REL` relatório |
+| `MOD` | módulo — `INI` início · `ATD` atendimento · `EML` e-mail · `CAD` cadastro · `CFG` configuração · `REL` relatório |
 | `a` | submódulo |
 | `b` | tela |
 | `c` | aba dentro da tela (opcional) |
@@ -164,3 +164,38 @@ Fixa no rodapé de **toda** tela principal. Modelo mental: barra do Excel / bloc
 | `cadastro` | `CAD_1.*` |
 
 Perfil é conjunto de telas, montado do registro. **Não existe permissão escrita fora dele.**
+
+---
+
+## Telas de hoje (espelho de `movizap/telas.py`)
+
+> ⚠️ Esta seção espelha o registro. `teste_telas.py` reprova se um
+> código existir no `telas.py` e não aparecer aqui — foi assim que
+> `INI_1.1` e `EML_1.1` ficaram de fora até 10/08.
+
+| Código | Título | Rota | Permissão | Fase |
+|---|---|---|---|---|
+| `ATD_1.1` | Caixa de entrada | `/atendimento` | atendimento | 1 |
+| `ATD_1.2` | Conversa | `/atendimento/{id}` | atendimento | 1 |
+| `ATD_1.3` | Fila | `/atendimento/fila` | atendimento | 1 |
+| `ATD_3.1` | Informativos | `/informativos` | informativos | 1 |
+| `ATD_5.1` | Histórico | `/atendimento/historico` | atendimento | 1 |
+| `CAD_1.1` | Clientes | `/cadastro/clientes` | cadastro | 1 |
+| `CAD_1.2` | Contatos | `/cadastro/contatos` | cadastro | 1 |
+| `CAD_2.1` | Atendentes | `/cadastro/atendentes` | owner | 1 |
+| `CAD_2.2` | Times | `/cadastro/times` | owner | 1 |
+| `CFG_1.1` | Canais | `/config/canais` | owner | 1 |
+| `CFG_2.1` | IA — prompt | `/config/ia/prompt` | owner | 1 |
+| `CFG_2.2` | IA — analytics | `/config/ia/analytics` | admin | 2 |
+| `CFG_3.1` | Sincronização | `/config/sync` | owner | 1 |
+| `CFG_4.1` | Classificações | `/config/classificacoes` | owner | 1 |
+| `CFG_9.1` | Registro de telas | `/config/telas` | owner | 1 |
+| `EML_1.1` | E-mail | `/email` | atendimento | 1 |
+| `INI_1.1` | Início | `/inicio` | atendimento | 1 |
+| `REL_1.1` | Relatórios | `/relatorios` | admin | 3 |
+
+### Códigos aposentados
+
+🚨 **Nunca reaproveitados** — reusar faria o log antigo mentir.
+
+- `ATD_4.1` — era o e-mail dentro do módulo de atendimento. Aposentado em 10/08: o usuário decidiu que e-mail **jamais** se mistura com WhatsApp, e ele virou `EML_1.1`, módulo próprio. A tela nunca existiu, então nada foi logado com ele.
