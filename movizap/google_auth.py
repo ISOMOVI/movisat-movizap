@@ -43,6 +43,16 @@ AUTORIZAR = "https://accounts.google.com/o/oauth2/v2/auth"
 TROCAR = "https://oauth2.googleapis.com/token"
 VALIDADE_STATE = 600          # 10 min: tempo de fazer login, não mais
 
+# 🚨 SÓ LEITURA, por decisão do usuário em 10/08. Responder e enviar pedem
+# `gmail.send`, que é outro pedido de consentimento -- e só faz sentido quando
+# a tela existir e ele vir o que ela faz.
+ESCOPO_CAIXA = "https://www.googleapis.com/auth/gmail.readonly"
+
+# ⚠️ A AGENDA VAI NO MESMO CONSENTIMENTO. É o mesmo cliente OAuth e a mesma
+# pessoa; pedir em dois momentos faria consentir duas vezes para a mesma
+# coisa. Só leitura, como o Gmail.
+ESCOPO_AGENDA = "https://www.googleapis.com/auth/calendar.readonly"
+
 
 class GoogleRecusado(Exception):
     """Motivo em português, já pronto para a tela."""
@@ -66,6 +76,91 @@ def _state_valido(state: str) -> bool:
     except JWTError:
         return False
     return corpo.get("tipo") == "movizap_google_state"
+
+
+def url_da_caixa() -> str:
+    """Consentimento para LER a caixa -- fluxo à parte do login.
+
+    ⚠️ `access_type=offline` e `prompt=consent` não são enfeite: sem eles o
+    Google devolve só um token de uma hora, e a leitura de fundo pararia
+    sozinha. O refresh token vem UMA vez, no consentimento -- guardar na hora
+    ou perder.
+    """
+    return AUTORIZAR + "?" + urlencode({
+        "client_id": settings.google_client_id,
+        "redirect_uri": settings.google_redirect,
+        "response_type": "code",
+        "scope": f"openid email {ESCOPO_CAIXA} {ESCOPO_AGENDA}",
+        "state": jwt.encode(
+            {"tipo": "movizap_caixa_state", "exp": int(time.time()) + VALIDADE_STATE},
+            settings.jwt_secret, algorithm=auth.ALGORITMO),
+        "hd": settings.google_dominio,
+        "access_type": "offline",
+        "prompt": "consent",
+    })
+
+
+def _e_state_de_caixa(state: str) -> bool:
+    try:
+        corpo = jwt.decode(state, settings.jwt_secret, algorithms=[auth.ALGORITMO])
+    except JWTError:
+        return False
+    return corpo.get("tipo") == "movizap_caixa_state"
+
+
+def conectar_caixa(codigo: str, state: str) -> dict:
+    """Guarda a autorização da caixa. Não mexe em sessão nem em login.
+
+    🚨 A linha em `email_conta` nasce AQUI, e não num cadastro à mão: a caixa
+    que existe é a que foi autorizada. Cadastrar endereço sem consentimento
+    criaria conta que nunca vai ler nada.
+    """
+    from . import banco
+
+    if not _e_state_de_caixa(state):
+        raise GoogleRecusado("Pedido de autorização expirado. Tente de novo.")
+
+    resposta = httpx.post(TROCAR, timeout=20, data={
+        "code": codigo,
+        "client_id": settings.google_client_id,
+        "client_secret": settings.google_client_secret,
+        "redirect_uri": settings.google_redirect,
+        "grant_type": "authorization_code",
+    })
+    if resposta.status_code != 200:
+        # ⚠️ Nunca registrar o corpo: carrega código e pedaços de credencial.
+        log.warning("autorização da caixa recusada: HTTP %s", resposta.status_code)
+        raise GoogleRecusado(
+            "O Google recusou. Confira se a Gmail API está ativa no projeto "
+            "e se o escopo gmail.readonly está na tela de consentimento.")
+
+    dados = resposta.json()
+    refresh = dados.get("refresh_token")
+    corpo = _corpo_do_id_token(dados.get("id_token") or "")
+    email = (corpo.get("email") or "").strip().lower()
+
+    if not email.endswith("@" + settings.google_dominio.lower()):
+        raise GoogleRecusado(f"Só caixas @{settings.google_dominio}.")
+
+    # ⚠️ Sem refresh token a caixa lê por uma hora e para. Melhor recusar com
+    # o motivo do que criar uma conta que morre sozinha depois do almoço.
+    if not refresh:
+        raise GoogleRecusado(
+            "O Google não devolveu autorização de longo prazo. Revogue o "
+            "acesso do MoviZap em myaccount.google.com e autorize de novo.")
+
+    banco.executar(
+        """INSERT INTO email_conta (endereco, provedor, refresh_token,
+                                    puxar_desde, ativa)
+           VALUES (%s, 'gmail', %s, DATE '2026-01-01', true)
+           ON CONFLICT (endereco) DO UPDATE
+              SET refresh_token = EXCLUDED.refresh_token,
+                  ativa = true,
+                  atualizada_em = now()""",
+        (email, refresh))
+
+    log.info("caixa autorizada: %s", email)
+    return {"endereco": email}
 
 
 def url_de_entrada() -> str:

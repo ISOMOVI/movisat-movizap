@@ -25,6 +25,7 @@ import { temToken } from '../api/cliente.js'
 
 import Login from '../telas/Login.vue'
 import Inicio from '../telas/Inicio.vue'
+import Email from '../telas/Email.vue'
 import Canais from '../telas/Canais.vue'
 import Clientes from '../telas/Clientes.vue'
 import Contatos from '../telas/Contatos.vue'
@@ -54,6 +55,13 @@ const rotas = [
     name: 'INI_1.1',
     component: Inicio,
     meta: { codigo: 'INI_1.1', titulo: 'Início' },
+  },
+
+  {
+    path: '/email',
+    name: 'EML_1.1',
+    component: Email,
+    meta: { codigo: 'EML_1.1', titulo: 'E-mail' },
   },
 
   // ---- ATD: atendimento ----

@@ -17,7 +17,7 @@
    cliente, ou o número responde por vários cadastros. As duas situações pedem
    ações diferentes de quem atende.
    ============================================================================ */
-import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import { api, pedirBlob, ErroDeApi } from '../api/cliente.js'
@@ -92,6 +92,7 @@ async function abrir(id) {
     achadosCliente.value = []
     aberta.value = await api.get(`/api/conversas/${id}`)
     carregarMidiasDaConversa(aberta.value)
+    rolarParaOFim()
     recado.value = ''
     if (route.params.id !== String(id)) {
       router.replace({ path: `/atendimento/${id}` })
@@ -292,6 +293,19 @@ async function baixarMidia(m) {
    fora do alcance por cadastro incompleto; cada vínculo feito nesta gaveta é
    um telefone que passa a existir, digitado por quem está falando com a
    pessoa. */
+const baloes = ref(null)
+
+/* 🚨 A CONVERSA ABRE NA MENSAGEM MAIS RECENTE. Abrir no topo obriga o
+   atendente a rolar até o fim toda vez para achar o que a pessoa acabou de
+   dizer -- e em conversa longa isso é o primeiro gesto, sempre.
+
+   ⚠️ `nextTick` é obrigatório: sem ele a rolagem acontece antes de os balões
+   existirem no DOM, e não faz nada -- em silêncio. */
+async function rolarParaOFim() {
+  await nextTick()
+  if (baloes.value) baloes.value.scrollTop = baloes.value.scrollHeight
+}
+
 const gaveta = ref(false)
 
 /* As empresas que o telefone alcança -- o grupo da pessoa.
@@ -684,7 +698,7 @@ function carregarMidiasDaConversa(c) {
             </template>
           </aside>
 
-          <div class="baloes">
+          <div ref="baloes" class="baloes">
             <div
               v-for="m in aberta.mensagens"
               :key="m.id"

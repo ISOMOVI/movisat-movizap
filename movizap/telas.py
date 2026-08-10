@@ -30,6 +30,19 @@ TELAS = [
         "permissao": "atendimento",
         "fase": 1,
     },
+    # ---- EML: e-mail ----
+    # 🚨 MÓDULO PRÓPRIO, NÃO ATD. Decisão do usuário em 10/08: "jamais
+    # misturemos whatsapp com gmail, nunca". Caixa própria, marcadores
+    # próprios, fila própria -- e o código diz isso antes do primeiro clique.
+    {
+        "codigo": "EML_1.1",
+        "titulo": "E-mail",
+        "rota": "/email",
+        "icone": "bi-envelope",
+        "descricao": "Caixa de e-mail, separada do WhatsApp.",
+        "permissao": "atendimento",
+        "fase": 1,
+    },
     # ---- ATD: atendimento ----
     {
         "codigo": "ATD_1.1",
@@ -169,15 +182,6 @@ TELAS = [
     },
     # ---- reservados: código já ocupado, tela ainda não existe ----
     {
-        "codigo": "ATD_4.1",
-        "titulo": "E-mail",
-        "rota": "/email",
-        "icone": "bi-envelope",
-        "descricao": "Caixa de e-mail dos atendentes.",
-        "permissao": "atendimento",
-        "fase": 2,
-    },
-    {
         "codigo": "CFG_2.2",
         "titulo": "IA — analytics",
         "rota": "/config/ia/analytics",
@@ -206,6 +210,15 @@ PERFIS = {
     "atendimento": {"atendimento"},
     "cadastro": {"cadastro"},
 }
+
+# 🚨 CÓDIGO APOSENTADO NUNCA VOLTA. Esta lista existe para ninguém
+# "redescobrir" um número livre daqui a três meses e fazer o log antigo mentir.
+#
+#   ATD_4.1  reservado para e-mail na fase 2, quando e-mail seria mais um canal
+#            de atendimento. Aposentado em 10/08: decisão do usuário de que
+#            e-mail JAMAIS se mistura com WhatsApp -- virou EML_1.1, módulo
+#            próprio. A tela nunca existiu, então nada foi logado com ele.
+CODIGOS_APOSENTADOS = {"ATD_4.1"}
 
 CODIGOS_VALIDOS = {t["codigo"] for t in TELAS}
 PERMISSOES_VALIDAS = {t["permissao"] for t in TELAS}

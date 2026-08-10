@@ -20,6 +20,8 @@ from . import cadastro
 from . import canais as registro_canais
 from . import conversas
 from . import evolution
+from . import agenda as agenda_google
+from . import gmail
 from . import google_auth
 from . import inicio as tela_inicial
 from . import informativos
@@ -476,6 +478,71 @@ def google_inicio():
     return RedirectResponse(google_auth.url_de_entrada(), status_code=302)
 
 
+@app.get("/api/email/marcadores")
+def email_marcadores(usuario: dict = Depends(auth.requer_tela("EML_1.1"))):
+    return {"marcadores": banco.varios(
+        """SELECT m.id, m.id_externo, m.nome, m.natureza,
+                  (SELECT count(*) FROM email_mensagem_marcador mm
+                    WHERE mm.marcador_id = m.id) AS quantidade
+             FROM email_marcador m ORDER BY m.natureza, m.nome""")}
+
+
+@app.get("/api/email/mensagens")
+def email_mensagens(marcador: str = "", busca: str = "", limite: int = 60,
+                    usuario: dict = Depends(auth.requer_tela("EML_1.1"))):
+    """A lista da caixa.
+
+    ⚠️ SPAM e TRASH nunca entram: ninguém quer lixeira num painel de
+    atendimento, e filtrar na tela deixaria o dado passando pela rede à toa.
+    """
+    condicoes = ["NOT e.arquivada"]
+    params: list = []
+    if busca.strip():
+        condicoes.append("(e.assunto ILIKE %s OR e.remetente ILIKE %s)")
+        params += [f"%{busca.strip()}%"] * 2
+    params.append(limite)
+    return {"mensagens": banco.varios(
+        f"""SELECT e.id, e.remetente, e.remetente_nome, e.assunto, e.enviado_em,
+                   e.tem_anexo, e.lida, c.nome AS cliente_nome
+              FROM email_mensagem e
+              LEFT JOIN cliente c ON c.id = e.cliente_id
+             WHERE {' AND '.join(condicoes)}
+             ORDER BY e.enviado_em DESC NULLS LAST
+             LIMIT %s""", tuple(params))}
+
+
+@app.get("/api/email/mensagens/{mensagem_id}")
+def email_mensagem(mensagem_id: int,
+                   usuario: dict = Depends(auth.requer_tela("EML_1.1"))):
+    linha = banco.um(
+        """SELECT e.*, c.nome AS cliente_nome
+             FROM email_mensagem e
+             LEFT JOIN cliente c ON c.id = e.cliente_id
+            WHERE e.id = %s""", (mensagem_id,))
+    if not linha:
+        raise HTTPException(status_code=404, detail="Mensagem não encontrada.")
+    # `bruto` nunca vai para a tela: ela desenha com texto/html.
+    linha.pop("bruto", None)
+    return linha
+
+
+@app.post("/api/email/ler")
+def email_ler(usuario: dict = Depends(auth.requer_tela("EML_1.1"))):
+    """Busca o que ainda não temos. Devolve FLUXO, não estoque."""
+    try:
+        return gmail.ler()
+    except gmail.GmailIndisponivel as e:
+        raise HTTPException(status_code=503, detail=str(e))
+
+
+@app.get("/api/email/autorizar")
+def email_autorizar(usuario: dict = Depends(auth.requer_tela("CFG_1.1"))):
+    """Pede consentimento para LER a caixa. Só o owner, e só de propósito."""
+    if not google_auth.configurado():
+        raise HTTPException(status_code=503, detail="Google não configurado.")
+    return {"url": google_auth.url_da_caixa()}
+
+
 @app.get("/api/auth/google/callback")
 def google_callback(code: str = "", state: str = "", error: str = ""):
     """Volta do Google e entrega a sessão à tela.
@@ -487,12 +554,36 @@ def google_callback(code: str = "", state: str = "", error: str = ""):
     destino = f"https://{settings.dominio}/login"
     if error or not code:
         return RedirectResponse(f"{destino}#erro=Entrada+cancelada", status_code=302)
+    from urllib.parse import quote
+
+    # 🚨 O MESMO callback serve aos dois fluxos -- o Google só aceita uma URI
+    # de redirecionamento por cliente. Quem diz qual é o `state`: o de caixa
+    # tem tipo próprio, e autorizar caixa NÃO cria sessão.
+    if google_auth._e_state_de_caixa(state):
+        try:
+            caixa = google_auth.conectar_caixa(code, state)
+        except google_auth.GoogleRecusado as e:
+            return RedirectResponse(f"https://{settings.dominio}/config/canais"
+                                    f"#erro={quote(str(e))}", status_code=302)
+        return RedirectResponse(f"https://{settings.dominio}/config/canais"
+                                f"#ok={quote(caixa['endereco'])}", status_code=302)
+
     try:
         resultado = google_auth.entrar(code, state)
     except google_auth.GoogleRecusado as e:
-        from urllib.parse import quote
         return RedirectResponse(f"{destino}#erro={quote(str(e))}", status_code=302)
     return RedirectResponse(f"{destino}#t={resultado['token']}", status_code=302)
+
+
+@app.get("/api/agenda/hoje")
+def agenda_de_hoje(usuario: dict = Depends(auth.requer_tela("INI_1.1"))):
+    """Os compromissos de hoje.
+
+    🚨 ROTA SEPARADA DE PROPÓSITO. Se estivesse dentro de `/api/inicio`, uma
+    falha do Google -- ou o escopo ainda não concedido -- derrubaria a tela
+    inicial inteira. Assim a agenda some e o resto continua.
+    """
+    return agenda_google.hoje()
 
 
 @app.get("/api/inicio")

@@ -15,6 +15,16 @@ class TestIntegridadeDoRegistro:
         codigos = [t["codigo"] for t in telas.TELAS]
         assert len(codigos) == len(set(codigos)), "código repetido no registro"
 
+    def test_codigo_aposentado_nunca_volta(self):
+        """🚨 Reaproveitar código faria o log antigo mentir.
+
+        ATD_4.1 era do e-mail na fase 2; virou EML_1.1 em 10/08, quando o
+        usuário decidiu que e-mail não se mistura com WhatsApp.
+        """
+        vivos = {t["codigo"] for t in telas.TELAS}
+        assert not (vivos & telas.CODIGOS_APOSENTADOS), (
+            f"código aposentado voltou: {vivos & telas.CODIGOS_APOSENTADOS}")
+
     def test_rotas_sao_unicas(self):
         rotas = [t["rota"] for t in telas.TELAS]
         assert len(rotas) == len(set(rotas)), "duas telas na mesma rota"
@@ -25,7 +35,7 @@ class TestIntegridadeDoRegistro:
             # INI entrou em 10/08 com a tela inicial: é a porta de entrada,
             # não atendimento nem cadastro. Prefixo novo se registra AQUI --
             # é este teste que impede código inventado passar despercebido.
-            assert modulo in {"INI", "ATD", "CAD", "CFG", "REL"}, t["codigo"]
+            assert modulo in {"INI", "EML", "ATD", "CAD", "CFG", "REL"}, t["codigo"]
             assert numero, t["codigo"]
             for parte in numero.split("."):
                 assert parte.isdigit(), f"{t['codigo']}: parte não numérica"
@@ -65,7 +75,12 @@ class TestBusca:
         A guarda continua valendo para as que seguem reservadas -- e foi ela
         que acusou a mudança, que é exatamente o trabalho dela."""
         codigos_ativos = {t["codigo"] for t in telas.ativas()}
-        for reservada in ("ATD_4.1", "CFG_2.2", "REL_1.1"):
+        # ⚠️ A `ATD_4.1` SAIU desta lista em 10/08 -- e não porque subiu, como
+        # a ATD_3.1: ela foi APOSENTADA. Era o e-mail dentro do módulo de
+        # atendimento; o usuário decidiu que e-mail JAMAIS se mistura com
+        # WhatsApp, e o e-mail virou EML_1.1, módulo próprio. O código não
+        # volta -- está em CODIGOS_APOSENTADOS, com teste próprio.
+        for reservada in ("CFG_2.2", "REL_1.1"):
             assert reservada in telas.CODIGOS_VALIDOS, \
                 f"{reservada}: o código precisa continuar reservado"
             assert reservada not in codigos_ativos, \

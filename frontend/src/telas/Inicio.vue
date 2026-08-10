@@ -21,6 +21,7 @@ import { sessao } from '../estado/sessao.js'
 
 const router = useRouter()
 const dados = ref(null)
+const agenda = ref(null)
 const erro = ref('')
 let relogio = null
 
@@ -42,6 +43,28 @@ async function carregar() {
   } catch {
     erro.value = 'Não consegui ler o estado do painel.'
   }
+  /* 🚨 A agenda é buscada à parte e NUNCA derruba a tela: é complemento. Se
+     o Google estiver fora, ou a permissão não tiver sido concedida, a faixa
+     some e conversas e canais continuam aparecendo. */
+  try {
+    agenda.value = await api.get('/api/agenda/hoje')
+  } catch {
+    agenda.value = null
+  }
+}
+
+function hora(iso, diaInteiro) {
+  if (!iso) return ''
+  if (diaInteiro) return 'dia todo'
+  return new Date(iso).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+}
+
+/* "agora" é o compromisso que já começou e ainda não acabou pela próxima
+   hora -- é o que a pessoa precisa ver primeiro ao abrir o painel. */
+function acontecendo(e) {
+  if (e.dia_inteiro || !e.quando) return false
+  const d = new Date(e.quando)
+  return d <= new Date() && new Date() - d < 3600000
 }
 
 function quando(iso) {
@@ -92,6 +115,23 @@ onUnmounted(() => clearInterval(relogio))
           <span class="inicio__rotulo">{{ item.rotulo }}</span>
           <span v-if="item.nota" class="inicio__nota">{{ item.nota }}</span>
         </button>
+      </section>
+
+      <!-- ── a agenda de hoje ────────────────────────────────────────── -->
+      <section v-if="agenda && agenda.eventos.length" class="cartao inicio__bloco">
+        <h2 class="inicio__titulo">Hoje</h2>
+        <ul class="inicio__agenda">
+          <li v-for="(e, i) in agenda.eventos" :key="i" class="linha pequeno">
+            <span class="inicio__hora" :class="{ 'inicio__hora--agora': acontecendo(e) }">
+              {{ acontecendo(e) ? 'agora' : hora(e.quando, e.dia_inteiro) }}
+            </span>
+            <strong>{{ e.titulo }}</strong>
+            <span v-if="e.local" class="apagado">· {{ e.local }}</span>
+            <a v-if="e.link" :href="e.link" target="_blank" rel="noopener" class="apagado">
+              <i class="bi bi-camera-video" aria-hidden="true"></i>
+            </a>
+          </li>
+        </ul>
       </section>
 
       <!-- ── os canais estão de pé? ──────────────────────────────────── -->
@@ -182,6 +222,17 @@ onUnmounted(() => clearInterval(relogio))
 .inicio__bloco { padding: var(--e-4); margin-bottom: var(--e-3); }
 .inicio__bloco--alerta { border-color: var(--aviso-borda); background: var(--aviso-suave); }
 .inicio__titulo { font-size: var(--txt-md); margin: 0 0 var(--e-2); }
+
+.inicio__agenda { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--e-1); }
+.inicio__hora {
+  min-width: 54px; flex: none;
+  font-variant-numeric: tabular-nums;
+  color: var(--texto-fraco);
+}
+.inicio__hora--agora {
+  color: var(--acento);
+  font-weight: 700;
+}
 
 .inicio__canais { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--e-1); }
 .inicio__ponto { width: 9px; height: 9px; border-radius: var(--r-full); flex: none; }
