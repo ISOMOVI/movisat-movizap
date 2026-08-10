@@ -17,6 +17,7 @@ permite.
 """
 import base64
 import logging
+import pathlib
 import time
 from datetime import datetime, timezone
 from email.utils import parseaddr, parsedate_to_datetime
@@ -41,6 +42,55 @@ class GmailIndisponivel(Exception):
     """Falha de transporte. NUNCA vira 'não há mensagens'."""
 
 
+CHAVE_SA = pathlib.Path("/home/claude/movizap_painel/.google_sa.json")
+
+ESCOPOS_SA = " ".join([
+    "https://www.googleapis.com/auth/gmail.modify",
+    "https://www.googleapis.com/auth/gmail.send",
+    "https://www.googleapis.com/auth/calendar.readonly",
+])
+
+
+def _token_delegado(endereco: str) -> str:
+    """Token agindo COMO `endereco`, sem consentimento individual.
+
+    🚨 A conta de serviço assina um JWT dizendo "sou eu, e quero agir como
+    fulano" (campo `sub`). É o que permite o time inteiro usar o painel sem
+    cada pessoa autorizar -- e o que faz um atendente novo só precisar existir
+    no cadastro.
+
+    ⚠️ A chave lê e envia e-mail de QUALQUER pessoa do domínio. Ela mora em
+    `.google_sa.json` com permissão 600, fora do git.
+    """
+    import json
+    import time
+
+    from jose import jwt
+
+    if not CHAVE_SA.is_file():
+        raise GmailIndisponivel("Chave da conta de serviço não está no servidor.")
+
+    sa = json.loads(CHAVE_SA.read_text(encoding="utf-8"))
+    agora = int(time.time())
+    assinado = jwt.encode(
+        {"iss": sa["client_email"], "sub": endereco, "scope": ESCOPOS_SA,
+         "aud": sa["token_uri"], "iat": agora, "exp": agora + 3600},
+        sa["private_key"], algorithm="RS256",
+        headers={"kid": sa["private_key_id"]})
+
+    r = httpx.post(sa["token_uri"], timeout=30, data={
+        "grant_type": "urn:ietf:params:oauth:grant-type:jwt-bearer",
+        "assertion": assinado,
+    })
+    if r.status_code != 200:
+        # ⚠️ Nunca registrar o corpo: carrega a asserção assinada.
+        log.warning("delegação recusada para %s: HTTP %s", endereco, r.status_code)
+        raise GmailIndisponivel(
+            f"O Google recusou agir como {endereco}. Confira a delegação "
+            f"em todo o domínio no Admin Console.")
+    return r.json()["access_token"]
+
+
 def _token_de_acesso(conta: dict) -> str:
     """Troca o refresh token por um token de 1 hora.
 
@@ -48,6 +98,13 @@ def _token_de_acesso(conta: dict) -> str:
     Google recusá-lo, a conta é desativada com motivo -- em vez de o serviço
     tentar para sempre e encher o log.
     """
+    # 🚨 OS DOIS CAMINHOS CONVIVEM, de propósito. Conta com token próprio
+    # segue usando o dela; conta sem token usa a delegação. Trocar tudo de uma
+    # vez faria a caixa que JÁ FUNCIONA depender de algo que nunca rodou em
+    # produção -- e a falha apareceria como "caixa vazia", não como erro.
+    if not conta.get("refresh_token"):
+        return _token_delegado(conta["endereco"])
+
     resposta = httpx.post(TROCAR, timeout=20, data={
         "client_id": settings.google_client_id,
         "client_secret": settings.google_client_secret,
@@ -159,6 +216,44 @@ def sincronizar_marcadores(conta: dict, cliente: httpx.Client) -> int:
              "sistema" if m.get("type") == "system" else "usuario"))
         n += 1
     return n
+
+
+def marcar_lida(mensagem_id: int) -> dict:
+    """Tira o `UNREAD` no Gmail, não só na nossa base.
+
+    🚨 SEM ISTO O PAINEL MENTE. Abrir aqui e continuar não-lida lá faz os dois
+    contadores divergirem -- e quem usa os dois desconfia do painel, que é o
+    que faz voltar para a ferramenta antiga.
+
+    ⚠️ Escrita REVERSÍVEL de propósito: é a primeira coisa que o painel altera
+    na caixa de alguém, e marcar lida se desfaz com um clique.
+    """
+    linha = banco.um(
+        """SELECT m.id, m.id_externo, m.lida, c.id AS conta_id, c.endereco,
+                  c.refresh_token
+             FROM email_mensagem m JOIN email_conta c ON c.id = m.conta_id
+            WHERE m.id = %s""", (mensagem_id,))
+    if not linha:
+        return {"ok": False, "motivo": "Mensagem não encontrada."}
+    if linha["lida"]:
+        return {"ok": True, "ja_estava": True}
+
+    token = _token_de_acesso(linha)
+    r = httpx.post(
+        f"{API}/messages/{linha['id_externo']}/modify",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"removeLabelIds": ["UNREAD"]}, timeout=30)
+    if r.status_code != 200:
+        raise GmailIndisponivel(f"O Gmail recusou marcar como lida ({r.status_code}).")
+
+    banco.executar("UPDATE email_mensagem SET lida = true WHERE id = %s",
+                   (mensagem_id,))
+    banco.executar(
+        """DELETE FROM email_mensagem_marcador mm
+            USING email_marcador mk
+            WHERE mk.id = mm.marcador_id AND mm.mensagem_id = %s
+              AND mk.id_externo = 'UNREAD'""", (mensagem_id,))
+    return {"ok": True, "ja_estava": False}
 
 
 def ler(conta_id: int | None = None, limite: int = TETO_POR_EXECUCAO) -> dict:

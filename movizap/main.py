@@ -537,6 +537,15 @@ def email_mensagem(mensagem_id: int,
     return linha
 
 
+@app.post("/api/email/mensagens/{mensagem_id}/lida")
+def email_marcar_lida(mensagem_id: int,
+                      usuario: dict = Depends(auth.requer_tela("EML_1.1"))):
+    try:
+        return gmail.marcar_lida(mensagem_id)
+    except gmail.GmailIndisponivel as e:
+        raise HTTPException(status_code=503, detail=str(e))
+
+
 @app.post("/api/email/ler")
 def email_ler(usuario: dict = Depends(auth.requer_tela("EML_1.1"))):
     """Busca o que ainda não temos. Devolve FLUXO, não estoque."""

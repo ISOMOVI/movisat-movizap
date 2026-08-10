@@ -46,11 +46,16 @@ VALIDADE_STATE = 600          # 10 min: tempo de fazer login, não mais
 # 🚨 SÓ LEITURA, por decisão do usuário em 10/08. Responder e enviar pedem
 # `gmail.send`, que é outro pedido de consentimento -- e só faz sentido quando
 # a tela existir e ele vir o que ela faz.
-ESCOPO_CAIXA = "https://www.googleapis.com/auth/gmail.readonly"
+ESCOPO_CAIXA = " ".join([
+    # ler a caixa
+    "https://www.googleapis.com/auth/gmail.modify",
+    # enviar e responder
+    "https://www.googleapis.com/auth/gmail.send",
+])
+# gmail.modify cobre ler, marcar lida, mover e arquivar. Fica de fora o
+# https://mail.google.com/, que e acesso total inclusive apagar em
+# definitivo: "Excluir" no painel move para a Lixeira, como o Gmail faz.
 
-# ⚠️ A AGENDA VAI NO MESMO CONSENTIMENTO. É o mesmo cliente OAuth e a mesma
-# pessoa; pedir em dois momentos faria consentir duas vezes para a mesma
-# coisa. Só leitura, como o Gmail.
 ESCOPO_AGENDA = "https://www.googleapis.com/auth/calendar.readonly"
 
 

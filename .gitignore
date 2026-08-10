@@ -49,3 +49,8 @@ backups/
 *.db-wal
 *.db-shm
 *.db-journal
+
+# ---- chave da conta de servico (delegacao em todo o dominio) ----
+# 🚨 Le e envia e-mail de QUALQUER pessoa do dominio. Nunca versionar.
+.google_sa.json
+*-sa.json

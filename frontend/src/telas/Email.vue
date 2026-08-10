@@ -113,6 +113,13 @@ async function carregar() {
 async function abrir(id) {
   try {
     aberta.value = await api.get(`/api/email/mensagens/${id}`)
+    /* Marca lida no Gmail, não só aqui. Falha em silêncio: não conseguir
+       marcar não pode impedir a pessoa de LER a mensagem. */
+    const naLista = mensagens.value.find((m) => m.id === id)
+    if (naLista && !naLista.lida) {
+      naLista.lida = true
+      api.post(`/api/email/mensagens/${id}/lida`, {}).catch(() => {})
+    }
   } catch (e) {
     erro.value = e instanceof ErroDeApi ? e.message : 'Não consegui abrir.'
   }
