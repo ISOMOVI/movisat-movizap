@@ -906,7 +906,7 @@ function carregarMidiasDaConversa(c) {
    conversa e não tem rota. É o equivalente a clicar no contato no WhatsApp. */
 .gaveta {
   border: var(--borda-fina) solid var(--borda);
-  border-radius: var(--raio-2);
+  border-radius: var(--r-md);
   background: var(--superficie-2);
   padding: var(--e-3);
   margin-bottom: var(--e-3);
@@ -954,7 +954,7 @@ function carregarMidiasDaConversa(c) {
   gap: 2px;
   padding: var(--e-2);
   border: var(--borda-fina) solid var(--borda);
-  border-radius: var(--raio-1);
+  border-radius: var(--r-sm);
   background: var(--superficie);
 }
 .gaveta__achado {
@@ -972,7 +972,7 @@ function carregarMidiasDaConversa(c) {
   max-width: 100%;
   max-height: 320px;
   width: auto;
-  border-radius: var(--raio-2);
+  border-radius: var(--r-md);
   margin-bottom: var(--e-2);
   background: var(--superficie-2);
 }
@@ -988,7 +988,7 @@ function carregarMidiasDaConversa(c) {
   padding: var(--e-1) var(--e-2);
   margin-bottom: var(--e-2);
   background: var(--superficie-2);
-  border-radius: var(--raio-1);
+  border-radius: var(--r-sm);
   color: var(--texto-fraco);
   overflow-wrap: anywhere;
 }

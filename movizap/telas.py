@@ -17,6 +17,19 @@ Ver `docs/03_Registro_Telas.md`.
 # `fase` documenta quando a tela entra. Só as de fase 1 sobem agora; as demais
 # ficam registradas para o código já estar reservado e nunca ser reusado.
 TELAS = [
+    # ---- INI: a porta de entrada ----
+    # 🚨 PRIMEIRA DA LISTA DE PROPÓSITO. A rota `/` do frontend redireciona
+    # para `sessao.telas[0].rota` -- ser a primeira é o que faz esta tela ser
+    # o destino de todo login, por senha ou pelo Google.
+    {
+        "codigo": "INI_1.1",
+        "titulo": "Início",
+        "rota": "/inicio",
+        "icone": "bi-house",
+        "descricao": "O que precisa de gente agora.",
+        "permissao": "atendimento",
+        "fase": 1,
+    },
     # ---- ATD: atendimento ----
     {
         "codigo": "ATD_1.1",

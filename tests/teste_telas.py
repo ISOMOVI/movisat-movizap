@@ -22,7 +22,10 @@ class TestIntegridadeDoRegistro:
     def test_todo_codigo_segue_o_formato(self):
         for t in telas.TELAS:
             modulo, _, numero = t["codigo"].partition("_")
-            assert modulo in {"ATD", "CAD", "CFG", "REL"}, t["codigo"]
+            # INI entrou em 10/08 com a tela inicial: é a porta de entrada,
+            # não atendimento nem cadastro. Prefixo novo se registra AQUI --
+            # é este teste que impede código inventado passar despercebido.
+            assert modulo in {"INI", "ATD", "CAD", "CFG", "REL"}, t["codigo"]
             assert numero, t["codigo"]
             for parte in numero.split("."):
                 assert parte.isdigit(), f"{t['codigo']}: parte não numérica"

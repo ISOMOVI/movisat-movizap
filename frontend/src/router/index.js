@@ -24,6 +24,7 @@ import { sessao, autenticado, codigosPermitidos, restaurar } from '../estado/ses
 import { temToken } from '../api/cliente.js'
 
 import Login from '../telas/Login.vue'
+import Inicio from '../telas/Inicio.vue'
 import Canais from '../telas/Canais.vue'
 import Clientes from '../telas/Clientes.vue'
 import Contatos from '../telas/Contatos.vue'
@@ -46,6 +47,13 @@ const rotas = [
     name: 'login',
     component: Login,
     meta: { publica: true, titulo: 'Entrar' },
+  },
+
+  {
+    path: '/inicio',
+    name: 'INI_1.1',
+    component: Inicio,
+    meta: { codigo: 'INI_1.1', titulo: 'Início' },
   },
 
   // ---- ATD: atendimento ----

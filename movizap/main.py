@@ -21,6 +21,7 @@ from . import canais as registro_canais
 from . import conversas
 from . import evolution
 from . import google_auth
+from . import inicio as tela_inicial
 from . import informativos
 from . import midia
 from . import operacao
@@ -492,6 +493,12 @@ def google_callback(code: str = "", state: str = "", error: str = ""):
         from urllib.parse import quote
         return RedirectResponse(f"{destino}#erro={quote(str(e))}", status_code=302)
     return RedirectResponse(f"{destino}#t={resultado['token']}", status_code=302)
+
+
+@app.get("/api/inicio")
+def estado_inicial(usuario: dict = Depends(auth.requer_tela("INI_1.1"))):
+    """INI_1.1 — o que precisa de gente agora."""
+    return tela_inicial.resumo(_atendente_do_usuario(usuario))
 
 
 @app.get("/api/conversas/resumo")
