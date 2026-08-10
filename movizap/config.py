@@ -44,6 +44,15 @@ class Settings:
     admin_login: str = _ler("MOVIZAP_ADMIN_LOGIN")
     admin_senha_hash: str = _ler("MOVIZAP_ADMIN_SENHA_HASH")
 
+    # Entrada pelo Google. Sem estes valores o botão não aparece na tela --
+    # botão que não funciona rende chamado.
+    google_client_id: str = _ler("MOVIZAP_GOOGLE_CLIENT_ID")
+    google_client_secret: str = _ler("MOVIZAP_GOOGLE_CLIENT_SECRET")
+    google_redirect: str = _ler(
+        "MOVIZAP_GOOGLE_REDIRECT",
+        "https://movizap.movisat.com.br/api/auth/google/callback")
+    google_dominio: str = _ler("MOVIZAP_GOOGLE_DOMINIO", "movisat.com.br")
+
     fpsl_base_url: str = _ler("FPSL_BASE_URL", "http://127.0.0.1:8005")
 
     # ---- banco (migração 001, 2026-08-05) ----

@@ -107,6 +107,37 @@ async function pedir(metodo, caminho, corpo) {
   )
 }
 
+/* Busca um arquivo protegido e devolve um Blob.
+
+   🚨 NÃO DÁ PARA USAR <img src="/api/midia/1/ver">. O token vive no cabeçalho
+   Authorization, e o navegador não manda cabeçalho em `src` -- a imagem
+   voltaria 401 e o atendente veria um ícone quebrado sem explicação. Por isso
+   o binário vem por fetch e vira object URL. */
+export async function pedirBlob(caminho) {
+  const cabecalhos = {}
+  if (token) cabecalhos.Authorization = `Bearer ${token}`
+
+  rede.emVoo += 1
+  let resposta
+  try {
+    resposta = await fetch(caminho, { headers: cabecalhos })
+  } catch {
+    rede.emVoo -= 1
+    throw new ErroDeApi('Sem resposta do servidor.', 0, '')
+  }
+  rede.emVoo -= 1
+
+  if (resposta.status === 401) {
+    definirToken('')
+    aoPerderSessao()
+  }
+  if (!resposta.ok) {
+    throw new ErroDeApi(`Não consegui buscar o arquivo (${resposta.status}).`,
+                        resposta.status, '')
+  }
+  return await resposta.blob()
+}
+
 export const api = {
   get: (caminho) => pedir('GET', caminho),
   post: (caminho, corpo) => pedir('POST', caminho, corpo ?? {}),

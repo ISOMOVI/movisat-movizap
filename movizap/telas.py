@@ -81,7 +81,7 @@ TELAS = [
         "rota": "/cadastro/atendentes",
         "icone": "bi-people",
         "descricao": "Contas do painel e o que cada uma enxerga.",
-        "permissao": "admin",
+        "permissao": "owner",
         "fase": 1,
     },
     {
@@ -90,7 +90,7 @@ TELAS = [
         "rota": "/cadastro/times",
         "icone": "bi-diagram-2",
         "descricao": "Times que recebem transferência.",
-        "permissao": "admin",
+        "permissao": "owner",
         "fase": 1,
     },
     # ---- CFG: configuração ----
@@ -100,7 +100,7 @@ TELAS = [
         "rota": "/config/canais",
         "icone": "bi-whatsapp",
         "descricao": "Conectar e acompanhar os números de WhatsApp.",
-        "permissao": "admin",
+        "permissao": "owner",
         "fase": 1,
     },
     {
@@ -109,7 +109,7 @@ TELAS = [
         "rota": "/config/ia/prompt",
         "icone": "bi-robot",
         "descricao": "Versões do prompt e o que a IA pode fazer.",
-        "permissao": "admin",
+        "permissao": "owner",
         "fase": 1,
     },
     {
@@ -118,7 +118,7 @@ TELAS = [
         "rota": "/config/sync",
         "icone": "bi-arrow-repeat",
         "descricao": "Leitura do Harmonit: a cada 12h e sob demanda.",
-        "permissao": "admin",
+        "permissao": "owner",
         "fase": 1,
     },
     {
@@ -127,7 +127,7 @@ TELAS = [
         "rota": "/config/classificacoes",
         "icone": "bi-tags",
         "descricao": "Motivos de fechamento de conversa.",
-        "permissao": "admin",
+        "permissao": "owner",
         "fase": 1,
     },
     {

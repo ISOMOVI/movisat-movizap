@@ -10,7 +10,7 @@ import time
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, HTTPException, Request, status
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -20,7 +20,9 @@ from . import cadastro
 from . import canais as registro_canais
 from . import conversas
 from . import evolution
+from . import google_auth
 from . import informativos
+from . import midia
 from . import operacao
 from . import prompt as prompt_ia
 from . import ratelimit
@@ -412,6 +414,86 @@ async def sincronizar_agora(request: Request,
 
 # ------------------------------------------------ atendimento (ATD_1.1/1.2/1.3)
 
+# 🚨 AS ROTAS LITERAIS DE /api/conversas VÊM ANTES DE {conversa_id}.
+# Declarada depois, `/api/conversas/buscar-empresa` casa com o parâmetro e
+# o FastAPI tenta ler "buscar-empresa" como inteiro: 422, e a gaveta recebe
+# um corpo sem `itens` -- "nenhuma empresa" para toda busca, sem erro à
+# vista. É a mesma regra que o roteador do Vue já carrega para
+# /atendimento/fila, cometida de novo aqui.
+@app.get("/api/conversas/{conversa_id}/empresas")
+def empresas_da_conversa(conversa_id: int,
+                         usuario: dict = Depends(auth.requer_tela("ATD_1.2"))):
+    """As empresas que o telefone desta conversa alcança.
+
+    🚨 Vem por rota própria, e não dentro do detalhe da conversa, porque é
+    consulta sob demanda: a maioria das conversas tem uma empresa só, e
+    carregar o grupo inteiro em toda abertura seria trabalho por nada.
+    """
+    return conversas.empresas_do_telefone(conversa_id)
+
+
+@app.get("/api/conversas/buscar-empresa")
+def buscar_empresa_para_vincular(
+        termo: str = "",
+        usuario: dict = Depends(auth.requer_tela("ATD_1.2"))):
+    """Procura empresa para vincular ao número, de dentro da conversa.
+
+    🚨 EXISTE PORQUE A PERMISSÃO MUDOU. `/api/clientes` é CAD_1.1, que o perfil
+    `atendimento` não tem desde 10/08 -- a gaveta tomaria 403 ao buscar. Esta
+    rota devolve só o que a ficha mostra, com teto de 10, e não substitui a
+    tela de cadastro.
+
+    ⚠️ Termo com menos de 2 caracteres devolve vazio em vez de a base inteira:
+    uma letra casaria com quase tudo e a lista não ajudaria ninguém.
+    """
+    termo = (termo or "").strip()
+    if len(termo) < 2:
+        return {"itens": []}
+    achados = cadastro.listar_clientes(termo, pagina=1, por_pagina=10)
+    return {
+        "itens": [
+            {"id": c["id"], "nome": c["nome"], "documento": c.get("documento"),
+             "ativo": c.get("ativo")}
+            for c in achados.get("itens", [])
+        ],
+        "interpretacao": achados.get("interpretacao"),
+    }
+
+
+@app.get("/api/auth/google/disponivel")
+def google_disponivel():
+    """A tela pergunta antes de desenhar o botão. Rota pública de propósito:
+    é o que a tela de login precisa saber ANTES de haver sessão."""
+    return {"disponivel": google_auth.configurado()}
+
+
+@app.get("/api/auth/google/inicio")
+def google_inicio():
+    if not google_auth.configurado():
+        raise HTTPException(status_code=503,
+                            detail="Entrada pelo Google não está configurada.")
+    return RedirectResponse(google_auth.url_de_entrada(), status_code=302)
+
+
+@app.get("/api/auth/google/callback")
+def google_callback(code: str = "", state: str = "", error: str = ""):
+    """Volta do Google e entrega a sessão à tela.
+
+    🚨 O token vai no FRAGMENTO da URL (`#t=`), não na query. Fragmento não é
+    enviado ao servidor nem entra em log de acesso do nginx; a tela o lê e
+    limpa a barra de endereços em seguida.
+    """
+    destino = f"https://{settings.dominio}/login"
+    if error or not code:
+        return RedirectResponse(f"{destino}#erro=Entrada+cancelada", status_code=302)
+    try:
+        resultado = google_auth.entrar(code, state)
+    except google_auth.GoogleRecusado as e:
+        from urllib.parse import quote
+        return RedirectResponse(f"{destino}#erro={quote(str(e))}", status_code=302)
+    return RedirectResponse(f"{destino}#t={resultado['token']}", status_code=302)
+
+
 @app.get("/api/conversas/resumo")
 def resumo_das_conversas(usuario: dict = Depends(auth.requer_tela("ATD_1.1"))):
     """🚨 `eventos_pendentes` e `eventos_com_erro` vêm junto de propósito. Sem
@@ -429,6 +511,40 @@ def listar_conversas(estado: str | None = None, sem_dono: bool = False,
         atendente_id=_atendente_do_usuario(usuario) if minhas else None)
 
 
+@app.get("/api/midia/{midia_id}")
+def baixar_midia(midia_id: int,
+                 usuario: dict = Depends(auth.requer_tela("ATD_1.2"))):
+    """O arquivo que o cliente mandou.
+
+    🚨 PASSA PELA API, não pelo nginx. Servir a pasta direto deixaria qualquer
+    um com o link ver anexo de cliente sem token nenhum -- e o link vaza no
+    histórico do navegador, no print, no grupo de WhatsApp. Aqui vale a mesma
+    permissão da tela de conversa.
+
+    ⚠️ `Content-Disposition: attachment` é o que faz o botão "baixar" baixar
+    em vez de abrir. A tela mostra a imagem por outro caminho (`?ver=1`).
+    """
+    linha = midia.arquivo(midia_id)
+    if not linha:
+        raise HTTPException(status_code=404, detail="Mídia não encontrada.")
+    return FileResponse(
+        linha["caminho"],
+        media_type=linha["mime"] or "application/octet-stream",
+        filename=midia.nome_para_baixar(linha),
+    )
+
+
+@app.get("/api/midia/{midia_id}/ver")
+def ver_midia(midia_id: int,
+              usuario: dict = Depends(auth.requer_tela("ATD_1.2"))):
+    """A mesma mídia, para aparecer DENTRO da conversa em vez de baixar."""
+    linha = midia.arquivo(midia_id)
+    if not linha:
+        raise HTTPException(status_code=404, detail="Mídia não encontrada.")
+    return FileResponse(linha["caminho"],
+                        media_type=linha["mime"] or "application/octet-stream")
+
+
 @app.get("/api/conversas/{conversa_id}")
 def ver_conversa(conversa_id: int,
                  usuario: dict = Depends(auth.requer_tela("ATD_1.2"))):
@@ -436,6 +552,34 @@ def ver_conversa(conversa_id: int,
     if not achada:
         raise HTTPException(status_code=404, detail="Conversa não encontrada.")
     return achada
+
+
+class Vinculo(BaseModel):
+    cliente_id: int | None = None
+    contato_id: int | None = None
+
+
+@app.post("/api/conversas/{conversa_id}/vincular")
+def vincular_conversa(conversa_id: int, corpo: Vinculo,
+                      usuario: dict = Depends(auth.requer_tela("ATD_1.2"))):
+    """Diz de quem é este número, do painel lateral.
+
+    Fica em ATD_1.2 e não em CAD_1.2 de propósito: quem descobre de quem é o
+    número é quem está atendendo, na hora da conversa.
+    """
+    resultado = conversas.vincular(conversa_id, corpo.cliente_id, corpo.contato_id)
+    if not resultado.get("ok"):
+        raise HTTPException(status_code=400, detail=resultado.get("motivo"))
+    return resultado
+
+
+@app.post("/api/conversas/{conversa_id}/desvincular")
+def desvincular_conversa(conversa_id: int,
+                         usuario: dict = Depends(auth.requer_tela("ATD_1.2"))):
+    resultado = conversas.desvincular(conversa_id)
+    if not resultado.get("ok"):
+        raise HTTPException(status_code=404, detail=resultado.get("motivo"))
+    return resultado
 
 
 @app.post("/api/conversas/{conversa_id}/assumir")

@@ -37,16 +37,8 @@ import Classificacoes from '../telas/Classificacoes.vue'
 import IaPrompt from '../telas/IaPrompt.vue'
 import Sincronizacao from '../telas/Sincronizacao.vue'
 import RegistroDeTelas from '../telas/RegistroDeTelas.vue'
-import EmConstrucao from '../telas/EmConstrucao.vue'
 import SemPermissao from '../telas/SemPermissao.vue'
 import NaoEncontrada from '../telas/NaoEncontrada.vue'
-
-/** Atalho: tela de fase 1 ainda sem implementação, mas já com código e barra. */
-const emObra = (codigo, titulo, oQueVemAqui) => ({
-  component: EmConstrucao,
-  meta: { codigo, titulo },
-  props: { codigo, titulo, oQueVemAqui },
-})
 
 const rotas = [
   {

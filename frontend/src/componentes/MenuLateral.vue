@@ -13,7 +13,6 @@ import { computed } from 'vue'
 import { useRouter } from 'vue-router'
 
 import { sessao, sair } from '../estado/sessao.js'
-import { tema, alternarTema } from '../estado/tema.js'
 
 const router = useRouter()
 
@@ -77,18 +76,6 @@ function encerrar() {
     </nav>
 
     <div class="menu__rodape">
-      <button
-        class="botao botao--fantasma menu__acao"
-        type="button"
-        @click="alternarTema"
-        :title="'Tema: ' + tema.preferencia"
-      >
-        <i class="bi" :class="tema.resolvido === 'escuro' ? 'bi-sun' : 'bi-moon-stars'" aria-hidden="true"></i>
-        <span class="menu__acao-texto">
-          {{ tema.resolvido === 'escuro' ? 'Tema claro' : 'Tema escuro' }}
-        </span>
-      </button>
-
       <button class="botao botao--contorno menu__acao" type="button" @click="encerrar">
         <i class="bi bi-box-arrow-left" aria-hidden="true"></i>
         <span class="menu__acao-texto">Sair</span>

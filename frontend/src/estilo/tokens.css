@@ -8,9 +8,10 @@
    REGRA: nenhuma tela escreve cor, tamanho de fonte, raio ou espaçamento na
    mão. Se um valor não existe aqui, ou ele vira token, ou não entra.
 
-   O tema é resolvido em JS e gravado em <html data-tema="claro|escuro"> antes
-   da primeira pintura (ver o script no index.html). Por isso aqui não há
-   @media prefers-color-scheme: um valor só, num lugar só.
+   TEMA ÚNICO, CLARO. O escuro foi removido em 10/08 a pedido do usuário.
+   Não há data-tema, não há @media prefers-color-scheme: um valor só, num
+   lugar só. O menu lateral segue escuro pelos tokens --menu-*, que nunca
+   seguiram o tema.
    ============================================================================ */
 
 :root {
@@ -82,8 +83,7 @@
    o padrão visual da casa; três painéis com "quase a mesma cor" é pior que
    três painéis diferentes, porque parece defeito em vez de escolha.
    ========================================================================== */
-:root,
-:root[data-tema="claro"] {
+:root {
   color-scheme: light;
 
   --fundo:        #F8FAFC;  /* = --bg  do MoviChat */
@@ -133,57 +133,4 @@
   --sombra-2: 0 8px 24px rgba(15, 23, 42, .12), 0 2px 6px rgba(15, 23, 42, .06);
 
   --foco: 0 0 0 3px rgba(37, 99, 235, .28);
-}
-
-/* ==========================================================================
-   TEMA ESCURO — herda a paleta já validada no painel do MoviServer
-   ========================================================================== */
-:root[data-tema="escuro"] {
-  color-scheme: dark;
-
-  --fundo:        #0d1117;
-  --superficie:   #161b22;
-  --superficie-2: #1c222b;
-  --superficie-3: #262d38;
-
-  --borda:        #30363d;
-  --borda-forte:  #48505b;
-
-  --texto:        #e6edf3;
-  --texto-fraco:  #9aa4b1;
-  --texto-apagado:#6e7781;
-
-  --acento:        #2f81f7;
-  --acento-hover:  #4b95fb;
-  --acento-suave:  rgba(47, 129, 247, .16);
-  --acento-borda:  rgba(47, 129, 247, .45);
-  --acento-texto:  #04122a;
-
-  --ok:        #3fb950;
-  --ok-suave:  rgba(63, 185, 80, .16);
-  --ok-borda:  rgba(63, 185, 80, .40);
-
-  --aviso:       #d29922;
-  --aviso-suave: rgba(210, 153, 34, .15);
-  --aviso-borda: rgba(210, 153, 34, .42);
-
-  --erro:        #f85149;
-  --erro-suave:  rgba(248, 81, 73, .14);
-  --erro-borda:  rgba(248, 81, 73, .42);
-
-  --info:        #58a6ff;
-  --info-suave:  rgba(88, 166, 255, .14);
-  --info-borda:  rgba(88, 166, 255, .42);
-
-  /* No escuro o menu já é escuro: segue a superfície, sem contraste extra. */
-  --menu-fundo:       #0d1117;
-  --menu-texto:       #9aa4b1;
-  --menu-texto-forte: #e6edf3;
-  --menu-hover:       rgba(255, 255, 255, .06);
-  --menu-borda:       #30363d;
-
-  --sombra-1: 0 1px 2px rgba(0, 0, 0, .40);
-  --sombra-2: 0 8px 24px rgba(0, 0, 0, .48);
-
-  --foco: 0 0 0 3px rgba(47, 129, 247, .40);
 }

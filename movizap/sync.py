@@ -470,7 +470,12 @@ def _executar(origem: str, atendente_id: int | None,
             bruto = harmonit.obter_cliente(apenas_id)
             paginas = [] if bruto is None else [(0, [bruto])]
         else:
-            paginas = harmonit.paginar_clientes(limite=limite)
+            # 🚨 SÓ OS ATIVOS. Decisão do usuário em 10/08: empresa
+            # inativa não faz parte desta base -- ela não escreve, e se
+            # escrever entra como não identificada, que é o caso normal.
+            # Sem este filtro as 106 inativas apagadas voltariam às 17:45.
+            paginas = harmonit.paginar_clientes(somente_ativos=True,
+                                                limite=limite)
 
         # ── PASSAGEM 1: cliente e contato, e a coleta dos telefones ─────────
         #

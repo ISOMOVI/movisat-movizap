@@ -75,9 +75,15 @@ def listar_times(incluir_inativos: bool = False) -> list[dict]:
           LEFT JOIN time tr ON tr.id = t.time_transbordo_id
           LEFT JOIN (
                 SELECT at.time_id,
-                       COUNT(*) AS qtd,
+                       -- 🚨 CONTA SÓ QUEM PODE RECEBER. `qtd_membros` responde
+                       -- "transferir para este time chega em alguém?", e o
+                       -- owner não recebe transferência (decisão de 10/08).
+                       -- Contá-lo faria um time onde só ele está parecer
+                       -- atendido -- e a conversa sumiria.
+                       COUNT(*) FILTER (WHERE a.transferivel) AS qtd,
                        json_agg(json_build_object('id', a.id, 'nome', a.nome,
-                                                  'ativo', a.ativo)
+                                                  'ativo', a.ativo,
+                                                  'transferivel', a.transferivel)
                                 ORDER BY a.nome) AS membros
                   FROM atendente_time at
                   JOIN atendente a ON a.id = at.atendente_id

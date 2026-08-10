@@ -186,10 +186,23 @@ class TestFronteiraDoSync:
 
 class TestSemente:
     def test_os_sete_times_do_chatwoot(self, cur):
+        """Os sete vieram do Chatwoot; os NOMES foram padronizados em 10/08.
+
+        Chegaram como `agendamento` (minúscula) e `Pós Venda` (sem hífen),
+        misturados com cinco em maiúscula. Nome de time aparece na tela de
+        transferência e vai virar entrada da IA: grafia inconsistente ali é
+        ruído que se propaga.
+        """
         cur.execute("SELECT nome FROM time ORDER BY id")
         assert [r[0] for r in cur.fetchall()] == [
             "Contratual", "Comercial", "Financeiro", "Suporte",
-            "Geral", "Pós Venda", "agendamento"]
+            "Geral", "Pós-venda", "Agendamento"]
+
+    def test_nome_de_time_comeca_com_maiuscula(self, cur):
+        """Trava a padronização: foi corrigida à mão uma vez, não duas."""
+        cur.execute("SELECT nome FROM time")
+        fora = [r[0] for r in cur.fetchall() if not r[0][:1].isupper()]
+        assert fora == [], f"time com nome fora do padrão: {fora}"
 
     def test_todo_time_tem_descricao(self, cur):
         # 🚨 a descricao e ENTRADA DA IA: time sem ela = IA chutando

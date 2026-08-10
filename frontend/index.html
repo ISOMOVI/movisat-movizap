@@ -1,9 +1,9 @@
 <!doctype html>
-<html lang="pt-BR" data-tema="claro">
+<html lang="pt-BR">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="color-scheme" content="light dark" />
+    <meta name="color-scheme" content="light" />
     <meta name="robots" content="noindex, nofollow" />
     <title>MoviZap</title>
 
@@ -17,27 +17,6 @@
       href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%231a7f37'/%3E%3Cpath d='M9 8H23v3.2L13.7 20.8H23V24H9v-3.2L18.3 11.2H9Z' fill='%23fff'/%3E%3C/svg%3E"
     />
 
-    <!--
-      Tema aplicado ANTES da primeira pintura. Sem isto, o painel pisca branco a
-      cada carga para quem usa tema escuro — e este painel fica aberto o dia
-      inteiro. A regra é a mesma de src/estado/tema.js: é a única duplicação
-      aceita no projeto, e existe porque o JS do app só roda depois da pintura.
-    -->
-    <script>
-      (function () {
-        try {
-          var p = localStorage.getItem('movizap.tema');
-          // Padrao CLARO: so escurece se foi escolhido, ou se a escolha foi
-          // 'sistema' E o sistema esta no escuro. Ausencia de valor = claro.
-          var escuro =
-            p === 'escuro' ||
-            (p === 'sistema' && window.matchMedia('(prefers-color-scheme: dark)').matches);
-          document.documentElement.setAttribute('data-tema', escuro ? 'escuro' : 'claro');
-        } catch (e) {
-          /* localStorage bloqueado: fica no claro, que e o padrao */
-        }
-      })();
-    </script>
   </head>
   <body>
     <div id="app"></div>

@@ -159,9 +159,25 @@ class TestBuscaDeCliente:
         assert r["por_pagina"] == cadastro.POR_PAGINA_MAX
 
     def test_apenas_ativos_filtra_de_verdade(self):
-        todos = cadastro.listar_clientes()["total"]
-        ativos = cadastro.listar_clientes(apenas_ativos=True)["total"]
-        assert 0 < ativos < todos, "o filtro não mudou nada -- não está filtrando"
+        """🚨 CRIA A PRÓPRIA LINHA INATIVA.
+
+        Este teste passava por acidente: a base tinha 106 clientes inativos
+        vindos do Harmonit. Em 10/08 eles foram apagados por decisão do
+        usuário e o teste caiu -- sem que o filtro tivesse defeito. Depender
+        de dado que outra decisão pode remover é o mesmo erro de 06/08 com a
+        Pastelaria Velasco, em outro lugar.
+        """
+        from movizap import banco
+
+        criado = banco.um(
+            "INSERT INTO cliente (nome, origem, ativo) "
+            "VALUES ('zz_teste_inativo', 'movizap', false) RETURNING id")
+        try:
+            todos = cadastro.listar_clientes()["total"]
+            ativos = cadastro.listar_clientes(apenas_ativos=True)["total"]
+            assert 0 < ativos < todos, "o filtro não mudou nada -- não está filtrando"
+        finally:
+            banco.executar("DELETE FROM cliente WHERE id = %s", (criado["id"],))
 
     def test_tipo_pessoa_tem_descricao_inclusive_o_zero(self):
         r = cadastro.listar_clientes(por_pagina=200)

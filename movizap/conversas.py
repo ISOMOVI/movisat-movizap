@@ -25,7 +25,7 @@ import asyncio
 import logging
 from datetime import datetime, timezone
 
-from . import banco, cadastro, telefone as tel
+from . import banco, cadastro, midia as midia_mod, telefone as tel
 
 log = logging.getLogger("movizap.conversas")
 
@@ -117,6 +117,52 @@ def _tipo_e_texto(mensagem: dict) -> tuple[str, str | None]:
     return "texto", None
 
 
+def _nome_whatsapp(data: dict) -> str | None:
+    """O apelido que a pessoa escolheu no WhatsApp.
+
+    🚨 MEDIDO EM 10/08: `pushName` chega em 721 dos 722 eventos guardados e era
+    descartado inteiro. Ao mesmo tempo 35 das 37 conversas não têm vínculo com
+    o cadastro -- o atendente via um número cru numa tela em que o nome da
+    pessoa já tinha chegado.
+
+    ⚠️ ISTO NÃO IDENTIFICA NINGUÉM. É apelido: a pessoa troca quando quiser e
+    dois desconhecidos podem usar o mesmo. Quem diz de quem é a conversa
+    continua sendo `contato_id`. Guardar os dois separados é o que impede um
+    apelido de virar cadastro.
+
+    Só vale quando NÃO é mensagem nossa: em `fromMe` o `pushName` é o nome do
+    nosso próprio número, e gravá-lo renomearia o cliente com o nome da
+    Movisat.
+    """
+    nome = data.get("pushName")
+    if not isinstance(nome, str):
+        return None
+    nome = nome.strip()
+    return nome[:120] if nome else None
+
+
+def _citada_id(cur, data: dict) -> int | None:
+    """A mensagem que esta está respondendo, se nós a temos.
+
+    🚨 MEDIDO EM 10/08, e o número é MENOR do que parecia: `contextInfo` chega
+    em 392 eventos, mas em 359 deles é `mentionedJid`/`groupMentions`, que não
+    é citação nenhuma. Citação de verdade -- com `stanzaId` -- são **33**.
+    Desses, 32 apontam para mensagem que já está no banco.
+
+    ⚠️ O `stanzaId` pode apontar para mensagem anterior ao painel. Nesse caso
+    fica NULL e a mensagem aparece sem a citação, em vez de sumir.
+    """
+    ctx = data.get("contextInfo")
+    if not isinstance(ctx, dict):
+        return None
+    stanza = ctx.get("stanzaId")
+    if not stanza:
+        return None
+    cur.execute("SELECT id FROM mensagem WHERE id_externo = %s", (stanza,))
+    achada = cur.fetchone()
+    return achada["id"] if achada else None
+
+
 def _contato_do_numero(e164: str) -> int | None:
     """Um dono, ou nenhum. Nunca um chute entre vários."""
     candidatos = cadastro.por_telefone(e164)
@@ -167,11 +213,22 @@ def _gravar_mensagem(cur, evento: dict, corpo: dict) -> str:
     conversa_id = garantir_conversa(cur, evento["canal_id"], e164)
     tipo, texto = _tipo_e_texto(data.get("message") or {})
 
+    # O apelido do WhatsApp, só do lado do cliente. `IS DISTINCT FROM` porque
+    # ele vem igual em toda mensagem: sem isso seriam 700 UPDATEs inúteis.
+    if not de_mim:
+        nome = _nome_whatsapp(data)
+        if nome:
+            cur.execute(
+                """UPDATE conversa
+                      SET nome_whatsapp = %s, nome_whatsapp_em = now()
+                    WHERE id = %s AND nome_whatsapp IS DISTINCT FROM %s""",
+                (nome, conversa_id, nome))
+
     cur.execute(
         """INSERT INTO mensagem
                (conversa_id, id_externo, direcao, autor, tipo, conteudo,
-                entrega, criada_em)
-           VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                entrega, criada_em, citada_id)
+           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
            ON CONFLICT (id_externo) WHERE id_externo IS NOT NULL DO NOTHING
            RETURNING id""",
         (conversa_id, evento["id_externo"],
@@ -179,8 +236,20 @@ def _gravar_mensagem(cur, evento: dict, corpo: dict) -> str:
          "atendente" if de_mim else "cliente",
          tipo, texto,
          ENTREGA.get(str(data.get("status") or "").upper()) if de_mim else None,
-         _quando(data)))
+         _quando(data),
+         _citada_id(cur, data)))
     nova = cur.fetchone()
+
+    # 🚨 A MÍDIA VEM NO PRÓPRIO WEBHOOK, em `message.base64`. Só é guardada
+    # quando a mensagem é NOVA: em reentrega o arquivo já está no disco, e
+    # reescrever seria trabalho por nada em cada repetição do Evolution.
+    if nova is not None:
+        achado = midia_mod.extrair(data.get("message") or {})
+        if achado:
+            midia_id = midia_mod.guardar(cur, conversa_id, achado)
+            if midia_id:
+                cur.execute("UPDATE mensagem SET midia_id = %s WHERE id = %s",
+                            (midia_id, nova["id"]))
 
     # A atividade avança mesmo em reentrega: a conversa continua viva.
     cur.execute(
@@ -332,6 +401,7 @@ def listar(estado: str | None = None, atendente_id: int | None = None,
                ca.nome AS canal_nome,
                u.conteudo AS ultima_mensagem,
                u.direcao  AS ultima_direcao,
+               c.nome_whatsapp,
                u.tipo     AS ultimo_tipo,
                (SELECT COUNT(*) FROM mensagem m2
                  WHERE m2.conversa_id = c.id AND m2.direcao = 'entrada') AS qtd_entrada
@@ -367,6 +437,9 @@ def conversa(conversa_id: int) -> dict | None:
     if not linha:
         return None
     linha["mensagens"] = mensagens(conversa_id)
+    # Os dados da empresa, quando há vínculo. É o conteúdo do painel lateral:
+    # o mesmo que se vê ao clicar no contato dentro do WhatsApp.
+    linha["empresa"] = _empresa_da_conversa(linha)
     # 🚨 Quem NÃO foi identificado precisa dizer por quê: "não é cliente" e
     # "o número responde por 8 cadastros" pedem ações diferentes de quem atende.
     if not linha["contato_id"]:
@@ -377,13 +450,150 @@ def conversa(conversa_id: int) -> dict | None:
     return linha
 
 
+def empresas_do_telefone(conversa_id: int) -> dict:
+    """Todas as empresas que este telefone alcança — o grupo da pessoa.
+
+    🚨 Um telefone em vários cadastros NÃO é ambiguidade. Medido na base: são
+    grupos empresariais com o mesmo responsável -- a pessoa é uma só, as
+    empresas é que são várias. Por isso aqui não se escolhe uma vencedora:
+    devolve-se todas, com CNPJ, para o atendente conferir.
+
+    ⚠️ Empresa inativa não aparece: foram removidas da base em 10/08. Se
+    voltar a existir, o campo `ativo` já vem junto para a tela marcar.
+    """
+    conversa_linha = banco.um(
+        "SELECT telefone_e164 FROM conversa WHERE id = %s", (conversa_id,))
+    if not conversa_linha:
+        return {"empresas": []}
+
+    return {"empresas": banco.varios(
+        """SELECT DISTINCT cl.id, cl.nome, cl.nome_fantasia, cl.documento,
+                  cl.ativo, ct.nome AS contato_nome, ct.id AS contato_id
+             FROM contato_telefone tel
+             JOIN contato ct ON ct.id = tel.contato_id
+             JOIN cliente cl ON cl.id = ct.cliente_id
+            WHERE tel.e164 = %s
+            ORDER BY cl.nome""",
+        (conversa_linha["telefone_e164"],))}
+
+
+def _empresa_da_conversa(conversa: dict) -> dict | None:
+    """Os dados da empresa por trás desta conversa, ou None se não há vínculo.
+
+    ⚠️ SÓ DADO DE EMPRESA. Veículo, contrato e fatura ficam de fora por decisão
+    do usuário em 10/08 -- e quando faltar informação de empresa, ela entra
+    pela planilha, não por endpoint novo. Manter o escopo aqui é o que impede
+    a gaveta de virar um segundo sistema de consulta.
+    """
+    if not conversa.get("contato_id"):
+        return None
+
+    contato = cadastro.contato(conversa["contato_id"])
+    if not contato:
+        return None
+
+    empresa = {"contato": contato, "cliente": None}
+    if contato.get("cliente_id"):
+        empresa["cliente"] = cadastro.cliente(contato["cliente_id"])
+    return empresa
+
+
+def vincular(conversa_id: int, cliente_id: int | None = None,
+             contato_id: int | None = None) -> dict:
+    """Liga esta conversa a um cadastro, à mão, de dentro do atendimento.
+
+    🚨 É AQUI QUE O CADASTRO SE CONSERTA PELO USO. Medido em 07/08: 483 dos 944
+    clientes ativos (51%) estão fora do alcance por CADASTRO INCOMPLETO, não
+    por recusarem WhatsApp. Cada vínculo feito aqui é um telefone que passa a
+    existir -- no lugar onde a informação aparece, por quem está falando com a
+    pessoa.
+
+    O telefone é gravado com `origem_campo = 'atendimento'`, que o separa para
+    sempre do que veio do sync. Sem essa marca não daria para saber, depois, o
+    que o Harmonit trouxe e o que nós afirmamos.
+
+    ⚠️ Vincular por CLIENTE quando ele tem exatamente um contato usa esse
+    contato. Com nenhum ou vários, cria um contato novo com o nome do WhatsApp
+    -- escolher entre vários seria chute, e é a mesma regra que o
+    `_contato_do_numero` já segue do outro lado.
+    """
+    with banco.cursor() as cur:
+        cur.execute("SELECT * FROM conversa WHERE id = %s", (conversa_id,))
+        conversa_linha = cur.fetchone()
+        if not conversa_linha:
+            return {"ok": False, "motivo": "Conversa não encontrada."}
+
+        alvo = contato_id
+        if alvo is None:
+            if cliente_id is None:
+                return {"ok": False, "motivo": "Informe o cliente ou o contato."}
+            cur.execute(
+                "SELECT id FROM contato WHERE cliente_id = %s AND ativo",
+                (cliente_id,))
+            existentes = cur.fetchall()
+            if len(existentes) == 1:
+                alvo = existentes[0]["id"]
+            else:
+                nome = conversa_linha.get("nome_whatsapp") or conversa_linha["telefone_e164"]
+                cur.execute(
+                    """INSERT INTO contato (cliente_id, nome, origem, ativo)
+                       VALUES (%s, %s, 'movizap', true) RETURNING id""",
+                    (cliente_id, nome))
+                alvo = cur.fetchone()["id"]
+
+        cur.execute("SELECT id, cliente_id FROM contato WHERE id = %s", (alvo,))
+        if not cur.fetchone():
+            return {"ok": False, "motivo": "Contato não encontrado."}
+
+        # O telefone passa a existir no cadastro. `ON CONFLICT` porque o número
+        # pode já estar lá por outro caminho -- vincular duas vezes não é erro.
+        cur.execute(
+            """INSERT INTO contato_telefone
+                   (contato_id, e164, bruto, origem_campo, tem_whatsapp,
+                    verificado_em, principal)
+               VALUES (%s, %s, %s, 'atendimento', true, now(), false)
+               ON CONFLICT DO NOTHING""",
+            (alvo, conversa_linha["telefone_e164"], conversa_linha["telefone_e164"]))
+
+        cur.execute(
+            "UPDATE conversa SET contato_id = %s, atualizada_em = now() WHERE id = %s",
+            (alvo, conversa_id))
+
+    log.info("conversa %s vinculada ao contato %s", conversa_id, alvo)
+    return {"ok": True, "contato_id": alvo}
+
+
+def desvincular(conversa_id: int) -> dict:
+    """Desfaz o vínculo da CONVERSA. Não apaga telefone do cadastro.
+
+    ⚠️ De propósito: vincular errado é engano de tela e tem que ser barato de
+    corrigir; apagar telefone é perder informação que alguém digitou. Quem quer
+    tirar o número do cadastro faz isso no cadastro, olhando para ele.
+    """
+    with banco.cursor() as cur:
+        cur.execute(
+            "UPDATE conversa SET contato_id = NULL, atualizada_em = now() "
+            "WHERE id = %s RETURNING id", (conversa_id,))
+        if not cur.fetchone():
+            return {"ok": False, "motivo": "Conversa não encontrada."}
+    return {"ok": True}
+
+
 def mensagens(conversa_id: int, limite: int = 300) -> list[dict]:
     """⚠️ Ordenado pela hora do PROVEDOR, não pela de chegada: fora de ordem é
     normal no WhatsApp, e ordenar por chegada mostraria a conversa embaralhada."""
     return banco.varios(
         """SELECT m.id, m.direcao, m.autor, m.tipo, m.conteudo, m.entrega,
-                  m.criada_em, m.id_externo, a.nome AS atendente_nome
-             FROM mensagem m LEFT JOIN atendente a ON a.id = m.atendente_id
+                  m.criada_em, m.id_externo, a.nome AS atendente_nome,
+                  m.midia_id, md.mime AS midia_mime, md.tamanho AS midia_tamanho,
+                  md.nome_original AS midia_nome,
+                  m.citada_id,
+                  q.conteudo AS citada_conteudo, q.tipo AS citada_tipo,
+                  q.autor    AS citada_autor
+             FROM mensagem m
+             LEFT JOIN atendente a ON a.id = m.atendente_id
+             LEFT JOIN midia md ON md.id = m.midia_id
+             LEFT JOIN mensagem q ON q.id = m.citada_id
             WHERE m.conversa_id = %s
             ORDER BY m.criada_em, m.id
             LIMIT %s""", (conversa_id, limite))
@@ -567,6 +777,17 @@ def fila() -> list[dict]:
 MOTIVOS = ("manual", "inatividade", "ia_triagem", "sem_time")
 
 
+def _recebe_transferencia(cur, atendente_id: int) -> bool:
+    """O owner assume qualquer conversa, mas ninguém transfere PARA ele.
+
+    ⚠️ A tela já não o oferece, mas a API é pública -- e foi assim que o painel
+    de demandas apagou dados em 07/08: a tela nunca fazia aquilo, a rota fazia.
+    """
+    cur.execute("SELECT transferivel FROM atendente WHERE id = %s", (atendente_id,))
+    linha = cur.fetchone()
+    return bool(linha and linha["transferivel"])
+
+
 def transferir(conversa_id: int, time_id: int | None,
                para_atendente_id: int | None, motivo: str = "manual",
                de_atendente_id: int | None = None,
@@ -593,6 +814,12 @@ def transferir(conversa_id: int, time_id: int | None,
                 "motivo": f"Motivo inválido. Vale: {', '.join(MOTIVOS)}."}
 
     with banco.cursor() as cur:
+        # 🚨 Ninguém transfere PARA o owner. A tela já não o oferece, mas a API
+        # é pública -- e foi por confiar na tela que o painel de demandas
+        # apagou dados em 07/08.
+        if para_atendente_id and not _recebe_transferencia(cur, para_atendente_id):
+            return {"ok": False,
+                    "motivo": "Esta pessoa não recebe transferência."}
         cur.execute(
             """UPDATE conversa
                   SET time_id = COALESCE(%s, time_id),

@@ -1,6 +1,6 @@
 <script setup>
 /* ============================================================================
-   Login local — padrão MoviServer (item 13 do escopo). Google OAuth é Fase 2.
+   Login local + entrada pelo Google (10/08).
    ----------------------------------------------------------------------------
    A mensagem de erro é única de propósito, espelhando o backend: não se diz
    se o que estava errado era o login ou a senha.
@@ -9,8 +9,7 @@ import { ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import { entrar } from '../estado/sessao.js'
-import { tema, alternarTema } from '../estado/tema.js'
-import { ErroDeApi } from '../api/cliente.js'
+import { api, definirToken, ErroDeApi } from '../api/cliente.js'
 
 const rota = useRoute()
 const router = useRouter()
@@ -22,7 +21,39 @@ const reqIdDoErro = ref('')
 const enviando = ref(false)
 const campoLogin = ref(null)   // preenchido pelo ref="campoLogin" do template
 
-onMounted(() => campoLogin.value?.focus())
+const googleDisponivel = ref(false)
+
+onMounted(async () => {
+  /* 🚨 O RETORNO DO GOOGLE VEM NO FRAGMENTO (`#t=`), não na query. Fragmento
+     não vai ao servidor nem entra no log do nginx. Lido aqui, a barra de
+     endereços é limpa em seguida para o token não ficar no histórico. */
+  const frag = new URLSearchParams(window.location.hash.slice(1))
+  const token = frag.get('t')
+  const recusa = frag.get('erro')
+  if (token || recusa) {
+    history.replaceState(null, '', window.location.pathname)
+  }
+  if (token) {
+    definirToken(token)
+    await router.push(rota.query.destino || '/')
+    return
+  }
+  if (recusa) erro.value = recusa
+
+  try {
+    const r = await api.get('/api/auth/google/disponivel')
+    googleDisponivel.value = Boolean(r.disponivel)
+  } catch {
+    googleDisponivel.value = false
+  }
+  campoLogin.value?.focus()
+})
+
+function entrarComGoogle() {
+  // Navegação de página inteira, não fetch: o Google recusa ser carregado
+  // dentro de XHR e precisa da barra de endereços para o consentimento.
+  window.location.href = '/api/auth/google/inicio'
+}
 
 async function enviar() {
   if (enviando.value) return
@@ -44,21 +75,19 @@ async function enviar() {
 
 <template>
   <div class="entrada">
-    <button
-      class="botao botao--fantasma entrada__tema"
-      type="button"
-      @click="alternarTema"
-      :title="'Tema: ' + tema.preferencia"
-    >
-      <i class="bi" :class="tema.resolvido === 'escuro' ? 'bi-sun' : 'bi-moon-stars'" aria-hidden="true"></i>
-      <span class="so-leitor">Alternar tema</span>
-    </button>
-
     <div class="entrada__caixa">
       <!-- Marca fora do cartão, como no MoviChat -->
       <div class="entrada__marca">
         <img class="entrada__logo" src="/movisat-logo.png" alt="Movisat" />
         <p class="entrada__sub">Painel de comunicação · MoviZap</p>
+      </div>
+
+      <div v-if="googleDisponivel" class="cartao entrada__cartao entrada__google">
+        <button class="botao botao--contorno entrada__google-botao" type="button" @click="entrarComGoogle">
+          <i class="bi bi-google" aria-hidden="true"></i>
+          Entrar com Google
+        </button>
+        <p class="apagado pequeno">Contas @movisat.com.br já cadastradas no painel.</p>
       </div>
 
       <form class="cartao entrada__cartao" @submit.prevent="enviar">
@@ -130,12 +159,17 @@ async function enviar() {
   background: var(--fundo);
 }
 
-.entrada__tema {
-  position: fixed;
-  top: var(--e-4);
-  right: var(--e-4);
+.entrada__google {
+  display: flex;
+  flex-direction: column;
+  gap: var(--e-2);
+  align-items: center;
+  margin-bottom: var(--e-3);
 }
-
+.entrada__google-botao {
+  width: 100%;
+  min-height: var(--altura-toque);
+}
 .entrada__caixa {
   width: 100%;
   max-width: 420px;   /* MoviChat usa 380px; aqui os campos são maiores */
@@ -151,8 +185,6 @@ async function enviar() {
   max-width: 100%;
   object-fit: contain;
 }
-/* A logo é escura: no tema escuro precisa inverter para não sumir. */
-:root[data-tema="escuro"] .entrada__logo { filter: brightness(0) invert(1); }
 
 .entrada__sub {
   margin-top: var(--e-3);

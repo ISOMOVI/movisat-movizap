@@ -6,11 +6,10 @@
    06_Conteudo_das_Telas desenha. `/atendimento/:id` só entra já com uma
    selecionada.
 
-   🚨 O QUE ESTA TELA NÃO FAZ, E PRECISA DIZER: não envia mensagem. `evolution.py`
-   não tem rota de envio — Fase 1 é receber. O campo de resposta aparece
-   desabilitado com o motivo à vista, pela mesma regra do "Esqueci minha senha":
-   controle que existe e explica por que não funciona é honesto; controle que
-   some muda a tela debaixo de quem usa.
+   🚨 A MÍDIA VEM DO WEBHOOK, NÃO DE DOWNLOAD. O Evolution entrega o binário
+   em `base64` dentro do próprio evento; o backend só o move para o disco. Aqui
+   ele é buscado por `pedirBlob` porque o token vive no cabeçalho e <img src>
+   não carrega cabeçalho — apontar o `src` para a rota daria 401 mudo.
 
    🚨 "NÃO IDENTIFICADO" É CASO NORMAL, NÃO EXCEÇÃO. Medido em 07/08: dos 9
    números que trocaram mensagem, 1 estava no cadastro. A lista mostra o
@@ -18,10 +17,10 @@
    cliente, ou o número responde por vários cadastros. As duas situações pedem
    ações diferentes de quem atende.
    ============================================================================ */
-import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
-import { api, ErroDeApi } from '../api/cliente.js'
+import { api, pedirBlob, ErroDeApi } from '../api/cliente.js'
 
 const route = useRoute()
 const router = useRouter()
@@ -83,7 +82,16 @@ async function carregar({ silencioso = false } = {}) {
 
 async function abrir(id) {
   try {
+    // Solta o que a conversa anterior segurava ANTES de trocar: o object URL
+    // da foto de outro cliente não tem por que continuar vivo.
+    soltarMidias()
+    gaveta.value = false
+    empresas.value = []
+    empresasAbertas.value = false
+    buscaCliente.value = ''
+    achadosCliente.value = []
     aberta.value = await api.get(`/api/conversas/${id}`)
+    carregarMidiasDaConversa(aberta.value)
     recado.value = ''
     if (route.params.id !== String(id)) {
       router.replace({ path: `/atendimento/${id}` })
@@ -194,8 +202,14 @@ const filaParada = computed(
   () => resumo.value && resumo.value.eventos_pendentes > 50,
 )
 
+/* Quem está falando, na ordem do WhatsApp: o apelido que a pessoa escolheu,
+   depois o nome do cadastro, e o número só quando não há nem um nem outro.
+
+   🚨 O apelido vem PRIMEIRO de propósito. 35 das 37 conversas não têm vínculo
+   com o cadastro -- com `contato_nome` na frente, a tela mostrava número cru
+   quase sempre, num painel em que o nome da pessoa já tinha chegado. */
 function quem(c) {
-  return c.contato_nome || c.telefone_e164
+  return c.nome_whatsapp || c.contato_nome || c.telefone_e164
 }
 
 function quando(iso) {
@@ -217,6 +231,155 @@ const ICONE = {
   imagem: 'bi-image', audio: 'bi-mic', video: 'bi-camera-video',
   documento: 'bi-file-earmark', figurinha: 'bi-emoji-smile',
   localizacao: 'bi-geo-alt', contato: 'bi-person-vcard',
+}
+
+/* ---- mídia --------------------------------------------------------------
+   O que aparece dentro do balão (imagem, figurinha, áudio, vídeo) é buscado
+   sob demanda e guardado aqui pelo id da mídia. Documento não é pré-carregado:
+   nada ganha em baixar um PDF que ninguém abriu.
+
+   ⚠️ Os object URLs são liberados ao trocar de conversa. Sem isso o navegador
+   segura o binário de toda conversa já aberta -- num painel que fica aberto o
+   dia inteiro, isso vira centenas de MB. */
+const midias = reactive({})
+const MOSTRAM_SOZINHAS = ['imagem', 'figurinha', 'audio', 'video']
+
+function tamanhoLegivel(bytes) {
+  if (!bytes) return ''
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`
+}
+
+async function carregarMidia(m) {
+  if (!m.midia_id || midias[m.midia_id] !== undefined) return
+  midias[m.midia_id] = ''   // marca "em andamento": evita buscar duas vezes
+  try {
+    const blob = await pedirBlob(`/api/midia/${m.midia_id}/ver`)
+    midias[m.midia_id] = URL.createObjectURL(blob)
+  } catch {
+    // Falhar aqui não pode derrubar a conversa: o balão mostra o botão de
+    // baixar e o texto, que é o que importa.
+    midias[m.midia_id] = null
+  }
+}
+
+function soltarMidias() {
+  for (const [id, url] of Object.entries(midias)) {
+    if (url) URL.revokeObjectURL(url)
+    delete midias[id]
+  }
+}
+
+async function baixarMidia(m) {
+  const blob = await pedirBlob(`/api/midia/${m.midia_id}`)
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = m.midia_nome || `midia-${m.midia_id}`
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  URL.revokeObjectURL(url)
+}
+
+/* ---- gaveta do contato ---------------------------------------------------
+   Abre por botão, como clicar no contato no WhatsApp. Quando há vínculo mostra
+   a empresa; quando não há -- que é o caso de 35 das 41 conversas -- mostra a
+   busca para vincular à mão.
+
+   🚨 A busca é o produto aqui, não um detalhe. 51% dos clientes ativos estão
+   fora do alcance por cadastro incompleto; cada vínculo feito nesta gaveta é
+   um telefone que passa a existir, digitado por quem está falando com a
+   pessoa. */
+const gaveta = ref(false)
+
+/* As empresas que o telefone alcança -- o grupo da pessoa.
+
+   🚨 Número em vários cadastros NÃO é ambiguidade: são grupos empresariais
+   com o mesmo responsável. A identidade é da PESSOA; as empresas são consulta
+   rápida, atrás de um botão, com CNPJ para conferir. */
+const empresas = ref([])
+const empresasAbertas = ref(false)
+const buscandoEmpresas = ref(false)
+
+async function verEmpresas() {
+  empresasAbertas.value = !empresasAbertas.value
+  if (!empresasAbertas.value || empresas.value.length) return
+  buscandoEmpresas.value = true
+  try {
+    const r = await api.get(`/api/conversas/${aberta.value.id}/empresas`)
+    empresas.value = r.empresas || []
+  } catch {
+    empresas.value = []
+  } finally {
+    buscandoEmpresas.value = false
+  }
+}
+const buscaCliente = ref('')
+const achadosCliente = ref([])
+const buscando = ref(false)
+const vinculando = ref(false)
+
+async function procurarCliente() {
+  const termo = buscaCliente.value.trim()
+  if (termo.length < 2) {
+    achadosCliente.value = []
+    return
+  }
+  buscando.value = true
+  try {
+    const r = await api.get(`/api/conversas/buscar-empresa?termo=${encodeURIComponent(termo)}`)
+    achadosCliente.value = r.itens || r.lista || []
+  } catch {
+    achadosCliente.value = []
+  } finally {
+    buscando.value = false
+  }
+}
+
+async function vincularA(clienteId) {
+  vinculando.value = true
+  try {
+    await api.post(`/api/conversas/${aberta.value.id}/vincular`, { cliente_id: clienteId })
+    // Relê do servidor em vez de remendar a tela: o vínculo pode ter criado
+    // contato novo, e o que vale é o que o banco diz.
+    await abrir(aberta.value.id)
+    await carregar({ silencioso: true })
+    recado.value = 'Número vinculado ao cadastro.'
+    buscaCliente.value = ''
+    achadosCliente.value = []
+  } catch (e) {
+    erro.value = e instanceof ErroDeApi ? e.message : 'Falha ao vincular.'
+  } finally {
+    vinculando.value = false
+  }
+}
+
+async function desvincular() {
+  try {
+    await api.post(`/api/conversas/${aberta.value.id}/desvincular`)
+    await abrir(aberta.value.id)
+    await carregar({ silencioso: true })
+    recado.value = 'Vínculo desfeito. O telefone continua no cadastro.'
+  } catch (e) {
+    erro.value = e instanceof ErroDeApi ? e.message : 'Falha ao desvincular.'
+  }
+}
+
+function documentoLegivel(d) {
+  if (!d) return ''
+  const s = String(d)
+  if (s.length === 14) return s.replace(/(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})/, '$1.$2.$3/$4-$5')
+  if (s.length === 11) return s.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '$1.$2.$3-$4')
+  return s
+}
+
+function carregarMidiasDaConversa(c) {
+  if (!c || !c.mensagens) return
+  for (const m of c.mensagens) {
+    if (m.midia_id && MOSTRAM_SOZINHAS.includes(m.tipo)) carregarMidia(m)
+  }
 }
 </script>
 
@@ -325,6 +488,8 @@ const ICONE = {
                 {{ c.ultima_mensagem || '(sem texto)' }}
               </p>
               <div class="linha pequeno">
+                <!-- "não identificado" fala do CADASTRO, não do nome: ter apelido
+                     do WhatsApp não quer dizer que se saiba de qual cliente é. -->
                 <span v-if="!c.contato_nome" class="chip chip--aviso">não identificado</span>
                 <span v-if="c.cliente_nome" class="chip">{{ c.cliente_nome }}</span>
                 <span v-if="c.atendente_nome" class="chip chip--acento">{{ c.atendente_nome }}</span>
@@ -346,9 +511,21 @@ const ICONE = {
         <template v-else>
           <header class="cartao__cabecalho">
             <div>
-              <strong>{{ aberta.contato_nome || aberta.telefone_e164 }}</strong>
+              <strong>{{ aberta.nome_whatsapp || aberta.contato_nome || aberta.telefone_e164 }}</strong>
+              <button
+                class="botao botao--pequeno botao--fantasma"
+                type="button"
+                :aria-expanded="gaveta"
+                @click="gaveta = !gaveta"
+              >
+                <i class="bi bi-person-lines-fill" aria-hidden="true"></i>
+                {{ gaveta ? 'Fechar ficha' : 'Ver ficha' }}
+              </button>
               <p class="apagado pequeno mono">
                 {{ aberta.telefone_e164 }}
+                <span v-if="aberta.nome_whatsapp && aberta.contato_nome">
+                  · cadastro: {{ aberta.contato_nome }}
+                </span>
                 <span v-if="aberta.canal_nome"> · {{ aberta.canal_nome }}</span>
                 · {{ aberta.estado }}
               </p>
@@ -379,6 +556,134 @@ const ICONE = {
             </span>
           </p>
 
+          <!-- ================= GAVETA DO CONTATO ================= -->
+          <aside v-if="gaveta" class="gaveta">
+            <p class="gaveta__topo">
+              <strong>{{ aberta.nome_whatsapp || 'Sem nome no WhatsApp' }}</strong>
+              <span class="apagado pequeno mono">{{ aberta.telefone_e164 }}</span>
+            </p>
+
+            <!-- Empresas do grupo desta pessoa. Consulta, não escolha: o
+                 número identifica quem fala, não a empresa do assunto. -->
+            <button
+              class="botao botao--pequeno botao--contorno"
+              type="button"
+              :aria-expanded="empresasAbertas"
+              @click="verEmpresas"
+            >
+              <i class="bi bi-buildings" aria-hidden="true"></i>
+              {{ empresasAbertas ? 'Ocultar empresas' : 'Empresas vinculadas' }}
+            </button>
+
+            <div v-if="empresasAbertas" class="gaveta__bloco">
+              <p v-if="buscandoEmpresas" class="apagado pequeno">consultando…</p>
+              <p v-else-if="!empresas.length" class="apagado pequeno">
+                Este número não está em nenhum cadastro.
+              </p>
+              <ul v-else class="gaveta__lista">
+                <li v-for="e in empresas" :key="e.id" class="gaveta__empresa">
+                  <strong>{{ e.nome }}</strong>
+                  <span v-if="!e.ativo" class="chip chip--erro">inativa</span>
+                  <span class="apagado pequeno mono">{{ documentoLegivel(e.documento) || 'sem CNPJ' }}</span>
+                  <span class="apagado pequeno">contato: {{ e.contato_nome }}</span>
+                </li>
+              </ul>
+              <p v-if="empresas.length > 1" class="apagado pequeno">
+                {{ empresas.length }} empresas do mesmo responsável. A conversa
+                fica na pessoa; a empresa se escolhe quando o assunto exigir.
+              </p>
+            </div>
+
+            <!-- COM vínculo: os dados da empresa -->
+            <template v-if="aberta.empresa && aberta.empresa.cliente">
+              <dl class="gaveta__dados">
+                <dt>Empresa</dt>
+                <dd>
+                  {{ aberta.empresa.cliente.nome }}
+                  <span v-if="!aberta.empresa.cliente.ativo" class="chip chip--erro">inativo</span>
+                </dd>
+                <template v-if="aberta.empresa.cliente.nome_fantasia">
+                  <dt>Nome fantasia</dt>
+                  <dd>{{ aberta.empresa.cliente.nome_fantasia }}</dd>
+                </template>
+                <template v-if="aberta.empresa.cliente.documento">
+                  <dt>CNPJ/CPF</dt>
+                  <dd class="mono">{{ documentoLegivel(aberta.empresa.cliente.documento) }}</dd>
+                </template>
+                <template v-if="aberta.empresa.cliente.email">
+                  <dt>E-mail</dt>
+                  <dd>{{ aberta.empresa.cliente.email }}</dd>
+                </template>
+                <!-- ⚠️ NÃO mostrar `contato.papeis` aqui. Os papéis existem no
+                     banco desde a migração 001, vieram do modelo do ERP e não
+                     acionam nada; anunciá-los na ficha promete recurso que não
+                     existe, sobre um eixo que não é do atendimento. -->
+                <dt>Contato</dt>
+                <dd>{{ aberta.empresa.contato.nome }}</dd>
+                <template v-if="aberta.empresa.contato.email">
+                  <dt>E-mail do contato</dt>
+                  <dd>{{ aberta.empresa.contato.email }}</dd>
+                </template>
+              </dl>
+              <button class="botao botao--pequeno botao--fantasma" type="button" @click="desvincular">
+                <i class="bi bi-x-circle" aria-hidden="true"></i> Desvincular
+              </button>
+            </template>
+
+            <!-- SEM vínculo: o caso comum. Buscar e vincular. -->
+            <template v-else>
+              <p class="chip chip--aviso">Não está no cadastro</p>
+              <p class="apagado pequeno">
+                Procure a empresa e vincule este número. O telefone entra no
+                cadastro marcado como vindo do atendimento.
+              </p>
+
+              <!-- Candidatos que o próprio sistema já achou pelo telefone -->
+              <div v-if="aberta.candidatos && aberta.candidatos.length" class="gaveta__bloco">
+                <p class="pequeno fraco">Este número responde por mais de um cadastro:</p>
+                <button
+                  v-for="c in aberta.candidatos"
+                  :key="c.id"
+                  class="botao botao--pequeno botao--contorno gaveta__achado"
+                  type="button"
+                  :disabled="vinculando"
+                  @click="vincularA(c.cliente_id || c.id)"
+                >
+                  {{ c.nome }}
+                </button>
+              </div>
+
+              <label class="campo">
+                <span class="campo__rotulo">Buscar empresa</span>
+                <input
+                  v-model="buscaCliente"
+                  class="campo__entrada"
+                  type="search"
+                  placeholder="nome, CNPJ ou CPF"
+                  @input="procurarCliente"
+                />
+              </label>
+
+              <p v-if="buscando" class="apagado pequeno">procurando…</p>
+              <ul v-else-if="achadosCliente.length" class="gaveta__lista">
+                <li v-for="c in achadosCliente" :key="c.id">
+                  <button
+                    class="botao botao--pequeno botao--contorno gaveta__achado"
+                    type="button"
+                    :disabled="vinculando"
+                    @click="vincularA(c.id)"
+                  >
+                    <span>{{ c.nome }}</span>
+                    <span class="apagado pequeno mono">{{ documentoLegivel(c.documento) }}</span>
+                  </button>
+                </li>
+              </ul>
+              <p v-else-if="buscaCliente.length >= 2" class="apagado pequeno">
+                Nenhuma empresa com esse termo.
+              </p>
+            </template>
+          </aside>
+
           <div class="baloes">
             <div
               v-for="m in aberta.mensagens"
@@ -386,10 +691,46 @@ const ICONE = {
               class="balao"
               :class="`balao--${m.direcao}`"
             >
+              <!-- A mensagem que esta está respondendo. Sem isto, uma foto
+                   seguida de "esse aqui" fica ininteligível. -->
+              <p v-if="m.citada_id" class="balao__citada pequeno">
+                <i class="bi bi-reply" aria-hidden="true"></i>
+                <span class="fraco">{{ m.citada_autor === 'cliente' ? 'cliente' : 'nós' }}:</span>
+                {{ m.citada_conteudo || `(${m.citada_tipo})` }}
+              </p>
+
+              <img
+                v-if="m.midia_id && ['imagem', 'figurinha'].includes(m.tipo) && midias[m.midia_id]"
+                :src="midias[m.midia_id]"
+                class="balao__imagem"
+                :alt="m.conteudo || 'imagem enviada pelo cliente'"
+              />
+              <audio
+                v-else-if="m.midia_id && m.tipo === 'audio' && midias[m.midia_id]"
+                :src="midias[m.midia_id]"
+                controls
+                class="balao__audio"
+              ></audio>
+              <video
+                v-else-if="m.midia_id && m.tipo === 'video' && midias[m.midia_id]"
+                :src="midias[m.midia_id]"
+                controls
+                class="balao__imagem"
+              ></video>
+
               <p v-if="m.tipo !== 'texto'" class="balao__tipo pequeno">
                 <i class="bi" :class="ICONE[m.tipo] || 'bi-paperclip'" aria-hidden="true"></i>
-                {{ m.tipo }}
-                <span class="fraco">— mídia não é baixada na Fase 1</span>
+                {{ m.midia_nome || m.tipo }}
+                <span v-if="m.midia_tamanho" class="fraco">· {{ tamanhoLegivel(m.midia_tamanho) }}</span>
+                <button
+                  v-if="m.midia_id"
+                  class="botao botao--pequeno botao--fantasma"
+                  type="button"
+                  @click="baixarMidia(m)"
+                >
+                  <i class="bi bi-download" aria-hidden="true"></i> Baixar
+                </button>
+                <span v-else class="fraco">— sem arquivo guardado</span>
               </p>
               <p v-if="m.conteudo" class="balao__texto">{{ m.conteudo }}</p>
               <p v-else class="balao__texto fraco">(sem texto)</p>
@@ -561,6 +902,96 @@ const ICONE = {
 </template>
 
 <style scoped>
+/* A ficha é uma faixa dentro da conversa, não uma tela: some ao trocar de
+   conversa e não tem rota. É o equivalente a clicar no contato no WhatsApp. */
+.gaveta {
+  border: var(--borda-fina) solid var(--borda);
+  border-radius: var(--raio-2);
+  background: var(--superficie-2);
+  padding: var(--e-3);
+  margin-bottom: var(--e-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--e-2);
+}
+.gaveta__topo {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.gaveta__dados {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: var(--e-1) var(--e-3);
+  margin: 0;
+}
+.gaveta__dados dt {
+  color: var(--texto-fraco);
+  font-size: var(--txt-sm);
+}
+.gaveta__dados dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.gaveta__bloco {
+  display: flex;
+  flex-direction: column;
+  gap: var(--e-1);
+}
+.gaveta__lista {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--e-1);
+  max-height: 240px;
+  overflow-y: auto;
+}
+.gaveta__empresa {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--e-2);
+  border: var(--borda-fina) solid var(--borda);
+  border-radius: var(--raio-1);
+  background: var(--superficie);
+}
+.gaveta__achado {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--e-2);
+  text-align: left;
+}
+/* A imagem ocupa a largura do balão, com teto de altura: foto de celular em
+   pé tem 4000px e empurraria a conversa inteira para fora da tela. */
+.balao__imagem {
+  display: block;
+  max-width: 100%;
+  max-height: 320px;
+  width: auto;
+  border-radius: var(--raio-2);
+  margin-bottom: var(--e-2);
+  background: var(--superficie-2);
+}
+.balao__audio {
+  width: 100%;
+  max-width: 320px;
+  margin-bottom: var(--e-2);
+}
+/* A citação é uma faixa presa à esquerda, como no WhatsApp: precisa parecer
+   subordinada à mensagem, não outra mensagem. */
+.balao__citada {
+  border-left: 3px solid var(--acento-borda);
+  padding: var(--e-1) var(--e-2);
+  margin-bottom: var(--e-2);
+  background: var(--superficie-2);
+  border-radius: var(--raio-1);
+  color: var(--texto-fraco);
+  overflow-wrap: anywhere;
+}
 .tela { max-width: 1280px; }
 
 .tela__cabecalho {

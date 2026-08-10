@@ -14,11 +14,9 @@ import 'bootstrap-icons/font/bootstrap-icons.css'
 
 import App from './App.vue'
 import { router } from './router/index.js'
-import { iniciarTema } from './estado/tema.js'
 import { restaurar } from './estado/sessao.js'
 
 async function subir() {
-  iniciarTema()
 
   // Token guardado de uma sessão anterior: descobrir quem é ANTES da primeira
   // navegação. Sem isso, a guarda manda para o login quem já estava logado.
