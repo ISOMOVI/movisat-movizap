@@ -1,5 +1,8 @@
 # 11 — Identidade, vínculo e cruzamento de dados
 
+> Desenho aprovado em **2026-08-10**, com a régua do NOME revista em
+> **2026-08-11** depois de medida — ver `docs/12`.
+>
 > Desenho aprovado pelo usuário em **2026-08-10**. É a peça que decide se o
 > painel vira cadastro confiável ou uma pilha de palpites — e vale para o
 > WhatsApp, para o e-mail e para o ERP que vem depois.
@@ -58,12 +61,23 @@ Cada chave vale uma coisa diferente. **Esta tabela é a regra da casa:**
 | Telefone em **N** cadastros | é pessoa de grupo | **mostra as N empresas, não escolhe** |
 | E-mail corporativo em 1 cadastro | forte | vincula sozinho |
 | E-mail `gmail`/`hotmail` | fraco | **sugere, não vincula** |
-| **Nome de empresa normalizado** | indício | 🚨 **NUNCA vincula** — vai para revisão |
+| **Nome de empresa × cliente ATIVO** | **95,8% medido (11/08)** | **vincula** — ver `docs/12` |
 
-⚠️ **A última linha é a disciplina que mais importa.** Foi por nome que se
-encontraram as 305 empresas do Bitrix que parecem clientes nossos — e é por
-isso que elas **não foram importadas**. "Transportes Silva" existe dez vezes no
-Brasil.
+🚨 **A última linha MUDOU em 2026-08-11, e o motivo está em `docs/12`.**
+Esta regra foi escrita em 10/08 **sem medição**. Medida em 11/08, contra os
+265 contatos onde havia nome *e* chave dura ao mesmo tempo, ela acertou
+**254 vezes — 95,8%**, praticamente o mesmo que telefone e e-mail exatos.
+
+Por decisão do usuário em 11/08, nome de empresa contra cliente **ativo**
+passou a vincular, e foi assim que **862 números com WhatsApp verificado**
+entraram no cadastro (alcance de 39% para 61%).
+
+⚠️ A ressalva continua de pé: só deu para validar onde havia segunda chave.
+Nome sozinho — 206 dos 423 clientes — não tem nada que o confirme.
+
+⚠️ O que NÃO vincula, e reprovou na mesma medição, é o **domínio de
+e-mail**: 0 acertos em 6. `tnevelog.com.br` aponta 12 clientes distintos,
+porque transportadora com agregados dá o próprio e-mail a cada agregado.
 
 ---
 
@@ -90,9 +104,9 @@ ruído, e poderia contradizer o cadastro na cara de quem atende.
 | # | Passo | Estado |
 |---|---|---|
 | **1** | Importar em tabelas próprias, fora do cadastro | ✅ **10/08** — 14.214 contatos, 23.854 chaves |
-| **2** | Exportar **COMPANY** do Bitrix | ⬜ **é o próximo, e é do usuário** |
-| **3** | Promover ao cadastro **só o que casar por documento** | ⬜ depende do 2 |
-| **4** | O que casar por nome/e-mail → **lista de revisão** | ⬜ depende do 2 |
+| **2** | Exportar **COMPANY** do Bitrix | ❌ **CANCELADO em 11/08** — o usuário decidiu que não haverá nova exportação |
+| **3** | Promover ao cadastro | ✅ **11/08 — por nome + telefone + e-mail**, já que o documento não veio. 862 números, `docs/12` |
+| **4** | Lista de revisão | ✅ `revisao/2026-08-11_bitrix_nomes_empresa.md` |
 
 ### O que o passo 1 já entregou
 

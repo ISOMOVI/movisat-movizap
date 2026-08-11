@@ -618,3 +618,108 @@ CHECK ((tipo = 'nota') = (direcao = 'interna'))
 Amarra os dois campos: não existe nota que não seja interna, nem mensagem
 interna que não seja nota. É o banco impedindo que uma anotação do atendente
 saia para o cliente por erro de código.
+
+
+---
+
+## `conversa_participante` — quem acompanha (2026-08-11, migrações 021/022)
+
+Decisão do usuário em 11/08: dá para **convidar** outro atendente para uma
+conversa; o convidado responde à vontade; sair é do próprio ou o dono remove;
+e **quando o dono sai, a posse passa para quem ficou**.
+
+### 🚨 Convidar não dá acesso — o acesso já existia
+
+A auditoria de 11/08 mediu: **não há isolamento por conversa**. As 13 rotas de
+atendimento exigem a tela `ATD_1.2` e **nenhuma pergunta quem é o dono**.
+Qualquer atendente já abria, lia, respondia e vinculava qualquer conversa.
+
+Então esta tabela responde outra pergunta: **quem está acompanhando**. Ela faz a
+conversa **aparecer na lista** de quem foi chamado, e a tela mostrar quem mais
+está ali. Chamar isso de "permissão" seria mentir sobre o que o sistema faz.
+
+⚠️ Se o isolamento por conversa passar a existir um dia, esta tabela vira a
+lista de quem tem acesso além do dono — e aí **muda de significado**. Está dito
+para ninguém supor que já é isso.
+
+### A estrutura
+
+```sql
+conversa_participante (
+    conversa_id, atendente_id,          -- PK composta
+    convidado_por,                      -- NULL = entrou por conta própria
+    entrou_em, saiu_em,
+    CHECK (saiu_em IS NULL OR saiu_em >= entrou_em)
+)
+```
+
+**`saiu_em` em vez de apagar a linha:** quem entrou leu o que estava escrito na
+conversa. Apagar faria o sistema esquecer que aquela pessoa viu — e *"quem teve
+acesso a esta conversa"* é a pergunta que se faz **depois**, não antes.
+
+⚠️ **A PK composta tem uma consequência assumida:** reconvidar quem saiu
+**reabre a mesma linha**, em vez de criar outra. Perde-se o histórico de idas e
+vindas. É a troca escolhida — para auditoria importa se a pessoa esteve, não
+quantas vezes, e uma PK serial deixaria a porta aberta para duas participações
+ativas da mesma pessoa, que é o defeito pior.
+
+### 🚨 `entrou_em` é a fila de herança — e um `ON CONFLICT` quase a quebrou
+
+Quando o dono sai, herda **o participante ativo mais antigo por `entrou_em`**.
+Isso faz de `entrou_em` uma coluna com regra de negócio, não um carimbo.
+
+A primeira versão do `convidar` fazia `ON CONFLICT ... SET entrou_em = now()`
+**sempre**. Reconvidar alguém que **nunca saiu** reiniciava a antiguidade dele e
+**reordenava a fila de herança** — a posse ia para a pessoa errada, sem nada ter
+acontecido de verdade. O teste pegou isso antes de virar tela.
+
+A correção é a mesma lição da metodologia §1: **reentrega é conflito esperado, e
+conflito esperado se IGNORA**. Só quem tinha `saiu_em` preenchido recomeça a
+contar.
+
+### Os índices parciais
+
+```sql
+ix_participante_atendente (atendente_id) WHERE saiu_em IS NULL
+ix_participante_conversa  (conversa_id)  WHERE saiu_em IS NULL
+```
+
+O primeiro é o que a **caixa de entrada** usa a cada carregamento; o segundo, o
+cabeçalho da conversa. Parciais porque quem saiu não entra em lista nenhuma —
+o índice não carrega o que nunca será consultado. ⚠️ Postgres **não** indexa FK
+sozinho: é a mesma lição da migração 002.
+
+### `transferencia.motivo` ganhou `saida_do_dono` (migração 022)
+
+Herdar posse é troca de dono, e toda troca de dono é registrada. Mas o CHECK só
+conhecia `manual | inatividade | ia_triagem | sem_time`.
+
+🚨 **Gravar como `manual` seria mentir no dado**: o relatório diria que alguém
+transferiu à mão, quando quem passou a posse foi **o sistema**, porque o dono
+saiu. É a mesma lição da migração 009, que separou `motivo_ignorado` de `erro`.
+
+### Sair, nos dois casos
+
+| Quem sai | O que acontece |
+|---|---|
+| participante | marca `saiu_em`, e nada mais muda |
+| **dono**, com participante | o mais antigo vira dono e **deixa de ser participante** |
+| **dono**, sem ninguém | volta para a fila (`estado = 'fila'`) |
+
+🚨 **Tudo num cursor só, com `SELECT ... FOR UPDATE` na conversa.** Entre
+escolher o herdeiro e gravá-lo, o herdeiro pode ter saído — e a conversa
+acabaria com um dono que não está mais lá. É a mesma serialização que o
+`WHERE atendente_id IS NULL` dá ao `assumir`.
+
+### O que a listagem passou a fazer
+
+`listar(atendente_id=X)` deixou de significar *"sou o dono"* e passou a
+significar *"sou o dono **ou** estou acompanhando"*. Cada linha ganhou o campo
+**`acompanho`**, para a tela separar uma coisa da outra — sem ele a caixa de
+entrada misturaria "minha" com "fui chamado", e o atendente não saberia por
+qual ele responde.
+
+⚠️ Esse foi o ponto de regressão do trabalho: mexe no `WHERE` da tela que a
+operação usa todo dia. `tests/teste_listagem.py` foi escrito **antes** da
+mudança e fixa o comportamento anterior — 7 testes de regressão mais 7 do
+comportamento novo.

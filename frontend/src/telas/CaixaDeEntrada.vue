@@ -47,6 +47,77 @@ const resposta = ref('')
 const modoNota = ref(false)
 const enviando = ref(false)
 
+/* Participantes — quem mais está acompanhando esta conversa.
+   🚨 Convidar NÃO dá acesso: qualquer atendente com ATD_1.2 já abre qualquer
+   conversa. O convite faz ela APARECER NA LISTA de quem foi chamado. */
+const acompanham = ref([])
+const convidaveis = ref([])
+const souDono = ref(false)
+const souParticipante = ref(false)
+const convidado = ref('')
+const mexendo = ref(false)
+
+async function carregarParticipantes(id) {
+  try {
+    const r = await api.get(`/api/conversas/${id}/participantes`)
+    acompanham.value = r.participantes || []
+    convidaveis.value = r.convidaveis || []
+    souDono.value = Boolean(r.sou_dono)
+    souParticipante.value = Boolean(r.sou_participante)
+  } catch {
+    // A conversa abre mesmo se isto falhar: participante é informação a mais,
+    // não pré-requisito para atender.
+    acompanham.value = []
+    convidaveis.value = []
+  }
+}
+
+async function convidar() {
+  if (!convidado.value || mexendo.value) return
+  mexendo.value = true
+  try {
+    const r = await api.post(`/api/conversas/${aberta.value.id}/convidar`,
+                             { atendente_id: Number(convidado.value) })
+    recado.value = `${r.nome} foi chamado para a conversa.`
+    convidado.value = ''
+    painelAcao.value = ''
+    await carregarParticipantes(aberta.value.id)
+  } catch (e) {
+    erro.value = e instanceof ErroDeApi ? e.message : 'Não consegui convidar.'
+  } finally {
+    mexendo.value = false
+  }
+}
+
+async function sairDaConversa() {
+  mexendo.value = true
+  try {
+    const r = await api.post(`/api/conversas/${aberta.value.id}/sair`)
+    recado.value = r.para_fila
+      ? 'Você saiu e a conversa voltou para a fila.'
+      : (r.novo_dono_nome
+          ? `Você saiu; ${r.novo_dono_nome} passou a responder pela conversa.`
+          : 'Você saiu da conversa.')
+    await Promise.all([abrir(aberta.value.id), carregar({ silencioso: true })])
+  } catch (e) {
+    erro.value = e instanceof ErroDeApi ? e.message : 'Não consegui sair.'
+  } finally {
+    mexendo.value = false
+  }
+}
+
+async function removerParticipante(id) {
+  mexendo.value = true
+  try {
+    await api.post(`/api/conversas/${aberta.value.id}/remover/${id}`)
+    await carregarParticipantes(aberta.value.id)
+  } catch (e) {
+    erro.value = e instanceof ErroDeApi ? e.message : 'Não consegui remover.'
+  } finally {
+    mexendo.value = false
+  }
+}
+
 let timer = null
 
 const FILTROS = [
@@ -91,6 +162,7 @@ async function abrir(id) {
     buscaCliente.value = ''
     achadosCliente.value = []
     aberta.value = await api.get(`/api/conversas/${id}`)
+    carregarParticipantes(id)
     carregarMidiasDaConversa(aberta.value)
     rolarParaOFim()
     recado.value = ''
@@ -496,6 +568,12 @@ function carregarMidiasDaConversa(c) {
                 <strong class="conversa__quem">{{ quem(c) }}</strong>
                 <span class="apagado pequeno">{{ quando(c.ultima_atividade_em) }}</span>
               </div>
+              <!-- ⚠️ Fui CHAMADO para esta, não sou o dono. Sem a marca, ela
+                   fica igual às minhas na lista — e só o dono responde por ela. -->
+              <p v-if="c.acompanho" class="conversa__marca pequeno">
+                <i class="bi bi-people" aria-hidden="true"></i>
+                acompanhando<span v-if="c.atendente_nome"> · {{ c.atendente_nome }} responde</span>
+              </p>
               <p class="conversa__previa apagado pequeno">
                 <i v-if="ICONE[c.ultimo_tipo]" class="bi" :class="ICONE[c.ultimo_tipo]" aria-hidden="true"></i>
                 <span v-if="c.ultima_direcao === 'saida'" class="fraco">você: </span>
@@ -554,6 +632,24 @@ function carregarMidiasDaConversa(c) {
             </button>
             <span v-else class="chip chip--acento">{{ aberta.atendente_nome }}</span>
           </header>
+
+          <!-- ⚠️ Só aparece quando há alguém: linha vazia em toda conversa
+               seria ruído numa tela que já é densa. -->
+          <p v-if="acompanham.length" class="conversa__acompanham pequeno">
+            <i class="bi bi-people" aria-hidden="true"></i>
+            <span class="apagado">acompanhando:</span>
+            <span v-for="p in acompanham" :key="p.atendente_id" class="chip chip--pequeno">
+              {{ p.nome }}
+              <button
+                v-if="souDono"
+                class="chip__x"
+                type="button"
+                :disabled="mexendo"
+                :title="`tirar ${p.nome} da conversa`"
+                @click="removerParticipante(p.atendente_id)"
+              >×</button>
+            </span>
+          </p>
 
           <p v-if="!aberta.contato_id" class="aviso aviso--atencao">
             <i class="bi bi-person-exclamation aviso__icone" aria-hidden="true"></i>
@@ -793,10 +889,56 @@ function carregarMidiasDaConversa(c) {
               <button
                 class="botao botao--pequeno botao--contorno"
                 type="button"
+                @click="painelAcao = painelAcao === 'convidar' ? '' : 'convidar'"
+              >
+                <i class="bi bi-person-plus" aria-hidden="true"></i> Convidar
+              </button>
+              <button
+                v-if="souDono || souParticipante"
+                class="botao botao--pequeno botao--fantasma"
+                type="button"
+                :disabled="mexendo"
+                @click="sairDaConversa"
+              >
+                Sair da conversa
+              </button>
+              <button
+                class="botao botao--pequeno botao--contorno"
+                type="button"
                 @click="painelAcao = painelAcao === 'encerrar' ? '' : 'encerrar'"
               >
                 <i class="bi bi-check2-square" aria-hidden="true"></i> Encerrar
               </button>
+            </div>
+
+            <div v-if="painelAcao === 'convidar'" class="pilha acoes__painel">
+              <label class="campo">
+                <span class="campo__rotulo">Chamar para esta conversa</span>
+                <select v-model="convidado" class="campo__entrada">
+                  <option value="">escolha quem…</option>
+                  <option v-for="a in convidaveis" :key="a.id" :value="a.id">
+                    {{ a.nome }}
+                  </option>
+                </select>
+                <span class="campo__ajuda">
+                  Quem for chamado passa a ver esta conversa na lista dele e
+                  responde normalmente. <strong>Quem responde pela conversa
+                  continua sendo {{ aberta.atendente_nome || 'ninguém — está na fila' }}.</strong>
+                </span>
+              </label>
+              <div class="linha linha--quebra">
+                <button
+                  class="botao botao--primario"
+                  type="button"
+                  :disabled="!convidado || mexendo"
+                  @click="convidar"
+                >
+                  Convidar
+                </button>
+                <span v-if="!convidaveis.length" class="apagado pequeno">
+                  Todo mundo já está nesta conversa.
+                </span>
+              </div>
             </div>
 
             <div v-if="painelAcao === 'transferir'" class="pilha acoes__painel">
@@ -1071,6 +1213,17 @@ function carregarMidiasDaConversa(c) {
 .conversa--aberta { background: rgba(128, 128, 128, .14); }
 
 .conversa__topo { display: flex; justify-content: space-between; gap: var(--e-2); }
+.conversa__acompanham {
+  display: flex; align-items: center; gap: var(--e-1);
+  flex-wrap: wrap; padding: 0 var(--e-3) var(--e-2);
+}
+.chip--pequeno { font-size: var(--txt-sm); padding: 2px var(--e-1); }
+.conversa__marca { color: var(--acento); display: flex; gap: 4px; align-items: center; }
+.chip__x {
+  background: none; border: 0; cursor: pointer; padding: 0 0 0 4px;
+  color: inherit; opacity: .6; font-size: 1em; line-height: 1;
+}
+.chip__x:hover { opacity: 1; }
 .conversa__quem { overflow-wrap: anywhere; }
 .conversa__previa {
   margin: var(--e-1) 0;

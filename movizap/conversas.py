@@ -376,8 +376,16 @@ def listar(estado: str | None = None, atendente_id: int | None = None,
         condicoes.append("c.estado = %s")
         params.append(estado)
     if atendente_id:
-        condicoes.append("c.atendente_id = %s")
-        params.append(atendente_id)
+        # 🚨 "minhas conversas" passou a incluir as que eu ACOMPANHO. Quem foi
+        # convidado precisa ver a conversa na lista dele -- era exatamente
+        # disso que o convite servia (migração 021).
+        condicoes.append(
+            """(c.atendente_id = %s
+                OR EXISTS (SELECT 1 FROM conversa_participante p
+                            WHERE p.conversa_id = c.id
+                              AND p.atendente_id = %s
+                              AND p.saiu_em IS NULL))""")
+        params.extend([atendente_id, atendente_id])
     if sem_dono:
         condicoes.append("c.atendente_id IS NULL")
     if busca:
@@ -389,11 +397,22 @@ def listar(estado: str | None = None, atendente_id: int | None = None,
             condicoes.append("ct.nome ILIKE %s")
             params.append(f"%{busca}%")
 
+    # 🚨 ORDEM POSICIONAL: os dois %s do SELECT são os PRIMEIROS da query, então
+    # entram na frente de tudo que o WHERE já empilhou. Errar isso não dá erro
+    # de sintaxe -- dá resultado errado, que é pior.
+    params = [atendente_id, atendente_id] + params
     params.append(limite)
     return banco.varios(
         f"""
         SELECT c.id, c.estado, c.telefone_e164, c.contato_id, c.canal_id,
                c.ultima_atividade_em, c.criada_em, c.atendente_id,
+               -- ⚠️ A tela precisa separar "sou o dono" de "fui convidado":
+               -- as duas aparecem na mesma lista, e só o dono responde por ela.
+               CASE WHEN %s::bigint IS NULL THEN false
+                    ELSE EXISTS (SELECT 1 FROM conversa_participante p2
+                                  WHERE p2.conversa_id = c.id
+                                    AND p2.atendente_id = %s::bigint
+                                    AND p2.saiu_em IS NULL) END AS acompanho,
                ct.nome AS contato_nome,
                cl.nome AS cliente_nome,
                a.nome  AS atendente_nome,
@@ -968,3 +987,186 @@ def resumo() -> dict:
             "SELECT COUNT(*) AS n FROM webhook_evento "
             "WHERE motivo_ignorado IS NOT NULL")["n"],
     }
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# PARTICIPANTES — quem mais está acompanhando a conversa (migração 021)
+#
+# 🚨 ISTO NÃO É PERMISSÃO. A auditoria de 11/08 mostrou que não existe
+# isolamento por conversa: as rotas de atendimento exigem a tela `ATD_1.2` e
+# nenhuma pergunta quem é o dono. Convidar faz a conversa APARECER NA LISTA de
+# quem foi chamado -- o acesso àquela conversa essa pessoa já tinha.
+# ══════════════════════════════════════════════════════════════════════════
+
+
+def participantes(conversa_id: int) -> list[dict]:
+    """Quem está acompanhando agora. Quem saiu não aparece."""
+    return banco.varios(
+        """SELECT p.atendente_id, a.nome, a.login, p.entrou_em,
+                  p.convidado_por, q.nome AS convidado_por_nome
+             FROM conversa_participante p
+             JOIN atendente a ON a.id = p.atendente_id
+             LEFT JOIN atendente q ON q.id = p.convidado_por
+            WHERE p.conversa_id = %s AND p.saiu_em IS NULL
+            ORDER BY p.entrou_em""", (conversa_id,))
+
+
+def convidar(conversa_id: int, atendente_id: int,
+             convidado_por: int | None) -> dict:
+    """Chama alguém para a conversa.
+
+    ⚠️ Convite repetido NÃO é erro -- é conflito esperado, a mesma disciplina
+    da idempotência de webhook (metodologia §1). Reconvidar quem saiu reabre a
+    participação em vez de criar outra linha.
+    """
+    conversa_atual = banco.um(
+        "SELECT id, atendente_id FROM conversa WHERE id = %s", (conversa_id,))
+    if not conversa_atual:
+        return {"ok": False, "motivo": "Conversa não encontrada."}
+
+    alvo = banco.um("SELECT id, nome, ativo FROM atendente WHERE id = %s",
+                    (atendente_id,))
+    if not alvo:
+        return {"ok": False, "motivo": "Atendente não encontrado."}
+    if not alvo["ativo"]:
+        return {"ok": False, "motivo": f"{alvo['nome']} está inativo."}
+
+    # 🚨 O dono não é participante: ele é `conversa.atendente_id`. Convidá-lo
+    # criaria a mesma pessoa em dois lugares, e a saída dele teria que ser
+    # resolvida duas vezes.
+    if conversa_atual["atendente_id"] == atendente_id:
+        return {"ok": False,
+                "motivo": f"{alvo['nome']} já é quem responde por esta conversa."}
+
+    banco.executar(
+        """INSERT INTO conversa_participante
+               (conversa_id, atendente_id, convidado_por, entrou_em)
+           VALUES (%s, %s, %s, now())
+           ON CONFLICT (conversa_id, atendente_id) DO UPDATE
+              SET saiu_em = NULL,
+                  -- 🚨 SÓ quem tinha saído recomeça a contar. Reconvidar quem
+                  -- já está dentro não pode mexer em `entrou_em`: a ordem de
+                  -- `entrou_em` É A FILA DE HERANÇA da posse, e um convite
+                  -- repetido passaria a pessoa para trás sem nada ter mudado.
+                  -- Conflito esperado se ignora (metodologia §1).
+                  entrou_em = CASE
+                      WHEN conversa_participante.saiu_em IS NULL
+                          THEN conversa_participante.entrou_em
+                      ELSE now() END,
+                  convidado_por = CASE
+                      WHEN conversa_participante.saiu_em IS NULL
+                          THEN conversa_participante.convidado_por
+                      ELSE EXCLUDED.convidado_por END""",
+        (conversa_id, atendente_id, convidado_por))
+    log.info("conversa %s: %s foi convidado", conversa_id, alvo["nome"])
+    return {"ok": True, "conversa_id": conversa_id, "atendente_id": atendente_id,
+            "nome": alvo["nome"]}
+
+
+def sair(conversa_id: int, atendente_id: int) -> dict:
+    """Sai da conversa. Se quem sai é o DONO, a posse passa para quem ficou.
+
+    Decisão do usuário em 11/08. Os dois casos são diferentes de verdade:
+
+      · participante sai  -> marca `saiu_em`, e nada mais muda;
+      · DONO sai          -> o participante ativo mais antigo vira dono, e a
+                             transferência fica registrada. Sem ninguém para
+                             herdar, a conversa volta para a fila.
+
+    🚨 TUDO NUM CURSOR SÓ, COM A CONVERSA TRAVADA. Entre escolher o herdeiro e
+    gravá-lo, o herdeiro pode ter saído -- e a conversa acabaria com um dono
+    que não está mais lá. O `FOR UPDATE` serializa as saídas concorrentes, do
+    mesmo jeito que o `WHERE atendente_id IS NULL` serializa o `assumir`.
+    """
+    with banco.cursor() as cur:
+        cur.execute("SELECT id, atendente_id, estado FROM conversa "
+                    "WHERE id = %s FOR UPDATE", (conversa_id,))
+        conversa_atual = cur.fetchone()
+        if not conversa_atual:
+            return {"ok": False, "motivo": "Conversa não encontrada."}
+
+        era_dono = conversa_atual["atendente_id"] == atendente_id
+
+        cur.execute(
+            """UPDATE conversa_participante SET saiu_em = now()
+                WHERE conversa_id = %s AND atendente_id = %s AND saiu_em IS NULL
+                RETURNING atendente_id""", (conversa_id, atendente_id))
+        era_participante = cur.fetchone() is not None
+
+        if not era_dono and not era_participante:
+            return {"ok": False, "motivo": "Você não está nesta conversa."}
+        if not era_dono:
+            return {"ok": True, "conversa_id": conversa_id, "novo_dono": None,
+                    "para_fila": False}
+
+        # ── quem sai é o dono: alguém herda
+        cur.execute(
+            """SELECT p.atendente_id, a.nome FROM conversa_participante p
+                 JOIN atendente a ON a.id = p.atendente_id
+                WHERE p.conversa_id = %s AND p.saiu_em IS NULL AND a.ativo
+                ORDER BY p.entrou_em LIMIT 1""", (conversa_id,))
+        herdeiro = cur.fetchone()
+
+        if not herdeiro:
+            # ⚠️ Ninguém para herdar: volta para a fila, que é o caminho que já
+            # existe para conversa sem dono. Não se inventa estado novo.
+            cur.execute(
+                """UPDATE conversa SET atendente_id = NULL, estado = 'fila',
+                                       atualizada_em = now()
+                    WHERE id = %s AND estado <> 'resolvida'""", (conversa_id,))
+            cur.execute(
+                """INSERT INTO transferencia
+                       (conversa_id, de_atendente_id, motivo, resumo)
+                   VALUES (%s, %s, 'saida_do_dono', %s)""",
+                (conversa_id, atendente_id, "saiu e não havia quem herdasse"))
+            log.info("conversa %s voltou para a fila: o dono saiu sem herdeiro",
+                     conversa_id)
+            return {"ok": True, "conversa_id": conversa_id, "novo_dono": None,
+                    "para_fila": True}
+
+        # 🚨 Quem herda deixa de ser participante: agora é o dono. Ficar nos
+        # dois lugares faria a próxima saída dele ser tratada duas vezes.
+        cur.execute(
+            "UPDATE conversa SET atendente_id = %s, atualizada_em = now() "
+            "WHERE id = %s", (herdeiro["atendente_id"], conversa_id))
+        cur.execute(
+            "UPDATE conversa_participante SET saiu_em = now() "
+            "WHERE conversa_id = %s AND atendente_id = %s",
+            (conversa_id, herdeiro["atendente_id"]))
+        cur.execute(
+            """INSERT INTO transferencia
+                   (conversa_id, de_atendente_id, para_atendente_id, motivo, resumo)
+               VALUES (%s, %s, %s, 'saida_do_dono', %s)""",
+            (conversa_id, atendente_id, herdeiro["atendente_id"],
+             "o dono saiu; herdou quem estava há mais tempo"))
+        log.info("conversa %s: dono saiu, %s herdou",
+                 conversa_id, herdeiro["nome"])
+        return {"ok": True, "conversa_id": conversa_id,
+                "novo_dono": herdeiro["atendente_id"],
+                "novo_dono_nome": herdeiro["nome"], "para_fila": False}
+
+
+def remover(conversa_id: int, atendente_id: int, quem_pede: int | None) -> dict:
+    """O dono tira alguém da conversa. Decisão do usuário: o próprio sai, e o
+    dono também pode remover.
+
+    ⚠️ Não serve para o dono se remover -- para isso existe `sair`, que resolve
+    a herança da posse.
+    """
+    conversa_atual = banco.um(
+        "SELECT id, atendente_id FROM conversa WHERE id = %s", (conversa_id,))
+    if not conversa_atual:
+        return {"ok": False, "motivo": "Conversa não encontrada."}
+    if conversa_atual["atendente_id"] != quem_pede:
+        return {"ok": False,
+                "motivo": "Só quem responde pela conversa pode remover alguém."}
+    if atendente_id == quem_pede:
+        return {"ok": False, "motivo": "Para sair você mesmo, use 'sair'."}
+
+    linha = banco.um(
+        """UPDATE conversa_participante SET saiu_em = now()
+            WHERE conversa_id = %s AND atendente_id = %s AND saiu_em IS NULL
+            RETURNING atendente_id""", (conversa_id, atendente_id))
+    if not linha:
+        return {"ok": False, "motivo": "Esta pessoa não está na conversa."}
+    return {"ok": True, "conversa_id": conversa_id}

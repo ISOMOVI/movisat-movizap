@@ -943,6 +943,84 @@ def ver_fila(usuario: dict = Depends(auth.requer_tela("ATD_1.3"))):
     return conversas.fila()
 
 
+class ConviteEntrada(BaseModel):
+    atendente_id: int
+
+
+@app.get("/api/conversas/{conversa_id}/participantes")
+def ver_participantes(conversa_id: int,
+                      usuario: dict = Depends(auth.requer_tela("ATD_1.2"))):
+    """Quem acompanha, quem pode ser chamado, e qual é o meu papel aqui.
+
+    ⚠️ `convidaveis` sai daqui e não de `/api/atendentes` porque aquela rota
+    exige CAD_2.1 — tela de cadastro, que atendente comum não tem. Aqui vai só
+    id e nome, que é o necessário para o seletor.
+    """
+    eu = _atendente_do_usuario(usuario)
+    lista = conversas.participantes(conversa_id)
+    conversa_atual = banco.um(
+        "SELECT atendente_id FROM conversa WHERE id = %s", (conversa_id,))
+    if not conversa_atual:
+        raise HTTPException(status_code=404, detail="Conversa não encontrada.")
+
+    dentro = {p["atendente_id"] for p in lista}
+    if conversa_atual["atendente_id"]:
+        dentro.add(conversa_atual["atendente_id"])
+    return {
+        "participantes": lista,
+        "eu": eu,
+        "sou_dono": eu is not None and conversa_atual["atendente_id"] == eu,
+        "sou_participante": eu in {p["atendente_id"] for p in lista},
+        "convidaveis": [
+            {"id": a["id"], "nome": a["nome"]}
+            for a in banco.varios(
+                "SELECT id, nome FROM atendente WHERE ativo ORDER BY nome")
+            if a["id"] not in dentro],
+    }
+
+
+@app.post("/api/conversas/{conversa_id}/convidar")
+def convidar_para_conversa(conversa_id: int, dados: ConviteEntrada,
+                           usuario: dict = Depends(auth.requer_tela("ATD_1.2"))):
+    """Chama outro atendente para a conversa.
+
+    🚨 Isto NÃO concede acesso — não existe isolamento por conversa: qualquer
+    atendente com ATD_1.2 já abre qualquer conversa. O convite faz a conversa
+    APARECER NA LISTA de quem foi chamado, e registra quem está junto.
+    """
+    resultado = conversas.convidar(conversa_id, dados.atendente_id,
+                                   _atendente_do_usuario(usuario))
+    if not resultado["ok"]:
+        raise HTTPException(status_code=409, detail=resultado["motivo"])
+    return resultado
+
+
+@app.post("/api/conversas/{conversa_id}/sair")
+def sair_da_conversa(conversa_id: int,
+                     usuario: dict = Depends(auth.requer_tela("ATD_1.2"))):
+    """Sai da conversa. Se quem sai é o dono, a posse passa para quem ficou —
+    e se não ficou ninguém, a conversa volta para a fila."""
+    eu = _atendente_do_usuario(usuario)
+    if eu is None:
+        raise HTTPException(status_code=409,
+                            detail="Seu login não está ligado a um atendente.")
+    resultado = conversas.sair(conversa_id, eu)
+    if not resultado["ok"]:
+        raise HTTPException(status_code=409, detail=resultado["motivo"])
+    return resultado
+
+
+@app.post("/api/conversas/{conversa_id}/remover/{atendente_id}")
+def remover_da_conversa(conversa_id: int, atendente_id: int,
+                        usuario: dict = Depends(auth.requer_tela("ATD_1.2"))):
+    """Tira alguém da conversa. Só quem responde por ela pode."""
+    resultado = conversas.remover(conversa_id, atendente_id,
+                                  _atendente_do_usuario(usuario))
+    if not resultado["ok"]:
+        raise HTTPException(status_code=403, detail=resultado["motivo"])
+    return resultado
+
+
 @app.post("/api/conversas/{conversa_id}/transferir")
 def transferir_conversa(conversa_id: int, dados: TransferenciaEntrada,
                         usuario: dict = Depends(auth.requer_tela("ATD_1.2"))):
