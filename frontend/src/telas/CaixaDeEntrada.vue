@@ -239,7 +239,12 @@ async function devolver() {
 async function encerrar() {
   try {
     await api.post(`/api/conversas/${aberta.value.id}/encerrar`, {
-      classificacao_id: Number(classificacaoEscolhida.value),
+      // 🚨 `Number('')` é 0, e 0 não é "sem classificação" -- é um id que
+      // não existe. Classificar virou opcional em 11/08, então o que vai é
+      // null quando ninguém escolheu.
+      classificacao_id: classificacaoEscolhida.value
+        ? Number(classificacaoEscolhida.value)
+        : null,
       comentario: comentario.value || null,
     })
     recado.value = 'Encerrada. Ela passa a aparecer no Histórico.'
@@ -995,7 +1000,7 @@ function carregarMidiasDaConversa(c) {
               <button
                 class="botao botao--primario"
                 type="button"
-                :disabled="!classificacaoEscolhida || (exigeComentario && !comentario.trim())"
+                :disabled="exigeComentario && !comentario.trim()"
                 @click="encerrar"
               >
                 Encerrar conversa

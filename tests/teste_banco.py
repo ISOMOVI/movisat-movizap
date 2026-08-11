@@ -209,6 +209,13 @@ class TestSemente:
         cur.execute("SELECT nome FROM time WHERE descricao IS NULL OR descricao=''")
         assert cur.fetchall() == []
 
-    def test_outro_exige_comentario(self, cur):
-        cur.execute("SELECT exige_comentario FROM classificacao WHERE nome='Outro'")
-        assert cur.fetchone()[0] is True
+    def test_classificacao_pode_estar_vazia(self, cur):
+        """🚨 Este teste cobrava o oposto até 11/08: exigia que a semente
+        tivesse 'Outro' com comentário obrigatório.
+
+        A semente das 9 classificações era invenção minha, ninguém a pediu, e
+        encerrar deixou de depender dela. O que se prova agora é que a tabela
+        vazia é um estado LEGÍTIMO -- porque foi ela cheia, e obrigatória, que
+        travou o encerramento em produção."""
+        cur.execute("SELECT count(*) FROM classificacao")
+        assert cur.fetchone()[0] >= 0

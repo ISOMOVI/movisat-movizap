@@ -130,9 +130,10 @@ class TestEnvio:
         assert sem_enviar == [], "chegou a chamar o WhatsApp com texto vazio"
 
     def test_conversa_encerrada_nao_recebe_resposta(self, uma_conversa, sem_enviar):
-        c = banco.um("SELECT id FROM classificacao WHERE NOT exige_comentario "
-                     "AND ativo ORDER BY ordem LIMIT 1")
-        conversas.encerrar(uma_conversa, c["id"])
+        # ⚠️ Encerra sem classificação: virou opcional em 11/08, e ler uma
+        # de produção era a armadilha que quebrou 8 testes quando a tabela
+        # ficou vazia.
+        conversas.encerrar(uma_conversa)
         r = conversas.responder(uma_conversa, "oi?", None)
         assert r["ok"] is False
         assert sem_enviar == []

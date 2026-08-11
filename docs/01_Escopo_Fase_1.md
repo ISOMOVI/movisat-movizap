@@ -39,7 +39,7 @@ Se uma mensagem entra pelo WhatsApp, a IA responde, transfere para um humano, o 
 | 8 | **IA na triagem** | identifica, consulta, responde, transfere. **Sem menu numerado** |
 | 9 | **Máquina de estados** | nova → bot → fila → humano → resolvida, com adiar e reabrir |
 | 10 | **Botões na conversa** | Encerrar · Transferir · Adiar · Devolver ao bot |
-| 11 | **Classificação no fechamento** | obrigatória — é o que alimenta analytics depois |
+| 11 | **Classificação no fechamento** | ~~obrigatória~~ → **OPCIONAL desde 11/08** — ver nota abaixo |
 | 12 | **Ficha lateral** | cliente, veículos, contratos, faturas — consulta ao FPSL |
 | 13 | **Login local** | padrão MoviServer. Google OAuth é Fase 2 |
 | 14 | **Times** | cadastro e transferência entre eles |
@@ -53,6 +53,25 @@ Se uma mensagem entra pelo WhatsApp, a IA responde, transfere para um humano, o 
 | 22 | **Segundo canal: Informativos** | conectar e **receber**. Mensagem que chegar é gravada e **não vira conversa** |
 | 23 | **Interruptor da IA, por canal** | nasce **desligado**. Só o `atendimento` tem IA |
 | 24 | **Registro cru do webhook** | `webhook_evento` guarda o corpo inteiro antes de qualquer interpretação |
+
+### 🚨 Item 11 mudou em 2026-08-11: classificar deixou de ser obrigatório
+
+A justificativa original era *"é o que alimenta analytics depois"*. Perguntado
+para que as classificações serviam, **não houve como provar utilidade**:
+
+- `REL_1.1` (analytics) é **Fase 3** e não existe;
+- **0 conversas** haviam sido encerradas, **0 classificadas**;
+- os **9 rótulos eram invenção minha** — ninguém os pediu.
+
+A obrigatoriedade era circular: as classificações existiam porque eu as fiz
+obrigatórias, e eram obrigatórias porque existiam. Pior, elas **travaram o
+encerramento em produção** quando foram apagadas, junto com 8 testes.
+
+Ficou assim: **classificar é opcional**. Classificação inválida continua sendo
+recusada — o que sumiu foi a exigência, não a validação. A tabela está vazia, e
+a tela e a rota `POST /api/classificacoes` seguem prontas para quando houver
+analytics **e** uma lista que alguém tenha pedido.
+
 
 > ⚠️ **Emenda de 2026-08-06, autorizada pelo usuário.** Os itens **18 a 21**
 > alargam a Fase 1 em relação ao que foi fechado em 04/08. Estão escritos aqui

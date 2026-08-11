@@ -823,7 +823,8 @@ class TransferenciaEntrada(BaseModel):
 
 
 class EncerramentoEntrada(BaseModel):
-    classificacao_id: int
+    # Opcional desde 11/08: encerrar não depende mais de classificar.
+    classificacao_id: int | None = None
     comentario: str | None = Field(default=None, max_length=2000)
 
 
@@ -1047,7 +1048,9 @@ def devolver_conversa(conversa_id: int,
 @app.post("/api/conversas/{conversa_id}/encerrar")
 def encerrar_conversa(conversa_id: int, dados: EncerramentoEntrada,
                       usuario: dict = Depends(auth.requer_tela("ATD_1.2"))):
-    """🚨 Classificar é obrigatório para fechar (escopo, item 11)."""
+    """Fecha a conversa. Classificar é OPCIONAL desde 11/08 — a
+    obrigatoriedade do escopo item 11 servia a um analytics que não
+    existe, com rótulos que ninguém pediu."""
     resultado = conversas.encerrar(conversa_id, dados.classificacao_id,
                                    dados.comentario)
     if not resultado["ok"]:

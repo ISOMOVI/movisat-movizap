@@ -882,13 +882,21 @@ def devolver_para_fila(conversa_id: int, de_atendente_id: int | None,
     return {"ok": True, "conversa_id": conversa_id}
 
 
-def encerrar(conversa_id: int, classificacao_id: int,
+def encerrar(conversa_id: int, classificacao_id: int | None = None,
              comentario: str | None = None) -> dict:
-    """Fecha a conversa. CLASSIFICAR É OBRIGATÓRIO — escopo, item 11.
+    """Fecha a conversa. Classificar é OPCIONAL desde 11/08.
 
-    🚨 A classificação marcada com `exige_comentario` (o "Outro") pede texto.
-    Sem isso ele vira o vale-tudo onde metade das conversas acaba, e o
-    analytics morre junto: "no que gastamos atendimento" fica sem resposta.
+    🚨 ERA OBRIGATÓRIO, E A OBRIGATORIEDADE ERA CIRCULAR. O escopo (docs/01,
+    item 11) justificava com "é o que alimenta analytics depois" -- mas
+    `REL_1.1` é Fase 3, não existe, e nunca houve conversa classificada. Os 9
+    rótulos eram invenção minha, e travavam o encerramento de qualquer conversa.
+
+    Volta a ser obrigatória quando houver analytics E uma lista que alguém
+    pediu. Até lá, quem quiser classificar classifica; quem não quiser fecha.
+
+    ⚠️ Se vier classificação, ela continua sendo validada: id inexistente ou
+    inativo é erro, e a que exige comentário continua exigindo. Aceitar
+    qualquer número faria o histórico apontar para nada.
     """
     conversa_atual = banco.um(
         "SELECT id, criada_em, estado FROM conversa WHERE id = %s", (conversa_id,))
@@ -897,14 +905,16 @@ def encerrar(conversa_id: int, classificacao_id: int,
     if conversa_atual["estado"] == "resolvida":
         return {"ok": False, "motivo": "Esta conversa já está encerrada."}
 
-    classificacao = banco.um(
-        "SELECT id, nome, exige_comentario FROM classificacao WHERE id = %s AND ativo",
-        (classificacao_id,))
-    if not classificacao:
-        return {"ok": False, "motivo": "Classificação inexistente ou inativa."}
+    classificacao = None
+    if classificacao_id is not None:
+        classificacao = banco.um(
+            "SELECT id, nome, exige_comentario FROM classificacao "
+            "WHERE id = %s AND ativo", (classificacao_id,))
+        if not classificacao:
+            return {"ok": False, "motivo": "Classificação inexistente ou inativa."}
 
     comentario = (comentario or "").strip() or None
-    if classificacao["exige_comentario"] and not comentario:
+    if classificacao and classificacao["exige_comentario"] and not comentario:
         return {"ok": False,
                 "motivo": f"A classificação {classificacao['nome']!r} exige um "
                           f"comentário dizendo o que foi."}
@@ -917,7 +927,8 @@ def encerrar(conversa_id: int, classificacao_id: int,
                   atualizada_em = now()
             WHERE id = %s""",
         (classificacao_id, comentario, conversa_id))
-    log.info("conversa %s encerrada como %s", conversa_id, classificacao["nome"])
+    log.info("conversa %s encerrada%s", conversa_id,
+             f" como {classificacao['nome']}" if classificacao else "")
     return {"ok": True, "conversa_id": conversa_id}
 
 

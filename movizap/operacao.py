@@ -456,18 +456,10 @@ def atualizar_classificacao(classificacao_id: int, nome: str,
         raise DadoInvalido("Classificação não encontrada.")
     nome = _texto(nome, "O nome da classificação", maximo=80)
 
-    # 🚨 Escopo, item 11: classificar é obrigatório para fechar conversa. Se
-    # todas forem desativadas, ninguém consegue mais encerrar nada -- e o
-    # sintoma aparece longe daqui, na tela do atendente.
-    if not ativo:
-        sobram = banco.um(
-            "SELECT COUNT(*) AS n FROM classificacao WHERE ativo AND id <> %s",
-            (classificacao_id,))
-        if sobram["n"] == 0:
-            raise EmUso(
-                "Esta é a última classificação ativa. Sem nenhuma, o atendente "
-                "não consegue encerrar conversa."
-            )
+    # ⚠️ Havia aqui uma regra impedindo desativar a ÚLTIMA classificação: sem
+    # nenhuma, ninguém encerrava conversa. Ela saiu em 11/08, junto com a
+    # obrigatoriedade de classificar -- guardar o sistema contra um problema
+    # que não existe mais só impede o usuário de limpar a própria base.
     try:
         banco.executar(
             """UPDATE classificacao SET nome = %s, exige_comentario = %s,

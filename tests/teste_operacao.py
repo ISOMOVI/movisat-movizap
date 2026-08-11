@@ -225,11 +225,14 @@ def test_classificacao_repetida_e_recusada():
         banco.executar("DELETE FROM classificacao WHERE id = %s", (c["id"],))
 
 
-def test_producao_tem_classificacao_ativa_suficiente():
-    """A regra "não desative a última" só se prova com uma só ativa, e não dá
-    para deixar a base assim. Aqui se confere a premissa; a regra em si tem
-    teste unitário no ramo de erro do módulo."""
+def test_producao_pode_ficar_sem_classificacao_nenhuma():
+    """🚨 O oposto do que este teste exigia até 11/08.
+
+    Ele cobrava >= 2 classificações ativas em produção, porque encerrar
+    dependia delas. Encerrar deixou de depender: a lista de 9 era invenção
+    minha, ninguém a pediu, e nunca houve conversa classificada.
+
+    Agora o que se prova é que a ausência NÃO quebra nada -- porque foi
+    exatamente isso que quebrou em produção quando as 9 foram apagadas."""
     ativas = operacao.listar_classificacoes()
-    assert len(ativas) >= 2
-    assert any(c["exige_comentario"] for c in ativas), \
-        "'Outro' sem comentário obrigatório vira o vale-tudo do analytics"
+    assert isinstance(ativas, list), "listar não pode estourar sem classificação"

@@ -143,49 +143,79 @@ class TestTransferenciaEATriagemManual:
         assert c["estado"] == "fila"
 
 
+@pytest.fixture()
+def classificacao():
+    """Uma classificação SÓ deste teste.
+
+    🚨 Antes daqui os testes liam `SELECT ... FROM classificacao LIMIT 1` — a
+    linha de PRODUÇÃO. Quebraram no instante em que a base ficou legitimamente
+    sem classificação nenhuma, porque encerrar deixou de exigir em 11/08.
+    É a armadilha registrada na metodologia: teste em tabela de produção
+    precisa da própria linha.
+    """
+    ids = {}
+    for exige, nome in ((False, "zz_teste_fila_simples"),
+                        (True, "zz_teste_fila_com_texto")):
+        ids[exige] = banco.um(
+            """INSERT INTO classificacao (nome, ordem, exige_comentario, ativo)
+               VALUES (%s, 900, %s, true) RETURNING id""", (nome, exige))["id"]
+    yield ids
+    banco.executar("UPDATE conversa SET classificacao_id = NULL "
+                   "WHERE classificacao_id = ANY(%s)", (list(ids.values()),))
+    banco.executar("DELETE FROM classificacao WHERE id = ANY(%s)",
+                   (list(ids.values()),))
+
+
 class TestEncerramento:
-    def test_encerrar_exige_classificacao_valida(self, uma_conversa):
+    def test_encerra_SEM_classificacao(self, uma_conversa):
+        """🚨 O comportamento novo de 11/08.
+
+        A obrigatoriedade era CIRCULAR: as 9 classificações existiam porque eu
+        as fiz obrigatórias, e eram obrigatórias porque existiam. O escopo
+        justificava com "alimenta analytics depois" -- e `REL_1.1` é Fase 3,
+        não existe, e nunca houve conversa classificada."""
+        assert conversas.encerrar(uma_conversa)["ok"] is True
+        linha = banco.um("SELECT estado, classificacao_id FROM conversa "
+                         "WHERE id = %s", (uma_conversa,))
+        assert linha["estado"] == "resolvida"
+        assert linha["classificacao_id"] is None
+
+    def test_classificacao_inexistente_continua_recusada(self, uma_conversa):
+        """⚠️ Classificar virou opcional; classificar ERRADO não. Um id que não
+        existe faria o histórico apontar para nada."""
         assert conversas.encerrar(uma_conversa, 999999)["ok"] is False
 
-    def test_classificacao_que_exige_comentario_recusa_sem_texto(self, uma_conversa):
-        """⚠️ Sem isto, "Outro" vira o vale-tudo e o analytics morre."""
-        c = banco.um("SELECT id FROM classificacao WHERE exige_comentario AND ativo LIMIT 1")
-        if not c:
-            pytest.skip("nenhuma classificação exige comentário")
-        assert conversas.encerrar(uma_conversa, c["id"])["ok"] is False
-        assert conversas.encerrar(uma_conversa, c["id"], "foi isso aqui")["ok"] is True
+    def test_classificacao_que_exige_comentario_recusa_sem_texto(
+            self, uma_conversa, classificacao):
+        assert conversas.encerrar(uma_conversa, classificacao[True])["ok"] is False
+        assert conversas.encerrar(uma_conversa, classificacao[True],
+                                  "foi isso aqui")["ok"] is True
 
-    def test_encerrada_sai_da_fila_e_entra_no_historico(self, uma_conversa):
-        c = banco.um("SELECT id FROM classificacao WHERE NOT exige_comentario "
-                     "AND ativo ORDER BY ordem LIMIT 1")
-        assert conversas.encerrar(uma_conversa, c["id"])["ok"] is True
+    def test_encerrada_sai_da_fila_e_entra_no_historico(self, uma_conversa,
+                                                        classificacao):
+        assert conversas.encerrar(uma_conversa, classificacao[False])["ok"] is True
 
         todas = [x["id"] for g in conversas.fila() for x in g["conversas"]]
         assert uma_conversa not in todas
         assert uma_conversa in [h["id"] for h in conversas.historico()]
 
-    def test_nao_encerra_duas_vezes(self, uma_conversa):
-        c = banco.um("SELECT id FROM classificacao WHERE NOT exige_comentario "
-                     "AND ativo ORDER BY ordem LIMIT 1")
-        conversas.encerrar(uma_conversa, c["id"])
-        assert conversas.encerrar(uma_conversa, c["id"])["ok"] is False
+    def test_nao_encerra_duas_vezes(self, uma_conversa, classificacao):
+        conversas.encerrar(uma_conversa, classificacao[False])
+        assert conversas.encerrar(uma_conversa, classificacao[False])["ok"] is False
 
-    def test_encerrar_grava_a_duracao(self, uma_conversa):
-        c = banco.um("SELECT id FROM classificacao WHERE NOT exige_comentario "
-                     "AND ativo ORDER BY ordem LIMIT 1")
-        conversas.encerrar(uma_conversa, c["id"])
+    def test_encerrar_grava_a_duracao(self, uma_conversa, classificacao):
+        conversas.encerrar(uma_conversa, classificacao[False])
         linha = banco.um("SELECT segundos_total, resolvida_em FROM conversa "
                          "WHERE id = %s", (uma_conversa,))
         assert linha["resolvida_em"] is not None
         assert linha["segundos_total"] is not None
 
-    def test_apos_encerrar_um_novo_contato_abre_conversa_nova(self, uma_conversa):
+    def test_apos_encerrar_um_novo_contato_abre_conversa_nova(self, uma_conversa,
+                                                              classificacao):
         """🚨 `ux_conversa_aberta` é parcial (`estado <> 'resolvida'`): a mesma
         pessoa pode voltar a falar e isso é uma conversa NOVA, não a antiga
         reaberta -- senão o histórico juntaria dois assuntos diferentes."""
-        c = banco.um("SELECT id FROM classificacao WHERE NOT exige_comentario "
-                     "AND ativo ORDER BY ordem LIMIT 1")
-        conversas.encerrar(uma_conversa, c["id"])
+        conversas.encerrar(uma_conversa, classificacao[False])
         canal = banco.um("SELECT id FROM canal WHERE instancia = 'atendimento'")
         with banco.cursor() as cur:
             nova = conversas.garantir_conversa(cur, canal["id"], FONE)
@@ -193,10 +223,9 @@ class TestEncerramento:
 
 
 class TestHistorico:
-    def test_busca_por_telefone_em_qualquer_grafia(self, uma_conversa):
-        c = banco.um("SELECT id FROM classificacao WHERE NOT exige_comentario "
-                     "AND ativo ORDER BY ordem LIMIT 1")
-        conversas.encerrar(uma_conversa, c["id"])
+    def test_busca_por_telefone_em_qualquer_grafia(self, uma_conversa,
+                                                   classificacao):
+        conversas.encerrar(uma_conversa, classificacao[False])
         for grafia in (FONE, "99 92222-0000", "5599922220000"):
             achados = [h["id"] for h in conversas.historico(busca=grafia)]
             assert uma_conversa in achados, f"grafia {grafia} não achou"
