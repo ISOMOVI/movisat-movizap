@@ -141,11 +141,16 @@ def registrar(corpo: dict) -> dict:
 
     canal = _canal_da_instancia(instancia) if instancia else None
 
-    # 🚨 Grupo tem `@g.us` e a Fase 1 não atende grupo. Grava e marca
-    # processado, para não ficar numa fila que ninguém vai consumir.
-    e_grupo = "@g.us" in jid
+    # 🚨 GRUPO DEIXOU DE SER DESCARTADO EM 12/08 (migração 027). O `@g.us` não
+    # é telefone -- `numero` fica nulo e a identidade da conversa passa a ser o
+    # próprio JID. O que impede a enxurrada não é mais descartar: é o grupo
+    # nascer com `atender = false`, fora da caixa de entrada.
+    #
+    # ⚠️ O CANAL INFORMATIVO CONTINUA DESCARTANDO GRUPO E TUDO MAIS. Ele é
+    # disparo, não conversa -- e um grupo virando atendimento ali seria
+    # resposta num canal que ninguém lê.
     informativo = bool(canal and canal["tipo"] == "informativo")
-    ignorar = e_grupo or informativo
+    ignorar = informativo
 
     linha = banco.um(
         """
@@ -174,8 +179,7 @@ def registrar(corpo: dict) -> dict:
             # falso é o que faz alguém parar de olhar o painel. Corrigido na
             # migração 009. É a mesma lição do `ok`/`vazio`/`erro` do sync,
             # cometida de novo em outro lugar.
-            "grupo: fora da Fase 1" if e_grupo else
-            ("canal informativo: não vira conversa" if informativo else None),
+            "canal informativo: não vira conversa" if informativo else None,
         ),
     )
 

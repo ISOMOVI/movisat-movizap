@@ -60,15 +60,9 @@ def buscar_usuario(login: str) -> dict | None:
     # copiar-colar produzem sozinhos -- ainda recusava sem chegar no bcrypt.
     login = (login or "").strip()
 
-    if settings.admin_login and login.casefold() == settings.admin_login.casefold():
-        return {
-            "login": settings.admin_login,
-            "nome": "Administrador",
-            "senha_hash": settings.admin_senha_hash,
-            "owner": True,
-            "ativo": True,
-            "permissoes": sorted(registro_telas.PERMISSOES_VALIDAS),
-        }
+    e_a_conta_do_env = bool(
+        settings.admin_login
+        and login.casefold() == settings.admin_login.casefold())
 
     # 🚨 Banco fora do ar NÃO pode virar 500 na tela de login. Sem este
     # try, um login desconhecido com o pool fechado levantava RuntimeError e
@@ -76,21 +70,58 @@ def buscar_usuario(login: str) -> dict | None:
     # inválidos". Falha fechado: sem banco, só a conta do .env entra.
     try:
         linha = banco.um(
-            """SELECT id, login, nome, senha_hash, ativo, owner, perfil
+            """SELECT id, login, nome, email, senha_hash, ativo, owner, perfil
                  FROM atendente WHERE lower(login) = lower(%s)""",
             (login,),
         )
     except (psycopg.Error, RuntimeError) as e:
         log.error("busca de usuário sem banco (%s): só a conta do .env entra",
                   e.__class__.__name__)
+        linha = None
+        if not e_a_conta_do_env:
+            return None
+
+    if linha is None:
+        # A PORTA DE EMERGÊNCIA, e só ela: a conta do .env sem linha na tabela.
+        # Acontece em dois casos -- banco fora do ar, ou instalação nova antes
+        # de existir atendente. Identidade mínima, sem `id`.
+        if e_a_conta_do_env:
+            return {
+                "login": settings.admin_login,
+                "nome": "Administrador",
+                "email": None,
+                "senha_hash": settings.admin_senha_hash,
+                "owner": True,
+                "ativo": True,
+                "permissoes": sorted(registro_telas.PERMISSOES_VALIDAS),
+            }
         return None
-    if not linha:
-        return None
+
+    # 🚨 A TABELA É A IDENTIDADE; O `.env` É SÓ UMA SENHA A MAIS. Até 12/08 a
+    # conta do `.env` era consultada PRIMEIRO e retornava ali mesmo -- e o
+    # login dela colidia com `atendente.login`. O dono entrava por senha e
+    # recebia uma identidade SEM `id`: nome "Administrador" em vez do próprio,
+    # e o vínculo com a linha 121 só acontecia porque `_atendente_do_usuario`
+    # resolvia pelo TEXTO do login. Coincidência dos dois nomes serem iguais,
+    # não desenho. Mudar o login do `.env` teria feito as notas do dono saírem
+    # com autor NULL, em silêncio.
+    #
+    # ⚠️ A SENHA DA TABELA GANHA QUANDO EXISTE. A linha do dono tem
+    # `senha_hash` NULL (ele entra por Google), então hoje quem vale é o hash
+    # do `.env` -- e é por isso que trocar a senha na CAD_2.1 não fazia nada,
+    # sem avisar. Com esta ordem, definir senha na CAD_2.1 passa a valer, e a
+    # porta do `.env` continua existindo exatamente quando é necessária: com o
+    # banco fora do ar, que é quando não há hash de tabela para ler.
+    senha_hash = linha["senha_hash"]
+    if e_a_conta_do_env and not senha_hash:
+        senha_hash = settings.admin_senha_hash
+
     return {
         "id": linha["id"],
         "login": linha["login"],
         "nome": linha["nome"],
-        "senha_hash": linha["senha_hash"],
+        "email": linha["email"],
+        "senha_hash": senha_hash,
         "owner": linha["owner"],
         "ativo": linha["ativo"],
         # Conta nova nasce sem nada: perfil desconhecido devolve conjunto

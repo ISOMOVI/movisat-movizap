@@ -22,6 +22,7 @@ envio de propósito. Mensagem com `fromMe` é gravada como saída porque ela
 aconteceu de verdade — foi digitada no celular —, não porque o painel mandou.
 """
 import asyncio
+import base64
 import logging
 from datetime import datetime, timezone
 
@@ -174,13 +175,73 @@ def _contato_do_numero(e164: str) -> int | None:
     return None
 
 
-def garantir_conversa(cur, canal_id: int, e164: str) -> int:
-    """A conversa aberta deste número neste canal, criando se não houver.
+def _nome_do_grupo(instancia: str, jid: str) -> str | None:
+    """Pergunta o nome do grupo ao Evolution. Import tardio, como o `responder`."""
+    from . import evolution
+    try:
+        return evolution.nome_do_grupo(instancia, jid)
+    except Exception as e:
+        # ⚠️ Nome de grupo é enfeite comparado a receber a mensagem: nunca
+        # pode derrubar o processamento do webhook.
+        log.info("nome do grupo %s não veio (%s)", jid, e.__class__.__name__)
+        return None
+
+
+def garantir_conversa(cur, canal_id: int, e164: str | None,
+                      grupo_jid: str | None = None,
+                      grupo_nome: str | None = None,
+                      instancia: str | None = None) -> int:
+    """A conversa aberta desta IDENTIDADE neste canal, criando se não houver.
+
+    Identidade é o telefone, para conversa direta, ou o JID `…@g.us`, para
+    grupo. Exatamente uma das duas — o CHECK `ck_conversa_identidade` garante.
 
     🚨 O `ON CONFLICT` usa o índice parcial `ux_conversa_aberta`. Sem ele, duas
     mensagens chegando juntas criariam duas conversas para a mesma pessoa e o
-    atendente veria a fala dela partida em duas telas.
+    atendente veria a fala dela partida em duas telas. Desde a migração 027 o
+    índice é por `COALESCE(grupo_jid, telefone_e164)`, então a mesma garantia
+    vale para grupo.
+
+    ⚠️ GRUPO ENTRA NA MESMA LISTA da conversa direta, como no WhatsApp. Não há
+    importação em massa: a conversa só nasce quando CHEGA MENSAGEM, então
+    grupo parado nunca aparece. Medido em 12/08: o número participa de 62
+    grupos, e só os que falam viram conversa.
     """
+    if grupo_jid:
+        cur.execute(
+            """SELECT id, grupo_nome FROM conversa
+                WHERE canal_id = %s AND grupo_jid = %s AND estado <> 'resolvida'""",
+            (canal_id, grupo_jid))
+        achada = cur.fetchone()
+        if achada:
+            # ⚠️ SÓ PERGUNTA O NOME SE AINDA NÃO TIVER. Perguntar a cada
+            # mensagem seria uma chamada HTTP por mensagem de grupo, dentro do
+            # processamento do webhook -- que tem de ser rápido.
+            if not achada["grupo_nome"] and instancia:
+                novo_nome = _nome_do_grupo(instancia, grupo_jid)
+                if novo_nome:
+                    cur.execute(
+                        "UPDATE conversa SET grupo_nome = %s WHERE id = %s",
+                        (novo_nome, achada["id"]))
+            elif grupo_nome and achada["grupo_nome"] != grupo_nome:
+                cur.execute(
+                    "UPDATE conversa SET grupo_nome = %s WHERE id = %s",
+                    (grupo_nome, achada["id"]))
+            return achada["id"]
+
+        cur.execute(
+            """INSERT INTO conversa (canal_id, tipo, grupo_jid, grupo_nome,
+                                     estado)
+               VALUES (%s, 'grupo', %s, %s, 'nova')
+               ON CONFLICT (canal_id, COALESCE(grupo_jid, telefone_e164))
+                    WHERE estado <> 'resolvida'
+               DO UPDATE SET atualizada_em = now()
+               RETURNING id""",
+            (canal_id, grupo_jid,
+             grupo_nome or (_nome_do_grupo(instancia, grupo_jid)
+                            if instancia else None)))
+        return cur.fetchone()["id"]
+
     cur.execute(
         """SELECT id FROM conversa
             WHERE canal_id = %s AND telefone_e164 = %s AND estado <> 'resolvida'""",
@@ -192,7 +253,8 @@ def garantir_conversa(cur, canal_id: int, e164: str) -> int:
     cur.execute(
         """INSERT INTO conversa (canal_id, contato_id, telefone_e164, estado)
            VALUES (%s, %s, %s, 'nova')
-           ON CONFLICT (canal_id, telefone_e164) WHERE estado <> 'resolvida'
+           ON CONFLICT (canal_id, COALESCE(grupo_jid, telefone_e164))
+                WHERE estado <> 'resolvida'
            DO UPDATE SET atualizada_em = now()
            RETURNING id""",
         (canal_id, _contato_do_numero(e164), e164))
@@ -204,18 +266,36 @@ def _gravar_mensagem(cur, evento: dict, corpo: dict) -> str:
     chave = _cavar(data, "key", padrao={})
     de_mim = bool(chave.get("fromMe"))
 
+    # 🚨 GRUPO NÃO TEM TELEFONE. O `remoteJid` termina em `@g.us` e a
+    # identidade da conversa passa a ser ele. Quem FALOU vem à parte, em
+    # `key.participant` -- numa conversa direta o remetente é a própria
+    # conversa, num grupo de quinze não é.
+    jid_bruto = (chave.get("remoteJid") or "")
+    e_grupo = jid_bruto.endswith("@g.us")
+
     e164 = evento["telefone"]
-    if not e164:
+    if not e_grupo and not e164:
         return "sem telefone: nada a ligar"
     if not evento["canal_id"]:
         return "evento de instância sem canal cadastrado"
 
-    conversa_id = garantir_conversa(cur, evento["canal_id"], e164)
+    # 🚨 O NOME DO GRUPO NÃO VEM NO PAYLOAD. `pushName` é o perfil de QUEM
+    # MANDOU -- para mensagem nossa, o nosso próprio nome de negócio. Gravá-lo
+    # como nome do grupo rotulou "Suporte Movisat -> Weso" de "Movisat
+    # Rastreamento e Gestão de Frotas" em 12/08. O nome se pergunta ao
+    # Evolution, e só quando a conversa AINDA NÃO TEM nome -- uma chamada por
+    # grupo, não por mensagem.
+    conversa_id = garantir_conversa(
+        cur, evento["canal_id"],
+        None if e_grupo else e164,
+        grupo_jid=jid_bruto if e_grupo else None,
+        instancia=evento.get("instancia") if e_grupo else None)
     tipo, texto = _tipo_e_texto(data.get("message") or {})
 
-    # O apelido do WhatsApp, só do lado do cliente. `IS DISTINCT FROM` porque
-    # ele vem igual em toda mensagem: sem isso seriam 700 UPDATEs inúteis.
-    if not de_mim:
+    # ⚠️ EM GRUPO, `pushName` É DE QUEM FALOU, NÃO DO GRUPO. Guardá-lo em
+    # `nome_whatsapp` da conversa faria o nome da conversa mudar a cada
+    # mensagem, virando o último que falou.
+    if not de_mim and not e_grupo:
         nome = _nome_whatsapp(data)
         if nome:
             cur.execute(
@@ -227,8 +307,9 @@ def _gravar_mensagem(cur, evento: dict, corpo: dict) -> str:
     cur.execute(
         """INSERT INTO mensagem
                (conversa_id, id_externo, direcao, autor, tipo, conteudo,
-                entrega, criada_em, citada_id)
-           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                entrega, criada_em, citada_id,
+                remetente_jid, remetente_nome)
+           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
            ON CONFLICT (id_externo) WHERE id_externo IS NOT NULL DO NOTHING
            RETURNING id""",
         (conversa_id, evento["id_externo"],
@@ -237,7 +318,11 @@ def _gravar_mensagem(cur, evento: dict, corpo: dict) -> str:
          tipo, texto,
          ENTREGA.get(str(data.get("status") or "").upper()) if de_mim else None,
          _quando(data),
-         _citada_id(cur, data)))
+         _citada_id(cur, data),
+         # Só em grupo: numa conversa direta o remetente é a conversa, e
+         # repetir o mesmo telefone em toda linha não diz nada.
+         (chave.get("participant") or None) if e_grupo else None,
+         _nome_whatsapp(data) if (e_grupo and not de_mim) else None))
     nova = cur.fetchone()
 
     # 🚨 A MÍDIA VEM NO PRÓPRIO WEBHOOK, em `message.base64`. Só é guardada
@@ -364,6 +449,115 @@ async def rodar(parar: asyncio.Event) -> None:
 # LEITURA — o que a ATD_1.1 e a ATD_1.2 mostram
 # ============================================================================
 
+def _condicao_busca(termo: str) -> tuple[str, list]:
+    """O `WHERE` da busca de conversa — UM só, para a caixa e o Histórico.
+
+    🚨 EXISTIA COMO DOIS TRECHOS COPIADOS, E ELES DIVERGIRAM. A caixa procurava
+    só em `contato.nome`; o Histórico procurava em `contato.nome OR
+    cliente.nome`. Mesma caixinha na tela, duas regras. Cópia não fica igual
+    sozinha -- por isso agora é função, e quem quiser mudar muda nos dois de
+    uma vez ou em nenhum.
+
+    🚨 É `OR` EM TUDO, NÃO `if/else`. A versão antiga escolhia telefone OU
+    nome: `tel.normalizar` devolvia `None` para "998116168" (falta DDD) e a
+    busca caía no ramo de nome, procurando dígitos em `contato.nome` e
+    devolvendo VAZIO -- sem dizer que faltava o DDD. Escolher o campo pelo
+    formato do que foi digitado é adivinhar; procurar em todos é responder.
+
+    🚨 PROCURA ONDE A TELA MOSTRA. A lista exibe `nome_whatsapp ||
+    contato_nome || telefone`, mas o SQL só olhava `contato.nome` -- e 85 das
+    131 conversas (65%) não têm `contato_id`. Elas apareciam na tela com nome
+    e eram inencontráveis por ele.
+
+    ⚠️ A NOTA INTERNA ENTRA NA BUSCA, por decisão do usuário em 12/08: "a
+    nota, uma vez dentro da conversa, faz parte da conversa". Buscar "boleto"
+    acha a conversa mesmo que só a anotação diga isso.
+
+    ⚠️ O `%` VAI COMO PARÂMETRO. Montar `ILIKE '%IAGO%'` dentro da string SQL
+    faz o psycopg ler `%I` como placeholder -- aconteceu duas vezes em 11/08.
+    """
+    termo = (termo or "").strip()
+    if not termo:
+        return "", []
+
+    curinga = f"%{termo}%"
+    partes = ["c.nome_whatsapp ILIKE %s", "ct.nome ILIKE %s", "cl.nome ILIKE %s"]
+    params: list = [curinga, curinga, curinga]
+
+    # ---- telefone -----------------------------------------------------------
+    # Dois caminhos, somados: o número inteiro (com as variantes do nono
+    # dígito, como manda a metodologia §2) e o PEDAÇO -- "6168" tem de achar o
+    # celular, e para isso não existe normalização possível.
+    digitos = "".join(ch for ch in termo if ch.isdigit())
+    if digitos:
+        analise = tel.normalizar(termo)
+        if analise:
+            partes.append("c.telefone_e164 = ANY(%s)")
+            params.append(sorted(tel.variantes(analise)))
+        partes.append("c.telefone_e164 LIKE %s")
+        params.append(f"%{digitos}%")
+
+    # ---- conteúdo -----------------------------------------------------------
+    # 🚨 `EXISTS`, não JOIN: com JOIN, a conversa em que o termo aparece em oito
+    # mensagens voltaria oito vezes na lista, e o DISTINCT não resolveria --
+    # as linhas seriam diferentes por causa das colunas da mensagem.
+    partes.append(
+        "EXISTS (SELECT 1 FROM mensagem m "
+        "         WHERE m.conversa_id = c.id AND m.conteudo ILIKE %s)")
+    params.append(curinga)
+
+    return "(" + " OR ".join(partes) + ")", params
+
+
+def _nome_explica(linha: dict, termo: str) -> bool:
+    """O que a lista JÁ MOSTRA contém o termo? Então o acerto está à vista.
+
+    ⚠️ Compara em minúscula porque o SQL casou com `ILIKE`. Usar comparação
+    sensível a caixa aqui faria "IAGO" parecer inexplicado e a linha ganharia
+    um trecho desnecessário -- discordando do próprio filtro que a trouxe.
+    """
+    termo = (termo or "").strip().casefold()
+    if not termo:
+        return True
+    visiveis = [linha.get("nome_whatsapp"), linha.get("contato_nome"),
+                linha.get("cliente_nome"), linha.get("telefone_e164")]
+    digitos = "".join(ch for ch in termo if ch.isdigit())
+    for valor in visiveis:
+        if valor and termo in valor.casefold():
+            return True
+    # O telefone aparece na tela sem pontuação nenhuma, então o pedaço de
+    # dígitos também conta como "à vista".
+    fone = linha.get("telefone_e164") or ""
+    return bool(digitos and digitos in fone)
+
+
+def _trechos_achados(ids: list[int], termo: str) -> dict[int, str]:
+    """O trecho que fez cada conversa casar, para a lista dizer POR QUÊ.
+
+    ⚠️ Sem isto, a conversa que casou pelo CONTEÚDO aparece na lista com uma
+    prévia sem o termo em lugar nenhum, e quem buscou conclui que a busca está
+    quebrada.
+
+    🚨 UMA CONSULTA PARA TODAS, NÃO UMA POR LINHA. Com 100 conversas na lista,
+    perguntar de uma em uma são 100 idas ao banco a cada tecla digitada.
+
+    ⚠️ E NÃO POR `LATERAL` DENTRO DO `listar`. O parâmetro do LATERAL cairia
+    entre os `%s` do SELECT e os do WHERE, e errar essa ordem não dá erro de
+    sintaxe -- dá resultado errado, que é o pior tipo. A própria `listar` já
+    tem um aviso sobre isso.
+    """
+    termo = (termo or "").strip()
+    if not termo or not ids:
+        return {}
+    linhas = banco.varios(
+        """SELECT DISTINCT ON (conversa_id) conversa_id, conteudo
+             FROM mensagem
+            WHERE conversa_id = ANY(%s) AND conteudo ILIKE %s
+            ORDER BY conversa_id, criada_em DESC, id DESC""",
+        (ids, f"%{termo}%"))
+    return {l["conversa_id"]: l["conteudo"] for l in linhas}
+
+
 def listar(estado: str | None = None, atendente_id: int | None = None,
            sem_dono: bool = False, busca: str = "", limite: int = 100) -> list[dict]:
     """As conversas para a lista da caixa de entrada.
@@ -371,6 +565,10 @@ def listar(estado: str | None = None, atendente_id: int | None = None,
     Cada linha traz o que o doc pede: nome (ou telefone, quando não
     identificado), última mensagem, há quanto tempo, quem atende e o time.
     """
+    # ⚠️ GRUPO E CONVERSA DIRETA NA MESMA LISTA, como no WhatsApp. A 027 tinha
+    # criado uma aba separada; a 028 desfez. O painel não importa grupo --
+    # conversa só nasce quando CHEGA MENSAGEM --, então grupo parado nunca
+    # aparece e a ordem por atividade faz o resto.
     condicoes, params = ["1=1"], []
     if estado:
         condicoes.append("c.estado = %s")
@@ -388,23 +586,20 @@ def listar(estado: str | None = None, atendente_id: int | None = None,
         params.extend([atendente_id, atendente_id])
     if sem_dono:
         condicoes.append("c.atendente_id IS NULL")
-    if busca:
-        analise = tel.normalizar(busca)
-        if analise:
-            condicoes.append("c.telefone_e164 = %s")
-            params.append(analise)
-        else:
-            condicoes.append("ct.nome ILIKE %s")
-            params.append(f"%{busca}%")
+    onde_busca, params_busca = _condicao_busca(busca)
+    if onde_busca:
+        condicoes.append(onde_busca)
+        params.extend(params_busca)
 
     # 🚨 ORDEM POSICIONAL: os dois %s do SELECT são os PRIMEIROS da query, então
     # entram na frente de tudo que o WHERE já empilhou. Errar isso não dá erro
     # de sintaxe -- dá resultado errado, que é pior.
     params = [atendente_id, atendente_id] + params
     params.append(limite)
-    return banco.varios(
+    linhas = banco.varios(
         f"""
         SELECT c.id, c.estado, c.telefone_e164, c.contato_id, c.canal_id,
+               c.tipo, c.grupo_jid, c.grupo_nome,
                c.ultima_atividade_em, c.criada_em, c.atendente_id,
                -- ⚠️ A tela precisa separar "sou o dono" de "fui convidado":
                -- as duas aparecem na mesma lista, e só o dono responde por ela.
@@ -440,6 +635,16 @@ def listar(estado: str | None = None, atendente_id: int | None = None,
          LIMIT %s
         """, tuple(params))
 
+    # ⚠️ O TRECHO SÓ APARECE QUANDO O NOME NÃO EXPLICA O ACERTO. Buscar "iago"
+    # e ver a linha da conversa do Iago trocar a prévia por um pedaço de
+    # mensagem é ruído: o motivo do acerto já está à vista, no nome. O trecho
+    # existe para o caso oposto -- a conversa que casou por algo invisível.
+    alvo = [l["id"] for l in linhas if not _nome_explica(l, busca)]
+    trechos = _trechos_achados(alvo, busca)
+    for l in linhas:
+        l["trecho"] = trechos.get(l["id"])
+    return linhas
+
 
 def conversa(conversa_id: int) -> dict | None:
     linha = banco.um(
@@ -456,6 +661,13 @@ def conversa(conversa_id: int) -> dict | None:
     if not linha:
         return None
     linha["mensagens"] = mensagens(conversa_id)
+    # 🚨 A TELA PRECISA SABER QUE ESTÁ VENDO UM PEDAÇO. Quem busca dentro da
+    # conversa só acha o que foi carregado; sem este aviso, a busca diria "não
+    # encontrado" sobre mensagem que existe no banco -- que é pior do que não
+    # ter busca. Comparar com o teto é suficiente e não custa um COUNT: se
+    # voltou exatamente o teto, há chance de haver mais.
+    linha["truncada"] = len(linha["mensagens"]) >= TETO_MENSAGENS_NA_TELA
+    linha["teto_mensagens"] = TETO_MENSAGENS_NA_TELA
     # Os dados da empresa, quando há vínculo. É o conteúdo do painel lateral:
     # o mesmo que se vê ao clicar no contato dentro do WhatsApp.
     linha["empresa"] = _empresa_da_conversa(linha)
@@ -603,45 +815,119 @@ def desvincular(conversa_id: int) -> dict:
     return {"ok": True}
 
 
-def mensagens(conversa_id: int, limite: int = 300) -> list[dict]:
+TETO_MENSAGENS_NA_TELA = 1000
+
+
+def mensagens(conversa_id: int, limite: int = TETO_MENSAGENS_NA_TELA) -> list[dict]:
     """⚠️ Ordenado pela hora do PROVEDOR, não pela de chegada: fora de ordem é
-    normal no WhatsApp, e ordenar por chegada mostraria a conversa embaralhada."""
+    normal no WhatsApp, e ordenar por chegada mostraria a conversa embaralhada.
+
+    ⚠️ O TETO É NOSSO, NÃO DO WHATSAPP. Era 300 -- um padrão que eu escrevi, e
+    que o frontend nunca sobrescreveu. Subiu para 1.000 por decisão do usuário
+    em 12/08. A maior conversa da base tem 130 mensagens, então é folga.
+
+    🚨 QUEM BUSCA DENTRO DA CONVERSA SÓ ACHA O QUE FOI CARREGADO. Por isso
+    `conversa()` devolve `truncada`: passando do teto, a tela precisa DIZER que
+    está vendo um pedaço, senão a busca responde "não encontrado" sobre
+    mensagem que existe.
+    """
+    # 🚨 O TETO CORTAVA PELO LADO ERRADO. `ORDER BY criada_em ASC LIMIT n`
+    # devolve as n mensagens MAIS ANTIGAS -- numa conversa acima do teto, o
+    # atendente veria o começo dela e nunca o que o cliente acabou de dizer,
+    # com a tela rolando para o "fim" de um pedaço velho. Nenhuma conversa
+    # passou do teto ainda (a maior tem 130), então isso nunca apareceu: é
+    # defeito latente, e subir o teto sozinho não o corrigiria.
+    # Pega-se as n mais RECENTES e reordena para exibir.
     return banco.varios(
-        """SELECT m.id, m.direcao, m.autor, m.tipo, m.conteudo, m.entrega,
-                  m.criada_em, m.id_externo, a.nome AS atendente_nome,
-                  m.midia_id, md.mime AS midia_mime, md.tamanho AS midia_tamanho,
-                  md.nome_original AS midia_nome,
-                  m.citada_id,
-                  q.conteudo AS citada_conteudo, q.tipo AS citada_tipo,
-                  q.autor    AS citada_autor
-             FROM mensagem m
-             LEFT JOIN atendente a ON a.id = m.atendente_id
-             LEFT JOIN midia md ON md.id = m.midia_id
-             LEFT JOIN mensagem q ON q.id = m.citada_id
-            WHERE m.conversa_id = %s
-            ORDER BY m.criada_em, m.id
-            LIMIT %s""", (conversa_id, limite))
+        """SELECT * FROM (
+               SELECT m.id, m.direcao, m.autor, m.tipo, m.conteudo, m.entrega,
+                      m.criada_em, m.id_externo, a.nome AS atendente_nome,
+                      -- Quem falou DENTRO do grupo. Nulo em conversa direta,
+                      -- onde o remetente é a própria conversa.
+                      m.remetente_jid, m.remetente_nome,
+                      m.midia_id, md.mime AS midia_mime,
+                      md.tamanho AS midia_tamanho,
+                      md.nome_original AS midia_nome,
+                      m.citada_id,
+                      q.conteudo AS citada_conteudo, q.tipo AS citada_tipo,
+                      q.autor    AS citada_autor
+                 FROM mensagem m
+                 LEFT JOIN atendente a ON a.id = m.atendente_id
+                 LEFT JOIN midia md ON md.id = m.midia_id
+                 LEFT JOIN mensagem q ON q.id = m.citada_id
+                WHERE m.conversa_id = %s
+                ORDER BY m.criada_em DESC, m.id DESC
+                LIMIT %s
+           ) recentes
+           ORDER BY criada_em, id""", (conversa_id, limite))
 
 
 def assumir(conversa_id: int, atendente_id: int) -> dict:
     """🚨 ASSUMIR É ATÔMICO. O `WHERE atendente_id IS NULL` é a trava: dois
     atendentes clicando junto, um ganha e o outro é avisado de quem ficou.
-    Sem isso, dois humanos respondem o mesmo cliente e ele vê a bagunça."""
+    Sem isso, dois humanos respondem o mesmo cliente e ele vê a bagunça.
+
+    Assumir uma conversa ENCERRADA a reabre (12/08). Antes disso, encerrar era
+    uma porta só de ida: o `responder` recusa conversa resolvida e a tela
+    escondia a barra inteira, então a conversa virava tela morta e o único
+    jeito de voltar a falar era o cliente escrever primeiro.
+
+    🚨 REABRIR ESBARRA NO `ux_conversa_aberta` — índice único em
+    `(canal_id, telefone_e164) WHERE estado <> 'resolvida'`, que é o que faz o
+    cliente que volta reabrir em vez de duplicar. Se ele já escreveu depois do
+    encerramento, existe OUTRA conversa aberta com este número e reabrir esta
+    estouraria o índice. Nesse caso não se força: devolve qual é a conversa
+    viva, porque é nela que a pessoa tem de falar.
+    """
+    # Caminho comum: conversa aberta e sem dono.
     linha = banco.um(
         """UPDATE conversa SET atendente_id = %s, estado = 'humano',
                                atualizada_em = now()
-            WHERE id = %s AND atendente_id IS NULL
+            WHERE id = %s AND atendente_id IS NULL AND estado <> 'resolvida'
             RETURNING id""", (atendente_id, conversa_id))
     if linha:
-        return {"ok": True, "conversa_id": conversa_id}
+        return {"ok": True, "conversa_id": conversa_id, "reaberta": False}
 
-    dono = banco.um(
-        """SELECT a.nome FROM conversa c LEFT JOIN atendente a ON a.id = c.atendente_id
+    atual = banco.um(
+        """SELECT c.id, c.estado, c.canal_id, c.telefone_e164, c.atendente_id,
+                  a.nome AS dono_nome
+             FROM conversa c LEFT JOIN atendente a ON a.id = c.atendente_id
             WHERE c.id = %s""", (conversa_id,))
-    if not dono:
+    if not atual:
         return {"ok": False, "motivo": "Conversa não encontrada."}
-    return {"ok": False,
-            "motivo": f"A conversa já foi assumida por {dono['nome'] or 'outra pessoa'}."}
+
+    if atual["estado"] != "resolvida":
+        return {"ok": False,
+                "motivo": f"A conversa já foi assumida por "
+                          f"{atual['dono_nome'] or 'outra pessoa'}."}
+
+    viva = banco.um(
+        """SELECT id FROM conversa
+            WHERE canal_id = %s AND telefone_e164 = %s AND estado <> 'resolvida'
+            LIMIT 1""", (atual["canal_id"], atual["telefone_e164"]))
+    if viva:
+        return {"ok": False, "conversa_aberta_id": viva["id"],
+                "motivo": f"Este número já tem uma conversa aberta "
+                          f"(#{viva['id']}). É nela que a resposta chega."}
+
+    # ⚠️ `resolvida_em` e `segundos_total` são métricas CONGELADAS no
+    # fechamento. Deixá-las preenchidas numa conversa que voltou a andar faria
+    # a ATD_5.1 listar como encerrada uma conversa aberta. Quem fecha de novo
+    # recalcula as duas.
+    reaberta = banco.um(
+        """UPDATE conversa
+              SET atendente_id = %s, estado = 'humano',
+                  resolvida_em = NULL, segundos_total = NULL,
+                  atualizada_em = now()
+            WHERE id = %s AND estado = 'resolvida'
+            RETURNING id""", (atendente_id, conversa_id))
+    if not reaberta:
+        return {"ok": False,
+                "motivo": "Alguém mexeu nesta conversa agora. Recarregue."}
+
+    log.info("conversa %s reaberta e assumida pelo atendente %s",
+             conversa_id, atendente_id)
+    return {"ok": True, "conversa_id": conversa_id, "reaberta": True}
 
 
 TETO_MENSAGEM = 4000
@@ -671,7 +957,13 @@ def responder(conversa_id: int, texto: str, atendente_id: int | None) -> dict:
                 "motivo": f"Mensagem passa de {TETO_MENSAGEM} caracteres."}
 
     conversa_atual = banco.um(
-        """SELECT c.id, c.telefone_e164, c.estado, c.atendente_id, ca.instancia
+        """SELECT c.id, c.telefone_e164, c.estado, c.atendente_id, ca.instancia,
+                  c.tipo, c.grupo_jid,
+                  -- 🚨 O DESTINO DO ENVIO. Conversa direta vai para o
+                  -- telefone; grupo vai para o JID. Os dois saem da CONVERSA,
+                  -- nunca do que foi digitado -- é a linha que impede o
+                  -- painel de virar ferramenta de disparo.
+                  COALESCE(c.grupo_jid, c.telefone_e164) AS destino
              FROM conversa c JOIN canal ca ON ca.id = c.canal_id
             WHERE c.id = %s""", (conversa_id,))
     if not conversa_atual:
@@ -693,7 +985,7 @@ def responder(conversa_id: int, texto: str, atendente_id: int | None) -> dict:
 
     try:
         enviado = evolution.enviar_texto(
-            conversa_atual["instancia"], conversa_atual["telefone_e164"], texto)
+            conversa_atual["instancia"], conversa_atual["destino"], texto)
     except evolution.ErroEvolution as e:
         log.warning("conversa %s: envio recusado pelo Evolution: %s", conversa_id, e)
         return {"ok": False, "motivo": f"O WhatsApp recusou: {e}"}
@@ -720,6 +1012,162 @@ def responder(conversa_id: int, texto: str, atendente_id: int | None) -> dict:
     return {"ok": True, "conversa_id": conversa_id,
             "mensagem_id": nova["id"] if nova else None,
             "id_externo": enviado["id_externo"]}
+
+
+# 🚨 25 MB É DECISÃO DO USUÁRIO (12/08), NÃO ESCOLHA MINHA. Eu tinha posto 16
+# sozinho, e ele já tinha dito -- no dia anterior -- que limite, filtro e teto
+# são decisão dele até prova em contrário. Mudar este número é pedir, nunca
+# aplicar.
+TETO_ARQUIVO_MB = 25
+TETO_ARQUIVO = TETO_ARQUIVO_MB * 1024 * 1024
+
+# O vocabulário de `mensagem.tipo` a partir da família do MIME. É o NOSSO
+# vocabulário, não o do Evolution -- os dois se parecem e não são iguais.
+_TIPO_POR_FAMILIA = {"image": "imagem", "video": "video", "audio": "audio"}
+
+
+def responder_com_arquivo(conversa_id: int, dados: bytes, mime: str,
+                          nome_arquivo: str, legenda: str,
+                          atendente_id: int | None) -> dict:
+    """Manda um arquivo para o cliente. Espelha `responder` em tudo que importa.
+
+    🚨 O NÚMERO VEM DA CONVERSA, NUNCA DO QUE FOI ENVIADO. É a mesma linha que
+    impede o painel de virar ferramenta de disparo: não existe caminho para
+    escolher destinatário.
+
+    🚨 ENVIA PRIMEIRO, GRAVA DEPOIS. O contrário registraria como enviado um
+    arquivo que o WhatsApp recusou -- e o atendente acharia que mandou.
+
+    🚨 GRAVA COM O `key.id` QUE O WHATSAPP DEVOLVEU, pelo mesmo motivo do
+    texto: o Evolution ecoa a nossa própria mensagem pelo webhook, e sem o id
+    o eco vira um segundo balão igual.
+
+    ⚠️ O ARQUIVO É GUARDADO NO DISCO como o que chega do cliente, e pelo mesmo
+    caminho (`midia.guardar`). Sem isso o balão de saída ficaria sem o anexo:
+    o eco do Evolution traz a mídia, mas a mensagem já existe pelo `id_externo`
+    e o eco é ignorado -- então quem grava tem de ser este envio.
+    """
+    from . import evolution  # tardio: evolution não conhece conversas
+
+    if not dados:
+        return {"ok": False, "motivo": "Arquivo vazio."}
+    if len(dados) > TETO_ARQUIVO:
+        return {"ok": False,
+                "motivo": f"O arquivo tem {len(dados) / 1024 / 1024:.1f} MB e o "
+                          f"teto é {TETO_ARQUIVO_MB} MB."}
+    legenda = (legenda or "").strip()
+    if len(legenda) > TETO_MENSAGEM:
+        return {"ok": False, "motivo": "Legenda longa demais."}
+
+    conversa_atual = banco.um(
+        """SELECT c.id, c.telefone_e164, c.estado, c.atendente_id, ca.instancia,
+                  c.tipo, c.grupo_jid,
+                  -- 🚨 O DESTINO DO ENVIO. Conversa direta vai para o
+                  -- telefone; grupo vai para o JID. Os dois saem da CONVERSA,
+                  -- nunca do que foi digitado -- é a linha que impede o
+                  -- painel de virar ferramenta de disparo.
+                  COALESCE(c.grupo_jid, c.telefone_e164) AS destino
+             FROM conversa c JOIN canal ca ON ca.id = c.canal_id
+            WHERE c.id = %s""", (conversa_id,))
+    if not conversa_atual:
+        return {"ok": False, "motivo": "Conversa não encontrada."}
+    if conversa_atual["estado"] == "resolvida":
+        return {"ok": False,
+                "motivo": "Conversa encerrada. Reabra ou espere o cliente escrever."}
+    if not conversa_atual["instancia"]:
+        return {"ok": False, "motivo": "O canal desta conversa não tem instância."}
+
+    # Quem responde assume, igual ao texto.
+    if conversa_atual["atendente_id"] is None and atendente_id:
+        banco.executar(
+            """UPDATE conversa SET atendente_id = %s, estado = 'humano',
+                                   atualizada_em = now()
+                WHERE id = %s AND atendente_id IS NULL""",
+            (atendente_id, conversa_id))
+
+    tipo = evolution.tipo_de_midia(mime)
+    try:
+        enviado = evolution.enviar_midia(
+            conversa_atual["instancia"], conversa_atual["destino"],
+            base64.b64encode(dados).decode("ascii"), mime, nome_arquivo, legenda)
+    except evolution.ErroEvolution as e:
+        log.warning("conversa %s: arquivo recusado pelo Evolution: %s",
+                    conversa_id, e)
+        return {"ok": False, "motivo": f"O WhatsApp recusou: {e}"}
+
+    nosso = _TIPO_POR_FAMILIA.get((mime or "").split("/")[0], "documento")
+    with banco.cursor() as cur:
+        midia_id = midia_mod.guardar(cur, conversa_id, {
+            "dados": dados, "mime": mime, "tipo": nosso,
+            "nome_original": nome_arquivo,
+        })
+        cur.execute(
+            """INSERT INTO mensagem
+                   (conversa_id, id_externo, direcao, autor, tipo, conteudo,
+                    atendente_id, entrega, midia_id, criada_em)
+               VALUES (%s, %s, 'saida', 'atendente', %s, %s, %s, 'enviada', %s, now())
+               ON CONFLICT (id_externo) WHERE id_externo IS NOT NULL DO NOTHING
+               RETURNING id""",
+            (conversa_id, enviado["id_externo"], nosso,
+             legenda or None, atendente_id, midia_id))
+        nova = cur.fetchone()
+        cur.execute(
+            """UPDATE conversa
+                  SET ultima_atividade_em = now(), atualizada_em = now(),
+                      primeira_resposta_em = COALESCE(primeira_resposta_em, now()),
+                      segundos_ate_resposta = COALESCE(
+                          segundos_ate_resposta,
+                          EXTRACT(EPOCH FROM (now() - criada_em))::int)
+                WHERE id = %s""", (conversa_id,))
+
+    return {"ok": True, "conversa_id": conversa_id,
+            "mensagem_id": nova["id"] if nova else None,
+            "midia_id": midia_id,
+            "id_externo": enviado["id_externo"]}
+
+
+def anotar_com_arquivo(conversa_id: int, dados: bytes, mime: str,
+                       nome_arquivo: str, texto: str,
+                       atendente_id: int | None) -> dict:
+    """Nota interna COM arquivo anexado. Decisão do usuário em 12/08.
+
+    🚨 O ARQUIVO NÃO SAI PARA O CLIENTE, e a garantia é estrutural: esta
+    função não chama o `evolution` em lugar nenhum. É o mesmo contrato da nota
+    de texto -- o CHECK do banco amarra `tipo = 'nota'` a `direcao = 'interna'`.
+
+    ⚠️ Eu tinha bloqueado anexo em nota, com o argumento de que "prometeria um
+    arquivo que o cliente nunca receberia". O argumento estava errado: anexar
+    o print de um erro ou o PDF que o cliente mandou por outro canal é
+    exatamente o que se quer guardar na conversa sem enviar nada.
+    """
+    if not dados:
+        return {"ok": False, "motivo": "Arquivo vazio."}
+    if len(dados) > TETO_ARQUIVO:
+        return {"ok": False,
+                "motivo": f"O arquivo tem {len(dados) / 1024 / 1024:.1f} MB e o "
+                          f"teto é {TETO_ARQUIVO_MB} MB."}
+    texto = (texto or "").strip()
+    if len(texto) > TETO_MENSAGEM:
+        return {"ok": False, "motivo": "Texto da nota longo demais."}
+    if not banco.um("SELECT id FROM conversa WHERE id = %s", (conversa_id,)):
+        return {"ok": False, "motivo": "Conversa não encontrada."}
+
+    with banco.cursor() as cur:
+        midia_id = midia_mod.guardar(cur, conversa_id, {
+            "dados": dados, "mime": mime,
+            "tipo": _TIPO_POR_FAMILIA.get((mime or "").split("/")[0], "documento"),
+            "nome_original": nome_arquivo,
+        })
+        cur.execute(
+            """INSERT INTO mensagem
+                   (conversa_id, direcao, autor, tipo, conteudo, atendente_id,
+                    midia_id, criada_em)
+               VALUES (%s, 'interna', 'atendente', 'nota', %s, %s, %s, now())
+               RETURNING id""",
+            (conversa_id, texto or None, atendente_id, midia_id))
+        nova = cur.fetchone()
+    return {"ok": True, "conversa_id": conversa_id,
+            "mensagem_id": nova["id"], "midia_id": midia_id}
 
 
 def anotar(conversa_id: int, texto: str, atendente_id: int | None) -> dict:
@@ -943,14 +1391,12 @@ def historico(busca: str = "", classificacao_id: int | None = None,
     if classificacao_id:
         condicoes.append("c.classificacao_id = %s")
         params.append(classificacao_id)
-    if busca:
-        e164 = tel.normalizar(busca)
-        if e164:
-            condicoes.append("c.telefone_e164 = %s")
-            params.append(e164)
-        else:
-            condicoes.append("(ct.nome ILIKE %s OR cl.nome ILIKE %s)")
-            params.extend([f"%{busca}%", f"%{busca}%"])
+    # A MESMA regra da caixa de entrada, pela mesma função. Antes de 12/08 aqui
+    # se procurava em `ct.nome OR cl.nome` e lá só em `ct.nome`.
+    onde_busca, params_busca = _condicao_busca(busca)
+    if onde_busca:
+        condicoes.append(onde_busca)
+        params.extend(params_busca)
     params.append(limite)
 
     return banco.varios(
@@ -1020,6 +1466,72 @@ def participantes(conversa_id: int) -> list[dict]:
              LEFT JOIN atendente q ON q.id = p.convidado_por
             WHERE p.conversa_id = %s AND p.saiu_em IS NULL
             ORDER BY p.entrou_em""", (conversa_id,))
+
+
+def esta_na_conversa(conversa_id: int, atendente_id: int | None) -> bool:
+    """É o dono OU participante ativo. A régua de quem pode AGIR (12/08).
+
+    🚨 ATÉ AQUI NÃO EXISTIA ISOLAMENTO POR CONVERSA, e o efeito não era
+    teórico: qualquer atendente com a tela `ATD_1.2` encerrava, transferia e
+    devolvia conversa em que não estava. O `souDono || souParticipante` da tela
+    governava só o botão *Sair*; os outros ficavam livres, e a rota não
+    perguntava nada. Encontrado pelo usuário abrindo a própria conversa depois
+    de sair dela.
+
+    ⚠️ LER CONTINUA LIVRE. Isto não fecha a conversa para consulta -- abrir,
+    ler o histórico e ver os participantes segue valendo para quem tem
+    `ATD_1.2`. O que passa a exigir estar dentro é o que MEXE: responder,
+    anotar, encerrar, transferir, devolver e convidar.
+
+    ⚠️ O owner NÃO é exceção. Fazer o dono do sistema passar por cima seria
+    justamente perder o registro de quem agiu -- e entrar custa um clique.
+    """
+    if not atendente_id:
+        return False
+    linha = banco.um(
+        """SELECT 1 FROM conversa c
+            WHERE c.id = %s
+              AND (c.atendente_id = %s
+                   OR EXISTS (SELECT 1 FROM conversa_participante p
+                               WHERE p.conversa_id = c.id
+                                 AND p.atendente_id = %s
+                                 AND p.saiu_em IS NULL))""",
+        (conversa_id, atendente_id, atendente_id))
+    return linha is not None
+
+
+def entrar(conversa_id: int, atendente_id: int) -> dict:
+    """Entrar por conta própria numa conversa que já tem dono.
+
+    🚨 NÃO EXISTIA CAMINHO PARA ISSO. `convidar` chama OUTRA pessoa e `assumir`
+    só funciona em conversa sem dono -- então quem saía de uma conversa com
+    dono não tinha como voltar, e quem chegava de fora não tinha como entrar
+    sem pedir para alguém convidá-lo.
+
+    ⚠️ ENTRAR NÃO É ASSUMIR. Vira participante; quem responde pela conversa
+    continua sendo o dono. Sem dono, o caminho é `assumir`, e a tela oferece
+    esse em vez deste.
+    """
+    conversa_atual = banco.um(
+        "SELECT id, atendente_id, estado FROM conversa WHERE id = %s",
+        (conversa_id,))
+    if not conversa_atual:
+        return {"ok": False, "motivo": "Conversa não encontrada."}
+    if conversa_atual["estado"] == "resolvida":
+        return {"ok": False,
+                "motivo": "Conversa encerrada. Reabra para voltar a atender."}
+    if conversa_atual["atendente_id"] == atendente_id:
+        return {"ok": True, "conversa_id": conversa_id, "papel": "dono"}
+    if conversa_atual["atendente_id"] is None:
+        return {"ok": False,
+                "motivo": "Esta conversa não tem dono — use Assumir."}
+
+    # Reaproveita o caminho do convite: convidado_por = a própria pessoa diz,
+    # no histórico, que ninguém a chamou -- ela entrou.
+    resultado = convidar(conversa_id, atendente_id, atendente_id)
+    if resultado.get("ok"):
+        resultado["papel"] = "participante"
+    return resultado
 
 
 def convidar(conversa_id: int, atendente_id: int,

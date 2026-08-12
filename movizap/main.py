@@ -9,8 +9,10 @@ import secrets
 import time
 from contextlib import asynccontextmanager
 
-from fastapi import Depends, FastAPI, File, HTTPException, Request, UploadFile, status
-from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
+from fastapi import (Depends, FastAPI, File, Form, HTTPException, Request,
+                     UploadFile, status)
+from fastapi.responses import (FileResponse, JSONResponse, RedirectResponse,
+                               Response)
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -19,6 +21,7 @@ from . import banco
 from . import bitrix
 from . import cadastro
 from . import canais as registro_canais
+from . import chat
 from . import conversas
 from . import evolution
 from . import agenda as agenda_google
@@ -42,6 +45,46 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
 )
 log = logging.getLogger("movizap")
+
+
+class MascararSegredoDoCaminho(logging.Filter):
+    """Tira o segredo do webhook da linha de acesso ANTES de ela ser escrita.
+
+    🚨 O SEGREDO ESTAVA INDO PARA O DISCO 2.527 VEZES POR DIA. Ele vive no
+    CAMINHO da URL -- é assim que o Evolution autentica --, e o uvicorn
+    registra a linha de requisição de toda chamada. Medido em 12/08: 2.527
+    ocorrências em 24 h no journal do usuário, em texto puro, rotacionado e
+    guardado. Não era um vazamento pontual; era um vazamento contínuo.
+
+    ⚠️ ISTO NÃO SUBSTITUI A ROTAÇÃO, e não alcança o `access.log` do nginx,
+    que registra a mesma linha e exige root para calar.
+
+    ⚠️ O filtro reescreve `record.args`, não a mensagem já formatada: o
+    `uvicorn.access` guarda os campos separados e só os junta na hora de
+    escrever. Mexer na mensagem final não pegaria nada.
+    """
+
+    PREFIXO = "/api/webhook/evolution/"
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        args = record.args
+        if not isinstance(args, tuple):
+            return True
+        limpos = tuple(
+            self.PREFIXO + "<segredo>"
+            if isinstance(a, str) and a.startswith(self.PREFIXO)
+            else a
+            for a in args
+        )
+        if limpos != args:
+            record.args = limpos
+        return True
+
+
+# Vale para o logger do uvicorn e para o do gunicorn, conforme quem sobe o
+# processo -- registrar nos dois é barato e não depende de lembrar qual é.
+for _nome in ("uvicorn.access", "gunicorn.access"):
+    logging.getLogger(_nome).addFilter(MascararSegredoDoCaminho())
 
 FRONTEND = RAIZ / "frontend" / "dist"
 
@@ -175,10 +218,20 @@ def login(dados: Credenciais, request: Request):
 
 @app.get("/api/sessao/eu")
 def eu(usuario: dict = Depends(auth.get_usuario)):
+    """Quem está logado, e se ele tem VÍNCULO DE ATENDIMENTO.
+
+    🚨 ENTRAR NO PAINEL E PODER ATENDER SÃO COISAS DIFERENTES. Sem vínculo, o
+    que a pessoa escrever é gravado com autor NULL -- ela responde o cliente e
+    a conversa não sabe dizer quem respondeu. Até 12/08 isso acontecia calado;
+    agora a tela inicial diz o que houve, em vez de deixar a pessoa trabalhar
+    e o histórico ficar anônimo.
+    """
     return {
         "login": usuario["login"],
         "nome": usuario["nome"],
         "owner": usuario["owner"],
+        "email": usuario.get("email"),
+        "vinculo_atendimento": _atendente_do_usuario(usuario) is not None,
         "telas": registro_telas.do_usuario(usuario),
     }
 
@@ -269,6 +322,27 @@ def desconectar_canal(canal_id: int, request: Request,
 
 # ---------------------------------------------------------------- webhook
 
+def _segredo_de_webhook_vale(recebido: str) -> bool:
+    """Confere contra o segredo em vigor e, durante rotação, contra o anterior.
+
+    🚨 `compare_digest` NOS DOIS, e sem atalho. Comparar com `==` vazaria o
+    tamanho do prefixo certo pelo tempo de resposta -- num endpoint público,
+    que aceita quantas tentativas quiserem fazer.
+
+    ⚠️ AS DUAS COMPARAÇÕES SEMPRE ACONTECEM. Escrever
+    `vale(atual) or vale(anterior)` faria o `or` curto-circuitar e o tempo de
+    resposta passaria a contar quantos segredos estão ativos. É pouca coisa,
+    mas é grátis não vazar.
+
+    ⚠️ Segredo vazio nunca vale: `.env` sem a chave não pode abrir o endpoint.
+    """
+    atual = bool(settings.webhook_segredo) and secrets.compare_digest(
+        recebido, settings.webhook_segredo)
+    anterior = bool(settings.webhook_segredo_anterior) and secrets.compare_digest(
+        recebido, settings.webhook_segredo_anterior)
+    return atual or anterior
+
+
 @app.post("/api/webhook/evolution/{segredo}")
 async def receber_webhook(segredo: str, request: Request):
     """O Evolution empurra os eventos aqui. SEM sessão -- quem chama é máquina.
@@ -285,8 +359,7 @@ async def receber_webhook(segredo: str, request: Request):
     faria o Evolution reenviar a mesma mensagem indefinidamente contra um
     sistema que já falhou nela. O erro fica no log, com o req_id.
     """
-    if not settings.webhook_segredo or not secrets.compare_digest(
-            segredo, settings.webhook_segredo):
+    if not _segredo_de_webhook_vale(segredo):
         # 404 e não 403: quem errou o segredo não precisa saber que acertou a rota.
         raise HTTPException(status_code=404, detail="Não encontrado.")
 
@@ -364,6 +437,27 @@ def ver_contato(contato_id: int,
     if not achado:
         raise HTTPException(status_code=404, detail="Contato não encontrado.")
     return achado
+
+
+class RelacaoEntrada(BaseModel):
+    relacao: str
+
+
+@app.put("/api/contatos/{contato_id}/relacao")
+def definir_relacao_contato(contato_id: int, dados: RelacaoEntrada,
+                            usuario: dict = Depends(auth.requer_tela("CAD_1.2"))):
+    """O que a pessoa é para a Movisat: cliente, fornecedor, técnico, lead…
+
+    🚨 A PRIMEIRA ESCRITA NESTE CAMPO. Ele existe desde a migração 001 e nunca
+    teve rota: o sync grava 'cliente' para todo mundo e não havia como corrigir.
+    Não existe chave dura que diga quem é fornecedor -- conferido em 12/08 --
+    então quem classifica é gente, uma linha por vez, aqui.
+    """
+    resultado = cadastro.definir_relacao(contato_id, dados.relacao)
+    if not resultado["ok"]:
+        codigo = 404 if "não encontrado" in resultado["motivo"] else 400
+        raise HTTPException(status_code=codigo, detail=resultado["motivo"])
+    return resultado
 
 
 @app.get("/api/contatos/por-telefone/{numero}")
@@ -634,6 +728,37 @@ def salvar_assinatura(dados: Assinatura,
     return {"ok": True}
 
 
+@app.get("/api/email/mensagens/{mensagem_id}/anexo/{indice}")
+def email_baixar_anexo(mensagem_id: int, indice: int,
+                       usuario: dict = Depends(auth.requer_tela("EML_1.1"))):
+    """Baixa um anexo recebido, buscando no Gmail na hora.
+
+    🚨 PASSA PELA API, NÃO POR LINK DIRETO. O anexo é documento de cliente:
+    boleto, contrato, foto de avaria. Servir por URL pública deixaria o link
+    vazar no histórico do navegador, no print e no grupo de WhatsApp. Aqui vale
+    a mesma permissão da tela de e-mail.
+
+    ⚠️ Nada é gravado em disco: os bytes vêm do Google e vão para o navegador.
+    """
+    try:
+        achado = gmail.anexo(mensagem_id, indice)
+    except gmail.GmailIndisponivel as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    if not achado["ok"]:
+        raise HTTPException(status_code=404, detail=achado["motivo"])
+
+    return Response(
+        content=achado["dados"],
+        media_type=achado["mime"],
+        headers={
+            # ⚠️ `attachment` com filename entre aspas: nome com espaço vira
+            # dois cabeçalhos sem isso, e o arquivo baixa truncado no nome.
+            "Content-Disposition":
+                f'attachment; filename="{achado["nome"]}"',
+        },
+    )
+
+
 @app.post("/api/email/mensagens/{mensagem_id}/lida")
 def email_marcar_lida(mensagem_id: int,
                       usuario: dict = Depends(auth.requer_tela("EML_1.1"))):
@@ -721,6 +846,7 @@ def resumo_das_conversas(usuario: dict = Depends(auth.requer_tela("ATD_1.1"))):
 def listar_conversas(estado: str | None = None, sem_dono: bool = False,
                      minhas: bool = False, busca: str = "",
                      usuario: dict = Depends(auth.requer_tela("ATD_1.1"))):
+    """A lista da caixa: conversa direta e grupo juntos, como no WhatsApp."""
     return conversas.listar(
         estado=estado, sem_dono=sem_dono, busca=busca,
         atendente_id=_atendente_do_usuario(usuario) if minhas else None)
@@ -902,6 +1028,51 @@ def pausar_disparo(disparo_id: int,
     return informativos.pausar(disparo_id)
 
 
+def _exige_estar_na_conversa(conversa_id: int, usuario: dict) -> int:
+    """Devolve o id do atendente, ou recusa quem está de fora da conversa.
+
+    🚨 A TRAVA É AQUI, NÃO NO BOTÃO. Esconder a ação na tela não é permissão --
+    a rota continua respondendo a quem a chamar direto. A metodologia é
+    explícita: "permissão vive no backend, em toda rota".
+
+    ⚠️ 409 e não 403: não é falta de permissão de TELA (quem chegou aqui tem
+    `ATD_1.2`), é estado errado -- a pessoa não está nesta conversa. E o texto
+    diz o que fazer, porque "proibido" sem saída vira chamado.
+    """
+    eu = _atendente_do_usuario(usuario)
+    if not eu:
+        raise HTTPException(
+            status_code=409,
+            detail="Sua conta não tem vínculo de atendimento. Procure o "
+                   "administrador do sistema.")
+    if not conversas.esta_na_conversa(conversa_id, eu):
+        raise HTTPException(
+            status_code=409,
+            detail="Você não está nesta conversa. Use Entrar (ou Assumir, se "
+                   "ela estiver sem dono) para poder agir.")
+    return eu
+
+
+@app.post("/api/conversas/{conversa_id}/entrar")
+def entrar_na_conversa(conversa_id: int,
+                       usuario: dict = Depends(auth.requer_tela("ATD_1.2"))):
+    """Entra como participante numa conversa que já tem dono.
+
+    Não existia caminho para isto: `convidar` chama outra pessoa e `assumir` só
+    vale para conversa sem dono. Quem saía não conseguia voltar.
+    """
+    eu = _atendente_do_usuario(usuario)
+    if not eu:
+        raise HTTPException(
+            status_code=409,
+            detail="Sua conta não tem vínculo de atendimento. Procure o "
+                   "administrador do sistema.")
+    resultado = conversas.entrar(conversa_id, eu)
+    if not resultado["ok"]:
+        raise HTTPException(status_code=409, detail=resultado["motivo"])
+    return resultado
+
+
 class RespostaEntrada(BaseModel):
     texto: str = Field(min_length=1, max_length=4000)
 
@@ -915,8 +1086,57 @@ def responder_conversa(conversa_id: int, dados: RespostaEntrada,
     escolher para quem enviar, e é isso que impede o painel de virar
     ferramenta de disparo -- que é Fase 2, com decisão própria.
     """
-    resultado = conversas.responder(conversa_id, dados.texto,
-                                    _atendente_do_usuario(usuario))
+    eu = _exige_estar_na_conversa(conversa_id, usuario)
+    resultado = conversas.responder(conversa_id, dados.texto, eu)
+    if not resultado["ok"]:
+        raise HTTPException(status_code=409, detail=resultado["motivo"])
+    return resultado
+
+
+@app.post("/api/conversas/{conversa_id}/arquivo")
+async def enviar_arquivo(conversa_id: int,
+                         arquivo: UploadFile = File(...),
+                         legenda: str = Form(""),
+                         interna: bool = Form(False),
+                         usuario: dict = Depends(auth.requer_tela("ATD_1.2"))):
+    """Manda um arquivo para o cliente, ou anexa numa nota interna.
+
+    ⚠️ `interna=true` NÃO envia nada: o arquivo é guardado e vira nota. Os dois
+    caminhos existem por decisão do usuário em 12/08 -- eu tinha bloqueado
+    anexo em nota por conta própria, e o argumento estava errado.
+
+    🚨 O DESTINATÁRIO NÃO É PARÂMETRO: sai da conversa, como no texto. Não
+    existe caminho para escolher para quem enviar, e é isso que impede o painel
+    de virar ferramenta de disparo.
+
+    ⚠️ O TETO É CONFERIDO LENDO, não pelo `content-length` que o navegador
+    manda -- cabeçalho é o que o cliente diz, não o que ele envia. Lê-se em
+    pedaços e para no primeiro byte acima do teto, em vez de carregar 500 MB
+    na memória para depois recusar.
+    """
+    eu = _exige_estar_na_conversa(conversa_id, usuario)
+
+    teto = conversas.TETO_ARQUIVO
+    pedacos, total = [], 0
+    while True:
+        pedaco = await arquivo.read(256 * 1024)
+        if not pedaco:
+            break
+        total += len(pedaco)
+        if total > teto:
+            raise HTTPException(
+                status_code=413,
+                detail=f"Arquivo acima de {conversas.TETO_ARQUIVO_MB} MB.")
+        pedacos.append(pedaco)
+    dados = b"".join(pedacos)
+
+    mime = arquivo.content_type or "application/octet-stream"
+    nome = arquivo.filename or "arquivo"
+    resultado = (
+        conversas.anotar_com_arquivo(conversa_id, dados, mime, nome, legenda, eu)
+        if interna
+        else conversas.responder_com_arquivo(conversa_id, dados, mime, nome,
+                                             legenda, eu))
     if not resultado["ok"]:
         raise HTTPException(status_code=409, detail=resultado["motivo"])
     return resultado
@@ -926,8 +1146,8 @@ def responder_conversa(conversa_id: int, dados: RespostaEntrada,
 def anotar_conversa(conversa_id: int, dados: RespostaEntrada,
                     usuario: dict = Depends(auth.requer_tela("ATD_1.2"))):
     """Nota interna — fica na conversa e nunca sai para o cliente."""
-    resultado = conversas.anotar(conversa_id, dados.texto,
-                                 _atendente_do_usuario(usuario))
+    eu = _exige_estar_na_conversa(conversa_id, usuario)
+    resultado = conversas.anotar(conversa_id, dados.texto, eu)
     if not resultado["ok"]:
         raise HTTPException(status_code=409, detail=resultado["motivo"])
     return resultado
@@ -989,8 +1209,8 @@ def convidar_para_conversa(conversa_id: int, dados: ConviteEntrada,
     atendente com ATD_1.2 já abre qualquer conversa. O convite faz a conversa
     APARECER NA LISTA de quem foi chamado, e registra quem está junto.
     """
-    resultado = conversas.convidar(conversa_id, dados.atendente_id,
-                                   _atendente_do_usuario(usuario))
+    eu = _exige_estar_na_conversa(conversa_id, usuario)
+    resultado = conversas.convidar(conversa_id, dados.atendente_id, eu)
     if not resultado["ok"]:
         raise HTTPException(status_code=409, detail=resultado["motivo"])
     return resultado
@@ -1026,10 +1246,10 @@ def remover_da_conversa(conversa_id: int, atendente_id: int,
 def transferir_conversa(conversa_id: int, dados: TransferenciaEntrada,
                         usuario: dict = Depends(auth.requer_tela("ATD_1.2"))):
     """Enquanto a IA não existe, ISTO é a triagem — feita por gente."""
+    eu = _exige_estar_na_conversa(conversa_id, usuario)
     resultado = conversas.transferir(
         conversa_id, dados.time_id, dados.para_atendente_id, "manual",
-        de_atendente_id=_atendente_do_usuario(usuario),
-        texto_resumo=dados.observacao)
+        de_atendente_id=eu, texto_resumo=dados.observacao)
     if not resultado["ok"]:
         raise HTTPException(status_code=409, detail=resultado["motivo"])
     return resultado
@@ -1038,8 +1258,8 @@ def transferir_conversa(conversa_id: int, dados: TransferenciaEntrada,
 @app.post("/api/conversas/{conversa_id}/devolver")
 def devolver_conversa(conversa_id: int,
                       usuario: dict = Depends(auth.requer_tela("ATD_1.2"))):
-    resultado = conversas.devolver_para_fila(
-        conversa_id, _atendente_do_usuario(usuario))
+    eu = _exige_estar_na_conversa(conversa_id, usuario)
+    resultado = conversas.devolver_para_fila(conversa_id, eu)
     if not resultado["ok"]:
         raise HTTPException(status_code=409, detail=resultado["motivo"])
     return resultado
@@ -1050,7 +1270,11 @@ def encerrar_conversa(conversa_id: int, dados: EncerramentoEntrada,
                       usuario: dict = Depends(auth.requer_tela("ATD_1.2"))):
     """Fecha a conversa. Classificar é OPCIONAL desde 11/08 — a
     obrigatoriedade do escopo item 11 servia a um analytics que não
-    existe, com rótulos que ninguém pediu."""
+    existe, com rótulos que ninguém pediu.
+
+    🚨 Exige estar na conversa desde 12/08: encerrar atendimento alheio era
+    livre para qualquer um com a tela."""
+    _exige_estar_na_conversa(conversa_id, usuario)
     resultado = conversas.encerrar(conversa_id, dados.classificacao_id,
                                    dados.comentario)
     if not resultado["ok"]:
@@ -1255,15 +1479,166 @@ def atualizar_classificacao(classificacao_id: int, dados: ClassificacaoEntrada,
 # 🚨 NENHUMA destas rotas fala com modelo nenhum. São texto versionado. O
 # motor é o passo 8, e `canal.ia_ligada` continua false nos dois canais.
 
-def _atendente_do_usuario(usuario: dict) -> int | None:
-    """O id na tabela `atendente` de quem está logado, quando existe.
+# ══════════════════════════════════════════════════════════════════════════
+# ATD_6.1 — chat entre atendentes
+#
+# 🚨 NADA DAQUI SAI PARA O CLIENTE, e não existe caminho para isso: o módulo
+# `chat` não conhece o `evolution`. É conversa interna, em tabelas próprias.
+# ══════════════════════════════════════════════════════════════════════════
 
-    ⚠️ A conta do .env não tem linha na tabela. Autor NULL é honesto: melhor
-    "autor desconhecido" do que atribuir a versão a outra pessoa.
+class ChatTexto(BaseModel):
+    texto: str = Field(min_length=1, max_length=4000)
+
+
+class ChatAbrir(BaseModel):
+    atendente_id: int
+
+
+def _eu_no_chat(usuario: dict) -> int:
+    eu = _atendente_do_usuario(usuario)
+    if not eu:
+        raise HTTPException(
+            status_code=409,
+            detail="Sua conta não tem vínculo de atendimento. Procure o "
+                   "administrador do sistema.")
+    return eu
+
+
+def _minha_sala(sala_id: int, usuario: dict) -> int:
+    """🚨 AQUI O ISOLAMENTO É REAL, diferente da conversa de cliente.
+
+    Conversa com cliente é responsabilidade coletiva e qualquer atendente lê.
+    Conversa entre duas pessoas não é: ler a alheia não é "colaborar". A rota
+    recusa mesmo que a tela não ofereça.
     """
-    linha = banco.um("SELECT id FROM atendente WHERE lower(login) = lower(%s)",
-                     (usuario["login"],))
-    return linha["id"] if linha else None
+    eu = _eu_no_chat(usuario)
+    if not chat.e_membro(sala_id, eu):
+        raise HTTPException(status_code=404, detail="Conversa não encontrada.")
+    return eu
+
+
+@app.get("/api/chat/salas")
+def chat_salas(usuario: dict = Depends(auth.requer_tela("ATD_6.1"))):
+    eu = _eu_no_chat(usuario)
+    return {"salas": chat.salas(eu), "contatos": chat.com_quem_falar(eu)}
+
+
+@app.get("/api/chat/nao-lidas")
+def chat_nao_lidas(usuario: dict = Depends(auth.requer_tela("ATD_6.1"))):
+    """O selo do menu. Separado das salas porque é chamado em intervalo curto."""
+    eu = _atendente_do_usuario(usuario)
+    return {"nao_lidas": chat.nao_lidas(eu) if eu else 0}
+
+
+@app.post("/api/chat/abrir")
+def chat_abrir(dados: ChatAbrir,
+               usuario: dict = Depends(auth.requer_tela("ATD_6.1"))):
+    """Acha ou cria a sala direta com alguém. Idempotente pela chave do par."""
+    eu = _eu_no_chat(usuario)
+    resultado = chat.abrir_direta(eu, dados.atendente_id)
+    if not resultado["ok"]:
+        raise HTTPException(status_code=409, detail=resultado["motivo"])
+    return resultado
+
+
+class ChatGrupoNovo(BaseModel):
+    nome: str = Field(min_length=1, max_length=60)
+    membros: list[int] = Field(default_factory=list)
+
+
+class ChatMembroNovo(BaseModel):
+    atendente_id: int
+
+
+@app.post("/api/chat/grupo")
+def chat_criar_grupo(dados: ChatGrupoNovo,
+                     usuario: dict = Depends(auth.requer_tela("ATD_6.1"))):
+    eu = _eu_no_chat(usuario)
+    resultado = chat.criar_grupo(dados.nome, eu, dados.membros)
+    if not resultado["ok"]:
+        raise HTTPException(status_code=409, detail=resultado["motivo"])
+    return resultado
+
+
+@app.get("/api/chat/salas/{sala_id}/membros")
+def chat_membros(sala_id: int,
+                 usuario: dict = Depends(auth.requer_tela("ATD_6.1"))):
+    _minha_sala(sala_id, usuario)
+    return {"membros": chat.membros(sala_id)}
+
+
+@app.post("/api/chat/salas/{sala_id}/membros")
+def chat_adicionar(sala_id: int, dados: ChatMembroNovo,
+                   usuario: dict = Depends(auth.requer_tela("ATD_6.1"))):
+    eu = _minha_sala(sala_id, usuario)
+    resultado = chat.adicionar_ao_grupo(sala_id, eu, dados.atendente_id)
+    if not resultado["ok"]:
+        raise HTTPException(status_code=409, detail=resultado["motivo"])
+    return resultado
+
+
+@app.post("/api/chat/salas/{sala_id}/sair")
+def chat_sair(sala_id: int,
+              usuario: dict = Depends(auth.requer_tela("ATD_6.1"))):
+    eu = _minha_sala(sala_id, usuario)
+    resultado = chat.sair_do_grupo(sala_id, eu)
+    if not resultado["ok"]:
+        raise HTTPException(status_code=409, detail=resultado["motivo"])
+    return resultado
+
+
+@app.get("/api/chat/salas/{sala_id}")
+def chat_mensagens(sala_id: int,
+                   usuario: dict = Depends(auth.requer_tela("ATD_6.1"))):
+    eu = _minha_sala(sala_id, usuario)
+    mensagens = chat.mensagens(sala_id, eu)
+    # Abrir a sala é ler: marca até a última que veio nesta resposta, e não
+    # "até agora" -- o que chegar durante a leitura continua não lido.
+    if mensagens:
+        chat.marcar_lido(sala_id, eu, mensagens[-1]["id"])
+    return {"sala_id": sala_id, "mensagens": mensagens}
+
+
+@app.post("/api/chat/salas/{sala_id}/escrever")
+def chat_escrever(sala_id: int, dados: ChatTexto,
+                  usuario: dict = Depends(auth.requer_tela("ATD_6.1"))):
+    eu = _minha_sala(sala_id, usuario)
+    resultado = chat.escrever(sala_id, eu, dados.texto)
+    if not resultado["ok"]:
+        raise HTTPException(status_code=409, detail=resultado["motivo"])
+    return resultado
+
+
+def _atendente_do_usuario(usuario: dict) -> int | None:
+    """O id na tabela `atendente` de quem está logado — o VÍNCULO DE ATENDIMENTO.
+
+    ⚠️ A conta do .env sem linha na tabela (banco fora do ar, instalação nova)
+    não tem vínculo. Autor NULL é honesto: melhor "autor desconhecido" do que
+    atribuir a mensagem a outra pessoa.
+
+    🚨 SEM E-MAIL, SEM VÍNCULO — regra do usuário em 12/08. O e-mail é o que
+    liga a pessoa à conta Google e é por ele que a conta passa de mão; uma
+    linha de atendente sem e-mail não identifica ninguém de forma durável.
+    Apagar o e-mail de alguém, de propósito ou por engano, tirava o vínculo
+    sem tirar o acesso: a pessoa continuava respondendo cliente e tudo saía
+    com autor NULL. Agora ela entra, a `INI_1.1` explica o que houve, e nada
+    é gravado sem dono.
+
+    ⚠️ Lê a linha pelo `id` que `buscar_usuario` já resolveu, quando há; só
+    cai no login quando a identidade veio da porta de emergência.
+    """
+    if usuario.get("id"):
+        linha = banco.um("SELECT id, email FROM atendente WHERE id = %s",
+                         (usuario["id"],))
+    else:
+        linha = banco.um(
+            "SELECT id, email FROM atendente WHERE lower(login) = lower(%s)",
+            (usuario["login"],))
+    if not linha:
+        return None
+    if not (linha["email"] or "").strip():
+        return None
+    return linha["id"]
 
 
 @app.get("/api/ia/prompt")

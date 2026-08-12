@@ -39,6 +39,34 @@ const PAPEIS = {
   financeiro: 'Financeiro',
 }
 
+/* ⚠️ ESTA LISTA É CÓPIA DO CHECK DO BANCO (`contato_relacao_check`, migração
+   023). O banco é quem manda: se divergir, o <select> oferece uma opção que a
+   gravação recusa. Mudar o vocabulário é migração, e as duas listas andam
+   juntas -- `cadastro.RELACOES` no backend é a terceira. */
+const RELACOES = ['cliente', 'fornecedor', 'parceiro', 'tecnico', 'lead',
+                  'colaborador', 'teste']
+
+const salvandoRelacao = ref(false)
+const relacaoSalva = ref(false)
+
+async function salvarRelacao(nova) {
+  if (!selecionado.value || nova === selecionado.value.relacao) return
+  salvandoRelacao.value = true
+  relacaoSalva.value = false
+  erro.value = ''
+  try {
+    await api.put(`/api/contatos/${selecionado.value.id}/relacao`, { relacao: nova })
+    // 🚨 Relê em vez de confiar no 200: o que vale é o que o banco gravou.
+    selecionado.value = await api.get(`/api/contatos/${selecionado.value.id}`)
+    relacaoSalva.value = true
+    await carregar()
+  } catch (e) {
+    erro.value = e instanceof ErroDeApi ? e.message : 'Não consegui gravar a relação.'
+  } finally {
+    salvandoRelacao.value = false
+  }
+}
+
 const itens = computed(() => dados.value?.itens || [])
 const interpretacao = computed(() => dados.value?.busca || { tipo: 'vazio' })
 const total = computed(() => dados.value?.total ?? 0)
@@ -62,6 +90,7 @@ async function carregar() {
 
 async function abrir(item) {
   aba.value = 'CAD_1.2.1'
+  relacaoSalva.value = false
   try {
     selecionado.value = await api.get(`/api/contatos/${item.id}`)
   } catch (e) {
@@ -242,7 +271,31 @@ onMounted(carregar)
           <div><dt>Nome</dt><dd>{{ selecionado.nome }}</dd></div>
           <div><dt>Cliente</dt><dd>{{ selecionado.cliente_nome || '—' }}</dd></div>
           <div><dt>Documento do cliente</dt><dd class="mono">{{ selecionado.cliente_documento || '—' }}</dd></div>
-          <div><dt>Relação</dt><dd>{{ selecionado.relacao }}</dd></div>
+          <!-- 🚨 O ÚNICO CAMPO EDITÁVEL DESTA ABA, e por um motivo medido: o
+               sync grava 'cliente' para TODO contato do Harmonit, então
+               1.751 de 1.752 estavam assim -- não porque a base seja toda de
+               clientes, mas porque era uma constante no código. Não existe
+               chave dura que separe fornecedor de cliente (conferido em
+               12/08), então quem separa é gente, aqui. -->
+          <div>
+            <dt>Relação</dt>
+            <dd>
+              <select
+                :value="selecionado.relacao"
+                class="campo__entrada cad__relacao"
+                :disabled="salvandoRelacao"
+                @change="salvarRelacao($event.target.value)"
+              >
+                <option v-for="r in RELACOES" :key="r" :value="r">{{ r }}</option>
+              </select>
+              <span v-if="salvandoRelacao" class="apagado pequeno"> gravando…</span>
+              <span v-else-if="relacaoSalva" class="chip chip--ok">gravado</span>
+              <span class="campo__ajuda">
+                O que a pessoa é para a Movisat. O sync do Harmonit
+                <strong>não</strong> desfaz o que for marcado aqui.
+              </span>
+            </dd>
+          </div>
           <div><dt>E-mail</dt><dd>{{ selecionado.email || '—' }}</dd></div>
           <div><dt>Origem</dt><dd>{{ selecionado.origem }}</dd></div>
           <div><dt>Id no Harmonit</dt><dd class="mono">{{ selecionado.harmonit_id || '—' }}</dd></div>
@@ -429,6 +482,8 @@ onMounted(carregar)
 .cad__dados dd {
   margin: 0;
 }
+
+.cad__relacao { max-width: 14rem; }
 
 .cad__papeis {
   list-style: none;

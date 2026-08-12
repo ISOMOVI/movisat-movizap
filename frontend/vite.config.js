@@ -19,6 +19,13 @@ export default defineConfig({
     sourcemap: true,
     chunkSizeWarningLimit: 700,
   },
+  // ⚠️ Os testes vivem em `*.teste.js`, em português como o resto do projeto.
+  // O padrao do Vitest e `*.test.js`/`*.spec.js` -- sem este `include`, ele
+  // roda ZERO teste e sai com sucesso, que e a pior forma de passar.
+  test: {
+    include: ["src/**/*.teste.js"],
+    environment: "node",
+  },
   server: {
     // Só para `npm run dev`. Em produção quem serve é o FastAPI.
     port: 5173,

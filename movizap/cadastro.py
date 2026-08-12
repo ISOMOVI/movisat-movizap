@@ -222,6 +222,39 @@ def contato(contato_id: int) -> dict | None:
     return _com_telefones_e_papeis(linha)
 
 
+# 🚨 A LISTA VIVE NO BANCO, NÃO AQUI. O CHECK `contato_relacao_check` é o
+# contrato (docs/02); esta tupla existe só para a tela montar o <select> e para
+# a rota recusar cedo, com mensagem legível, em vez de deixar o psycopg
+# devolver CheckViolation. Ampliar o vocabulário é migração, não edição aqui.
+RELACOES = ('cliente', 'fornecedor', 'parceiro', 'tecnico', 'lead',
+            'colaborador', 'teste')
+
+
+def definir_relacao(contato_id: int, relacao: str) -> dict:
+    """Diz o que a pessoa é para a Movisat. Editável desde 12/08.
+
+    🚨 ATÉ AQUI NINGUÉM PODIA MUDAR ISTO. `sync._gravar_contato` grava
+    `relacao = 'cliente'` LITERAL para todo contato do Harmonit, e não havia
+    rota de escrita: por isso 1.751 dos 1.752 contatos estavam como 'cliente'.
+    O número media uma constante no código, não a realidade.
+
+    ⚠️ O SYNC NÃO DESFAZ O QUE FOR MARCADO AQUI. O `ON CONFLICT ... DO UPDATE`
+    de `_gravar_contato` atualiza nome, e-mail, cliente_id e ativo, e não toca
+    em `relacao` -- conferido antes de expor esta rota. Se um dia mexer, o que
+    a pessoa marcou volta a virar 'cliente' amanhã de madrugada, sem aviso.
+    """
+    if relacao not in RELACOES:
+        return {"ok": False,
+                "motivo": f"Relação inválida. Vale uma de: {', '.join(RELACOES)}."}
+    linha = banco.um(
+        """UPDATE contato SET relacao = %s, atualizado_em = now()
+            WHERE id = %s RETURNING id, nome, relacao""",
+        (relacao, contato_id))
+    if not linha:
+        return {"ok": False, "motivo": "Contato não encontrado."}
+    return {"ok": True, **linha}
+
+
 def por_telefone(bruto: str) -> list[dict]:
     """Quem atende por este número. É o que o webhook vai chamar no passo 4.
 

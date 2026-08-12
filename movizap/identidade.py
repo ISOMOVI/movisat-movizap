@@ -116,7 +116,9 @@ def decidir_donos(brutos: dict, telefones_por_cliente: dict) -> tuple[dict, dict
             # (a) o mesmo cliente cadastrado várias vezes: o número é dele.
             donos[e164] = min(ids, key=lambda i: _antiguidade(brutos[i]))
         else:
-            # (b) e (c): ninguém recebe. Ver revisao/ e docs/08_Identidade.md.
+            # (b) e (c): ninguém recebe -- ver docs/08_Identidade.md.
+            # A pasta revisao/ foi apagada em 12/08: o relatório saiu, a
+            # trava ficou. Ninguém valida esses casos caso a caso.
             em_revisao[e164] = f"{len(ids)} clientes distintos disputam o número"
 
     return donos, em_revisao

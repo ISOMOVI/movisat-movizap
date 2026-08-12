@@ -26,7 +26,12 @@ TIMEOUT = httpx.Timeout(20.0, connect=5.0)
 
 # Aplicadas no pareamento, decididas no escopo da Fase 1.
 SETTINGS_PADRAO = {
-    "groupsIgnore": True,      # grupo é Fase 3, e a IA nunca responde em grupo
+    # 🚨 CONTINUA `True` COMO PADRÃO DE PAREAMENTO, e é decisão: instância nova
+    # não deve começar recebendo todo grupo de que o número participa. Quem
+    # atende grupo é a `atendimento`, e lá o valor foi desligado
+    # explicitamente em 12/08 (ver `scripts/ligar_grupo.py`). A `informativos`
+    # é disparo e nunca deve receber grupo.
+    "groupsIgnore": True,
     "syncFullHistory": False,  # o histórico que importa vem da ficha, não do balão
     "readMessages": False,     # não marcar lido por nós: quem lê é o atendente
     "alwaysOnline": False,
@@ -92,7 +97,7 @@ def enviar_texto(instancia: str, numero_e164: str, texto: str) -> dict:
 
     ⚠️ O número vai sem o `+`: o Evolution quer só dígitos.
     """
-    numero = "".join(c for c in (numero_e164 or "") if c.isdigit())
+    numero = destino_para_evolution(numero_e164)
     if not numero:
         raise ErroEvolution("Sem número para enviar.", 0)
     if not (texto or "").strip():
@@ -103,6 +108,108 @@ def enviar_texto(instancia: str, numero_e164: str, texto: str) -> dict:
 
     chave = (resposta or {}).get("key") or {}
     log.info("enviado por %s (id=%s)", instancia, chave.get("id"))
+    return {
+        "id_externo": chave.get("id"),
+        "status": (resposta or {}).get("status"),
+        "bruto": resposta,
+    }
+
+
+def nome_do_grupo(instancia: str, jid: str) -> str | None:
+    """O nome (subject) de um grupo, perguntado ao Evolution.
+
+    🚨 `pushName` NÃO É O NOME DO GRUPO. Num evento de grupo ele é o perfil de
+    QUEM MANDOU -- e para mensagem nossa (`fromMe`) é o nome do nosso próprio
+    perfil de negócio. Em 12/08 eu gravei "Movisat Rastreamento e Gestão de
+    Frotas" como nome de um grupo que se chama "Suporte Movisat -> Weso".
+    Descoberto lendo o estado depois de ligar, não pelo teste: o payload não
+    tem o nome do grupo em lugar nenhum.
+
+    ⚠️ Falha em silêncio de propósito: nome de grupo é enfeite comparado a
+    receber a mensagem. Sem o nome, a tela mostra o JID e a conversa funciona.
+    """
+    # ⚠️ A INSTÂNCIA VAI NO CAMINHO, o JID vai na query. Sem a instância o
+    # Evolution devolve 404 — testado em 12/08 contra o servidor real, porque
+    # a documentação do 2.3.7 mostra a forma curta.
+    try:
+        dados = _pedir("GET", f"/group/findGroupInfos/{instancia}?groupJid={jid}")
+    except ErroEvolution as e:
+        log.info("nome do grupo %s não veio: %s", jid, e)
+        return None
+    if isinstance(dados, list):
+        dados = dados[0] if dados else {}
+    nome = (dados or {}).get("subject")
+    return nome or None
+
+
+def destino_para_evolution(destino: str) -> str:
+    """O que vai no campo `number` do Evolution.
+
+    🚨 GRUPO VAI COM O JID INTEIRO; TELEFONE VAI SÓ COM DÍGITOS. Tirar o que
+    não é dígito de um `1203...@g.us` deixaria só o número do grupo, sem o
+    `@g.us` — e o Evolution trataria como telefone, mandando a resposta do
+    grupo para um número que não existe. Falha silenciosa: a API aceita e a
+    mensagem some.
+    """
+    destino = (destino or "").strip()
+    if destino.endswith("@g.us"):
+        return destino
+    return "".join(c for c in destino if c.isdigit())
+
+
+FAMILIA_PARA_EVOLUTION = {
+    "image": "image",
+    "video": "video",
+    "audio": "audio",
+}
+
+
+def tipo_de_midia(mime: str) -> str:
+    """O `mediatype` que o Evolution espera, a partir do MIME do arquivo.
+
+    ⚠️ Vocabulário FECHADO do lado deles: `image`, `video`, `audio` ou
+    `document`. Mandar `mediatype` que não existe não dá erro claro -- dá
+    mensagem que não chega.
+    """
+    familia = (mime or "").split("/")[0].strip().lower()
+    return FAMILIA_PARA_EVOLUTION.get(familia, "document")
+
+
+def enviar_midia(instancia: str, numero_e164: str, base64_dados: str,
+                 mime: str, nome_arquivo: str, legenda: str = "") -> dict:
+    """Manda um arquivo e devolve a chave que o WhatsApp deu à mensagem.
+
+    🚨 MESMA REGRA DO TEXTO: o `key.id` da resposta é o que evita a mensagem
+    duplicada. O Evolution ecoa a nossa própria mensagem pelo webhook com
+    `fromMe: true` e o mesmo id; sem gravar o id agora, o eco vira um segundo
+    balão igual na tela.
+
+    ⚠️ O número vai sem o `+`: o Evolution quer só dígitos.
+
+    ⚠️ `fileName` importa para documento -- é o nome que o cliente vê e usa
+    para abrir. Sem ele o WhatsApp mostra um nome genérico e o PDF chega
+    parecendo lixo.
+    """
+    numero = destino_para_evolution(numero_e164)
+    if not numero:
+        raise ErroEvolution("Sem número para enviar.", 0)
+    if not base64_dados:
+        raise ErroEvolution("Arquivo vazio.", 0)
+
+    corpo = {
+        "number": numero,
+        "mediatype": tipo_de_midia(mime),
+        "mimetype": mime,
+        "media": base64_dados,
+        "fileName": nome_arquivo or "arquivo",
+    }
+    if legenda:
+        corpo["caption"] = legenda
+
+    resposta = _pedir("POST", f"/message/sendMedia/{instancia}", corpo)
+    chave = (resposta or {}).get("key") or {}
+    log.info("arquivo enviado por %s (id=%s, tipo=%s, %s)",
+             instancia, chave.get("id"), corpo["mediatype"], nome_arquivo)
     return {
         "id_externo": chave.get("id"),
         "status": (resposta or {}).get("status"),

@@ -182,12 +182,24 @@ TELAS = [
     },
     # ---- reservados: código já ocupado, tela ainda não existe ----
     {
+        "codigo": "ATD_6.1",
+        "titulo": "Chat interno",
+        "rota": "/chat",
+        "icone": "bi-chat-left-dots",
+        # ⚠️ "entre atendentes" e não "com cliente" -- a descrição aparece na
+        # CFG_9.1 e é o que distingue esta tela da caixa de entrada.
+        "descricao": "Conversa entre atendentes. Não sai para o cliente.",
+        "permissao": "atendimento",
+        "fase": 1,
+    },
+    {
         "codigo": "CFG_2.2",
         "titulo": "IA — analytics",
         "rota": "/config/ia/analytics",
         "icone": "bi-graph-up",
         "descricao": "Custo, resolução sem humano e o que ela não soube.",
-        "permissao": "admin",
+        # 12/08: era "admin". O perfil saiu do vocabulário -- ver PERFIS.
+        "permissao": "owner",
         "fase": 2,
     },
     {
@@ -196,7 +208,8 @@ TELAS = [
         "rota": "/relatorios",
         "icone": "bi-file-earmark-bar-graph",
         "descricao": "Volume, tempo de resposta, desfecho.",
-        "permissao": "admin",
+        # 12/08: era "admin". O perfil saiu do vocabulário -- ver PERFIS.
+        "permissao": "owner",
         "fase": 3,
     },
 ]
@@ -204,9 +217,23 @@ TELAS = [
 FASE_ATUAL = 1
 
 # Perfis são conjuntos de permissão, e permissão só existe se alguma tela a usa.
+# 🚨 `admin` SAIU EM 12/08, e o que ele destravava era NADA. Como permissão,
+# aparecia em duas telas -- CFG_2.2 (Fase 2) e REL_1.1 (Fase 3) --, nenhuma das
+# quais existe. Como perfil, dava `atendimento` + `cadastro` e mais o `admin`
+# que não abria nada: o alcance real era idêntico a ter os dois outros. A doc,
+# enquanto isso, prometia que um admin configuraria Canais e Sincronização --
+# e o código nunca permitiu, porque `pode_acessar` recusa tela `owner` a quem
+# não é owner. Ninguém usava: 1 owner e 3 atendimento na base.
+#
+# Decisão do usuário: **owner é o único administrador, e não nascem mais
+# owners.** As duas telas futuras viraram `owner` e o CHECK de
+# `atendente.perfil` perdeu o valor (migração 024).
+#
+# ⚠️ Perfil desconhecido devolve conjunto VAZIO, que é menu vazio. Se sobrasse
+# alguém com `perfil = 'admin'`, ele perderia tudo em silêncio -- por isso a
+# migração recusa rodar se existir linha assim, em vez de converter no escuro.
 PERFIS = {
     "owner": None,  # None = tudo, inclusive o que é só do owner
-    "admin": {"admin", "atendimento", "cadastro"},
     "atendimento": {"atendimento"},
     "cadastro": {"cadastro"},
 }

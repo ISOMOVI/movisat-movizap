@@ -106,7 +106,7 @@ ruído, e poderia contradizer o cadastro na cara de quem atende.
 | **1** | Importar em tabelas próprias, fora do cadastro | ✅ **10/08** — 14.214 contatos, 23.854 chaves |
 | **2** | Exportar **COMPANY** do Bitrix | ❌ **CANCELADO em 11/08** — o usuário decidiu que não haverá nova exportação |
 | **3** | Promover ao cadastro | ✅ **11/08 — por nome + telefone + e-mail**, já que o documento não veio. 862 números, `docs/12` |
-| **4** | Lista de revisão | ✅ `revisao/2026-08-11_bitrix_nomes_empresa.md` |
+| **4** | Lista de revisão | ❌ **DESCARTADA em 12/08** — o usuário decidiu não validar caso a caso. A trava (número em disputa fica sem dono) continua |
 
 ### O que o passo 1 já entregou
 

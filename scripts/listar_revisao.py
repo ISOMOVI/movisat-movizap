@@ -1,13 +1,18 @@
 """Gera a lista dos vinculos telefone-cliente que NAO entram no banco.
 
 Decisao do usuario em 06/08: os duvidosos nao sobem, para nao sujar a base
-nova. Ficam aqui, para validacao caso a caso.
+nova.
+
+⚠️ A VALIDACAO CASO A CASO FOI DESCARTADA em 12/08, e a pasta `revisao/` foi
+apagada. A trava continua -- numero em disputa fica sem dono --, mas ninguem
+vai revisar a lista. Este script vira ferramenta de diagnostico: roda quando
+alguem quiser SABER quantos casos existem, nao para alimentar uma fila.
 
 🚨 Este arquivo e GERADO. Nao editar a mao -- rode o script de novo. O sync
 rele o Harmonit inteiro a cada 12h, entao a lista muda sozinha quando o
 cadastro de la mudar.
 
-Uso:  ./venv/bin/python scripts/listar_revisao.py > revisao/<data>_numeros.md
+Uso:  ./venv/bin/python scripts/listar_revisao.py   (imprime na tela)
 """
 import re
 import sys

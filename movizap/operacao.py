@@ -261,9 +261,16 @@ def criar_atendente(nome: str, login: str, email: str | None = None,
     `senha_hash IS NULL` antes de chegar no bcrypt, então uma conta criada e
     esquecida não é porta aberta -- é porta que não existe ainda. A senha se
     define depois, na própria tela.
+
+    🚨 E NÃO NASCE OWNER. Decisão do usuário em 12/08: o owner é único, e a
+    conta passa de mão trocando o e-mail DELA, não criando outra.
     """
     nome, login, email = _validar_campos(nome, login, email, perfil, estado,
                                          max_conversas)
+    if perfil == "owner":
+        raise DadoInvalido(
+            "Não se cria owner. O owner é único e a conta passa de mão "
+            "trocando o e-mail da linha existente.")
     try:
         linha = banco.um(
             """INSERT INTO atendente (login, nome, email, perfil, estado,
@@ -282,16 +289,48 @@ def atualizar_atendente(atendente_id: int, nome: str, login: str,
                         max_conversas: int | None, ativo: bool,
                         fuso: str = "America/Sao_Paulo",
                         quem_edita: str | None = None) -> dict:
-    atual = banco.um("SELECT login, owner FROM atendente WHERE id = %s", (atendente_id,))
+    atual = banco.um("SELECT login, owner, email FROM atendente WHERE id = %s",
+                     (atendente_id,))
     if not atual:
         raise DadoInvalido("Atendente não encontrado.")
     nome, login, email = _validar_campos(nome, login, email, perfil, estado,
                                          max_conversas)
 
+    # 🚨 O PERFIL `owner` NÃO ENTRA NEM SAI POR AQUI. Editar a linha do owner
+    # (nome, e-mail, fuso) continua livre -- o que se barra é PROMOVER alguém
+    # e REBAIXAR o dono.
+    #
+    # Depois da migração 025 os dois lados custam caro: `owner` virou coluna
+    # DERIVADA de `perfil`, então promover concede owner pleno na hora, e
+    # rebaixar tira o acesso do único administrador do sistema -- que é o
+    # mesmo estrago de desativar a própria conta, e por um campo que parece
+    # inofensivo num formulário.
+    if perfil == "owner" and not atual["owner"]:
+        raise DadoInvalido(
+            "Não se promove ninguém a owner. O owner é único e a conta passa "
+            "de mão trocando o e-mail da linha dele.")
+    if atual["owner"] and perfil != "owner":
+        raise EmUso(
+            "O owner não pode deixar de ser owner: ele é o único administrador "
+            "do sistema e ninguém poderia devolvê-lo ao lugar.")
+
     # ⚠️ Desativar a própria conta é o tipo de clique que só se percebe depois
     # de sair. Barrar aqui é barato; recuperar acesso não é.
     if not ativo and quem_edita and quem_edita.casefold() == atual["login"].casefold():
         raise EmUso("Você não pode desativar a sua própria conta.")
+
+    # 🚨 TROCAR O E-MAIL É PASSAR A CONTA — e o `google_sub` tem de ir junto.
+    # A entrada pelo Google casa por `google_sub OR email`, e o `sub` fica
+    # gravado na primeira entrada. Trocar só o e-mail deixaria o dono anterior
+    # entrando normalmente, porque o `sub` dele continua casando -- em
+    # silêncio, sem erro e sem recusa no log. O novo dono só o expulsaria ao
+    # entrar pela primeira vez, quando o UPDATE sobrescreve o `sub`; até lá,
+    # os dois teriam acesso. Zerar aqui fecha essa janela.
+    trocou_email = (email or "").casefold() != (atual["email"] or "").casefold()
+    if trocou_email:
+        banco.executar(
+            "UPDATE atendente SET google_sub = NULL WHERE id = %s", (atendente_id,))
+        log.info("atendente %s trocou de e-mail: google_sub zerado", atendente_id)
 
     try:
         banco.executar(

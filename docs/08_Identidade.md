@@ -104,7 +104,12 @@ Reavaliar se: o usuário validar os 96 vínculos caso a caso
 ```
 
 **"Não cadastre os duvidosos ainda."** O vínculo duvidoso não entra em
-`contato_telefone` e é listado em `revisao/`, para validação caso a caso.
+`contato_telefone` -- ninguém recebe o número. **A regra continua valendo.**
+
+> **A pasta `revisao/` foi apagada em 12/08, por decisão do usuário: os 32
+> casos nao serao validados caso a caso.** O que sai e o RELATORIO, nao a
+> trava: numero em disputa segue sem dono, que e a falha fechada. Os arquivos
+> antigos estao no historico do git, se algum dia fizerem falta.
 
 | | |
 |---|---|

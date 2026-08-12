@@ -5,9 +5,36 @@ O que se protege aqui:
   - permissão vazando para quem não tem;
   - tela de fase futura subindo antes da hora.
 """
+import pathlib
+
 import pytest
 
 from movizap import telas
+
+DOC = pathlib.Path(__file__).parent.parent / "docs" / "03_Registro_Telas.md"
+
+
+def _doc_registro() -> str:
+    return DOC.read_text(encoding="utf-8")
+
+
+def _linha_da_tabela(doc: str, codigo: str) -> dict | None:
+    """A linha da tabela de telas para um código, em colunas.
+
+    ⚠️ Casa pelo início da linha (`| \\`CODIGO\\` |`) e não por "contém": o
+    código aparece em vários parágrafos do doc, e um deles casaria antes da
+    tabela -- o teste passaria lendo prosa.
+    """
+    alvo = f"| `{codigo}` |"
+    for linha in doc.splitlines():
+        if not linha.startswith(alvo):
+            continue
+        colunas = [c.strip().strip("`") for c in linha.strip().strip("|").split("|")]
+        if len(colunas) < 5:
+            return None
+        return {"codigo": colunas[0], "titulo": colunas[1], "rota": colunas[2],
+                "permissao": colunas[3], "fase": colunas[4]}
+    return None
 
 
 class TestIntegridadeDoRegistro:
@@ -22,12 +49,56 @@ class TestIntegridadeDoRegistro:
         e não acusou `INI_1.1` nem `EML_1.1` até 10/08. Escrever as linhas que
         faltavam não conserta -- este teste é que conserta.
         """
-        import pathlib
-
-        doc = (pathlib.Path(__file__).parent.parent
-               / "docs" / "03_Registro_Telas.md").read_text(encoding="utf-8")
+        doc = _doc_registro()
         faltando = [t["codigo"] for t in telas.TELAS if t["codigo"] not in doc]
         assert not faltando, f"telas fora do doc: {faltando}"
+
+    def test_doc_traz_a_PERMISSAO_e_a_FASE_certas(self):
+        """🚨 "O CÓDIGO APARECE NO DOC" NÃO É VERIFICAÇÃO SUFICIENTE.
+
+        Foi este buraco que deixou o `03_Registro_Telas` afirmar, por semanas,
+        que Canais, Sincronização, Classificações, Atendentes, Times e
+        IA-prompt eram `admin` -- quando as seis sempre foram `owner` no
+        código. O teste antigo passava, porque o código da tela ESTAVA lá; a
+        coluna ao lado é que mentia. Quem lesse a doc criaria um perfil admin
+        e levaria 403 sem entender.
+
+        Agora a linha inteira é conferida. Encontrado em 12/08.
+        """
+        doc = _doc_registro()
+        erros = []
+        for tela in telas.TELAS:
+            linha = _linha_da_tabela(doc, tela["codigo"])
+            if linha is None:
+                erros.append(f"{tela['codigo']}: sem linha na tabela do doc")
+                continue
+            if linha["permissao"] != tela["permissao"]:
+                erros.append(
+                    f"{tela['codigo']}: doc diz permissão {linha['permissao']!r}, "
+                    f"código diz {tela['permissao']!r}")
+            if linha["fase"] != str(tela["fase"]):
+                erros.append(
+                    f"{tela['codigo']}: doc diz fase {linha['fase']}, "
+                    f"código diz {tela['fase']}")
+        assert not erros, "doc e código discordam:\n  " + "\n  ".join(erros)
+
+    def test_o_doc_nao_tem_DUAS_tabelas_de_telas(self):
+        """🚨 Duas tabelas do mesmo fato: uma vai mentir, e mentiu.
+
+        Até 12/08 o arquivo tinha "Registro — Fase 1" e "Telas de hoje". Só a
+        segunda era espelho real. Corrigir células não resolveria -- a causa
+        era a cópia existir. Este teste impede que ela volte.
+        """
+        doc = _doc_registro()
+        # ⚠️ Conta só a tabela de TELA, que é a que tem coluna Permissão. A de
+        # abas e componentes também começa com "| Código |" e é legítima --
+        # abas não têm permissão própria, herdam da tela mãe. A primeira
+        # versão deste teste contou as duas e reprovou sozinha.
+        cabecalhos = [l for l in doc.splitlines()
+                      if l.strip().startswith("| Código |") and "Permissão" in l]
+        assert len(cabecalhos) == 1, (
+            f"o doc voltou a ter {len(cabecalhos)} tabelas de tela com coluna "
+            f"Permissão; tabela de tela é UMA, espelho do telas.py")
 
     def test_codigo_aposentado_nunca_volta(self):
         """🚨 Reaproveitar código faria o log antigo mentir.

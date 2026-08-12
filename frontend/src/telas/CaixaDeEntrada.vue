@@ -21,6 +21,7 @@ import { ref, reactive, computed, onMounted, onUnmounted, watch, nextTick } from
 import { useRoute, useRouter } from 'vue-router'
 
 import { api, pedirBlob, ErroDeApi } from '../api/cliente.js'
+import { marcar, partir } from '../util/destaque.js'
 
 const route = useRoute()
 const router = useRouter()
@@ -44,8 +45,59 @@ const classificacaoEscolhida = ref('')
 const comentario = ref('')
 
 const resposta = ref('')
-const modoNota = ref(false)
 const enviando = ref(false)
+
+/* ---- buscar DENTRO da conversa (ATD_1.2) --------------------------------
+   Pergunta diferente da busca da lista: lá é "com quem eu falei", aqui é
+   "onde ele disse isso". Por isso são dois campos e não um.
+
+   ⚠️ RODA NO NAVEGADOR, sem rota nova: as mensagens já estão carregadas em
+   `aberta.mensagens`. Uma rota faria o servidor reler o que a tela já tem.
+
+   🚨 SÓ ACHA O QUE FOI CARREGADO. O backend manda no máximo
+   `teto_mensagens` e avisa em `truncada`. Numa conversa truncada, "não
+   encontrado" seria mentira -- a tela precisa dizer que está vendo um pedaço.
+   Nenhuma conversa passou do teto ainda (a maior tem 130 de 1.000). */
+const buscaNaConversa = ref('')
+const achadoAtual = ref(0)
+
+const achadosNaConversa = computed(() => {
+  const alvo = buscaNaConversa.value.trim().toLowerCase()
+  if (!alvo || !aberta.value) return []
+  return aberta.value.mensagens
+    .filter((m) => (m.conteudo || '').toLowerCase().includes(alvo))
+    .map((m) => m.id)
+})
+
+const idAchado = computed(() => achadosNaConversa.value[achadoAtual.value] ?? null)
+
+function casaNaConversa(m) {
+  const alvo = buscaNaConversa.value.trim().toLowerCase()
+  return Boolean(alvo && (m.conteudo || '').toLowerCase().includes(alvo))
+}
+
+function irParaAchado(passo) {
+  const total = achadosNaConversa.value.length
+  if (!total) return
+  // Dá a volta nas duas direções: no último, "próximo" volta ao primeiro.
+  achadoAtual.value = (achadoAtual.value + passo + total) % total
+  rolarAteAchado()
+}
+
+async function rolarAteAchado() {
+  await nextTick()
+  const alvo = idAchado.value
+  if (!alvo || !baloes.value) return
+  const el = baloes.value.querySelector(`[data-mensagem="${alvo}"]`)
+  if (el) el.scrollIntoView({ block: 'center', behavior: 'smooth' })
+}
+
+/* ⚠️ Zera ao trocar o termo: sem isto, apagar uma letra deixa o contador em
+   "7/2" e o próximo clique pula para um índice que não existe mais. */
+watch(buscaNaConversa, () => {
+  achadoAtual.value = 0
+  if (achadosNaConversa.value.length) rolarAteAchado()
+})
 
 /* Participantes — quem mais está acompanhando esta conversa.
    🚨 Convidar NÃO dá acesso: qualquer atendente com ATD_1.2 já abre qualquer
@@ -54,8 +106,52 @@ const acompanham = ref([])
 const convidaveis = ref([])
 const souDono = ref(false)
 const souParticipante = ref(false)
-const convidado = ref('')
+/* Vários de uma vez (12/08): era um <select> de um só, e chamar três pessoas
+   custava três idas ao painel. */
+const convidados = ref([])
 const mexendo = ref(false)
+
+/* ---- confirmação --------------------------------------------------------
+   Uma caixa só, alimentada por quem chama. `acao` é a função que roda no
+   "confirmar"; enquanto ninguém aperta, nada acontece.
+
+   ⚠️ NÃO CONFIRMAR O QUE SE DESFAZ SOZINHO. Encerrar, devolver e sair mudam
+   quem responde pelo cliente e nenhum tem "desfazer" -- por isso estes três
+   perguntam. Transferir e convidar abrem painel próprio, onde a escolha já é
+   deliberada; pedir confirmação ali seria um clique a mais por nada. */
+const confirmacao = ref(null)
+
+/* ⚠️ FECHAR LIMPA O QUE FOI DIGITADO. Sem isto, quem abre "encerrar", escolhe
+   uma classificação, desiste e depois encerra OUTRA conversa leva a escolha
+   antiga junto -- e o histórico grava um rótulo que ninguém escolheu ali. */
+function abrirPainel(qual) {
+  painelAcao.value = painelAcao.value === qual ? '' : qual
+  if (!painelAcao.value) limparPaineis()
+}
+
+function fecharPainel() {
+  painelAcao.value = ''
+  limparPaineis()
+}
+
+function limparPaineis() {
+  convidados.value = []
+  timeEscolhido.value = ''
+  motivo.value = ''
+  classificacaoEscolhida.value = ''
+  comentario.value = ''
+}
+
+function perguntar(titulo, texto, rotulo, acao, perigo = false) {
+  confirmacao.value = { titulo, texto, rotulo, acao, perigo }
+}
+
+async function confirmar() {
+  const c = confirmacao.value
+  if (!c || mexendo.value) return
+  confirmacao.value = null
+  await c.acao()
+}
 
 async function carregarParticipantes(id) {
   try {
@@ -72,18 +168,63 @@ async function carregarParticipantes(id) {
   }
 }
 
+/* 🚨 UM CONVITE POR CHAMADA, DE PROPÓSITO. A rota `/convidar` é atômica por
+   pessoa; mandar a lista inteira de uma vez faria três convites virarem uma
+   transação só, e um nome inválido derrubaria os outros dois. Aqui cada um vai
+   sozinho e o resultado é contado -- o parcial é dito, não escondido.
+
+   ⚠️ NÃO SE ANUNCIA SUCESSO SEM CONTAR: "3 chamados" quando dois falharam é
+   exatamente o tipo de tela que mente. */
 async function convidar() {
-  if (!convidado.value || mexendo.value) return
+  if (!convidados.value.length || mexendo.value) return
+  mexendo.value = true
+  erro.value = ''
+  const nomeDe = (id) => {
+    const a = convidaveis.value.find((x) => String(x.id) === String(id))
+    return a ? a.nome : `#${id}`
+  }
+  const entraram = []
+  const falharam = []
+  for (const id of convidados.value) {
+    try {
+      const r = await api.post(`/api/conversas/${aberta.value.id}/convidar`,
+                               { atendente_id: Number(id) })
+      entraram.push(r.nome || nomeDe(id))
+    } catch (e) {
+      falharam.push(`${nomeDe(id)} (${e instanceof ErroDeApi ? e.message : 'falhou'})`)
+    }
+  }
+  if (entraram.length) {
+    recado.value = entraram.length === 1
+      ? `${entraram[0]} foi chamado para a conversa.`
+      : `${entraram.length} pessoas foram chamadas: ${entraram.join(', ')}.`
+  }
+  if (falharam.length) erro.value = `Não entrou: ${falharam.join(' · ')}`
+  convidados.value = []
+  painelAcao.value = ''
+  await carregarParticipantes(aberta.value.id)
+  mexendo.value = false
+}
+
+/* 🚨 SÓ QUEM ESTÁ NA CONVERSA AGE NELA. Até 12/08 qualquer atendente com a
+   tela `ATD_1.2` encerrava, transferia e devolvia conversa alheia -- o
+   `souDono || souParticipante` governava só o botão *Sair*. O usuário achou
+   saindo de uma conversa e reabrindo pelo painel.
+
+   ⚠️ Esconder o botão NÃO é a trava: a rota recusa com 409. Isto aqui é para
+   a tela não oferecer o que vai ser negado. */
+const posso = computed(() => souDono.value || souParticipante.value)
+
+async function entrarNaConversa() {
   mexendo.value = true
   try {
-    const r = await api.post(`/api/conversas/${aberta.value.id}/convidar`,
-                             { atendente_id: Number(convidado.value) })
-    recado.value = `${r.nome} foi chamado para a conversa.`
-    convidado.value = ''
-    painelAcao.value = ''
-    await carregarParticipantes(aberta.value.id)
+    const r = await api.post(`/api/conversas/${aberta.value.id}/entrar`)
+    recado.value = r.papel === 'dono'
+      ? 'Você já responde por esta conversa.'
+      : 'Você entrou — agora pode responder e agir nela.'
+    await Promise.all([abrir(aberta.value.id), carregar({ silencioso: true })])
   } catch (e) {
-    erro.value = e instanceof ErroDeApi ? e.message : 'Não consegui convidar.'
+    erro.value = e instanceof ErroDeApi ? e.message : 'Não consegui entrar.'
   } finally {
     mexendo.value = false
   }
@@ -134,8 +275,19 @@ function parametros() {
   return p.toString()
 }
 
+/* ⚠️ O GIRANDO SÓ APARECE DEPOIS DE 3 SEGUNDOS. Busca rápida — que é o caso
+   normal, medido entre 5 e 30 ms — não pode piscar um indicador: pisca-pisca a
+   cada tecla cansa mais do que espera nenhuma. Passando de 3 s, o silêncio é
+   que vira problema: sem sinal, a pessoa acha que a tela travou e digita de
+   novo. Decisão do usuário em 12/08. */
+const DEMORA_ATE_AVISAR_MS = 3000
+const buscaDemorada = ref(false)
+let avisoDemora = null
+
 async function carregar({ silencioso = false } = {}) {
   if (!silencioso) carregando.value = true
+  clearTimeout(avisoDemora)
+  avisoDemora = setTimeout(() => { buscaDemorada.value = true }, DEMORA_ATE_AVISAR_MS)
   try {
     const [conversas, r] = await Promise.all([
       api.get(`/api/conversas?${parametros()}`),
@@ -147,6 +299,10 @@ async function carregar({ silencioso = false } = {}) {
   } catch (e) {
     if (!silencioso) erro.value = e instanceof ErroDeApi ? e.message : 'Falha ao ler as conversas.'
   } finally {
+    // 🚨 Apagar o aviso no `finally`, nunca no caminho de sucesso: busca que
+    // FALHA depois de 4 s deixaria o girando na tela para sempre.
+    clearTimeout(avisoDemora)
+    buscaDemorada.value = false
     carregando.value = false
   }
 }
@@ -156,6 +312,15 @@ async function abrir(id) {
     // Solta o que a conversa anterior segurava ANTES de trocar: o object URL
     // da foto de outro cliente não tem por que continuar vivo.
     soltarMidias()
+    // ⚠️ Modal aberto para a conversa anterior não pode sobreviver à troca:
+    // ele confirmaria sobre a conversa nova com o texto da velha.
+    painelAcao.value = ''
+    confirmacao.value = null
+    limparPaineis()
+    // A busca é DESTA conversa: carregá-la em outra mostraria contador e
+    // marcações de um termo que ninguém procurou aqui.
+    buscaNaConversa.value = ''
+    achadoAtual.value = 0
     gaveta.value = false
     empresas.value = []
     empresasAbertas.value = false
@@ -174,15 +339,49 @@ async function abrir(id) {
   }
 }
 
-async function assumir() {
+/* Assumir serve os dois casos: conversa na fila e conversa ENCERRADA.
+   Encerrada, assumir REABRE -- antes de 12/08 encerrar era porta só de ida e o
+   único jeito de voltar a falar era o cliente escrever primeiro. */
+async function assumir(id = null) {
+  const alvo = id || aberta.value.id
   try {
-    await api.post(`/api/conversas/${aberta.value.id}/assumir`)
-    recado.value = 'Conversa assumida.'
-    await Promise.all([abrir(aberta.value.id), carregar({ silencioso: true })])
+    const r = await api.post(`/api/conversas/${alvo}/assumir`)
+    recado.value = r.reaberta
+      ? 'Conversa reaberta — você passou a responder por ela.'
+      : 'Conversa assumida.'
+    await Promise.all([abrir(alvo), carregar({ silencioso: true })])
   } catch (e) {
-    // 🚨 409 aqui é o caso projetado: outra pessoa clicou primeiro.
+    // 🚨 409 aqui é o caso projetado: outra pessoa clicou primeiro, ou este
+    // número já tem outra conversa aberta e é nela que a resposta chega.
     erro.value = e instanceof ErroDeApi ? e.message : 'Não consegui assumir.'
   }
+}
+
+/* Pela lista: sem dono assume direto; encerrada abre a conversa ANTES de
+   perguntar, para quem vai reabrir ver do que se trata em vez de confirmar às
+   cegas a partir de uma linha de lista. */
+async function assumirDaLista(c) {
+  if (c.estado !== 'resolvida') {
+    await assumir(c.id)
+    return
+  }
+  await abrir(c.id)
+  if (aberta.value && aberta.value.estado === 'resolvida') pedirParaAssumir()
+}
+
+function pedirParaAssumir() {
+  if (aberta.value.estado === 'resolvida') {
+    perguntar(
+      'Reabrir esta conversa?',
+      'Ela sai do Histórico, volta para a caixa de entrada e você passa a '
+        + 'responder por ela. O tempo de atendimento é recontado no próximo '
+        + 'encerramento.',
+      'Reabrir e assumir',
+      () => assumir(),
+    )
+    return
+  }
+  assumir()
 }
 
 const exigeComentario = computed(() => {
@@ -190,13 +389,20 @@ const exigeComentario = computed(() => {
   return Boolean(c && c.exige_comentario)
 })
 
-async function enviar() {
+/* O destino vem do BOTÃO clicado, não de um estado guardado. Era `modoNota`,
+   um seletor invisível que o usuário não conseguia entender -- e com razão. */
+const ocupado = computed(() => enviando.value || enviandoArquivo.value)
+const temAlgoParaEnviar = computed(
+  () => Boolean(arquivo.value) || Boolean(resposta.value.trim()),
+)
+
+async function enviar(interna = false) {
   const texto = resposta.value.trim()
-  if (!texto || enviando.value) return
+  if (!texto || ocupado.value) return
   enviando.value = true
   erro.value = ''
   recado.value = ''
-  const caminho = modoNota.value ? 'nota' : 'responder'
+  const caminho = interna ? 'nota' : 'responder'
   try {
     await api.post(`/api/conversas/${aberta.value.id}/${caminho}`, { texto })
     resposta.value = ''
@@ -208,6 +414,83 @@ async function enviar() {
   } finally {
     enviando.value = false
   }
+}
+
+/* ---- envio de arquivo ----------------------------------------------------
+   🚨 O DESTINATÁRIO NÃO É ESCOLHIDO AQUI. A rota tira o número da conversa;
+   o formulário manda só o arquivo e a legenda.
+
+   ⚠️ NÃO passa pelo `api.post`, que serializa JSON. Arquivo vai por
+   `FormData`, e nesse caso o navegador precisa montar o `Content-Type` com o
+   boundary sozinho -- definir o cabeçalho na mão quebra o upload em silêncio,
+   com o servidor recebendo corpo vazio. */
+/* 25 MB é decisão do usuário (12/08). Eu tinha posto 16 por conta própria, e
+   teto é decisão dele -- regra que ele já tinha dado no dia anterior. */
+const TETO_ARQUIVO_MB = 25
+const arquivo = ref(null)
+const enviandoArquivo = ref(false)
+
+function escolherArquivo(evento) {
+  const f = evento.target.files?.[0] || null
+  erro.value = ''
+  if (f && f.size > TETO_ARQUIVO_MB * 1024 * 1024) {
+    // Barra aqui também, além do servidor: subir 40 MB para levar 413 no fim
+    // é desperdício de tempo de quem está atendendo.
+    erro.value = `O arquivo tem ${(f.size / 1024 / 1024).toFixed(1)} MB e o `
+      + `teto é ${TETO_ARQUIVO_MB} MB.`
+    evento.target.value = ''
+    arquivo.value = null
+    return
+  }
+  arquivo.value = f
+}
+
+function limparArquivo() {
+  arquivo.value = null
+  const campo = document.getElementById('campo-arquivo')
+  if (campo) campo.value = ''
+}
+
+async function enviarArquivo(interna = false) {
+  if (!arquivo.value || ocupado.value) return
+  enviandoArquivo.value = true
+  erro.value = ''
+  recado.value = ''
+  try {
+    const forma = new FormData()
+    forma.append('arquivo', arquivo.value)
+    forma.append('legenda', resposta.value.trim())
+    // Anexo vale nos dois destinos: como nota, o arquivo é guardado na
+    // conversa e não sai para o cliente.
+    forma.append('interna', interna ? 'true' : 'false')
+    const r = await fetch(`/api/conversas/${aberta.value.id}/arquivo`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${localStorage.getItem('movizap.token')}` },
+      body: forma,
+    })
+    // 🚨 Não confiar no código: ler o corpo e decidir por ele.
+    const texto = await r.text()
+    let corpo = null
+    try { corpo = JSON.parse(texto) } catch { corpo = null }
+    if (!r.ok) {
+      throw new Error((corpo && corpo.detail) || `Falha ao enviar (${r.status}).`)
+    }
+    limparArquivo()
+    resposta.value = ''
+    recado.value = 'Arquivo enviado.'
+    await Promise.all([abrir(aberta.value.id), carregar({ silencioso: true })])
+  } catch (e) {
+    erro.value = e.message || 'Não consegui enviar o arquivo.'
+  } finally {
+    enviandoArquivo.value = false
+  }
+}
+
+function tamanhoDoArquivo(f) {
+  if (!f) return ''
+  return f.size < 1024 * 1024
+    ? `${Math.round(f.size / 1024)} KB`
+    : `${(f.size / 1024 / 1024).toFixed(1)} MB`
 }
 
 async function transferir() {
@@ -234,6 +517,29 @@ async function devolver() {
   } catch (e) {
     erro.value = e instanceof ErroDeApi ? e.message : 'Não consegui devolver.'
   }
+}
+
+function pedirParaDevolver() {
+  perguntar(
+    'Devolver à fila?',
+    `A conversa fica sem dono e volta para a fila, onde qualquer atendente pode `
+      + `assumir. Você deixa de ser responsável por ela. O cliente não é avisado.`,
+    'Devolver à fila',
+    devolver,
+  )
+}
+
+function pedirParaSair() {
+  /* ⚠️ O texto muda conforme o papel, porque a consequência muda: dono que sai
+     PASSA A POSSE (ou joga na fila); participante que sai só deixa de ver. */
+  const texto = souDono.value
+    ? (acompanham.value.length
+        ? 'Você é quem responde por ela. Ao sair, a posse passa para quem está '
+          + 'acompanhando há mais tempo.'
+        : 'Você é quem responde por ela e não há mais ninguém acompanhando — '
+          + 'ao sair, a conversa volta para a fila.')
+    : 'Ela deixa de aparecer na sua lista. Quem responde pela conversa não muda.'
+  perguntar('Sair da conversa?', texto, 'Sair da conversa', sairDaConversa)
 }
 
 async function encerrar() {
@@ -287,8 +593,14 @@ const filaParada = computed(
    com o cadastro -- com `contato_nome` na frente, a tela mostrava número cru
    quase sempre, num painel em que o nome da pessoa já tinha chegado. */
 function quem(c) {
+  // ⚠️ Grupo tem nome próprio e não tem telefone. Sem este primeiro caso, a
+  // linha do grupo cairia no `telefone_e164`, que é NULO, e a lista mostraria
+  // vazio.
+  if (c.tipo === 'grupo') return c.grupo_nome || 'Grupo sem nome'
   return c.nome_whatsapp || c.contato_nome || c.telefone_e164
 }
+
+const ehGrupo = computed(() => Boolean(aberta.value && aberta.value.tipo === 'grupo'))
 
 function quando(iso) {
   if (!iso) return ''
@@ -304,6 +616,10 @@ function quando(iso) {
 function hora(iso) {
   return new Date(iso).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })
 }
+
+/* `partir` e `marcar` mudaram para `util/destaque.js` em 12/08 — funções puras
+   dentro de um `.vue` são inalcançáveis por teste, e elas sustentam o destaque
+   da busca inclusive na parte de segurança. Ver `destaque.teste.js`. */
 
 const ICONE = {
   imagem: 'bi-image', audio: 'bi-mic', video: 'bi-camera-video',
@@ -321,6 +637,23 @@ const ICONE = {
    dia inteiro, isso vira centenas de MB. */
 const midias = reactive({})
 const MOSTRAM_SOZINHAS = ['imagem', 'figurinha', 'audio', 'video']
+
+/* Que tipo de mídia é esta mensagem, para decidir se mostra foto, áudio ou só
+   o link de baixar.
+
+   🚨 NÃO DÁ PARA OLHAR SÓ `m.tipo`. Nota com anexo tem `tipo = 'nota'` -- o
+   CHECK `ck_nota_e_interna` do banco exige isso --, então uma foto anexada a
+   uma nota apareceria como "arquivo genérico" e nunca como imagem. Quem sabe
+   o que é o arquivo é o MIME dele. */
+const FAMILIA = { image: 'imagem', audio: 'audio', video: 'video' }
+
+function tipoDaMidia(m) {
+  if (!m.midia_id) return m.tipo
+  if (m.tipo === 'nota' || m.tipo === 'documento') {
+    return FAMILIA[(m.midia_mime || '').split('/')[0]] || 'documento'
+  }
+  return m.tipo
+}
 
 function tamanhoLegivel(bytes) {
   if (!bytes) return ''
@@ -469,7 +802,7 @@ function documentoLegivel(d) {
 function carregarMidiasDaConversa(c) {
   if (!c || !c.mensagens) return
   for (const m of c.mensagens) {
-    if (m.midia_id && MOSTRAM_SOZINHAS.includes(m.tipo)) carregarMidia(m)
+    if (m.midia_id && MOSTRAM_SOZINHAS.includes(tipoDaMidia(m))) carregarMidia(m)
   }
 }
 </script>
@@ -538,16 +871,37 @@ function carregarMidiasDaConversa(c) {
         </header>
 
         <div class="cartao__corpo">
-          <label class="campo">
-            <span class="so-leitor">Buscar</span>
-            <input
-              v-model="busca"
-              class="campo__entrada"
-              type="search"
-              placeholder="nome ou telefone"
-              @keyup.enter="carregar()"
-            />
-            <span class="campo__ajuda">Telefone em qualquer grafia encontra o mesmo número.</span>
+          <label class="campo campo--busca">
+            <span class="so-leitor">Buscar conversa</span>
+            <div class="busca">
+              <input
+                v-model="busca"
+                class="campo__entrada"
+                type="search"
+                placeholder="nome, telefone ou o que foi dito"
+                @keyup.enter="carregar()"
+              />
+              <button
+                class="botao botao--primario botao--icone"
+                type="button"
+                title="Buscar conversa"
+                aria-label="Buscar conversa"
+                @click="carregar()"
+              >
+                <i class="bi bi-search" aria-hidden="true"></i>
+              </button>
+            </div>
+            <span class="campo__ajuda">
+              Procura no nome do WhatsApp, no cadastro, no telefone
+              (<strong>pedaço serve</strong>: <code>6168</code>) e no texto das
+              mensagens, inclusive das notas internas.
+            </span>
+            <!-- ⚠️ Só depois de 3 s. Antes disso, o normal é responder em
+                 milissegundos e piscar seria pior que ficar quieto. -->
+            <span v-if="buscaDemorada" class="linha pequeno fraco">
+              <span class="girando"></span> Procurando… a base está grande, isso
+              pode levar alguns segundos.
+            </span>
           </label>
         </div>
 
@@ -562,7 +916,11 @@ function carregarMidiasDaConversa(c) {
         </div>
 
         <ul v-else class="conversas">
-          <li v-for="c in lista" :key="c.id">
+          <!-- 🚨 O "Assumir" é IRMÃO do botão da conversa, não filho: botão
+               dentro de botão é HTML inválido, e o navegador desfaz o
+               aninhamento sozinho -- o clique de dentro passa a abrir a
+               conversa em vez de assumir, sem erro nenhum aparecer. -->
+          <li v-for="c in lista" :key="c.id" class="conversas__item">
             <button
               class="conversa"
               :class="{ 'conversa--aberta': aberta && aberta.id === c.id }"
@@ -570,7 +928,12 @@ function carregarMidiasDaConversa(c) {
               @click="abrir(c.id)"
             >
               <div class="conversa__topo">
-                <strong class="conversa__quem">{{ quem(c) }}</strong>
+                <strong class="conversa__quem">
+                  <!-- Grupo e conversa direta na MESMA lista, como no
+                       WhatsApp. O ícone é o que distingue. -->
+                  <i v-if="c.tipo === 'grupo'" class="bi bi-people" aria-hidden="true"></i>
+                  {{ quem(c) }}
+                </strong>
                 <span class="apagado pequeno">{{ quando(c.ultima_atividade_em) }}</span>
               </div>
               <!-- ⚠️ Fui CHAMADO para esta, não sou o dono. Sem a marca, ela
@@ -579,7 +942,17 @@ function carregarMidiasDaConversa(c) {
                 <i class="bi bi-people" aria-hidden="true"></i>
                 acompanhando<span v-if="c.atendente_nome"> · {{ c.atendente_nome }} responde</span>
               </p>
-              <p class="conversa__previa apagado pequeno">
+              <!-- 🚨 CASOU PELO TEXTO: MOSTRAR O TEXTO. Sem isto a conversa
+                   entra na lista sem nada visível batendo com o que foi
+                   digitado, e quem buscou conclui que a busca está quebrada.
+                   O backend só manda `trecho` quando o nome NÃO explica o
+                   acerto -- se o nome já bate, a prévia normal continua. -->
+              <p v-if="c.trecho" class="conversa__previa conversa__previa--achado pequeno">
+                <i class="bi bi-search" aria-hidden="true"></i>
+                <span v-for="(p, i) in partir(c.trecho, busca)" :key="i"
+                      :class="{ 'achado': p.casa }">{{ p.texto }}</span>
+              </p>
+              <p v-else class="conversa__previa apagado pequeno">
                 <i v-if="ICONE[c.ultimo_tipo]" class="bi" :class="ICONE[c.ultimo_tipo]" aria-hidden="true"></i>
                 <span v-if="c.ultima_direcao === 'saida'" class="fraco">você: </span>
                 {{ c.ultima_mensagem || '(sem texto)' }}
@@ -589,9 +962,25 @@ function carregarMidiasDaConversa(c) {
                      do WhatsApp não quer dizer que se saiba de qual cliente é. -->
                 <span v-if="!c.contato_nome" class="chip chip--aviso">não identificado</span>
                 <span v-if="c.cliente_nome" class="chip">{{ c.cliente_nome }}</span>
+                <span v-if="c.estado === 'resolvida'" class="chip chip--ok">encerrada</span>
                 <span v-if="c.atendente_nome" class="chip chip--acento">{{ c.atendente_nome }}</span>
                 <span v-else class="chip">sem dono</span>
               </div>
+            </button>
+
+            <!-- Sem dono, ou encerrada: dá para pegar daqui, sem abrir antes.
+                 Encerrada, assumir REABRE -- por isso o rótulo muda. -->
+            <button
+              v-if="!c.atendente_id || c.estado === 'resolvida'"
+              class="botao botao--pequeno botao--primario conversas__assumir"
+              type="button"
+              :title="c.estado === 'resolvida'
+                ? 'Reabrir esta conversa e passar a responder por ela'
+                : 'Assumir esta conversa'"
+              @click="assumirDaLista(c)"
+            >
+              <i class="bi" :class="c.estado === 'resolvida' ? 'bi-arrow-counterclockwise' : 'bi-hand-index-thumb'" aria-hidden="true"></i>
+              {{ c.estado === 'resolvida' ? 'Reabrir' : 'Assumir' }}
             </button>
           </li>
         </ul>
@@ -608,8 +997,15 @@ function carregarMidiasDaConversa(c) {
         <template v-else>
           <header class="cartao__cabecalho">
             <div>
-              <strong>{{ aberta.nome_whatsapp || aberta.contato_nome || aberta.telefone_e164 }}</strong>
+              <strong>
+                <i v-if="ehGrupo" class="bi bi-people" aria-hidden="true"></i>
+                {{ quem(aberta) }}
+              </strong>
+              <!-- 🚨 GRUPO NÃO TEM FICHA. A gaveta mostra UM cliente, e num
+                   grupo há vários ou nenhum -- abri-la ali mostraria a ficha
+                   de quem, exatamente? -->
               <button
+                v-if="!ehGrupo"
                 class="botao botao--pequeno botao--fantasma"
                 type="button"
                 :aria-expanded="gaveta"
@@ -627,13 +1023,16 @@ function carregarMidiasDaConversa(c) {
                 · {{ aberta.estado }}
               </p>
             </div>
+            <!-- Encerrada TEM dono (quem fechou), então o `!atendente_id` de
+                 antes escondia o botão justo onde ele é mais necessário. -->
             <button
-              v-if="!aberta.atendente_id"
+              v-if="!aberta.atendente_id || aberta.estado === 'resolvida'"
               class="botao botao--pequeno botao--primario"
               type="button"
-              @click="assumir"
+              @click="pedirParaAssumir"
             >
-              Assumir
+              <i class="bi" :class="aberta.estado === 'resolvida' ? 'bi-arrow-counterclockwise' : 'bi-hand-index-thumb'" aria-hidden="true"></i>
+              {{ aberta.estado === 'resolvida' ? 'Reabrir e assumir' : 'Assumir' }}
             </button>
             <span v-else class="chip chip--acento">{{ aberta.atendente_nome }}</span>
           </header>
@@ -656,7 +1055,90 @@ function carregarMidiasDaConversa(c) {
             </span>
           </p>
 
-          <p v-if="!aberta.contato_id" class="aviso aviso--atencao">
+          <!-- ══ BARRA DE AÇÕES ══════════════════════════════════════════
+               Fica no TOPO, logo abaixo de quem responde pela conversa
+               (pedido do usuário em 12/08): é ali que se olha para saber de
+               quem é a conversa, e é ali que se decide o que fazer com ela.
+               Antes estava lá embaixo, depois de todos os balões.
+
+               🚨 ÍCONE SEM NOME É ADIVINHAÇÃO: os quatro carregam `title` e
+               `aria-label`. "Devolver à fila" e "Sair da conversa" fazem
+               coisas diferentes e têm setas parecidas. *Encerrar* mantém o
+               texto — é o fim do atendimento, e é o único que não deve
+               depender de reconhecer desenho. -->
+          <div v-if="aberta.estado !== 'resolvida'" class="acoes cartao__corpo">
+            <!-- DE FORA: só dá para ler. A rota recusa com 409 de qualquer
+                 jeito; aqui a tela para de oferecer o que seria negado. -->
+            <div v-if="!posso" class="linha linha--quebra">
+              <span class="chip chip--aviso">
+                <i class="bi bi-eye" aria-hidden="true"></i> só leitura
+              </span>
+              <span class="apagado pequeno">
+                Você não está nesta conversa.
+              </span>
+              <span class="espaco"></span>
+              <button
+                v-if="aberta.atendente_id"
+                class="botao botao--pequeno botao--primario"
+                type="button"
+                :disabled="mexendo"
+                @click="entrarNaConversa"
+              >
+                <i class="bi bi-box-arrow-in-right" aria-hidden="true"></i> Entrar
+              </button>
+            </div>
+
+            <div v-else class="linha linha--quebra">
+              <button
+                class="botao botao--pequeno botao--contorno botao--icone"
+                type="button"
+                title="Transferir para outro time"
+                aria-label="Transferir para outro time"
+                @click="abrirPainel('transferir')"
+              >
+                <i class="bi bi-arrow-left-right" aria-hidden="true"></i>
+              </button>
+              <button
+                class="botao botao--pequeno botao--contorno botao--icone"
+                type="button"
+                title="Convidar atendentes para esta conversa"
+                aria-label="Convidar atendentes para esta conversa"
+                @click="abrirPainel('convidar')"
+              >
+                <i class="bi bi-person-plus" aria-hidden="true"></i>
+              </button>
+              <button
+                v-if="aberta.atendente_id"
+                class="botao botao--pequeno botao--contorno botao--icone"
+                type="button"
+                title="Devolver à fila — a conversa fica sem dono"
+                aria-label="Devolver à fila"
+                @click="pedirParaDevolver"
+              >
+                <i class="bi bi-arrow-return-left" aria-hidden="true"></i>
+              </button>
+              <button
+                class="botao botao--pequeno botao--contorno botao--icone"
+                type="button"
+                :disabled="mexendo"
+                title="Sair da conversa — ela some da sua lista"
+                aria-label="Sair da conversa"
+                @click="pedirParaSair"
+              >
+                <i class="bi bi-box-arrow-left" aria-hidden="true"></i>
+              </button>
+              <span class="espaco"></span>
+              <button
+                class="botao botao--pequeno botao--contorno"
+                type="button"
+                @click="abrirPainel('encerrar')"
+              >
+                <i class="bi bi-check2-square" aria-hidden="true"></i> Encerrar
+              </button>
+            </div>
+          </div>
+
+          <p v-if="!aberta.contato_id && !ehGrupo" class="aviso aviso--atencao">
             <i class="bi bi-person-exclamation aviso__icone" aria-hidden="true"></i>
             <span v-if="aberta.candidatos.length">
               <strong>Número compartilhado:</strong> responde por
@@ -672,7 +1154,7 @@ function carregarMidiasDaConversa(c) {
           </p>
 
           <!-- ================= GAVETA DO CONTATO ================= -->
-          <aside v-if="gaveta" class="gaveta">
+          <aside v-if="gaveta && !ehGrupo" class="gaveta">
             <p class="gaveta__topo">
               <strong>{{ aberta.nome_whatsapp || 'Sem nome no WhatsApp' }}</strong>
               <span class="apagado pequeno mono">{{ aberta.telefone_e164 }}</span>
@@ -817,12 +1299,69 @@ function carregarMidiasDaConversa(c) {
             </template>
           </aside>
 
+          <!-- BUSCAR NA CONVERSA — outra pergunta que a busca da lista:
+               lá é "com quem eu falei", aqui é "onde ele disse isso". -->
+          <div class="buscaconversa">
+            <div class="busca">
+              <input
+                v-model="buscaNaConversa"
+                class="campo__entrada"
+                type="search"
+                placeholder="Buscar na conversa"
+                aria-label="Buscar na conversa"
+                @keyup.enter="irParaAchado(1)"
+              />
+              <template v-if="buscaNaConversa.trim()">
+                <span class="pequeno fraco buscaconversa__conta">
+                  {{ achadosNaConversa.length
+                     ? `${achadoAtual + 1}/${achadosNaConversa.length}`
+                     : '0' }}
+                </span>
+                <button
+                  class="botao botao--pequeno botao--contorno botao--icone"
+                  type="button"
+                  :disabled="!achadosNaConversa.length"
+                  title="Ocorrência anterior"
+                  aria-label="Ocorrência anterior"
+                  @click="irParaAchado(-1)"
+                >
+                  <i class="bi bi-chevron-up" aria-hidden="true"></i>
+                </button>
+                <button
+                  class="botao botao--pequeno botao--contorno botao--icone"
+                  type="button"
+                  :disabled="!achadosNaConversa.length"
+                  title="Próxima ocorrência"
+                  aria-label="Próxima ocorrência"
+                  @click="irParaAchado(1)"
+                >
+                  <i class="bi bi-chevron-down" aria-hidden="true"></i>
+                </button>
+              </template>
+            </div>
+            <!-- 🚨 "Não encontrado" numa conversa truncada seria MENTIRA: a
+                 busca só vê o que foi carregado. Nenhuma conversa passou do
+                 teto ainda, mas o aviso nasce junto com a busca. -->
+            <p v-if="aberta.truncada" class="chip chip--aviso pequeno">
+              Mostrando as {{ aberta.teto_mensagens }} mensagens mais recentes —
+              a busca não alcança o que está antes disso.
+            </p>
+            <p v-else-if="buscaNaConversa.trim() && !achadosNaConversa.length"
+               class="apagado pequeno">
+              Nada com esse termo nesta conversa.
+            </p>
+          </div>
+
           <div ref="baloes" class="baloes">
             <div
               v-for="m in aberta.mensagens"
               :key="m.id"
               class="balao"
-              :class="`balao--${m.direcao}`"
+              :class="[`balao--${m.direcao}`, {
+                'balao--casa': casaNaConversa(m),
+                'balao--atual': m.id === idAchado,
+              }]"
+              :data-mensagem="m.id"
             >
               <!-- A mensagem que esta está respondendo. Sem isto, uma foto
                    seguida de "esse aqui" fica ininteligível. -->
@@ -833,27 +1372,28 @@ function carregarMidiasDaConversa(c) {
               </p>
 
               <img
-                v-if="m.midia_id && ['imagem', 'figurinha'].includes(m.tipo) && midias[m.midia_id]"
+                v-if="m.midia_id && ['imagem', 'figurinha'].includes(tipoDaMidia(m)) && midias[m.midia_id]"
                 :src="midias[m.midia_id]"
                 class="balao__imagem"
-                :alt="m.conteudo || 'imagem enviada pelo cliente'"
+                :alt="m.conteudo || 'imagem da conversa'"
               />
               <audio
-                v-else-if="m.midia_id && m.tipo === 'audio' && midias[m.midia_id]"
+                v-else-if="m.midia_id && tipoDaMidia(m) === 'audio' && midias[m.midia_id]"
                 :src="midias[m.midia_id]"
                 controls
                 class="balao__audio"
               ></audio>
               <video
-                v-else-if="m.midia_id && m.tipo === 'video' && midias[m.midia_id]"
+                v-else-if="m.midia_id && tipoDaMidia(m) === 'video' && midias[m.midia_id]"
                 :src="midias[m.midia_id]"
                 controls
                 class="balao__imagem"
               ></video>
 
-              <p v-if="m.tipo !== 'texto'" class="balao__tipo pequeno">
-                <i class="bi" :class="ICONE[m.tipo] || 'bi-paperclip'" aria-hidden="true"></i>
-                {{ m.midia_nome || m.tipo }}
+              <p v-if="m.tipo !== 'texto' && (m.midia_id || m.tipo !== 'nota')"
+                 class="balao__tipo pequeno">
+                <i class="bi" :class="ICONE[tipoDaMidia(m)] || 'bi-paperclip'" aria-hidden="true"></i>
+                {{ m.midia_nome || tipoDaMidia(m) }}
                 <span v-if="m.midia_tamanho" class="fraco">· {{ tamanhoLegivel(m.midia_tamanho) }}</span>
                 <button
                   v-if="m.midia_id"
@@ -865,217 +1405,297 @@ function carregarMidiasDaConversa(c) {
                 </button>
                 <span v-else class="fraco">— sem arquivo guardado</span>
               </p>
-              <p v-if="m.conteudo" class="balao__texto">{{ m.conteudo }}</p>
+              <!-- 🚨 NOTA SEM AUTOR NÃO SERVE PARA CONSULTAR DEPOIS. O nome já
+                   vinha da API (`mensagens()` faz o JOIN em atendente desde
+                   sempre) e a tela simplesmente não o imprimia: meses depois,
+                   "cliente pediu desconto" não dizia quem tinha escrito. -->
+              <!-- 🚨 EM GRUPO, QUEM FALOU NÃO É A CONVERSA. Sem esta linha o
+                   histórico de um grupo de quinze vira monólogo de autor
+                   desconhecido. Só na ENTRADA: o que sai é nosso. -->
+              <p v-if="ehGrupo && m.direcao === 'entrada' && m.remetente_nome"
+                 class="balao__autor pequeno">
+                <i class="bi bi-person" aria-hidden="true"></i>
+                {{ m.remetente_nome }}
+              </p>
+              <p v-if="m.tipo === 'nota'" class="balao__autor pequeno">
+                <i class="bi bi-sticky" aria-hidden="true"></i>
+                Nota de <strong>{{ m.atendente_nome || 'autor não registrado' }}</strong>
+              </p>
+              <!-- Pedaços, não `v-html`: o texto é do cliente. -->
+              <p v-if="m.conteudo" class="balao__texto">
+                <span v-for="(p, i) in marcar(m.conteudo, buscaNaConversa)" :key="i"
+                      :class="{ 'achado': p.casa }">{{ p.texto }}</span>
+              </p>
               <p v-else class="balao__texto fraco">(sem texto)</p>
               <p class="balao__rodape apagado pequeno">
                 {{ hora(m.criada_em) }}
+                <!-- Só na saída: quem respondeu pelo painel. O eco do WhatsApp
+                     chega sem atendente, e aí não há nome a mostrar. -->
+                <span v-if="m.direcao === 'saida' && m.atendente_nome">
+                  · {{ m.atendente_nome }}
+                </span>
                 <span v-if="m.entrega"> · {{ m.entrega }}</span>
               </p>
             </div>
           </div>
 
-          <div v-if="aberta.estado !== 'resolvida'" class="acoes cartao__corpo">
-            <div class="linha linha--quebra">
-              <button
-                class="botao botao--pequeno botao--contorno"
-                type="button"
-                @click="painelAcao = painelAcao === 'transferir' ? '' : 'transferir'"
-              >
-                <i class="bi bi-arrow-left-right" aria-hidden="true"></i> Transferir
-              </button>
-              <button
-                v-if="aberta.atendente_id"
-                class="botao botao--pequeno botao--fantasma"
-                type="button"
-                @click="devolver"
-              >
-                Devolver à fila
-              </button>
-              <button
-                class="botao botao--pequeno botao--contorno"
-                type="button"
-                @click="painelAcao = painelAcao === 'convidar' ? '' : 'convidar'"
-              >
-                <i class="bi bi-person-plus" aria-hidden="true"></i> Convidar
-              </button>
-              <button
-                v-if="souDono || souParticipante"
-                class="botao botao--pequeno botao--fantasma"
-                type="button"
-                :disabled="mexendo"
-                @click="sairDaConversa"
-              >
-                Sair da conversa
-              </button>
-              <button
-                class="botao botao--pequeno botao--contorno"
-                type="button"
-                @click="painelAcao = painelAcao === 'encerrar' ? '' : 'encerrar'"
-              >
-                <i class="bi bi-check2-square" aria-hidden="true"></i> Encerrar
-              </button>
-            </div>
-
-            <div v-if="painelAcao === 'convidar'" class="pilha acoes__painel">
-              <label class="campo">
-                <span class="campo__rotulo">Chamar para esta conversa</span>
-                <select v-model="convidado" class="campo__entrada">
-                  <option value="">escolha quem…</option>
-                  <option v-for="a in convidaveis" :key="a.id" :value="a.id">
-                    {{ a.nome }}
-                  </option>
-                </select>
-                <span class="campo__ajuda">
-                  Quem for chamado passa a ver esta conversa na lista dele e
-                  responde normalmente. <strong>Quem responde pela conversa
-                  continua sendo {{ aberta.atendente_nome || 'ninguém — está na fila' }}.</strong>
-                </span>
-              </label>
-              <div class="linha linha--quebra">
-                <button
-                  class="botao botao--primario"
-                  type="button"
-                  :disabled="!convidado || mexendo"
-                  @click="convidar"
-                >
-                  Convidar
-                </button>
-                <span v-if="!convidaveis.length" class="apagado pequeno">
-                  Todo mundo já está nesta conversa.
-                </span>
-              </div>
-            </div>
-
-            <div v-if="painelAcao === 'transferir'" class="pilha acoes__painel">
-              <p class="campo__ajuda">
-                🚨 Enquanto a IA está desligada, <strong>isto é a triagem</strong>:
-                você lê e decide o destino. Transferir para time tira o dono — a
-                conversa volta a ser responsabilidade coletiva.
-              </p>
-              <label class="campo">
-                <span class="campo__rotulo">Time</span>
-                <select v-model="timeEscolhido" class="campo__entrada">
-                  <option value="">escolha…</option>
-                  <option v-for="t in times" :key="t.id" :value="t.id">
-                    {{ t.nome }}{{ t.qtd_membros ? '' : ' — sem ninguém dentro!' }}
-                  </option>
-                </select>
-                <span class="campo__ajuda">
-                  Time sem membro aceita a transferência, mas ninguém recebe.
-                </span>
-              </label>
-              <label class="campo">
-                <span class="campo__rotulo">Resumo para quem vai receber</span>
-                <input v-model="motivo" class="campo__entrada" maxlength="2000" />
-                <span class="campo__ajuda">
-                  O que já foi conversado. Quem assume não deve precisar ler
-                  tudo de novo.
-                </span>
-              </label>
-              <button class="botao botao--primario" type="button" :disabled="!timeEscolhido" @click="transferir">
-                Transferir
-              </button>
-            </div>
-
-            <div v-if="painelAcao === 'encerrar'" class="pilha acoes__painel">
-              <label class="campo">
-                <span class="campo__rotulo">Classificação</span>
-                <select v-model="classificacaoEscolhida" class="campo__entrada">
-                  <option value="">escolha…</option>
-                  <option v-for="c in classificacoes" :key="c.id" :value="c.id">{{ c.nome }}</option>
-                </select>
-                <span class="campo__ajuda">
-                  Obrigatória: é ela que responde depois "no que gastamos
-                  atendimento".
-                </span>
-              </label>
-              <label v-if="exigeComentario" class="campo">
-                <span class="campo__rotulo">Comentário — obrigatório nesta</span>
-                <textarea v-model="comentario" class="campo__entrada" rows="2" maxlength="2000"></textarea>
-                <span class="campo__ajuda">
-                  Sem isto, "Outro" vira o vale-tudo onde metade das conversas
-                  acaba e o analytics morre.
-                </span>
-              </label>
-              <button
-                class="botao botao--primario"
-                type="button"
-                :disabled="exigeComentario && !comentario.trim()"
-                @click="encerrar"
-              >
-                Encerrar conversa
-              </button>
-            </div>
+          <div v-if="aberta.estado === 'resolvida'" class="cartao__corpo pilha">
+            <p class="aviso aviso--ok">
+              <i class="bi bi-check-circle aviso__icone" aria-hidden="true"></i>
+              <span>
+                Conversa encerrada. Ela está no Histórico (ATD_5.1).
+                <strong>Para voltar a responder, reabra.</strong>
+              </span>
+            </p>
+            <!-- 🚨 SEM ISTO, ENCERRAR ERA PORTA SÓ DE IDA. O `responder` recusa
+                 conversa resolvida, e a tela escondia a barra inteira: só o
+                 cliente escrevendo de novo trazia a conversa de volta. -->
+            <button class="botao botao--primario" type="button" @click="pedirParaAssumir">
+              <i class="bi bi-arrow-counterclockwise" aria-hidden="true"></i>
+              Reabrir e assumir
+            </button>
           </div>
 
-          <p v-else class="aviso aviso--ok">
-            <i class="bi bi-check-circle aviso__icone" aria-hidden="true"></i>
-            <span>Conversa encerrada. Ela está no Histórico (ATD_5.1).</span>
+          <!-- DE FORA: nem o campo aparece. Poder escrever sem estar na
+               conversa é o mesmo furo da barra de ações. -->
+          <p v-else-if="!posso" class="cartao__corpo apagado pequeno">
+            <i class="bi bi-lock" aria-hidden="true"></i>
+            Entre na conversa para responder ou anotar.
           </p>
 
-          <div v-if="aberta.estado !== 'resolvida'" class="cartao__corpo pilha">
-            <div class="linha linha--quebra">
-              <button
-                class="botao botao--pequeno"
-                :class="modoNota ? 'botao--fantasma' : 'botao--primario'"
-                type="button"
-                @click="modoNota = false"
-              >
-                Responder o cliente
-              </button>
-              <button
-                class="botao botao--pequeno"
-                :class="modoNota ? 'botao--primario' : 'botao--fantasma'"
-                type="button"
-                @click="modoNota = true"
-              >
-                <i class="bi bi-sticky" aria-hidden="true"></i> Nota interna
-              </button>
-            </div>
-
+          <div v-else class="cartao__corpo pilha">
+            <!-- 🚨 NÃO EXISTE MAIS SELETOR DE MODO. Havia um par
+                 "Para o cliente | Nota interna" que só trocava um estado
+                 invisível: clicar no lado que já estava ativo não fazia nada,
+                 e o usuário perguntou duas vezes para que servia. Estado que
+                 não se vê é o que confunde. Agora o destino é o BOTÃO: um
+                 campo, duas ações, e o que se clica é o que acontece. -->
             <label class="campo">
-              <span class="so-leitor">{{ modoNota ? 'Nota interna' : 'Resposta' }}</span>
+              <span class="so-leitor">Mensagem</span>
               <textarea
                 v-model="resposta"
                 class="campo__entrada"
-                :class="{ 'campo--nota': modoNota }"
                 rows="3"
                 maxlength="4000"
-                :placeholder="modoNota
-                  ? 'Fica na conversa e NUNCA vai para o cliente'
-                  : 'Escreva e aperte Ctrl+Enter para enviar'"
+                placeholder="Escreva e escolha abaixo: enviar ao cliente ou guardar como nota"
                 @keydown.ctrl.enter.prevent="enviar"
               ></textarea>
-              <span class="campo__ajuda">
-                <template v-if="modoNota">
-                  🚨 Nota interna não sai para o cliente — o banco amarra os dois
-                  campos para ela não vazar como mensagem.
-                </template>
-                <template v-else>
-                  Vai pelo WhatsApp, para <strong>{{ aberta.telefone_e164 }}</strong>.
-                  Não dá para escolher outro destinatário: o número sai da
-                  conversa.
-                </template>
-              </span>
             </label>
 
+            <!-- ANEXO nos DOIS modos (decisão do usuário, 12/08). No modo
+                 nota o arquivo é guardado na conversa e NÃO sai para o
+                 cliente -- é o print do erro, o PDF que chegou por outro
+                 canal, o comprovante que se quer deixar registrado. -->
+            <div v-if="arquivo" class="anexo">
+              <i class="bi bi-paperclip" aria-hidden="true"></i>
+              <span class="anexo__nome">{{ arquivo.name }}</span>
+              <span class="apagado pequeno">{{ tamanhoDoArquivo(arquivo) }}</span>
+              <button
+                class="botao botao--pequeno botao--fantasma"
+                type="button"
+                title="Tirar o anexo"
+                @click="limparArquivo"
+              >×</button>
+            </div>
+
             <div class="linha linha--quebra">
+              <label class="botao botao--contorno botao--icone" title="Anexar arquivo">
+                <i class="bi bi-paperclip" aria-hidden="true"></i>
+                <span class="so-leitor">Anexar arquivo</span>
+                <input
+                  id="campo-arquivo"
+                  class="so-leitor"
+                  type="file"
+                  @change="escolherArquivo"
+                />
+              </label>
+
+              <!-- O DESTINO É O BOTÃO. Verde é WhatsApp em toda a casa;
+                   amarelo é nota. A cor diz para onde vai antes do clique. -->
               <button
                 class="botao botao--primario"
                 type="button"
-                :disabled="enviando || !resposta.trim()"
-                @click="enviar"
+                :disabled="ocupado || !temAlgoParaEnviar"
+                @click="arquivo ? enviarArquivo(false) : enviar(false)"
               >
-                <span v-if="enviando" class="girando"></span>
-                {{ enviando ? 'Enviando…' : (modoNota ? 'Salvar nota' : 'Enviar') }}
+                <span v-if="ocupado" class="girando"></span>
+                <i v-else class="bi bi-whatsapp" aria-hidden="true"></i>
+                {{ arquivo ? 'Enviar arquivo ao cliente' : 'Enviar ao cliente' }}
               </button>
+
+              <button
+                class="botao botao--nota"
+                type="button"
+                :disabled="ocupado || !temAlgoParaEnviar"
+                @click="arquivo ? enviarArquivo(true) : enviar(true)"
+              >
+                <i class="bi bi-sticky" aria-hidden="true"></i>
+                {{ arquivo ? 'Guardar como nota' : 'Salvar nota' }}
+              </button>
+
               <span class="apagado pequeno">
-                ⚠️ Envio de arquivo entra na Fase 2. Recebimento já funciona.
+                <template v-if="arquivo">
+                  O texto acima vai junto com o arquivo.
+                </template>
+                <template v-else>
+                  Ctrl+Enter envia ao cliente. Arquivo até {{ TETO_ARQUIVO_MB }} MB.
+                </template>
               </span>
             </div>
           </div>
         </template>
       </section>
+    </div>
+
+    <!-- ================================================================ MODAIS
+         Ficam fora das colunas de propósito: `position: fixed` dentro de um
+         container que rola acompanha a rolagem e a caixa some da vista. -->
+
+    <!-- CONVIDAR — vários de uma vez, por caixa de seleção -->
+    <div v-if="painelAcao === 'convidar' && aberta" class="modal" @click.self="fecharPainel">
+      <div class="modal__caixa" role="dialog" aria-modal="true" aria-label="Convidar atendentes">
+        <p class="modal__titulo">Convidar para esta conversa</p>
+        <p class="modal__texto pequeno">
+          Marque quantos precisar. Quem for chamado passa a ver esta conversa na
+          lista dele e responde normalmente.
+          <strong>Quem responde pela conversa continua sendo
+          {{ aberta.atendente_nome || 'ninguém — está na fila' }}.</strong>
+        </p>
+
+        <div v-if="convidaveis.length" class="modal__opcoes">
+          <label v-for="a in convidaveis" :key="a.id" class="modal__opcao">
+            <input v-model="convidados" type="checkbox" :value="a.id" />
+            <span>{{ a.nome }}</span>
+          </label>
+        </div>
+        <p v-else class="apagado pequeno">Todo mundo já está nesta conversa.</p>
+
+        <div class="modal__acoes">
+          <button class="botao botao--contorno" type="button" @click="fecharPainel">
+            Cancelar
+          </button>
+          <button
+            class="botao botao--primario"
+            type="button"
+            :disabled="!convidados.length || mexendo"
+            @click="convidar"
+          >
+            <span v-if="mexendo" class="girando"></span>
+            {{ convidados.length > 1 ? `Convidar ${convidados.length}` : 'Convidar' }}
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- TRANSFERIR -->
+    <div v-if="painelAcao === 'transferir' && aberta" class="modal" @click.self="fecharPainel">
+      <div class="modal__caixa" role="dialog" aria-modal="true" aria-label="Transferir conversa">
+        <p class="modal__titulo">Transferir para outro time</p>
+        <p class="modal__texto pequeno">
+          🚨 Enquanto a IA está desligada, <strong>isto é a triagem</strong>:
+          você lê e decide o destino. Transferir para time tira o dono — a
+          conversa volta a ser responsabilidade coletiva.
+        </p>
+        <label class="campo">
+          <span class="campo__rotulo">Time</span>
+          <select v-model="timeEscolhido" class="campo__entrada">
+            <option value="">escolha…</option>
+            <option v-for="t in times" :key="t.id" :value="t.id">
+              {{ t.nome }}{{ t.qtd_membros ? '' : ' — sem ninguém dentro!' }}
+            </option>
+          </select>
+          <span class="campo__ajuda">
+            Time sem membro aceita a transferência, mas ninguém recebe.
+          </span>
+        </label>
+        <label class="campo">
+          <span class="campo__rotulo">Resumo para quem vai receber</span>
+          <input v-model="motivo" class="campo__entrada" maxlength="2000" />
+          <span class="campo__ajuda">
+            O que já foi conversado. Quem assume não deve precisar ler tudo de novo.
+          </span>
+        </label>
+        <div class="modal__acoes">
+          <button class="botao botao--contorno" type="button" @click="fecharPainel">
+            Cancelar
+          </button>
+          <button class="botao botao--primario" type="button" :disabled="!timeEscolhido" @click="transferir">
+            Transferir
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ENCERRAR — caixa de confirmação. A classificação vem NO FIM e é
+         opcional desde 11/08: ninguém pediu a lista, e o analytics que a
+         justificava é Fase 3. -->
+    <div v-if="painelAcao === 'encerrar' && aberta" class="modal" @click.self="fecharPainel">
+      <div class="modal__caixa" role="dialog" aria-modal="true" aria-label="Encerrar conversa">
+        <p class="modal__titulo">Encerrar esta conversa?</p>
+        <p class="modal__texto">
+          Ela sai da caixa de entrada e passa para o Histórico. O cliente
+          <strong>não</strong> é avisado. Se ele escrever de novo, uma conversa
+          nova é aberta — e você pode reabrir esta a qualquer momento.
+        </p>
+
+        <details class="encerrar__extra">
+          <summary class="pequeno">Classificar (opcional)</summary>
+          <label class="campo">
+            <span class="campo__rotulo">Classificação</span>
+            <select v-model="classificacaoEscolhida" class="campo__entrada">
+              <option value="">não classificar</option>
+              <option v-for="c in classificacoes" :key="c.id" :value="c.id">{{ c.nome }}</option>
+            </select>
+            <span class="campo__ajuda">
+              Deixou de ser obrigatória em 11/08. Encerrar sem classificar é o
+              caminho normal.
+            </span>
+          </label>
+          <label v-if="exigeComentario" class="campo">
+            <span class="campo__rotulo">Comentário — obrigatório nesta</span>
+            <textarea v-model="comentario" class="campo__entrada" rows="2" maxlength="2000"></textarea>
+            <span class="campo__ajuda">
+              Sem isto, "Outro" vira o vale-tudo onde metade das conversas acaba.
+            </span>
+          </label>
+        </details>
+
+        <div class="modal__acoes">
+          <button class="botao botao--contorno" type="button" @click="fecharPainel">
+            Cancelar
+          </button>
+          <button
+            class="botao botao--primario"
+            type="button"
+            :disabled="exigeComentario && !comentario.trim()"
+            @click="encerrar"
+          >
+            Encerrar conversa
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- CONFIRMAÇÃO genérica — devolver, sair, reabrir -->
+    <div v-if="confirmacao" class="modal" @click.self="confirmacao = null">
+      <div class="modal__caixa" role="dialog" aria-modal="true" :aria-label="confirmacao.titulo">
+        <p class="modal__titulo">{{ confirmacao.titulo }}</p>
+        <p class="modal__texto">{{ confirmacao.texto }}</p>
+        <div class="modal__acoes">
+          <button class="botao botao--contorno" type="button" @click="confirmacao = null">
+            Cancelar
+          </button>
+          <button
+            class="botao"
+            :class="confirmacao.perigo ? 'botao--perigo' : 'botao--primario'"
+            type="button"
+            :disabled="mexendo"
+            @click="confirmar"
+          >
+            {{ confirmacao.rotulo }}
+          </button>
+        </div>
+      </div>
     </div>
   </div>
 </template>
@@ -1204,13 +1824,26 @@ function carregarMidiasDaConversa(c) {
 
 .conversas { list-style: none; margin: 0; padding: 0; max-height: 60vh; overflow-y: auto; }
 
+/* O "Assumir" fica ao lado do botão da conversa, não dentro dele — o item é
+   quem vira a linha, e a borda de topo passou para cá porque agora são dois
+   elementos irmãos dividindo a mesma linha. */
+.conversas__item {
+  display: flex;
+  align-items: center;
+  gap: var(--e-2);
+  padding-right: var(--e-3);
+  border-top: 1px solid var(--borda, rgba(128, 128, 128, .25));
+}
+.conversas__item:hover { background: rgba(128, 128, 128, .08); }
+.conversas__assumir { flex: none; }
+
 .conversa {
   display: block;
-  width: 100%;
+  flex: 1 1 auto;
+  min-width: 0;
   text-align: left;
   background: none;
   border: 0;
-  border-top: 1px solid var(--borda, rgba(128, 128, 128, .25));
   padding: var(--e-3);
   cursor: pointer;
 }
@@ -1260,11 +1893,78 @@ function carregarMidiasDaConversa(c) {
 .balao__tipo { margin: 0 0 var(--e-1); }
 .balao__rodape { margin: var(--e-1) 0 0; }
 
+/* Quem escreveu a nota. Fora do itálico do balão interno: é etiqueta, não
+   parte do texto que a pessoa digitou. */
+.balao__autor {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0 0 var(--e-1);
+  font-style: normal;
+  color: var(--texto-fraco);
+}
+
 .linha--quebra { flex-wrap: wrap; gap: var(--e-2); }
+
+/* ---- busca --------------------------------------------------------------- */
+.busca { display: flex; align-items: center; gap: var(--e-2); }
+.busca .campo__entrada { flex: 1 1 auto; min-width: 0; }
+.campo--busca { margin-bottom: var(--e-2); }
+
+.buscaconversa {
+  display: flex;
+  flex-direction: column;
+  gap: var(--e-1);
+  padding: var(--e-2) var(--e-4);
+  border-bottom: 1px solid var(--borda, rgba(128, 128, 128, .25));
+}
+.buscaconversa__conta { flex: none; min-width: 3.2em; text-align: right; }
+
+/* O anexo escolhido, antes de ir. Sem esta faixa, o único sinal de que há
+   arquivo seria o botão mudar de rótulo. */
+.anexo {
+  display: flex;
+  align-items: center;
+  gap: var(--e-2);
+  padding: var(--e-2) var(--e-3);
+  border: 1px dashed var(--borda-forte, var(--borda));
+  border-radius: var(--r-sm);
+  background: var(--superficie-2);
+}
+.anexo__nome { overflow-wrap: anywhere; font-weight: var(--peso-medio); }
+
+/* O botão de nota é amarelo porque a nota é amarela em toda a tela. A cor diz
+   para onde vai a mensagem ANTES do clique — que é justamente o que o seletor
+   de modo, sendo estado invisível, não conseguia dizer. */
+.botao--nota {
+  background: rgba(255, 193, 7, .85);
+  color: #241c00;
+  border-color: rgba(255, 193, 7, .85);
+}
+.botao--nota:hover:not(:disabled) { background: rgba(255, 193, 7, 1); }
+
+/* O termo achado. Amarelo é a convenção de "achado" em toda parte, e é o
+   mesmo amarelo que a nota interna já usa nesta tela. */
+.achado {
+  background: rgba(255, 193, 7, .45);
+  border-radius: 3px;
+  font-weight: var(--peso-forte);
+}
+.conversa__previa--achado { color: var(--texto-fraco); }
+
+/* A mensagem em que a busca está parada AGORA, distinta das outras que também
+   casaram: sem isso, num balão longo, não se sabe qual das 17 é a "3". */
+.balao--casa { outline: 1px solid rgba(255, 193, 7, .5); }
+.balao--atual { outline: 2px solid var(--acento); }
 
 .acoes { border-top: 1px solid var(--borda, rgba(128, 128, 128, .25)); }
 
 textarea.campo__entrada { resize: vertical; }
 .campo--nota { background: rgba(255, 193, 7, .10); }
-.acoes__painel { margin-top: var(--e-3); }
+
+/* Classificar ficou no fim e fechado: é opcional desde 11/08, e caixa aberta
+   por padrão lê como campo que falta preencher. */
+.encerrar__extra { margin-top: var(--e-2); }
+.encerrar__extra summary { cursor: pointer; color: var(--texto-fraco); }
+.encerrar__extra > .campo { margin-top: var(--e-3); }
 </style>

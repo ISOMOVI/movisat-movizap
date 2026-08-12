@@ -59,7 +59,17 @@ export function sair() {
 /** Busca quem sou e o que enxergo. Fonte única do menu. */
 export async function carregarEu() {
   const eu = await api.get('/api/sessao/eu')
-  sessao.usuario = { login: eu.login, nome: eu.nome, owner: eu.owner }
+  /* 🚨 ENTRAR NO PAINEL E PODER ATENDER SÃO COISAS DIFERENTES. `vinculo_atendimento`
+     é false quando a conta não tem linha em `atendente` com e-mail — e sem
+     vínculo tudo que a pessoa escrever é gravado com autor NULL. Até 12/08
+     isso acontecia calado; agora a INI_1.1 diz o que houve. */
+  sessao.usuario = {
+    login: eu.login,
+    nome: eu.nome,
+    owner: eu.owner,
+    email: eu.email || null,
+    vinculoAtendimento: eu.vinculo_atendimento !== false,
+  }
   sessao.telas = eu.telas || []
   return eu
 }

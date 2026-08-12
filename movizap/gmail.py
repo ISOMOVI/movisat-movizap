@@ -16,6 +16,7 @@ lida, não move, não apaga e não envia -- nem por engano, porque o token não
 permite.
 """
 import base64
+import json
 import logging
 import pathlib
 import time
@@ -312,6 +313,66 @@ def marcar_lida(mensagem_id: int) -> dict:
             WHERE mk.id = mm.marcador_id AND mm.mensagem_id = %s
               AND mk.id_externo = 'UNREAD'""", (mensagem_id,))
     return {"ok": True, "ja_estava": False}
+
+
+def anexo(mensagem_id: int, indice: int) -> dict:
+    """Baixa UM anexo do Gmail na hora do clique. Não guarda nada.
+
+    🚨 OS BYTES FICAM NO GOOGLE, E ISSO É DECISÃO DE PROJETO (ver o cabeçalho
+    deste módulo e a migração 015): guardar tudo custaria ~360 MB/ano para
+    duplicar o que o Google já guarda. O que faltava não era guardar -- era
+    poder ABRIR. Até 12/08 a tela dizia "tem anexo" e não deixava baixar:
+    48 dos 226 e-mails, e quem precisava do boleto ia no Gmail.
+
+    ⚠️ `gmail.readonly` BASTA. Não é preciso escopo novo -- conferido antes de
+    escrever: `messages.attachments.get` é leitura.
+
+    ⚠️ O ÍNDICE VEM DA LISTA GUARDADA, não do que o cliente mandar por conta
+    própria: quem pede escolhe uma POSIÇÃO na lista que nós gravamos, e é
+    `attachmentId` de lá que vai ao Google. Assim não existe caminho para
+    pedir anexo de outra mensagem passando um id qualquer.
+    """
+    linha = banco.um(
+        """SELECT m.id, m.id_externo, m.anexos, c.id AS conta_id, c.endereco,
+                  c.refresh_token
+             FROM email_mensagem m JOIN email_conta c ON c.id = m.conta_id
+            WHERE m.id = %s""", (mensagem_id,))
+    if not linha:
+        return {"ok": False, "motivo": "Mensagem não encontrada."}
+
+    lista = linha["anexos"] or []
+    if isinstance(lista, str):
+        lista = json.loads(lista)
+    if indice < 0 or indice >= len(lista):
+        return {"ok": False, "motivo": "Anexo não encontrado."}
+
+    item = lista[indice]
+    if not item.get("id_externo"):
+        # Anexo pequeno vem embutido no corpo da parte e o Gmail não dá
+        # `attachmentId`. Não temos os bytes e não há o que buscar.
+        return {"ok": False,
+                "motivo": "Este anexo não tem id no Gmail — abra pelo Gmail."}
+
+    token = _token_de_acesso(linha)
+    with httpx.Client(headers={"Authorization": f"Bearer {token}"}) as cliente:
+        corpo = _pedir(
+            cliente,
+            f"/messages/{linha['id_externo']}/attachments/{item['id_externo']}")
+
+    dados = corpo.get("data") or ""
+    try:
+        # 🚨 O Gmail devolve base64 URL-SAFE e SEM o padding. Decodificar com
+        # o alfabeto padrão devolve bytes corrompidos sem erro nenhum -- o
+        # arquivo chega ao atendente parecendo defeito do remetente.
+        bruto = base64.urlsafe_b64decode(dados + "=" * (-len(dados) % 4))
+    except Exception:
+        return {"ok": False, "motivo": "O Gmail devolveu um anexo ilegível."}
+
+    log.info("anexo %s da mensagem %s baixado (%s bytes)",
+             indice, mensagem_id, len(bruto))
+    return {"ok": True, "dados": bruto,
+            "nome": item.get("nome") or f"anexo-{indice}",
+            "mime": item.get("mime") or "application/octet-stream"}
 
 
 def ler(conta_id: int | None = None, limite: int = TETO_POR_EXECUCAO) -> dict:

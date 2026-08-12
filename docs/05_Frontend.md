@@ -158,25 +158,34 @@ serviço continua `active` e nada acusa. `tests/teste_frontend.py` cobre isso.
 reconstruível; versionar bundle minificado suja todo diff e mente sobre o que
 mudou.
 
-⚠️ **O painel só escuta em `127.0.0.1:8008`.** Enquanto o bloco nginx não for
-autorizado (exige root), o acesso é por túnel SSH:
+⚠️ **O processo escuta em `127.0.0.1:8008`; quem publica é o nginx.** O painel
+está em **`https://movizap.movisat.com.br`**. O túnel SSH
+(`ssh -L 8008:127.0.0.1:8008 vps`) continua servindo para depurar sem passar
+pelo nginx, mas não é mais o caminho de uso.
 
-```
-ssh -L 8008:127.0.0.1:8008 vps      # depois, http://localhost:8008
-```
+## 7. O que este frontend NÃO tem
 
-## 7. O que este esqueleto NÃO tem
+> 🚨 **ESTA SEÇÃO DESCREVIA UM ESQUELETO QUE NÃO EXISTE MAIS.** Até 12/08 ela
+> afirmava três coisas falsas: que não havia banco, que `ATD_1.1`/`ATD_1.2`
+> eram placeholder e que o acesso era por túnel SSH. Doc que descreve um
+> estágio já superado é pior que doc faltando — quem lê para de procurar.
+> Hoje são 31 tabelas, 18 telas registradas e o painel está publicado.
 
 Está escrito para não ser redescoberto:
 
-- **nenhum dado real** — não há banco; o usuário vem do `.env` e é um só;
-- **nenhuma tela de conversa** — `ATD_1.1`/`ATD_1.2` são placeholder;
-- **nenhum teste de frontend** — o build pega import quebrado e erro de
-  template, mas não pega lógica. Quando a caixa de entrada chegar, a
-  normalização de telefone e a máquina de estados entram com teste (item 6 da
-  metodologia);
+- **nenhum teste de frontend** — não existe runner de JS no projeto. O `build`
+  pega import quebrado e erro de template, e `tests/teste_frontend.py` prova
+  que o `dist` está onde o `main.py` procura. Nada disso pega **lógica**: o
+  recorte da busca (`partir`/`marcar` na `CaixaDeEntrada.vue`) e a navegação
+  entre ocorrências não têm teste, e é o maior buraco de cobertura do painel;
 - **nenhuma verificação em navegador automatizada** — o `verificar_ao_vivo.py`
-  prova a API e o HTML servido, não a renderização.
+  prova a API e o HTML servido, não a renderização. Tela nova continua exigindo
+  um humano abrindo e clicando;
+- **nenhuma rolagem virtual** — a conversa desenha todos os balões de uma vez.
+  O teto é de 1.000 mensagens (`conversas.TETO_MENSAGENS_NA_TELA`) e a maior
+  conversa da base tem 130, então sobra folga; se uma chegar perto do teto, o
+  custo é do **navegador**, não da API, e a saída é rolagem virtual — não
+  baixar o teto de volta.
 
 ## 8. Documentos irmãos
 

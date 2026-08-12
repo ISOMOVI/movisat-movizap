@@ -97,10 +97,27 @@ onUnmounted(() => clearInterval(relogio))
       </button>
     </header>
 
-    <p v-if="erro" class="aviso aviso--erro">{{ erro }}</p>
-    <p v-else-if="!dados" class="apagado">carregando…</p>
+    <!-- 🚨 SEM VÍNCULO DE ATENDIMENTO, A TELA PARA AQUI. A conta entra no
+         painel, mas não tem linha em `atendente` com e-mail -- e sem isso
+         tudo que a pessoa escrever é gravado com autor NULL: ela responde o
+         cliente e a conversa não sabe dizer quem respondeu. Até 12/08 isso
+         acontecia calado, e o histórico ficava anônimo sem ninguém notar.
+         Deixar trabalhar e explicar depois é pior do que barrar agora. -->
+    <div v-if="sessao.usuario && !sessao.usuario.vinculoAtendimento" class="vazio">
+      <i class="bi bi-person-slash vazio__icone" aria-hidden="true"></i>
+      <p class="vazio__titulo">Não possui vínculo de atendimento</p>
+      <p>Procure o administrador do sistema.</p>
+      <p class="apagado pequeno">
+        Sua conta entra no painel, mas não está ligada a um atendente com
+        e-mail — então nada do que você escrever teria autor registrado.
+      </p>
+    </div>
 
     <template v-else>
+      <p v-if="erro" class="aviso aviso--erro">{{ erro }}</p>
+      <p v-else-if="!dados" class="apagado">carregando…</p>
+
+      <template v-else>
       <!-- ── o que espera alguém ─────────────────────────────────────── -->
       <section class="inicio__atencao">
         <button
@@ -177,6 +194,7 @@ onUnmounted(() => clearInterval(relogio))
           </span>
         </p>
       </section>
+      </template>
     </template>
   </div>
 </template>

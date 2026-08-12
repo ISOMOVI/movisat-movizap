@@ -30,43 +30,159 @@ retrato antigo: hoje `LLM_PROVIDER=deepseek` e o custo medido é
 
 ## ATD_1.1 — Caixa de entrada
 
-### Abas por canal: sim, mas com uma só populada
+> ⚠️ **Reescrita em 12/08.** A versão anterior desenhava uma tela que nunca
+> foi construída: abas por canal, botões *Adiar* e *IA*, foto do contato,
+> etiqueta de papel colorida e coluna de time na linha. Nada disso existe, e
+> faltava tudo que existe. Desenho que promete botão inexistente faz quem lê
+> procurar na tela o que não está lá.
+
+### Layout de hoje — duas colunas, não três
 
 ```
-┌ Todos (12) ┬ WhatsApp (12) ┬ E-mail (—) ┐
+┌──────────────────────┬──────────────────────────────────────┐
+│ LISTA                │ CONVERSA (ATD_1.2)                   │
+│ [Todas][Sem dono]    │  cabeçalho · nome · telefone · estado │
+│ [Minhas]             │  [Assumir] ou [Reabrir e assumir]     │
+│ 🔍 Buscar conversa   │  ─────────────────────────────────    │
+│ ──────────────────   │  🔍 Buscar na conversa      3/17 ↑↓   │
+│ Iago Do Ó       2min │  ─────────────────────────────────    │
+│ …boleto vence hoje   │  balões                               │
+│ [não identificado]   │  ▸ gaveta do contato (abre por botão) │
+│              [Assumir]│  ─────────────────────────────────   │
+│ …                    │  [⇄][+][↩][⇤]            [Encerrar]  │
+│                      │  [Responder][Nota interna]            │
+│                      │  [ campo de texto                  ]  │
+└──────────────────────┴──────────────────────────────────────┘
 ```
 
-- **WhatsApp** é o único canal da Fase 1;
-- **E-mail** aparece **desabilitada, com o motivo à vista** ("Fase 2"). Mesma
-  regra do "Esqueci minha senha": aba que existe e diz por que não funciona é
-  honesta; aba que some e volta depois muda a tela debaixo do usuário.
+**A ficha do cliente com dados do FPSL (veículos, contratos, faturas) é a
+`ATD_2.1` e ainda não existe.** O que existe é a *gaveta*, componente da
+`ATD_1.2`, que mostra o que o Harmonit e o Bitrix sabem do número.
 
-🚨 A consequência real não é visual: **`conversa.canal` precisa existir no
-banco desde o dia 1**. Acrescentar coluna de canal depois de ter conversa
-gravada é migração; nascer com ela é grátis.
+### Cada linha da lista
 
-### Layout
+nome · há quanto tempo · prévia · selos · **[Assumir]** quando cabe.
 
-```
-┌──────────────┬─────────────────────────┬──────────────┐
-│ LISTA        │ CONVERSA                │ FICHA        │
-│              │                         │              │
-│ filtros:     │ balões                  │ cliente      │
-│  · minhas    │ ...                     │ veículos     │
-│  · sem dono  │                         │ contratos    │
-│  · time      │ [ Encerrar Transferir   │ faturas      │
-│  · estado    │   Adiar  Devolver IA ]  │              │
-│              │ [ campo de texto      ] │ (do FPSL)    │
-└──────────────┴─────────────────────────┴──────────────┘
-```
+- **O nome** sai de `nome_whatsapp || contato_nome || telefone`, nessa ordem.
+  O apelido do WhatsApp vem primeiro porque 65% das conversas não têm vínculo
+  com o cadastro — com o nome do cadastro na frente, a tela mostrava número
+  cru quase sempre.
+- **A prévia** é a última mensagem — **ou o trecho achado**, quando a conversa
+  entrou na lista por causa do texto de uma mensagem e não do nome. Ver busca,
+  abaixo.
+- **Selos:** `não identificado` (fala do cadastro, não do nome) · nome do
+  cliente · quem atende, ou `sem dono` · `encerrada`.
+- **[Assumir]** aparece em conversa sem dono; em conversa encerrada ele vira
+  **[Reabrir]**, e abre a conversa antes de perguntar.
 
-**Cada linha da lista mostra:** foto/inicial · nome (ou telefone, se não
-cadastrado) · última mensagem · há quanto tempo · **quem está atendendo** ·
-etiqueta de papel (cor) · time.
+### 🔍 Buscar conversa
+
+Um campo só, e ele procura em **tudo que identifica a conversa**:
+
+| Onde | Exemplo |
+|---|---|
+| apelido do WhatsApp | `ago` acha Iago, Thiago, Tiago, Yago |
+| nome do contato e do **cliente** | `keeva` |
+| telefone, **em pedaço** | `6168`, `998116168` (sem DDD), `(18) 99811-6168` |
+| texto das mensagens, **inclusive notas internas** | `rastreador`, `boleto` |
+
+🚨 **É `OR` em tudo, não escolha por formato.** Até 12/08 o código decidia
+entre telefone *ou* nome pelo que tinha sido digitado: `998116168` não
+normalizava (falta DDD), caía no ramo de nome e devolvia **vazio, sem dizer
+por quê**. Escolher o campo pelo formato do que a pessoa digitou é adivinhar.
+
+⚠️ **A nota interna entra na busca** — decisão do usuário em 12/08: *"a nota,
+uma vez dentro da conversa, faz parte da conversa"*.
+
+⚠️ **O girando só aparece depois de 3 s.** O normal é responder entre 5 e 30
+ms; piscar indicador a cada tecla cansa mais do que espera nenhuma. Passando
+de 3 s o silêncio é que engana, e a pessoa acha que travou.
+
+---
+
+## ATD_1.2 — Conversa
+
+Vive **dentro** da `ATD_1.1`, na coluna direita — não é tela separada, embora
+tenha rota própria (`/atendimento/{id}`) para dar link direto e para o log de
+auditoria saber distinguir. As 16 rotas de API do atendimento exigem esta tela.
+
+### A barra de ações
+
+Quatro são **só ícone**, com `title` e `aria-label`; *Encerrar* mantém o texto,
+por ser o fim do atendimento e o único que não deve depender de reconhecer
+desenho.
+
+| | Ação | O que faz | Confirma? |
+|---|---|---|---|
+| ⇄ | **Transferir** | manda para um time; **tira o dono** | modal com time + resumo |
+| + | **Convidar** | chama atendentes; **vários de uma vez**, por caixa de seleção | modal |
+| ↩ | **Devolver à fila** | larga sem fechar; fica sem dono | **sim** |
+| ⇤ | **Sair da conversa** | some da sua lista; se você era o dono, a posse passa | **sim** |
+| | **Encerrar** | vai para o Histórico; classificar é **opcional**, e fica no fim | **sim** |
+
+🚨 **Convidar NÃO dá acesso.** Qualquer atendente com `ATD_1.2` já abre
+qualquer conversa — **não existe isolamento por conversa**. O convite faz a
+conversa **aparecer na lista** de quem foi chamado. Quem responde por ela
+continua sendo o dono.
+
+🚨 **O dono que sai passa a posse** a quem está acompanhando há mais tempo; sem
+ninguém, a conversa volta para a fila. Fica gravado com motivo
+`saida_do_dono` — não `manual`, que faria o histórico dizer que uma pessoa
+transferiu à mão.
+
+### Reabrir
+
+Conversa encerrada mostra **[Reabrir e assumir]**. Até 12/08 encerrar era porta
+só de ida: `responder` recusa conversa resolvida e a tela escondia a barra
+inteira, então só o cliente escrevendo de novo trazia a conversa de volta.
+
+🚨 **Reabrir esbarra no `ux_conversa_aberta`** — único em
+`(canal_id, telefone_e164)` para conversa não resolvida, que é o que faz o
+cliente que volta reabrir em vez de duplicar. Se ele já escreveu depois do
+encerramento, existe outra conversa aberta: o sistema **não força**, avisa qual
+é a conversa viva e manda falar nela.
+
+⚠️ Reabrir limpa `resolvida_em` e `segundos_total`, que são métricas congeladas
+no fechamento. Deixá-las preenchidas faria a `ATD_5.1` listar como encerrada
+uma conversa que voltou a andar.
+
+### Os balões
+
+- **Nota interna** é amarela, centralizada, e diz **quem escreveu**. O nome
+  sempre veio da API; a tela é que não o imprimia — meses depois, *"cliente
+  pediu desconto"* não dizia de quem era.
+- **Resposta enviada pelo painel** mostra o nome de quem respondeu no rodapé.
+  O eco do WhatsApp (mensagem mandada pelo celular ou pelo sistema antigo)
+  chega **sem atendente**, e aí não há nome a mostrar — não é defeito.
+- **Mídia** aparece no próprio balão; ela vem no webhook em base64, não por
+  download. Documento não é pré-carregado.
+
+### 🔍 Buscar na conversa
+
+Pergunta diferente da busca da lista: lá é *"com quem eu falei"*, aqui é
+*"onde ele disse isso"*. Destaca as ocorrências, conta `3/17` e navega com ↑↓,
+dando a volta nas duas pontas.
+
+⚠️ **Roda no navegador**, sem rota nova: as mensagens já estão carregadas.
+
+🚨 **Só acha o que foi carregado.** O teto é de 1.000 mensagens
+(`conversas.TETO_MENSAGENS_NA_TELA`) e a conversa avisa quando está truncada —
+*"não encontrado"* numa conversa cortada seria mentira. Nenhuma passou do teto
+ainda: a maior tem 130.
+
+⚠️ **A marcação é feita em pedaços, nunca com `v-html`.** O texto é o que o
+cliente escreveu; montar `<mark>` numa string e injetar entregaria a tela a
+quem manda a mensagem.
+
+### Envio
 
 ⚠️ **Envio de arquivo fica visível e desabilitado**, com o motivo: *"Envio de
 mídia entra na Fase 2. Recebimento já funciona."* O cliente **manda** áudio,
 foto e vídeo e nós vemos — só não devolvemos arquivo.
+
+🚨 **O destinatário não é parâmetro: sai da conversa.** Não existe caminho para
+escolher para quem enviar, e é isso que impede o painel de virar ferramenta de
+disparo — que é a `ATD_3.1`, com decisão própria.
 
 ---
 

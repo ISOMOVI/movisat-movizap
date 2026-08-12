@@ -79,6 +79,13 @@ class Settings:
     # caminho da URL é o que o protege.
     webhook_segredo: str = _ler("MOVIZAP_WEBHOOK_SEGREDO")
 
+    # 🚨 SÓ EXISTE DURANTE UMA ROTAÇÃO, e sair é parte do procedimento.
+    # Segredo errado devolve 404, e o Evolution trata 404 como falha: trocar o
+    # valor e reiniciar criaria uma janela em que todo evento é recusado. Com
+    # os dois válidos, as duas URLs respondem enquanto o Evolution é
+    # reapontado, e nada se perde. Vazio = nenhuma rotação em curso.
+    webhook_segredo_anterior: str = _ler("MOVIZAP_WEBHOOK_SEGREDO_ANTERIOR")
+
     def dsn(self) -> str:
         """String de conexão do Postgres.
 

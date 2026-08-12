@@ -33,6 +33,7 @@ import CaixaDeEntrada from '../telas/CaixaDeEntrada.vue'
 import Fila from '../telas/Fila.vue'
 import Informativos from '../telas/Informativos.vue'
 import Historico from '../telas/Historico.vue'
+import ChatInterno from '../telas/ChatInterno.vue'
 import Atendentes from '../telas/Atendentes.vue'
 import Times from '../telas/Times.vue'
 import Classificacoes from '../telas/Classificacoes.vue'
@@ -84,6 +85,15 @@ const rotas = [
     name: 'ATD_5.1',
     component: Historico,
     meta: { codigo: 'ATD_5.1', titulo: 'Histórico' },
+  },
+  {
+    // 🚨 Fora de /atendimento de propósito: é conversa entre ATENDENTES, e
+    // nada daqui sai para o cliente. Pendurar em /atendimento faria o log
+    // misturar "falou com cliente" e "falou com colega".
+    path: '/chat',
+    name: 'ATD_6.1',
+    component: ChatInterno,
+    meta: { codigo: 'ATD_6.1', titulo: 'Chat interno' },
   },
   {
     // Mesmo componente da ATD_1.1: a conversa abre AO LADO da lista, como o

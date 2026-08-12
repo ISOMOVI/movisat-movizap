@@ -32,31 +32,72 @@ MOD_a.b[.c]
 
 ---
 
-## Registro — Fase 1
+## Telas — espelho de `movizap/telas.py`
+
+> 🚨 **ESTA TABELA É A ÚNICA.** Até 12/08 este arquivo tinha **duas** tabelas
+> de telas — "Registro — Fase 1" e "Telas de hoje" — e elas divergiram em
+> silêncio: a primeira dava `admin` a seis telas que o código trata como
+> `owner`, e não tinha `EML_1.1`, `INI_1.1` nem `CFG_2.2`. Só a segunda tinha
+> teste. Duas tabelas do mesmo fato é uma que vai mentir; o conserto não foi
+> corrigir células, foi apagar a cópia.
+>
+> ⚠️ `teste_telas.py` reprova se um código existir no `telas.py` e não
+> aparecer aqui. Foi assim que `INI_1.1` e `EML_1.1` ficaram de fora até 10/08.
 
 | Código | Tela | Rota | Permissão | Fase |
 |---|---|---|---|---|
+| `INI_1.1` | Início | `/inicio` | `atendimento` | 1 |
 | `ATD_1.1` | Caixa de entrada | `/atendimento` | `atendimento` | 1 |
 | `ATD_1.2` | Conversa | `/atendimento/{id}` | `atendimento` | 1 |
 | `ATD_1.3` | Fila | `/atendimento/fila` | `atendimento` | 1 |
-| `ATD_2.1` | Ficha do contato (painel lateral) | componente | `atendimento` | 1 |
+| `ATD_3.1` | Informativos | `/informativos` | `informativos` | 1 |
 | `ATD_5.1` | Histórico | `/atendimento/historico` | `atendimento` | 1 |
+| `ATD_6.1` | Chat interno | `/chat` | `atendimento` | 1 |
+| `EML_1.1` | E-mail | `/email` | `atendimento` | 1 |
 | `CAD_1.1` | Clientes | `/cadastro/clientes` | `cadastro` | 1 |
 | `CAD_1.2` | Contatos | `/cadastro/contatos` | `cadastro` | 1 |
-| `CAD_1.2.1` | Contato — dados | aba | `cadastro` | 1 |
-| `CAD_1.2.2` | Contato — telefones | aba | `cadastro` | 1 |
-| `CAD_1.2.3` | Contato — papéis | aba | `cadastro` | 1 |
-| `CAD_2.1` | Atendentes | `/cadastro/atendentes` | `admin` | 1 |
-| `CAD_2.2` | Times | `/cadastro/times` | `admin` | 1 |
-| `CFG_1.1` | Canais | `/config/canais` | `admin` | 1 |
-| `CFG_2.1` | IA — prompt | `/config/ia/prompt` | `admin` | 1 |
-| `CFG_3.1` | Sincronização Harmonit | `/config/sync` | `admin` | 1 |
-| `CFG_4.1` | Classificações | `/config/classificacoes` | `admin` | 1 |
-| `ATD_3.1` | Informativos | `/informativos` | `informativos` | 1 |
+| `CAD_2.1` | Atendentes | `/cadastro/atendentes` | `owner` | 1 |
+| `CAD_2.2` | Times | `/cadastro/times` | `owner` | 1 |
+| `CFG_1.1` | Canais | `/config/canais` | `owner` | 1 |
+| `CFG_2.1` | IA — prompt | `/config/ia/prompt` | `owner` | 1 |
+| `CFG_3.1` | Sincronização | `/config/sync` | `owner` | 1 |
+| `CFG_4.1` | Classificações | `/config/classificacoes` | `owner` | 1 |
 | `CFG_9.1` | Registro de telas | `/config/telas` | `owner` | 1 |
+| `CFG_2.2` | IA — analytics | `/config/ia/analytics` | `owner` | 2 |
+| `REL_1.1` | Relatórios | `/relatorios` | `owner` | 3 |
 
-**Reservados, não implementar na Fase 1:**
-`ATD_4.1` E-mail · `CFG_2.2` IA — analytics · `REL_1.1` Relatórios
+🚨 **TODA CONFIGURAÇÃO É `owner`, E ISSO É DECISÃO, NÃO DESCUIDO.** A tabela
+antiga dizia `admin` em seis dessas linhas. Quem lesse criaria um perfil
+`admin` esperando que ele configurasse Canais ou Sincronização, e levaria 403
+sem entender: `pode_acessar` devolve **False** para tela `owner` a menos que a
+pessoa seja o owner. Em 12/08 o perfil `admin` saiu do vocabulário — ver
+"Perfis" abaixo.
+
+## Abas e componentes
+
+Não entram no `telas.py`: **não têm rota nem permissão próprias**, e o
+`telas.py` é o registro das rotas — é ele que gera menu e resolve permissão.
+Herdam a permissão da tela que os hospeda. **Não é drift.**
+
+Continuam valendo como âncora de auditoria: o log grava `CAD_1.2.2` quando o
+erro foi na aba de telefones, e é isso que se procura.
+
+| Código | O quê | Dentro de |
+|---|---|---|
+| `CAD_1.2.1` | Contato — dados | `CAD_1.2` |
+| `CAD_1.2.2` | Contato — telefones | `CAD_1.2` |
+| `CAD_1.2.3` | Contato — papéis | `CAD_1.2` |
+| — | Gaveta do contato (painel lateral) | `ATD_1.2` — **sem código próprio** |
+
+⚠️ **A gaveta que existe hoje NÃO é a `ATD_2.1`.** Ela abre por botão dentro da
+conversa e mostra o que o Harmonit e o Bitrix sabem do número. A `ATD_2.1` é
+outra coisa, ainda não construída: a ficha do cliente **consultando o FPSL** —
+é o que o próprio texto da tela vazia promete. Até 12/08 a `ATD_2.1` aparecia
+nesta tabela como se fosse a gaveta, contradizendo o `docs/10`, que dizia que a
+gaveta está "fora do registro". Eram duas coisas com um nome só.
+
+**Reservados, não implementar agora:**
+`ATD_2.1` Ficha do cliente com FPSL · `CFG_2.2` IA — analytics · `REL_1.1` Relatórios
 
 🚨 **`ATD_3.1` SAIU DA RESERVA EM 2026-08-07** e subiu para a Fase 1.
 Decisão do usuário: *"o informativo é o que vai enviar, sem resposta de
@@ -69,21 +110,25 @@ o canal é irreversível. Por isso a permissão dela é `informativos`, que
 que se libera por padrão. Para dar a alguém, é acrescentar `informativos`
 ao perfil em `telas.PERFIS` — decisão consciente, não efeito colateral.
 
+⚠️ **Por que o chat é `ATD_6.1` e não cabe dentro de `ATD_1`.** Acrescentado
+em 12/08. O submódulo `ATD_1` é atendimento a **cliente** — caixa, conversa,
+fila. O chat interno é outro assunto: conversa entre atendentes, que nunca sai
+para o WhatsApp. Pendurá-lo em `ATD_1` faria o log de auditoria misturar
+"falou com cliente" e "falou com colega", que é justamente o que se quer poder
+distinguir. Submódulo próprio custa três dígitos.
+
 ⚠️ **Por que o Histórico é `ATD_5.1` e não `ATD_2.2`.** Acrescentado em
 2026-08-06. O submódulo `ATD_2` é a ficha do contato, e `ATD_3`/`ATD_4` já
 estão reservados acima. Poderia ter virado `ATD_2.2`, mas ficaria pendurado no
 submódulo da ficha, com quem não tem parentesco nenhum. Histórico é assunto
 próprio, então ganha submódulo próprio. **Custo: nenhum — são três dígitos.**
 
-⚠️ **Aba e componente não entram no `telas.py`.** A tabela acima tem três
-granularidades, e a coluna *Rota* diz qual é qual: rota de verdade, `aba` ou
-`componente`. O `telas.py` é o registro das **rotas** — é ele que gera menu e
-resolve permissão, e nem aba nem componente têm menu ou rota própria. Por isso
-a tabela tem 17 linhas e o `telas.py` tem 13 telas de Fase 1 — a diferença são
-exatamente `ATD_2.1` e as três abas. **Não é drift.**
-`ATD_2.1` e `CAD_1.2.1/.2/.3` vivem dentro da tela que os hospeda e herdam a
-permissão dela. Continuam valendo como âncora de auditoria: o log grava
-`CAD_1.2.2` quando o erro foi na aba de telefones, e isso é o que se procura.
+⚠️ **Contagem de linhas não serve como reconciliação.** Até 12/08 este trecho
+dizia "a tabela tem 17 linhas e o `telas.py` tem 13 de Fase 1 — a diferença são
+`ATD_2.1` e as três abas". A conta estava errada e ninguém percebeu, porque
+número em prosa não tem teste. A separação agora é estrutural: **tela** e
+**aba/componente** são duas tabelas diferentes, e só a primeira é espelho do
+`telas.py`. Quem quiser conferir roda `teste_telas.py`, não conta linha.
 
 ---
 
@@ -154,47 +199,37 @@ Fixa no rodapé de **toda** tela principal. Modelo mental: barra do Excel / bloc
 
 ---
 
-## Perfis — Fase 1
+## Perfis
 
-| Perfil | Telas |
-|---|---|
-| `owner` | todas, e não pode ser alterado nem por ele mesmo |
-| `admin` | tudo menos `CFG_9.1` |
-| `atendimento` | `ATD_*` |
-| `cadastro` | `CAD_1.*` |
+| Perfil | Permissões | Telas na prática |
+|---|---|---|
+| `owner` | todas | tudo, inclusive o que é exclusivo do owner |
+| `atendimento` | `atendimento` | `INI_1.1` `ATD_1.*` `ATD_5.1` `EML_1.1` |
+| `cadastro` | `cadastro` | `CAD_1.1` `CAD_1.2` |
 
-Perfil é conjunto de telas, montado do registro. **Não existe permissão escrita fora dele.**
+Perfil é conjunto de **permissões**, e a permissão de cada tela vem do registro.
+**Não existe permissão escrita fora dele.**
+
+🚨 **`admin` SAIU DO VOCABULÁRIO EM 12/08.** Ele existia como perfil e como
+permissão, e destravava exatamente duas telas — `CFG_2.2` (Fase 2) e `REL_1.1`
+(Fase 3) —, **nenhuma das quais existe**. Na prática, um `admin` tinha o mesmo
+alcance de quem tem `atendimento` + `cadastro`, e a doc prometia que ele
+configuraria Canais e Sincronização, o que o código nunca permitiu. Ninguém
+usava: a base tinha 1 `owner` e 3 `atendimento`.
+
+Decisão do usuário no mesmo dia: **owner é o único administrador, e não nascem
+mais owners.** As duas telas futuras passaram a `owner`, o perfil saiu de
+`telas.PERFIS` e o `CHECK` da coluna `atendente.perfil` perdeu o valor
+(migração 024).
+
+⚠️ **`informativos` não está em nenhum perfil**, de propósito — só o owner
+alcança a `ATD_3.1`. Disparo em massa não se libera por padrão; para dar a
+alguém, acrescenta-se `informativos` ao perfil em `telas.PERFIS`, como decisão
+consciente.
 
 ---
 
-## Telas de hoje (espelho de `movizap/telas.py`)
-
-> ⚠️ Esta seção espelha o registro. `teste_telas.py` reprova se um
-> código existir no `telas.py` e não aparecer aqui — foi assim que
-> `INI_1.1` e `EML_1.1` ficaram de fora até 10/08.
-
-| Código | Título | Rota | Permissão | Fase |
-|---|---|---|---|---|
-| `ATD_1.1` | Caixa de entrada | `/atendimento` | atendimento | 1 |
-| `ATD_1.2` | Conversa | `/atendimento/{id}` | atendimento | 1 |
-| `ATD_1.3` | Fila | `/atendimento/fila` | atendimento | 1 |
-| `ATD_3.1` | Informativos | `/informativos` | informativos | 1 |
-| `ATD_5.1` | Histórico | `/atendimento/historico` | atendimento | 1 |
-| `CAD_1.1` | Clientes | `/cadastro/clientes` | cadastro | 1 |
-| `CAD_1.2` | Contatos | `/cadastro/contatos` | cadastro | 1 |
-| `CAD_2.1` | Atendentes | `/cadastro/atendentes` | owner | 1 |
-| `CAD_2.2` | Times | `/cadastro/times` | owner | 1 |
-| `CFG_1.1` | Canais | `/config/canais` | owner | 1 |
-| `CFG_2.1` | IA — prompt | `/config/ia/prompt` | owner | 1 |
-| `CFG_2.2` | IA — analytics | `/config/ia/analytics` | admin | 2 |
-| `CFG_3.1` | Sincronização | `/config/sync` | owner | 1 |
-| `CFG_4.1` | Classificações | `/config/classificacoes` | owner | 1 |
-| `CFG_9.1` | Registro de telas | `/config/telas` | owner | 1 |
-| `EML_1.1` | E-mail | `/email` | atendimento | 1 |
-| `INI_1.1` | Início | `/inicio` | atendimento | 1 |
-| `REL_1.1` | Relatórios | `/relatorios` | admin | 3 |
-
-### Códigos aposentados
+## Códigos aposentados
 
 🚨 **Nunca reaproveitados** — reusar faria o log antigo mentir.
 

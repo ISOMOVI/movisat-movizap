@@ -16,7 +16,7 @@
    ============================================================================ */
 import { ref, computed, onMounted } from 'vue'
 
-import { api, ErroDeApi } from '../api/cliente.js'
+import { api, pedirBlob, ErroDeApi } from '../api/cliente.js'
 
 const marcadores = ref([])
 const mensagens = ref([])
@@ -207,6 +207,40 @@ function alternarMenu() {
 }
 const erro = ref('')
 const recado = ref('')
+
+/* ---- anexo recebido ------------------------------------------------------
+   Os bytes ficam no Google e são buscados no clique. Ver `gmail.anexo`.
+
+   ⚠️ NÃO DÁ PARA USAR <a href="/api/...">: o token vive no cabeçalho
+   Authorization e o navegador não manda cabeçalho em navegação -- o download
+   voltaria 401 e o atendente veria uma página de erro sem explicação. Por isso
+   o binário vem por `pedirBlob` e vira object URL. É a mesma razão pela qual a
+   mídia do WhatsApp não usa <img src>. */
+const baixando = ref(null)
+
+// `tamanho()` já existe acima, usada pelo anexo de RASCUNHO. Reaproveitada.
+
+async function baixarAnexo(indice, anexo) {
+  if (baixando.value !== null) return
+  baixando.value = indice
+  erro.value = ''
+  try {
+    const blob = await pedirBlob(
+      `/api/email/mensagens/${aberta.value.id}/anexo/${indice}`)
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = anexo.nome || `anexo-${indice}`
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    URL.revokeObjectURL(url)
+  } catch (e) {
+    erro.value = e instanceof ErroDeApi ? e.message : 'Não consegui baixar.'
+  } finally {
+    baixando.value = null
+  }
+}
 
 /* 🚨 A API do Gmail devolve identificador interno: `INBOX`, `CATEGORY_UPDATES`,
    `UNREAD`. Ninguém que abre uma caixa de e-mail deveria descobrir que existe
@@ -578,10 +612,29 @@ onMounted(async () => {
             </ul>
           </div>
 
-          <div v-if="aberta.anexos && aberta.anexos.length" class="linha pequeno">
-            <span v-for="a in aberta.anexos" :key="a.nome" class="chip">
-              <i class="bi bi-paperclip" aria-hidden="true"></i> {{ a.nome }}
-            </span>
+          <!-- 🚨 ATÉ 12/08 ISTO ERA SÓ UM SELO. A tela dizia "tem anexo" e
+               não deixava abrir: 48 dos 226 e-mails, e quem precisava do
+               boleto ia no Gmail. Os bytes continuam no Google -- guardá-los
+               custaria ~360 MB/ano para duplicar o que já está lá --, mas
+               agora o clique busca na hora. -->
+          <div v-if="aberta.anexos && aberta.anexos.length"
+               class="linha linha--quebra pequeno">
+            <button
+              v-for="(a, i) in aberta.anexos"
+              :key="a.nome + i"
+              class="botao botao--pequeno botao--contorno"
+              type="button"
+              :disabled="baixando === i"
+              :title="a.id_externo
+                ? `Baixar ${a.nome}`
+                : 'Anexo sem id no Gmail — abra pelo Gmail'"
+              @click="baixarAnexo(i, a)"
+            >
+              <span v-if="baixando === i" class="girando"></span>
+              <i v-else class="bi bi-paperclip" aria-hidden="true"></i>
+              {{ a.nome }}
+              <span v-if="a.tamanho" class="apagado">{{ tamanho(a.tamanho) }}</span>
+            </button>
           </div>
 
           <pre class="email__corpo">{{ aberta.texto || '(sem texto legível)' }}</pre>

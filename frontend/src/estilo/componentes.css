@@ -64,6 +64,87 @@
 .botao--largo { width: 100%; }
 .botao--pequeno { padding: 5px var(--e-3); font-size: var(--txt-sm); }
 
+/* Botão que é SÓ ícone. Quadrado, para a barra de ações da conversa não virar
+   uma fileira de palavras.
+
+   🚨 SEM RÓTULO VISÍVEL, `title` E `aria-label` SÃO OBRIGATÓRIOS. Um ícone
+   sozinho não diz o que faz para quem usa leitor de tela nem para quem passa o
+   mouse -- e "Devolver à fila" e "Sair da conversa" fazem coisas diferentes com
+   ícones parecidos. Ícone sem nome é adivinhação. */
+.botao--icone {
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  flex: none;
+  font-size: var(--txt-lg);
+}
+.botao--icone.botao--pequeno { width: 30px; height: 30px; font-size: var(--txt-md); }
+
+/* ── modal ────────────────────────────────────────────────────────────────
+   Caixa sobre a tela: confirmar algo que não se desfaz, ou escolher vários de
+   uma vez. Nasce aqui e não dentro de um .vue porque duas telas já pedem.
+
+   ⚠️ O fundo escuro fecha ao clique, mas quem confirma tem de apertar o botão:
+   fechar por engano cancela, e cancelar é sempre o lado seguro. */
+.modal {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-modal);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--e-4);
+  background: rgba(0, 0, 0, .55);
+}
+.modal__caixa {
+  width: 100%;
+  max-width: 420px;
+  max-height: 85vh;
+  overflow-y: auto;
+  padding: var(--e-5);
+  border: 1px solid var(--borda);
+  border-radius: var(--r-md);
+  background: var(--superficie);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, .35);
+}
+.modal__titulo {
+  margin: 0 0 var(--e-2);
+  font-size: var(--txt-lg);
+  font-weight: var(--peso-forte);
+  color: var(--texto);
+}
+.modal__texto { margin: 0 0 var(--e-4); color: var(--texto-fraco); }
+.modal__acoes {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--e-2);
+  margin-top: var(--e-4);
+}
+
+/* Lista de caixas de seleção dentro do modal — o "adicionar vários de uma vez". */
+.modal__opcoes {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 40vh;
+  overflow-y: auto;
+  margin-bottom: var(--e-3);
+  border: 1px solid var(--borda);
+  border-radius: var(--r-sm);
+  padding: var(--e-2);
+}
+.modal__opcao {
+  display: flex;
+  align-items: center;
+  gap: var(--e-3);
+  padding: var(--e-2) var(--e-3);
+  border-radius: var(--r-sm);
+  cursor: pointer;
+}
+.modal__opcao:hover { background: var(--superficie-2); }
+.modal__opcao input { width: 17px; height: 17px; accent-color: var(--acento); }
+
 /* ── campo de formulário ──────────────────────────────────────────────── */
 .campo { display: block; margin-bottom: var(--e-4); }
 
