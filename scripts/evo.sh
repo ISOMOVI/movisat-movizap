@@ -3,7 +3,7 @@
 # A chave é lida do .env DENTRO do script -- nunca entra em linha de comando.
 set -euo pipefail
 
-ENV_FILE="/home/claude/movibot/.env"
+ENV_FILE="/home/claude/movizap_painel/.env"
 KEY=$(grep -E '^EVOLUTION_API_KEY=' "$ENV_FILE" | cut -d= -f2- | tr -d '"'"'"'')
 BASE=$(grep -E '^EVOLUTION_BASE_URL=' "$ENV_FILE" | cut -d= -f2- | tr -d '"'"'"'')
 
