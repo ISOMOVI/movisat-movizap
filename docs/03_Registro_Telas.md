@@ -62,6 +62,7 @@ MOD_a.b[.c]
 | `CFG_2.1` | IA — prompt | `/config/ia/prompt` | `owner` | 1 |
 | `CFG_3.1` | Sincronização | `/config/sync` | `owner` | 1 |
 | `CFG_4.1` | Classificações | `/config/classificacoes` | `owner` | 1 |
+| `CFG_5.1` | Automação por tipo | `/config/automacao` | `owner` | 1 |
 | `CFG_9.1` | Registro de telas | `/config/telas` | `owner` | 1 |
 | `CFG_2.2` | IA — analytics | `/config/ia/analytics` | `owner` | 2 |
 | `REL_1.1` | Relatórios | `/relatorios` | `owner` | 3 |

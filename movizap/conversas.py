@@ -26,7 +26,8 @@ import base64
 import logging
 from datetime import datetime, timezone
 
-from . import banco, bitrix, cadastro, midia as midia_mod, telefone as tel
+from . import (automacao, banco, bitrix, cadastro, midia as midia_mod,
+               telefone as tel)
 
 log = logging.getLogger("movizap.conversas")
 
@@ -344,7 +345,25 @@ def _gravar_mensagem(cur, evento: dict, corpo: dict) -> str:
 
     if nova is None:
         return f"conversa {conversa_id}: mensagem repetida, ignorada"
+
+    # 🚨 A AUTOMAÇÃO SÓ OLHA MENSAGEM DE ENTRADA. O Evolution ecoa o que NÓS
+    # mandamos com `fromMe: true`, e responder ao próprio eco faria o painel
+    # conversar sozinho.
+    #
+    # ⚠️ FORA DO `cur`, DEPOIS DA GRAVAÇÃO. A saudação faz uma chamada HTTP ao
+    # Evolution; segurá-la dentro da transação do webhook prenderia a conexão
+    # do banco pelo tempo de uma rede alheia -- e o processamento do webhook
+    # tem de ser rápido, senão o Evolution considera falha e reentrega.
+    if not de_mim:
+        _boas_vindas_depois.append(conversa_id)
+
     return f"conversa {conversa_id}: mensagem {tipo} gravada"
+
+
+# A lista é consumida por `processar_pendentes` ao fim de cada evento, fora da
+# transação. Existe porque `_gravar_mensagem` recebe um cursor aberto e não é
+# lugar de fazer chamada de rede.
+_boas_vindas_depois: list[int] = []
 
 
 def _atualizar_entrega(cur, evento: dict, corpo: dict) -> str:
@@ -383,7 +402,8 @@ def processar_pendentes(limite: int = 500) -> dict:
             LIMIT %s""", (limite,))
 
     contas = {"lidos": len(pendentes), "mensagens": 0, "entregas": 0,
-              "ignorados": 0, "erros": 0}
+              "ignorados": 0, "erros": 0, "boas_vindas": 0}
+    _boas_vindas_depois.clear()
 
     for evento in pendentes:
         corpo = evento["payload"] or {}
@@ -407,6 +427,18 @@ def processar_pendentes(limite: int = 500) -> dict:
                     "UPDATE webhook_evento SET processado = true, "
                     "processado_em = now(), erro = NULL WHERE id = %s",
                     (evento["id"],))
+
+            # ⚠️ FORA DO `with`: a transação do evento já fechou. A saudação
+            # fala com o Evolution pela rede, e falha dela NÃO pode desfazer a
+            # gravação da mensagem do cliente nem marcar o evento como erro --
+            # a mensagem chegou, e é isso que importa guardar.
+            while _boas_vindas_depois:
+                alvo = _boas_vindas_depois.pop(0)
+                try:
+                    if automacao.boas_vindas(alvo).get("enviou"):
+                        contas["boas_vindas"] += 1
+                except Exception:                             # noqa: BLE001
+                    log.exception("boas-vindas falhou na conversa %s", alvo)
         except Exception as e:   # noqa: BLE001 - um evento ruim não para a fila
             contas["erros"] += 1
             log.exception("evento %s falhou ao processar", evento["id"])
@@ -1141,6 +1173,42 @@ TETO_ARQUIVO = TETO_ARQUIVO_MB * 1024 * 1024
 # O vocabulário de `mensagem.tipo` a partir da família do MIME. É o NOSSO
 # vocabulário, não o do Evolution -- os dois se parecem e não são iguais.
 _TIPO_POR_FAMILIA = {"image": "imagem", "video": "video", "audio": "audio"}
+
+
+def gravar_saida_automatica(conversa_id: int, texto: str,
+                            enviado: dict) -> int | None:
+    """Grava uma mensagem que o SISTEMA mandou, não uma pessoa.
+
+    🚨 `atendente_id` FICA NULO, E ISSO É A INFORMAÇÃO. Atribuir a saudação
+    automática a alguém faria o histórico dizer que uma pessoa escreveu o que
+    o sistema escreveu -- e o mini-CRM contaria tempo de resposta humana onde
+    não houve humano.
+
+    ⚠️ `autor = 'sistema'`, e o valor foi CONFERIDO no CHECK antes de escrever:
+    o vocabulário é `cliente | ia | atendente | sistema` (migração 001). Eu ia
+    gravar `'bot'`, que não existe lá e teria estourado CheckViolation no
+    primeiro cliente real -- dentro do processamento do webhook.
+
+    ⚠️ NÃO MEXE EM `primeira_resposta_em`. Automação não é resposta: se
+    contasse, todo tempo de primeira resposta viraria zero no dia em que a
+    saudação fosse ligada, e a métrica pareceria excelente justamente porque
+    ninguém atendeu.
+    """
+    with banco.cursor() as cur:
+        cur.execute(
+            """INSERT INTO mensagem
+                   (conversa_id, id_externo, direcao, autor, tipo, conteudo,
+                    entrega, criada_em)
+               VALUES (%s, %s, 'saida', 'sistema', 'texto', %s, 'enviada', now())
+               ON CONFLICT (id_externo) WHERE id_externo IS NOT NULL DO NOTHING
+               RETURNING id""",
+            (conversa_id, enviado.get("id_externo"), texto))
+        nova = cur.fetchone()
+        cur.execute(
+            """UPDATE conversa SET ultima_atividade_em = now(),
+                                   atualizada_em = now()
+                WHERE id = %s""", (conversa_id,))
+    return nova["id"] if nova else None
 
 
 def iniciar_conversa(canal_id: int, numero_digitado: str, texto: str,

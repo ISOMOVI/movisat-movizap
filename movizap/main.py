@@ -28,6 +28,7 @@ from . import agenda as agenda_google
 from . import enviar as enviar_email
 from . import gmail
 from . import google_auth
+from . import automacao
 from . import inicio as tela_inicial
 from . import informativos
 from . import midia
@@ -242,6 +243,38 @@ def eu(usuario: dict = Depends(auth.get_usuario)):
 def telas_do_usuario(usuario: dict = Depends(auth.get_usuario)):
     """O menu. O frontend não decide o que aparece -- ele desenha o que vem."""
     return registro_telas.do_usuario(usuario)
+
+
+@app.get("/api/automacao")
+def ver_automacao(usuario: dict = Depends(auth.requer_tela("CFG_5.1"))):
+    """CFG_5.1 — o que roda sozinho, por tipo de contato.
+
+    ⚠️ Vem junto `contatos`: quantas pessoas cada tipo alcança hoje. Sem esse
+    número, ligar "cliente" parece inofensivo e atinge 1.750 pessoas.
+
+    🚨 `ia_disponivel` é FALSO e a tela trava o interruptor de IA por causa
+    dele. Não há motor: o `services/llm/` do `IA_agente_Movichat` nunca
+    migrou. `docs/09`, item 4 -- configuração não afirma o que o código não
+    faz. O dia em que o motor entrar, isto vira `True` num lugar só.
+    """
+    return {"tipos": automacao.listar(), "ia_disponivel": False,
+            "ia_motivo": "O motor de IA ainda não migrou para o painel "
+                         "(services/llm do IA_agente_Movichat)."}
+
+
+class AutomacaoEntrada(BaseModel):
+    boas_vindas_ligado: bool | None = None
+    boas_vindas_texto: str | None = None
+
+
+@app.put("/api/automacao/{relacao}")
+def definir_automacao(relacao: str, dados: AutomacaoEntrada,
+                      usuario: dict = Depends(auth.requer_tela("CFG_5.1"))):
+    r = automacao.definir(relacao, dados.boas_vindas_ligado,
+                          dados.boas_vindas_texto)
+    if not r["ok"]:
+        raise HTTPException(status_code=400, detail=r["motivo"])
+    return r
 
 
 @app.get("/api/telas/registro")

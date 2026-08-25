@@ -156,6 +156,18 @@ TELAS = [
         "permissao": "owner",
         "fase": 1,
     },
+    # 🚨 CÓDIGO NOVO, NUNCA REAPROVEITADO. `CFG_5.1` estava livre e não está
+    # em CODIGOS_APOSENTADOS -- conferido antes de escrever. Reaproveitar
+    # código faz o log antigo mentir.
+    {
+        "codigo": "CFG_5.1",
+        "titulo": "Automação por tipo",
+        "rota": "/config/automacao",
+        "icone": "bi-robot",
+        "descricao": "O que roda sozinho quando chega mensagem, por tipo de contato.",
+        "permissao": "owner",
+        "fase": 1,
+    },
     {
         "codigo": "CFG_9.1",
         "titulo": "Registro de telas",

@@ -36,6 +36,7 @@ import Historico from '../telas/Historico.vue'
 import ChatInterno from '../telas/ChatInterno.vue'
 import Atendentes from '../telas/Atendentes.vue'
 import Times from '../telas/Times.vue'
+import Automacao from '../telas/Automacao.vue'
 import Classificacoes from '../telas/Classificacoes.vue'
 import IaPrompt from '../telas/IaPrompt.vue'
 import Sincronizacao from '../telas/Sincronizacao.vue'
@@ -165,6 +166,12 @@ const rotas = [
     name: 'CFG_4.1',
     component: Classificacoes,
     meta: { codigo: 'CFG_4.1', titulo: 'Classificações' },
+  },
+  {
+    path: '/config/automacao',
+    name: 'CFG_5.1',
+    component: Automacao,
+    meta: { codigo: 'CFG_5.1', titulo: 'Automação por tipo' },
   },
   {
     path: '/config/telas',
