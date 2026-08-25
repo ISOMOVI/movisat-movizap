@@ -207,15 +207,22 @@ class TestBuscaVazia:
         assert achou("zznaoexisteemlugarnenhum") == []
 
 
-class TestTetoDeMensagens:
-    def test_o_teto_e_1000(self):
-        """Decisão do usuário em 12/08. Era 300, e era um padrão meu."""
-        assert conversas.TETO_MENSAGENS_NA_TELA == 1000
+class TestJanelaDeMensagens:
+    """🚨 O TETO DE 1.000 SAIU EM 25/08. Ele foi decidido em 12/08 quando a
+    maior conversa tinha 130 mensagens; em 25/08 ela chegou a 776, e teto que
+    se encosta silencia mensagem antiga. No lugar entrou paginação por cursor:
+    60 ao abrir, 200 por vez para trás, sem teto.
+    """
 
-    def test_conversa_curta_nao_e_truncada(self, cena):
-        assert conversas.conversa(cena["conversa"])["truncada"] is False
+    def test_abre_com_a_janela_inicial(self):
+        """Decisão do usuário em 25/08: 60 ao abrir, 200 por vez."""
+        assert conversas.JANELA_INICIAL == 60
+        assert conversas.JANELA_ANTERIORES == 200
 
-    def test_o_teto_pega_as_mensagens_MAIS_RECENTES(self, cena):
+    def test_conversa_curta_nao_oferece_anteriores(self, cena):
+        assert conversas.conversa(cena["conversa"])["tem_anteriores"] is False
+
+    def test_a_janela_pega_as_mensagens_MAIS_RECENTES(self, cena):
         """🚨 `ORDER BY criada_em ASC LIMIT n` devolvia as n MAIS ANTIGAS.
 
         Numa conversa acima do teto o atendente veria o começo dela e nunca o
@@ -235,3 +242,85 @@ class TestTetoDeMensagens:
         textos = [m["conteudo"] for m in ultimas]
         assert textos == ["marco 3", "marco 4", "marco 5"], (
             f"o teto cortou pelo lado errado: {textos}")
+
+    def test_carregar_anteriores_traz_o_que_vem_ANTES(self, cena):
+        """O cursor é o id da mensagem mais antiga que a tela tem no topo."""
+        for i in range(6):
+            banco.executar(
+                """INSERT INTO mensagem (conversa_id, direcao, autor, tipo,
+                                         conteudo, criada_em)
+                   VALUES (%s, 'entrada', 'cliente', 'texto', %s,
+                           now() + (%s || ' minutes')::interval)""",
+                (cena["conversa"], f"pagina {i}", i + 1))
+
+        primeira_janela = conversas.mensagens(cena["conversa"], limite=3)
+        topo = primeira_janela[0]["id"]
+        anteriores = conversas.mensagens(cena["conversa"], limite=3,
+                                         antes_de=topo)
+        # Nada se repete entre as duas janelas.
+        assert not ({m["id"] for m in anteriores}
+                    & {m["id"] for m in primeira_janela})
+        # E o que veio é mais VELHO que o topo.
+        assert all(m["criada_em"] <= primeira_janela[0]["criada_em"]
+                   for m in anteriores)
+
+    def test_tem_anteriores_diz_a_verdade_nos_dois_sentidos(self, cena):
+        for i in range(6):
+            banco.executar(
+                """INSERT INTO mensagem (conversa_id, direcao, autor, tipo,
+                                         conteudo, criada_em)
+                   VALUES (%s, 'entrada', 'cliente', 'texto', %s,
+                           now() + (%s || ' minutes')::interval)""",
+                (cena["conversa"], f"pag {i}", i + 1))
+
+        janela = conversas.mensagens(cena["conversa"], limite=3)
+        assert conversas.tem_anteriores(cena["conversa"], janela[0]["id"]) is True
+
+        tudo = conversas.mensagens(cena["conversa"], limite=500)
+        assert conversas.tem_anteriores(cena["conversa"], tudo[0]["id"]) is False
+
+
+class TestBuscaDentroDaConversaNoServidor:
+    """🚨 A BUSCA SUBIU PARA O SERVIDOR JUNTO COM A PAGINAÇÃO. Ela rodava no
+    navegador sobre o que estava carregado. Com a tela abrindo em 60, a mesma
+    busca passaria a dizer "nada com esse termo" sobre mensagem que existe
+    três telas acima -- e o usuário registrou em 25/08 que essa busca "está
+    ótima". Paginar sem mover a busca teria quebrado exatamente o que ele
+    elogiou.
+    """
+
+    def test_acha_mensagem_FORA_da_janela_inicial(self, cena):
+        alvo = "zzagulhanopalheiro"
+        banco.executar(
+            """INSERT INTO mensagem (conversa_id, direcao, autor, tipo,
+                                     conteudo, criada_em)
+               VALUES (%s, 'entrada', 'cliente', 'texto', %s,
+                       now() - interval '10 days')""",
+            (cena["conversa"], alvo))
+        for i in range(5):
+            banco.executar(
+                """INSERT INTO mensagem (conversa_id, direcao, autor, tipo,
+                                         conteudo, criada_em)
+                   VALUES (%s, 'entrada', 'cliente', 'texto', %s, now())""",
+                (cena["conversa"], f"ruido {i}"))
+
+        # A janela pequena NÃO contém a agulha...
+        janela = conversas.mensagens(cena["conversa"], limite=3)
+        assert alvo not in [m["conteudo"] for m in janela]
+        # ...e a busca acha assim mesmo.
+        achados = conversas.buscar_na_conversa(cena["conversa"], alvo)
+        assert len(achados) == 1
+
+    def test_termo_vazio_nao_devolve_a_conversa_inteira(self, cena):
+        assert conversas.buscar_na_conversa(cena["conversa"], "  ") == []
+
+    def test_devolve_em_ordem_de_conversa(self, cena):
+        for i in range(3):
+            banco.executar(
+                """INSERT INTO mensagem (conversa_id, direcao, autor, tipo,
+                                         conteudo, criada_em)
+                   VALUES (%s, 'entrada', 'cliente', 'texto', %s,
+                           now() + (%s || ' minutes')::interval)""",
+                (cena["conversa"], f"zzordem {i}", i + 1))
+        achados = conversas.buscar_na_conversa(cena["conversa"], "zzordem")
+        assert [a["id"] for a in achados] == sorted(a["id"] for a in achados)

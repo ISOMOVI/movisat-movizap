@@ -51,53 +51,121 @@ const enviando = ref(false)
    Pergunta diferente da busca da lista: lá é "com quem eu falei", aqui é
    "onde ele disse isso". Por isso são dois campos e não um.
 
-   ⚠️ RODA NO NAVEGADOR, sem rota nova: as mensagens já estão carregadas em
-   `aberta.mensagens`. Uma rota faria o servidor reler o que a tela já tem.
+   🚨 SUBIU PARA O SERVIDOR EM 25/08, junto com a paginação. Ela rodava aqui
+   no navegador, sobre `aberta.mensagens` -- e isso estava CERTO enquanto a
+   conversa inteira vinha de uma vez. No momento em que a tela passou a abrir
+   com 60 mensagens, a mesma busca passaria a responder "nada com esse termo"
+   sobre mensagem que existe três telas acima. É por isso que paginar e mover
+   a busca são um item só.
 
-   🚨 SÓ ACHA O QUE FOI CARREGADO. O backend manda no máximo
-   `teto_mensagens` e avisa em `truncada`. Numa conversa truncada, "não
-   encontrado" seria mentira -- a tela precisa dizer que está vendo um pedaço.
-   Nenhuma conversa passou do teto ainda (a maior tem 130 de 1.000). */
+   ⚠️ O servidor devolve as POSIÇÕES (ids). Se o acerto está fora da janela
+   carregada, a tela carrega para trás até alcançá-lo -- ver `irParaAchado`. */
 const buscaNaConversa = ref('')
 const achadoAtual = ref(0)
-
-const achadosNaConversa = computed(() => {
-  const alvo = buscaNaConversa.value.trim().toLowerCase()
-  if (!alvo || !aberta.value) return []
-  return aberta.value.mensagens
-    .filter((m) => (m.conteudo || '').toLowerCase().includes(alvo))
-    .map((m) => m.id)
-})
+const achadosNaConversa = ref([])
+const buscandoNaConversa = ref(false)
+/* ⚠️ O servidor devolve no máximo 200 acertos. Termo largo numa conversa
+   longa encosta nisso, e encostar calado é a mentira por omissão que o teto
+   de 1.000 mensagens fazia. */
+const achadosLimitados = ref(false)
 
 const idAchado = computed(() => achadosNaConversa.value[achadoAtual.value] ?? null)
 
 function casaNaConversa(m) {
-  const alvo = buscaNaConversa.value.trim().toLowerCase()
-  return Boolean(alvo && (m.conteudo || '').toLowerCase().includes(alvo))
+  return achadosNaConversa.value.includes(m.id)
 }
 
-function irParaAchado(passo) {
+async function buscarNaConversa() {
+  const alvo = buscaNaConversa.value.trim()
+  achadoAtual.value = 0
+  if (!alvo || !aberta.value) {
+    achadosNaConversa.value = []
+    achadosLimitados.value = false
+    return
+  }
+  buscandoNaConversa.value = true
+  try {
+    const r = await api.get(
+      `/api/conversas/${aberta.value.id}/buscar?termo=${encodeURIComponent(alvo)}`)
+    achadosNaConversa.value = (r.achados || []).map((a) => a.id)
+    achadosLimitados.value = Boolean(r.limitado)
+    if (achadosNaConversa.value.length) await irParaAchado(0)
+  } catch {
+    achadosNaConversa.value = []
+  } finally {
+    buscandoNaConversa.value = false
+  }
+}
+
+async function irParaAchado(passo) {
   const total = achadosNaConversa.value.length
   if (!total) return
   // Dá a volta nas duas direções: no último, "próximo" volta ao primeiro.
   achadoAtual.value = (achadoAtual.value + passo + total) % total
-  rolarAteAchado()
+  await rolarAteAchado()
 }
 
 async function rolarAteAchado() {
   await nextTick()
   const alvo = idAchado.value
   if (!alvo || !baloes.value) return
+
+  /* 🚨 O ACERTO PODE ESTAR ACIMA DO QUE ESTÁ CARREGADO. Sem isto, a busca
+     acharia (o servidor vê a conversa inteira) e a tela não teria para onde
+     rolar -- o contador diria "3/7" e nada se mexeria, que é pior do que não
+     achar. Carrega para trás até o balão existir, com um limite de voltas
+     para nunca virar laço infinito numa conversa gigante. */
+  let voltas = 0
+  while (!baloes.value.querySelector(`[data-mensagem="${alvo}"]`)
+         && aberta.value?.tem_anteriores && voltas < 25) {
+    await carregarAnteriores()
+    await nextTick()
+    voltas += 1
+  }
+
   const el = baloes.value.querySelector(`[data-mensagem="${alvo}"]`)
   if (el) el.scrollIntoView({ block: 'center', behavior: 'smooth' })
 }
 
-/* ⚠️ Zera ao trocar o termo: sem isto, apagar uma letra deixa o contador em
-   "7/2" e o próximo clique pula para um índice que não existe mais. */
+/* ⚠️ Espera a digitação parar: uma rota por tecla faria uma consulta ao banco
+   a cada letra. 300 ms é o intervalo em que a pessoa ainda não percebeu que
+   esperou. */
+let debounceBuscaConversa = null
 watch(buscaNaConversa, () => {
-  achadoAtual.value = 0
-  if (achadosNaConversa.value.length) rolarAteAchado()
+  clearTimeout(debounceBuscaConversa)
+  debounceBuscaConversa = setTimeout(buscarNaConversa, 300)
 })
+
+/* ---- carregar mensagens anteriores --------------------------------------
+   🚨 A tela abre com 60 e sobe de 200 em 200 (decisão do usuário, 25/08). O
+   teto de 1.000 saiu: a maior conversa da base já tinha 776, e teto que se
+   encosta silencia mensagem antiga. */
+const carregandoAnteriores = ref(false)
+
+async function carregarAnteriores() {
+  if (!aberta.value || carregandoAnteriores.value) return
+  if (!aberta.value.mensagens.length) return
+  carregandoAnteriores.value = true
+  const topo = aberta.value.mensagens[0].id
+  /* ⚠️ Guarda a altura ANTES de prepender: sem isto a lista salta e a pessoa
+     perde o lugar onde estava lendo -- o conteúdo novo entra por cima e
+     empurra tudo para baixo. */
+  const alturaAntes = baloes.value ? baloes.value.scrollHeight : 0
+  try {
+    const r = await api.get(
+      `/api/conversas/${aberta.value.id}/mensagens?antes_de=${topo}`)
+    aberta.value.mensagens = [...(r.mensagens || []), ...aberta.value.mensagens]
+    aberta.value.tem_anteriores = Boolean(r.tem_anteriores)
+    await nextTick()
+    if (baloes.value) {
+      baloes.value.scrollTop = baloes.value.scrollHeight - alturaAntes
+    }
+  } catch (e) {
+    erro.value = e instanceof ErroDeApi ? e.message : 'Não consegui carregar.'
+  } finally {
+    carregandoAnteriores.value = false
+  }
+}
 
 /* Participantes — quem mais está acompanhando esta conversa.
    🚨 Convidar NÃO dá acesso: qualquer atendente com ATD_1.2 já abre qualquer
@@ -396,6 +464,11 @@ async function abrir(id) {
     // marcações de um termo que ninguém procurou aqui.
     buscaNaConversa.value = ''
     achadoAtual.value = 0
+    // ⚠️ Os ACHADOS também. Antes de 25/08 eles eram `computed` e sumiam
+    // sozinhos com o termo; agora são estado, e estado não se limpa sozinho --
+    // sobrariam marcações de balão de outra conversa.
+    achadosNaConversa.value = []
+    achadosLimitados.value = false
     gaveta.value = false
     empresas.value = []
     empresasAbertas.value = false
@@ -1458,6 +1531,7 @@ function carregarMidiasDaConversa(c) {
                 placeholder="Buscar na conversa"
                 aria-label="Buscar na conversa"
                 @keyup.enter="irParaAchado(1)"
+                :disabled="!aberta"
               />
               <template v-if="buscaNaConversa.trim()">
                 <span class="pequeno fraco buscaconversa__conta">
@@ -1487,12 +1561,16 @@ function carregarMidiasDaConversa(c) {
                 </button>
               </template>
             </div>
-            <!-- 🚨 "Não encontrado" numa conversa truncada seria MENTIRA: a
-                 busca só vê o que foi carregado. Nenhuma conversa passou do
-                 teto ainda, mas o aviso nasce junto com a busca. -->
-            <p v-if="aberta.truncada" class="chip chip--aviso pequeno">
-              Mostrando as {{ aberta.teto_mensagens }} mensagens mais recentes —
-              a busca não alcança o que está antes disso.
+            <!-- ⚠️ O AVISO DE "TRUNCADA" SAIU. Ele existia porque a busca só
+                 via o que estava carregado; agora ela roda no servidor e
+                 alcança a conversa inteira, então "nada com esse termo" é
+                 verdade quando aparece. -->
+            <p v-if="buscandoNaConversa" class="linha pequeno fraco">
+              <span class="girando"></span> procurando…
+            </p>
+            <p v-else-if="achadosLimitados" class="chip chip--aviso pequeno">
+              Mostrando os primeiros {{ achadosNaConversa.length }} acertos —
+              use um termo mais específico.
             </p>
             <p v-else-if="buscaNaConversa.trim() && !achadosNaConversa.length"
                class="apagado pequeno">
@@ -1501,6 +1579,21 @@ function carregarMidiasDaConversa(c) {
           </div>
 
           <div ref="baloes" class="baloes">
+            <!-- 🚨 O TOPO DA CONVERSA. A tela abre com as 60 mais recentes e
+                 sobe de 200 em 200: o teto de 1.000 saiu quando a maior
+                 conversa da base chegou a 776. -->
+            <div v-if="aberta.tem_anteriores" class="anteriores">
+              <button
+                class="botao botao--pequeno botao--contorno"
+                type="button"
+                :disabled="carregandoAnteriores"
+                @click="carregarAnteriores"
+              >
+                <span v-if="carregandoAnteriores" class="girando"></span>
+                <i v-else class="bi bi-arrow-up" aria-hidden="true"></i>
+                Carregar {{ aberta.janela }} anteriores
+              </button>
+            </div>
             <div
               v-for="m in aberta.mensagens"
               :key="m.id"
@@ -2146,6 +2239,8 @@ function carregarMidiasDaConversa(c) {
 .busca { display: flex; align-items: center; gap: var(--e-2); }
 .busca .campo__entrada { flex: 1 1 auto; min-width: 0; }
 .campo--busca { margin-bottom: var(--e-2); }
+
+.anteriores { display: flex; justify-content: center; padding: var(--e-2) 0; }
 
 .buscaconversa {
   display: flex;

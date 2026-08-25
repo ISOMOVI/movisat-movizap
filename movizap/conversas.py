@@ -703,13 +703,14 @@ def conversa(conversa_id: int) -> dict | None:
     if not linha:
         return None
     linha["mensagens"] = mensagens(conversa_id)
-    # 🚨 A TELA PRECISA SABER QUE ESTÁ VENDO UM PEDAÇO. Quem busca dentro da
-    # conversa só acha o que foi carregado; sem este aviso, a busca diria "não
-    # encontrado" sobre mensagem que existe no banco -- que é pior do que não
-    # ter busca. Comparar com o teto é suficiente e não custa um COUNT: se
-    # voltou exatamente o teto, há chance de haver mais.
-    linha["truncada"] = len(linha["mensagens"]) >= TETO_MENSAGENS_NA_TELA
-    linha["teto_mensagens"] = TETO_MENSAGENS_NA_TELA
+    # 🚨 "TRUNCADA" SAIU, E ISSO É A MUDANÇA DE FUNDO. Ela avisava que a
+    # conversa passava do teto e que a busca não alcançava o resto -- um aviso
+    # que existia porque não havia como buscar o resto. Agora há: a busca roda
+    # no servidor e vê a conversa inteira, e o que a tela precisa saber é só
+    # se ainda há mensagem ACIMA do topo, para oferecer "carregar anteriores".
+    primeira = linha["mensagens"][0]["id"] if linha["mensagens"] else None
+    linha["tem_anteriores"] = tem_anteriores(conversa_id, primeira)
+    linha["janela"] = JANELA_ANTERIORES
     # Os dados da empresa, quando há vínculo. É o conteúdo do painel lateral:
     # o mesmo que se vê ao clicar no contato dentro do WhatsApp.
     linha["empresa"] = _empresa_da_conversa(linha)
@@ -857,21 +858,33 @@ def desvincular(conversa_id: int) -> dict:
     return {"ok": True}
 
 
-TETO_MENSAGENS_NA_TELA = 1000
+# 🚨 NÃO EXISTE MAIS TETO DE CONVERSA. Havia `TETO_MENSAGENS_NA_TELA = 1000`,
+# e a conversa inteira vinha de uma vez. Em 25/08 a maior conversa da base
+# chegou a **776 mensagens** -- 78% do teto, contra as 130 de quando o número
+# foi escrito. Encostar no teto silenciaria mensagem antiga e faria a busca
+# dizer "não encontrado" sobre o que existe.
+#
+# Decisão do usuário em 25/08: abre com as 60 mais recentes e sobe de 200 em
+# 200, sem teto. Quem quiser o começo de uma conversa de 3.000 chega lá.
+JANELA_INICIAL = 60
+JANELA_ANTERIORES = 200
 
 
-def mensagens(conversa_id: int, limite: int = TETO_MENSAGENS_NA_TELA) -> list[dict]:
-    """⚠️ Ordenado pela hora do PROVEDOR, não pela de chegada: fora de ordem é
+def mensagens(conversa_id: int, limite: int = JANELA_INICIAL,
+              antes_de: int | None = None) -> list[dict]:
+    """A janela de mensagens da conversa, da mais recente para trás.
+
+    ⚠️ Ordenado pela hora do PROVEDOR, não pela de chegada: fora de ordem é
     normal no WhatsApp, e ordenar por chegada mostraria a conversa embaralhada.
 
-    ⚠️ O TETO É NOSSO, NÃO DO WHATSAPP. Era 300 -- um padrão que eu escrevi, e
-    que o frontend nunca sobrescreveu. Subiu para 1.000 por decisão do usuário
-    em 12/08. A maior conversa da base tem 130 mensagens, então é folga.
+    `antes_de` é o id da mensagem mais ANTIGA que a tela já tem: a próxima
+    página é o que vem antes dela. Cursor, não `OFFSET` -- com offset, uma
+    mensagem nova chegando entre dois cliques empurra tudo e a pessoa vê a
+    mesma linha duas vezes, ou pula uma.
 
-    🚨 QUEM BUSCA DENTRO DA CONVERSA SÓ ACHA O QUE FOI CARREGADO. Por isso
-    `conversa()` devolve `truncada`: passando do teto, a tela precisa DIZER que
-    está vendo um pedaço, senão a busca responde "não encontrado" sobre
-    mensagem que existe.
+    🚨 O PAR (criada_em, id) É O CURSOR, não só a data. Duas mensagens podem
+    ter o mesmo `criada_em` -- o WhatsApp entrega em lote --, e cortar só pela
+    data perderia uma delas em silêncio.
     """
     # 🚨 O TETO CORTAVA PELO LADO ERRADO. `ORDER BY criada_em ASC LIMIT n`
     # devolve as n mensagens MAIS ANTIGAS -- numa conversa acima do teto, o
@@ -898,10 +911,65 @@ def mensagens(conversa_id: int, limite: int = TETO_MENSAGENS_NA_TELA) -> list[di
                  LEFT JOIN midia md ON md.id = m.midia_id
                  LEFT JOIN mensagem q ON q.id = m.citada_id
                 WHERE m.conversa_id = %s
+                  AND (%s::bigint IS NULL OR
+                       (m.criada_em, m.id) <
+                       (SELECT criada_em, id FROM mensagem WHERE id = %s))
                 ORDER BY m.criada_em DESC, m.id DESC
                 LIMIT %s
            ) recentes
-           ORDER BY criada_em, id""", (conversa_id, limite))
+           ORDER BY criada_em, id""",
+        (conversa_id, antes_de, antes_de, limite))
+
+
+def tem_anteriores(conversa_id: int, antes_de: int | None) -> bool:
+    """Há mensagem antes da que a tela tem no topo?
+
+    ⚠️ EXISTE PARA A TELA NÃO MENTIR NOS DOIS SENTIDOS: sem isto, ou ela
+    mostra "carregar anteriores" numa conversa que já está inteira na tela, ou
+    esconde o botão quando ainda há coisa para trás. `EXISTS` não conta a
+    conversa inteira -- para na primeira linha.
+    """
+    if antes_de is None:
+        return False
+    return banco.um(
+        """SELECT EXISTS (
+             SELECT 1 FROM mensagem m
+              WHERE m.conversa_id = %s
+                AND (m.criada_em, m.id) <
+                    (SELECT criada_em, id FROM mensagem WHERE id = %s)
+           ) AS tem""", (conversa_id, antes_de))["tem"]
+
+
+# ⚠️ TETO DOS ACERTOS, e ele é DECLARADO. Buscar "a" numa conversa de 776
+# mensagens casa com quase tudo, e devolver tudo não ajuda ninguém a achar
+# nada. O que não se pode é devolver o teto CALADO -- foi assim que o teto de
+# 1.000 mensagens escondeu conversa antiga por semanas. A rota devolve
+# `limitado`, e a tela diz que está vendo os primeiros.
+TETO_ACHADOS_NA_CONVERSA = 200
+
+
+def buscar_na_conversa(conversa_id: int, termo: str,
+                       limite: int = TETO_ACHADOS_NA_CONVERSA) -> list[dict]:
+    """Onde, dentro desta conversa, alguém disse isso.
+
+    🚨 SUBIU PARA O SERVIDOR EM 25/08, JUNTO COM A PAGINAÇÃO. A busca rodava
+    no navegador, sobre `aberta.mensagens` -- o que estava carregado. Enquanto
+    a conversa inteira vinha de uma vez, isso era correto e rápido. No momento
+    em que a tela passou a abrir com 60, a mesma busca passaria a responder
+    "nada com esse termo" sobre mensagem que existe três telas acima.
+    É por isso que paginação e busca são um item só, e não dois.
+
+    ⚠️ Devolve a POSIÇÃO de cada acerto, não o texto: a tela já sabe desenhar
+    o balão, e o que ela precisa é saber para onde rolar e quantos há.
+    """
+    termo = (termo or "").strip()
+    if not termo:
+        return []
+    return banco.varios(
+        """SELECT id, criada_em FROM mensagem
+            WHERE conversa_id = %s AND conteudo ILIKE %s
+            ORDER BY criada_em, id
+            LIMIT %s""", (conversa_id, f"%{termo}%", limite))
 
 
 def assumir(conversa_id: int, atendente_id: int) -> dict:

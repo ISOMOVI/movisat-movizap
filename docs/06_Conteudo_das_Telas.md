@@ -917,3 +917,42 @@ que já existe; `iniciar_conversa` fala com quem ainda não escreveu.
 `id_externo`, e a segunda mensagem sumia. Não era defeito do código — é a
 trava de idempotência (`UNIQUE` em `mensagem.id_externo`) funcionando, porque
 o Evolution reentrega. Mock que repete id acusa o código por defeito do teste.
+
+### ✅ Validado em 25/08 — rolagem e busca dentro da conversa
+
+O teto de 1.000 mensagens **saiu**. `TETO_MENSAGENS_NA_TELA` não existe mais, e
+com ele saiu o aviso de "truncada" — ele existia porque não havia como buscar o
+resto, e agora há.
+
+| O quê | Confirmado na conversa 766, a maior (776 mensagens) |
+|---|---|
+| Abrir | 60 mensagens, `tem_anteriores: true` |
+| Carregar anteriores | 200 por vez, e diz se ainda há mais |
+| Busca | roda no servidor e alcança a conversa inteira |
+
+**Paginação por cursor, não por `OFFSET`.** O cursor é o par
+`(criada_em, id)` da mensagem mais antiga que a tela tem. Com offset, uma
+mensagem nova chegando entre dois cliques empurra tudo e a pessoa vê a mesma
+linha duas vezes, ou pula uma. E o par, não só a data: duas mensagens podem ter
+o mesmo `criada_em` — o WhatsApp entrega em lote — e cortar pela data perderia
+uma delas em silêncio.
+
+🚨 **O acerto pode estar acima do que está carregado.** A busca vê a conversa
+inteira; a tela, não. Sem tratar isso, o contador diria "3/7" e nada se
+mexeria — pior do que não achar. `rolarAteAchado` carrega para trás até o balão
+existir, com limite de voltas para nunca virar laço infinito.
+
+⚠️ **O scroll é preservado ao carregar anteriores.** Guarda-se a altura antes
+de prepender e recompõe-se depois; sem isso o conteúdo novo entra por cima e a
+pessoa perde o lugar onde estava lendo.
+
+### 🚨 O teto que quase se repetiu
+
+A busca no servidor devolvia **exatamente 200** acertos numa conversa longa — o
+próprio limite dela, calado. É a **mesma mentira por omissão** do teto de
+1.000: quem procura conclui que achou tudo. Corrigido no mesmo bloco:
+`TETO_ACHADOS_NA_CONVERSA` é declarado, a rota devolve `limitado`, e a tela
+diz *"mostrando os primeiros 200 acertos"*.
+
+Fica registrado porque o padrão é o que importa: **todo teto tem de aparecer na
+resposta.** Um teto que ninguém vê não é limite, é dado sumindo.

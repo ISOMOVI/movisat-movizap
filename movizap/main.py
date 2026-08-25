@@ -1042,6 +1042,50 @@ def ver_conversa(conversa_id: int,
     return achada
 
 
+@app.get("/api/conversas/{conversa_id}/mensagens")
+def mensagens_anteriores(conversa_id: int, antes_de: int,
+                         limite: int = conversas.JANELA_ANTERIORES,
+                         usuario: dict = Depends(auth.requer_tela("ATD_1.2"))):
+    """A página anterior de mensagens — o "carregar anteriores" do topo.
+
+    ⚠️ `antes_de` é OBRIGATÓRIO. Sem ele esta rota devolveria a mesma coisa
+    que abrir a conversa, e viraria um segundo caminho para o mesmo dado --
+    dois caminhos para o mesmo dado é como eles divergem.
+
+    🚨 O teto do `limite` é da ROTA, não da tela. Sem ele, `?limite=999999`
+    devolveria a conversa inteira num pedido, que é exatamente o que a
+    paginação existe para evitar.
+    """
+    limite = max(1, min(limite, conversas.JANELA_ANTERIORES))
+    anteriores = conversas.mensagens(conversa_id, limite=limite,
+                                     antes_de=antes_de)
+    topo = anteriores[0]["id"] if anteriores else antes_de
+    return {"mensagens": anteriores,
+            "tem_anteriores": conversas.tem_anteriores(conversa_id, topo)}
+
+
+@app.get("/api/conversas/{conversa_id}/buscar")
+def buscar_na_conversa(conversa_id: int, termo: str = "",
+                       usuario: dict = Depends(auth.requer_tela("ATD_1.2"))):
+    """Onde, DENTRO desta conversa, alguém disse isso.
+
+    🚨 É OUTRA PERGUNTA QUE A BUSCA DA LISTA. Lá é "com quem eu falei"; aqui é
+    "onde ele disse isso". Por isso são duas rotas e dois campos na tela.
+
+    ⚠️ Subiu do navegador para cá em 25/08, junto com a paginação: a busca
+    antiga só via o que estava carregado, e com a tela abrindo em 60 ela
+    passaria a não achar o que existe.
+    """
+    achados = conversas.buscar_na_conversa(conversa_id, termo)
+    # 🚨 O LIMITE PRECISA APARECER. Devolver 200 acertos calados quando há 400
+    # é a mesma mentira por omissão que o teto de 1.000 fazia com as
+    # mensagens: quem procura conclui que achou tudo. A tela diz que está
+    # vendo os primeiros.
+    return {"achados": achados,
+            "limitado": len(achados) >= conversas.TETO_ACHADOS_NA_CONVERSA,
+            "teto": conversas.TETO_ACHADOS_NA_CONVERSA}
+
+
 class Vinculo(BaseModel):
     cliente_id: int | None = None
     contato_id: int | None = None
