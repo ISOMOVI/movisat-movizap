@@ -826,3 +826,89 @@ lote vem ANTES do interruptor por tipo, e não depois.
 
 ⚠️ O `DEFAULT` era `'lead'` desde a 001. `lead` é uma afirmação — "ainda não
 comprou" —, e contato recém-nascido não sustenta afirmação nenhuma.
+
+---
+
+## O que entrou em 2026-08-25 — migrações 030 a 034
+
+⚠️ **Esta seção existe porque eu quase a esqueci.** As migrações 029 e 031
+foram documentadas na hora; as outras quatro ficaram só no arquivo `.sql` até
+o fim do dia. Modelo de dados que não está aqui é modelo que ninguém acha —
+e é a mesma dívida que o `docs/03` prende com teste e este doc não prende.
+
+### `email_conta.atendente_id` — a caixa tem dono (030)
+
+```
+Objetivo:     cada atendente ver as caixas que ELE conectou, e só elas
+Hoje:         = o objetivo. `atendente_id NOT NULL`, e UNIQUE (atendente_id,
+              endereco) no lugar do UNIQUE(endereco)
+Por quê:      decisão do usuário em 25/08 -- "cada um vê a que logou no seu
+              acesso... a Erika poderia logar o sac@ na caixa dela também, na
+              outra aba". Antecipada do bloco 6 porque outra pessoa entraria
+              no painel e NENHUMA rota de e-mail filtrava por conta: o
+              próximo login abriria a caixa do owner inteira. Não dava erro
+Reavaliar se: alguém precisar ver caixa que não conectou -- aí quem concede é
+              o owner, por tabela de acesso, e não se duplica a caixa
+```
+
+🚨 **O UNIQUE de `endereco` SAIU, e o custo está declarado:** duas pessoas com
+o mesmo endereço são duas contas sincronizadas, e a mesma mensagem fica
+guardada duas vezes (`email_mensagem` é UNIQUE por `(conta_id, id_externo)`, e
+continua certo assim). É o preço de "cada um vê a que logou".
+
+### `relacao_automacao` e `conversa.boas_vindas_em` (032)
+
+| Campo | Nota |
+|---|---|
+| `relacao` | PK. Os oito valores de `contato.relacao` **mais `sem_cadastro`** |
+| `boas_vindas_ligado` | aciona de verdade. Nasce **false** |
+| `boas_vindas_texto` | sem texto não se liga: ligado e vazio mandaria mensagem em branco |
+| `ia_ligada` | **guardado, não acionado** — não há motor no painel |
+
+🚨 **`sem_cadastro` É LINHA AQUI E NÃO É VALOR DE `contato.relacao`.** 64% das
+conversas chegam de número sem contato nenhum (211 de 332, medido em 25/08) —
+é o caso majoritário, e sem esta linha ele não teria como ser configurado.
+
+🚨 **`conversa.boas_vindas_em` é a trava de "uma vez só", e é do BANCO.** O
+`UPDATE ... WHERE boas_vindas_em IS NULL` só passa uma vez mesmo com dois
+processos entrando juntos — e o Evolution reentrega webhook por desenho. Trava
+em `if` perderia a corrida e o cliente receberia a saudação duas vezes.
+
+⚠️ **Marca ANTES de enviar.** Falha depois da marca custa uma saudação; na
+ordem inversa, uma falha entre enviar e marcar dispararia outra saudação na
+próxima mensagem, e mais outra.
+
+### `email_mensagem.estrela` (033)
+
+Reflexo local do marcador `STARRED`. O marcador continua sendo a verdade do
+Google; a coluna existe porque a lista lê `email_mensagem` direto, e um
+`EXISTS` por linha custaria uma subconsulta por mensagem numa tela que carrega
+60 de uma vez.
+
+🚨 **A tela desenhava a estrela a partir de um campo que o `SELECT` não
+trazia.** Toda estrela aparecia vazia, em qualquer estado, com a rota
+respondendo 200 e a lista completa em tudo o mais. Achado exercitando, não por
+teste. Ficou a regra, com teste que a prende: **campo que a tela desenha tem de
+estar na consulta que a tela pede.**
+
+### `mensagem.reacao` e `mensagem.encaminhada_de` (034)
+
+| Campo | Nota |
+|---|---|
+| `reacao` | O emoji com que NÓS reagimos. Uma coluna, não tabela: no WhatsApp cada participante tem UMA reação por mensagem, e do nosso lado só há um participante |
+| `encaminhada_de` | FK para `mensagem`, `ON DELETE SET NULL`. NULL = escrita aqui |
+
+⚠️ **Reação do CLIENTE ainda não é tratada:** chega como `reactionMessage` e
+cai no ramo de "tipo ainda não tratado". A migração não finge que esse
+trabalho existe.
+
+🚨 **A chave do WhatsApp (`{remoteJid, fromMe, id}`) NÃO é guardada.** Reagir e
+citar a reconstroem de `id_externo` + `direcao` + o destino da conversa —
+guardar o trio seria copiar o que já está aqui, contra o princípio 1 deste
+documento.
+
+### `config.jornada_ativa` — sem migração, e de propósito
+
+O interruptor da jornada é **um valor para o sistema inteiro**, e a tabela
+`config` existe exatamente para isso desde a 001. Nasce desligado: monta-se a
+escala com calma, e ligar é ato separado (decisão do usuário em 25/08).
