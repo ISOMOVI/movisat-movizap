@@ -199,6 +199,17 @@ def salas(eu: int) -> list[dict]:
                    WHERE m2.sala_id = s.id AND m2.atendente_id <> %s
                    LIMIT 1)
                END AS com,
+               -- 🚨 O ESTADO DA OUTRA PESSOA. `atendente.estado` existe desde
+               -- a migração 001 e NENHUMA tela o usava. Num canal interno é
+               -- ele que responde a pergunta que se faz antes de escrever:
+               -- adianta chamar agora? Só na sala direta -- num grupo de
+               -- cinco, o estado de quem?
+               CASE WHEN s.tipo = 'direta' THEN
+                 (SELECT a.estado FROM chat_membro m4
+                    JOIN atendente a ON a.id = m4.atendente_id
+                   WHERE m4.sala_id = s.id AND m4.atendente_id <> %s
+                   LIMIT 1)
+               END AS com_estado,
                (SELECT count(*) FROM chat_membro m3
                  WHERE m3.sala_id = s.id) AS qtd_membros,
                u.texto  AS ultima_mensagem,
@@ -217,7 +228,15 @@ def salas(eu: int) -> list[dict]:
           LEFT JOIN atendente ua ON ua.id = u.atendente_id
          WHERE m.atendente_id = %s
          ORDER BY COALESCE(u.criada_em, s.criada_em) DESC
-        """, (eu, eu, eu))
+        """,
+        # 🚨 QUATRO `%s`, NÃO TRÊS. O `com_estado` acrescentou um placeholder no
+        # meio da consulta, e psycopg casa por POSIÇÃO.
+        #
+        # ⚠️ E ESTE COMENTÁRIO FICA FORA DAS ASPAS. Escrevi-o dentro da string
+        # na primeira tentativa: o `%s` do próprio texto virou um QUINTO
+        # placeholder e o psycopg recusou a consulta. Comentário dentro de SQL
+        # é SQL.
+        (eu, eu, eu, eu))
 
 
 def e_membro(sala_id: int, eu: int) -> bool:
@@ -311,6 +330,6 @@ def com_quem_falar(eu: int) -> list[dict]:
     vínculo não aparece como destinatário, porque não teria como responder.
     """
     return banco.varios(
-        """SELECT id, nome, login FROM atendente
+        """SELECT id, nome, login, estado FROM atendente
             WHERE ativo AND id <> %s AND btrim(COALESCE(email, '')) <> ''
             ORDER BY lower(nome)""", (eu,))

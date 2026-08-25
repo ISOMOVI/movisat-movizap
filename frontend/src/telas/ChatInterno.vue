@@ -12,6 +12,7 @@
 import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 
 import { api, ErroDeApi } from '../api/cliente.js'
+import { corDaInicial, iniciais } from '../util/avatar.js'
 
 const salas = ref([])
 const contatos = ref([])
@@ -28,6 +29,116 @@ let timer = null
 const naoLidasTotal = computed(
   () => salas.value.reduce((s, x) => s + (x.nao_lidas || 0), 0),
 )
+
+/* ---- a lista, em duas seções (25/08) -------------------------------------
+   🚨 PESSOAS E GRUPOS ESTAVAM MISTURADOS numa coluna só, e embaixo dela havia
+   uma FILEIRA DE BOTÕES com o nome de cada atendente. Com 5 pessoas já ficava
+   estranho; com 15 seria impraticável. Agora são duas seções e uma busca --
+   que é como todo canal interno se organiza, e por isso ninguém precisa
+   aprender. */
+const filtro = ref('')
+
+function _casa(texto) {
+  const alvo = filtro.value.trim().toLowerCase()
+  if (!alvo) return true
+  return (texto || '').toLowerCase().includes(alvo)
+}
+
+const pessoas = computed(
+  () => salas.value.filter((s) => s.tipo === 'direta' && _casa(s.com)),
+)
+const grupos = computed(
+  () => salas.value.filter((s) => s.tipo === 'grupo' && _casa(s.nome)),
+)
+
+/* Quem ainda não tem conversa aberta comigo: entra na busca, não numa fileira
+   permanente de botões. */
+const semConversa = computed(() => {
+  const jaTem = new Set(salas.value.filter((s) => s.tipo === 'direta')
+                                   .map((s) => s.com))
+  return contatos.value.filter((c) => !jaTem.has(c.nome) && _casa(c.nome))
+})
+
+/* 🚨 `atendente.estado` EXISTE DESDE A MIGRAÇÃO 001 E NENHUMA TELA O USAVA.
+   Num canal interno é ele que responde a pergunta que se faz ANTES de
+   escrever: adianta chamar agora? */
+const ESTADO = {
+  disponivel: { rotulo: 'disponível', cor: 'var(--ok)' },
+  ausente: { rotulo: 'ausente', cor: 'var(--aviso)' },
+  nao_perturbe: { rotulo: 'não perturbe', cor: 'var(--erro)' },
+}
+
+function corDoEstado(estado) {
+  return (ESTADO[estado] || {}).cor || 'var(--texto-apagado)'
+}
+
+function rotuloDoEstado(estado) {
+  return (ESTADO[estado] || {}).rotulo || 'sem estado'
+}
+
+/* ---- separador de dia ----------------------------------------------------
+   Sem ele o fio é um bloco só, e "14:32" não diz se foi hoje ou em julho. */
+function _diaDe(iso) {
+  return iso ? new Date(iso).toDateString() : ''
+}
+
+function comecaODia(m, i) {
+  if (i === 0) return true
+  return _diaDe(m.criada_em) !== _diaDe(mensagens.value[i - 1].criada_em)
+}
+
+function rotuloDoDia(iso) {
+  if (!iso) return ''
+  const d = new Date(iso)
+  const hoje = new Date()
+  const ontem = new Date()
+  ontem.setDate(hoje.getDate() - 1)
+  if (d.toDateString() === hoje.toDateString()) return 'Hoje'
+  if (d.toDateString() === ontem.toDateString()) return 'Ontem'
+  const mesmoAno = d.getFullYear() === hoje.getFullYear()
+  return d.toLocaleDateString('pt-BR', mesmoAno
+    ? { day: '2-digit', month: 'long' }
+    : { day: '2-digit', month: 'long', year: 'numeric' })
+}
+
+/* Mensagens seguidas da mesma pessoa viram um bloco: repetir o nome em cada
+   balão é o que dá cara de log de sistema. */
+function mesmoAutor(m, i) {
+  if (i === 0) return false
+  const anterior = mensagens.value[i - 1]
+  return anterior.autor === m.autor
+    && anterior.minha === m.minha
+    && !comecaODia(m, i)
+}
+
+/* ---- emoji ---------------------------------------------------------------
+   🚨 GRADE PRÓPRIA, ZERO DEPENDÊNCIA. Emoji é caractere de texto: biblioteca
+   só serve para PROCURAR. `emoji-picker-element` custa ~40 KB e
+   `vue3-emoji-picker` ~90 KB -- num bundle de 300 KB, para inserir um
+   caractere. Com os que aparecem em atendimento, a grade resolve e serve os
+   dois compositores. Se um dia faltar busca por nome, troca-se por uma
+   biblioteca sem mexer no resto. */
+const EMOJIS = [
+  { grupo: 'Rosto', itens: ['😀', '😄', '😁', '😊', '🙂', '😉', '😍', '🤔',
+    '😅', '😂', '🥲', '😴', '😐', '🙄', '😕', '😞', '😢', '😭', '😤', '😡',
+    '🤯', '😱', '🤗', '🤝'] },
+  { grupo: 'Gesto', itens: ['👍', '👎', '👌', '✌️', '🙏', '👏', '💪', '🫡',
+    '👋', '🤞', '☝️', '✍️'] },
+  { grupo: 'Trabalho', itens: ['✅', '❌', '⚠️', '❗', '❓', '📌', '📎', '📅',
+    '⏰', '📞', '📱', '💻', '📧', '🧾', '💰', '📊', '🔧', '🚗', '🛠️', '🔑'] },
+  { grupo: 'Sinal', itens: ['🔴', '🟠', '🟡', '🟢', '🔵', '⚫', '⚪', '🔥',
+    '⭐', '💡', '🎯', '🚨'] },
+]
+const emojiAberto = ref(false)
+
+function porEmoji(e) {
+  texto.value = (texto.value || '') + e
+}
+
+function fecharEmojiSeForaDele(evento) {
+  if (!emojiAberto.value) return
+  if (!evento.target.closest('.emoji')) emojiAberto.value = false
+}
 
 async function carregar({ silencioso = false } = {}) {
   if (!silencioso) carregando.value = true
@@ -184,6 +295,7 @@ async function rolarParaOFim() {
 }
 
 onMounted(async () => {
+  document.addEventListener('click', fecharEmojiSeForaDele)
   await carregar()
   timer = setInterval(async () => {
     const estava = estaNoFim()
@@ -195,7 +307,10 @@ onMounted(async () => {
   }, 5000)
 })
 
-onUnmounted(() => clearInterval(timer))
+onUnmounted(() => {
+  clearInterval(timer)
+  document.removeEventListener('click', fecharEmojiSeForaDele)
+})
 
 watch(sala, () => { texto.value = '' })
 
@@ -219,10 +334,12 @@ function quando(iso) {
     <header class="tela__cabecalho">
       <div>
         <h1>Chat interno</h1>
-        <p class="fraco pequeno">
-          Conversa entre atendentes. <strong>Não sai para o cliente</strong> —
-          para falar com ele, use o Atendimento.
-        </p>
+        <!-- 🚨 UM AVISO, NÃO TRÊS. "Não chega ao cliente" aparecia no
+             cabeçalho da tela, no chip da conversa e embaixo do botão de
+             enviar. Repetir três vezes na mesma tela não avisa mais: avisa
+             menos, porque vira decoração que o olho pula. Fica o chip, que é
+             o que está à vista NA HORA de escrever. -->
+        <p class="fraco pequeno">Conversa entre atendentes.</p>
       </div>
       <span v-if="naoLidasTotal" class="chip chip--acento">
         {{ naoLidasTotal }} não lida{{ naoLidasTotal > 1 ? 's' : '' }}
@@ -233,102 +350,156 @@ function quando(iso) {
     <p v-if="recado" class="aviso aviso--ok" role="status">{{ recado }}</p>
 
     <div class="colunas">
-      <!-- ─────────────────────────────────────────────── quem -->
+      <!-- ─────────────────────────────────────────── pessoas e grupos -->
       <section class="cartao coluna">
-        <header class="cartao__cabecalho"><strong>Conversas</strong></header>
+        <div class="cartao__corpo ci__topo">
+          <!-- 🚨 UMA BUSCA NO LUGAR DA FILEIRA DE BOTÕES. Havia um botão por
+               atendente embaixo da lista: com 5 já ficava estranho, com 15
+               seria impraticável. Buscar serve para achar conversa E para
+               começar uma nova, que é a mesma intenção. -->
+          <label class="busca">
+            <span class="so-leitor">Buscar pessoa ou grupo</span>
+            <input
+              v-model="filtro"
+              class="campo__entrada"
+              type="search"
+              placeholder="Buscar pessoa ou grupo…"
+            />
+          </label>
+          <button
+            class="botao botao--pequeno botao--contorno botao--icone"
+            type="button"
+            title="Criar grupo"
+            aria-label="Criar grupo"
+            @click="criandoGrupo = !criandoGrupo"
+          >
+            <i class="bi bi-people" aria-hidden="true"></i>
+          </button>
+        </div>
+
+        <div v-if="criandoGrupo" class="cartao__corpo pilha grupo__novo">
+          <label class="campo">
+            <span class="campo__rotulo">Nome do grupo</span>
+            <input v-model="nomeGrupo" class="campo__entrada" maxlength="60"
+                   placeholder="Plantão do fim de semana" />
+          </label>
+          <p class="campo__rotulo">Quem entra</p>
+          <label v-for="c in contatos" :key="c.id" class="grupo__opcao">
+            <input v-model="escolhidos" type="checkbox" :value="c.id" />
+            <span>{{ c.nome }}</span>
+          </label>
+          <p class="apagado pequeno">Você entra automaticamente.</p>
+          <div class="linha linha--quebra">
+            <button class="botao botao--pequeno botao--contorno" type="button"
+                    @click="criandoGrupo = false; escolhidos = []">
+              Cancelar
+            </button>
+            <button
+              class="botao botao--pequeno botao--primario"
+              type="button"
+              :disabled="!nomeGrupo.trim() || !escolhidos.length || abrindo"
+              @click="criarGrupo"
+            >
+              Criar
+            </button>
+          </div>
+        </div>
 
         <p v-if="carregando" class="linha fraco cartao__corpo">
           <span class="girando"></span> Lendo…
         </p>
 
-        <ul v-else-if="salas.length" class="salas">
-          <li v-for="s in salas" :key="s.id">
+        <div v-else class="ci__lista">
+          <template v-if="pessoas.length">
+            <p class="ci__secao">Pessoas</p>
             <button
-              class="sala"
-              :class="{ 'sala--aberta': sala && sala.id === s.id }"
+              v-for="sl in pessoas"
+              :key="sl.id"
+              class="ci__sala"
+              :class="{ 'ci__sala--aberta': sala && sala.id === sl.id }"
               type="button"
-              @click="abrir(s.id)"
+              @click="abrir(sl.id)"
             >
-              <div class="sala__topo">
-                <strong>
-                  <i v-if="s.tipo === 'grupo'" class="bi bi-people" aria-hidden="true"></i>
-                  {{ s.com || s.nome || 'conversa' }}
-                </strong>
-                <span class="apagado pequeno">{{ quando(s.ultima_em) }}</span>
-              </div>
-              <p v-if="s.tipo === 'grupo'" class="apagado pequeno sala__previa">
-                {{ s.qtd_membros }} pessoas
-              </p>
-              <p class="apagado pequeno sala__previa">
-                <span v-if="s.ultimo_autor" class="fraco">{{ s.ultimo_autor }}: </span>
-                {{ s.ultima_mensagem || '(sem mensagem ainda)' }}
-              </p>
-              <span v-if="s.nao_lidas" class="chip chip--acento chip--pequeno">
-                {{ s.nao_lidas }}
+              <span class="ci__avatar" :style="{ background: corDaInicial(sl.com) }"
+                    aria-hidden="true">
+                {{ iniciais(sl.com) }}
+                <span class="ci__estado"
+                      :style="{ background: corDoEstado(sl.com_estado) }"
+                      :title="rotuloDoEstado(sl.com_estado)"></span>
               </span>
+              <span class="ci__corpo">
+                <span class="ci__topo1">
+                  <strong class="ci__nome">{{ sl.com }}</strong>
+                  <span class="apagado pequeno">{{ quando(sl.ultima_em) }}</span>
+                </span>
+                <span class="ci__previa pequeno apagado">
+                  <span v-if="sl.ultimo_autor" class="fraco">{{ sl.ultimo_autor }}: </span>
+                  {{ sl.ultima_mensagem || 'sem mensagem ainda' }}
+                </span>
+              </span>
+              <span v-if="sl.nao_lidas" class="ci__badge">{{ sl.nao_lidas }}</span>
             </button>
-          </li>
-        </ul>
+          </template>
 
-        <div v-else class="vazio">
-          <i class="bi bi-chat-left-dots vazio__icone" aria-hidden="true"></i>
-          <p class="vazio__titulo">Nenhuma conversa ainda</p>
-          <p>Escolha alguém abaixo para começar.</p>
-        </div>
-
-        <div class="cartao__corpo pilha">
-          <p class="campo__rotulo">Falar com</p>
-          <div class="linha linha--quebra">
+          <template v-if="grupos.length">
+            <p class="ci__secao">Grupos</p>
             <button
-              v-for="c in contatos"
+              v-for="sl in grupos"
+              :key="sl.id"
+              class="ci__sala"
+              :class="{ 'ci__sala--aberta': sala && sala.id === sl.id }"
+              type="button"
+              @click="abrir(sl.id)"
+            >
+              <span class="ci__avatar ci__avatar--grupo" aria-hidden="true">
+                <i class="bi bi-people"></i>
+              </span>
+              <span class="ci__corpo">
+                <span class="ci__topo1">
+                  <strong class="ci__nome">{{ sl.nome }}</strong>
+                  <span class="apagado pequeno">{{ quando(sl.ultima_em) }}</span>
+                </span>
+                <span class="ci__previa pequeno apagado">
+                  <span v-if="sl.ultimo_autor" class="fraco">{{ sl.ultimo_autor }}: </span>
+                  {{ sl.ultima_mensagem || `${sl.qtd_membros} pessoas` }}
+                </span>
+              </span>
+              <span v-if="sl.nao_lidas" class="ci__badge">{{ sl.nao_lidas }}</span>
+            </button>
+          </template>
+
+          <!-- ⚠️ Quem ainda não tem conversa aparece SÓ quando se procura ou
+               quando não há conversa nenhuma: lista permanente de "todos os
+               atendentes" é o que enchia a coluna antes. -->
+          <template v-if="semConversa.length && (filtro.trim() || !salas.length)">
+            <p class="ci__secao">Começar conversa</p>
+            <button
+              v-for="c in semConversa"
               :key="c.id"
-              class="botao botao--pequeno botao--contorno"
+              class="ci__sala"
               type="button"
               :disabled="abrindo"
               @click="falarCom(c.id)"
             >
-              <i class="bi bi-person" aria-hidden="true"></i> {{ c.nome }}
+              <span class="ci__avatar" :style="{ background: corDaInicial(c.nome) }"
+                    aria-hidden="true">
+                {{ iniciais(c.nome) }}
+                <span class="ci__estado" :style="{ background: corDoEstado(c.estado) }"
+                      :title="rotuloDoEstado(c.estado)"></span>
+              </span>
+              <span class="ci__corpo">
+                <span class="ci__nome">{{ c.nome }}</span>
+                <span class="ci__previa pequeno apagado">
+                  {{ rotuloDoEstado(c.estado) }}
+                </span>
+              </span>
             </button>
-          </div>
-          <p v-if="!contatos.length" class="apagado pequeno">
-            Não há outro atendente ativo com e-mail cadastrado.
-          </p>
+          </template>
 
-          <button
-            v-if="contatos.length && !criandoGrupo"
-            class="botao botao--pequeno botao--contorno"
-            type="button"
-            @click="criandoGrupo = true"
-          >
-            <i class="bi bi-people" aria-hidden="true"></i> Criar grupo
-          </button>
-
-          <div v-if="criandoGrupo" class="pilha grupo__novo">
-            <label class="campo">
-              <span class="campo__rotulo">Nome do grupo</span>
-              <input v-model="nomeGrupo" class="campo__entrada" maxlength="60"
-                     placeholder="Plantão do fim de semana" />
-            </label>
-            <p class="campo__rotulo">Quem entra</p>
-            <label v-for="c in contatos" :key="c.id" class="grupo__opcao">
-              <input v-model="escolhidos" type="checkbox" :value="c.id" />
-              <span>{{ c.nome }}</span>
-            </label>
-            <p class="apagado pequeno">Você entra automaticamente.</p>
-            <div class="linha linha--quebra">
-              <button class="botao botao--pequeno botao--contorno" type="button"
-                      @click="criandoGrupo = false; escolhidos = []">
-                Cancelar
-              </button>
-              <button
-                class="botao botao--pequeno botao--primario"
-                type="button"
-                :disabled="!nomeGrupo.trim() || !escolhidos.length || abrindo"
-                @click="criarGrupo"
-              >
-                Criar
-              </button>
-            </div>
+          <div v-if="!salas.length && !semConversa.length" class="vazio">
+            <i class="bi bi-chat-left-dots vazio__icone" aria-hidden="true"></i>
+            <p class="vazio__titulo">Nenhuma conversa ainda</p>
+            <p>Não há outro atendente ativo com e-mail cadastrado.</p>
           </div>
         </div>
       </section>
@@ -390,31 +561,71 @@ function quando(iso) {
             <p v-if="!mensagens.length" class="apagado pequeno cartao__corpo">
               Nenhuma mensagem ainda. Escreva a primeira.
             </p>
-            <div
-              v-for="m in mensagens"
-              :key="m.id"
-              class="balao"
-              :class="m.minha ? 'balao--minha' : 'balao--dele'"
-            >
-              <p v-if="!m.minha" class="balao__autor pequeno">{{ m.autor }}</p>
-              <p class="balao__texto">{{ m.texto }}</p>
-              <p class="balao__rodape apagado pequeno">{{ hora(m.criada_em) }}</p>
-            </div>
+            <template v-for="(m, i) in mensagens" :key="m.id">
+              <p v-if="comecaODia(m, i)" class="diario">
+                <span class="diario__marca">{{ rotuloDoDia(m.criada_em) }}</span>
+              </p>
+              <!-- ⚠️ Mensagens seguidas da mesma pessoa viram um bloco:
+                   repetir o nome em cada balão é o que dá cara de log. -->
+              <div
+                class="balao"
+                :class="[m.minha ? 'balao--minha' : 'balao--dele',
+                         { 'balao--seguida': mesmoAutor(m, i) }]"
+              >
+                <p v-if="!m.minha && !mesmoAutor(m, i)" class="balao__autor pequeno">
+                  {{ m.autor }}
+                </p>
+                <p class="balao__texto">{{ m.texto }}</p>
+                <p class="balao__rodape apagado pequeno">{{ hora(m.criada_em) }}</p>
+              </div>
+            </template>
           </div>
 
           <div class="cartao__corpo pilha">
             <label class="campo">
               <span class="so-leitor">Mensagem</span>
+              <!-- 🚨 ENTER ENVIA, Shift+Enter quebra linha. `Ctrl+Enter` é o
+                   que se usa na CAIXA DE ENTRADA, onde a mensagem vai para o
+                   cliente e não volta. Aqui é conversa de equipe: a fricção
+                   não se paga, e ela aparecia em toda mensagem. -->
               <textarea
                 v-model="texto"
                 class="campo__entrada"
                 rows="2"
                 maxlength="4000"
-                placeholder="Escreva e aperte Ctrl+Enter"
-                @keydown.ctrl.enter.prevent="enviar"
+                placeholder="Escreva e aperte Enter"
+                @keydown.enter.exact.prevent="enviar"
               ></textarea>
             </label>
             <div class="linha">
+              <!-- Grade própria de emoji: ~4 KB e nenhuma dependência. -->
+              <div class="emoji">
+                <button
+                  class="botao botao--contorno botao--icone"
+                  type="button"
+                  title="Emoji"
+                  aria-label="Emoji"
+                  :aria-expanded="emojiAberto"
+                  @click.prevent="emojiAberto = !emojiAberto"
+                >
+                  <i class="bi bi-emoji-smile" aria-hidden="true"></i>
+                </button>
+                <div v-if="emojiAberto" class="emoji__caixa">
+                  <div v-for="g in EMOJIS" :key="g.grupo" class="emoji__grupo">
+                    <p class="emoji__titulo">{{ g.grupo }}</p>
+                    <div class="emoji__grade">
+                      <button
+                        v-for="e in g.itens"
+                        :key="e"
+                        class="emoji__item"
+                        type="button"
+                        @click.prevent="porEmoji(e)"
+                      >{{ e }}</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
               <button
                 class="botao botao--primario"
                 type="button"
@@ -424,9 +635,7 @@ function quando(iso) {
                 <span v-if="enviando" class="girando"></span>
                 {{ enviando ? 'Enviando…' : 'Enviar' }}
               </button>
-              <span class="apagado pequeno">
-                🚨 Isto <strong>não</strong> chega ao cliente.
-              </span>
+              <span class="apagado pequeno">Enter envia · Shift+Enter quebra linha</span>
             </div>
           </div>
         </template>
@@ -436,6 +645,138 @@ function quando(iso) {
 </template>
 
 <style scoped>
+/* ---- coluna de pessoas e grupos ----------------------------------------- */
+.ci__topo { display: flex; gap: var(--e-2); align-items: center; }
+.ci__topo .busca { flex: 1 1 auto; }
+.ci__lista { overflow-y: auto; min-height: 0; }
+
+.ci__secao {
+  margin: var(--e-3) 0 var(--e-1);
+  padding: 0 var(--e-3);
+  font-size: var(--txt-xs);
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--texto-apagado);
+}
+
+.ci__sala {
+  display: flex;
+  align-items: center;
+  gap: var(--e-3);
+  width: 100%;
+  padding: var(--e-2) var(--e-3);
+  border: 0;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+  font-family: var(--fonte);
+}
+.ci__sala:hover { background: var(--superficie-2); }
+.ci__sala--aberta { background: var(--acento-suave); }
+
+.ci__avatar {
+  position: relative;
+  flex: none;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--r-full);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-size: var(--txt-sm);
+  font-weight: var(--peso-forte);
+}
+.ci__avatar--grupo { background: var(--superficie-3); color: var(--texto-fraco); }
+
+/* O ponto de estado fica NO avatar, não numa coluna à parte: é sobre aquela
+   pessoa, e ler os dois juntos é uma olhada só. */
+.ci__estado {
+  position: absolute;
+  right: -1px;
+  bottom: -1px;
+  width: 11px;
+  height: 11px;
+  border-radius: var(--r-full);
+  border: 2px solid var(--superficie);
+}
+
+.ci__corpo { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; }
+.ci__topo1 { display: flex; justify-content: space-between; gap: var(--e-2); }
+.ci__nome, .ci__previa {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ci__badge {
+  flex: none;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: var(--r-full);
+  background: var(--acento);
+  color: var(--acento-texto);
+  font-size: var(--txt-xs);
+  line-height: 20px;
+  text-align: center;
+}
+
+/* ---- separador de dia --------------------------------------------------- */
+.diario {
+  display: flex;
+  align-items: center;
+  gap: var(--e-3);
+  margin: var(--e-4) 0 var(--e-2);
+  color: var(--texto-apagado);
+  font-size: var(--txt-sm);
+}
+.diario::before, .diario::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--borda);
+}
+
+/* Balão que continua o anterior: cola no de cima e perde o canto, como em
+   qualquer mensageiro. */
+.balao--seguida { margin-top: 2px; }
+
+/* ---- emoji -------------------------------------------------------------- */
+.emoji { position: relative; }
+.emoji__caixa {
+  position: absolute;
+  bottom: calc(100% + var(--e-1));
+  left: 0;
+  z-index: var(--z-flutuante);
+  width: 280px;
+  max-height: 260px;
+  overflow-y: auto;
+  padding: var(--e-3);
+  background: var(--superficie);
+  border: var(--borda-fina) solid var(--borda);
+  border-radius: var(--r-lg);
+  box-shadow: var(--sombra-2);
+}
+.emoji__titulo {
+  margin: 0 0 var(--e-1);
+  font-size: var(--txt-xs);
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--texto-apagado);
+}
+.emoji__grupo + .emoji__grupo { margin-top: var(--e-3); }
+.emoji__grade { display: flex; flex-wrap: wrap; gap: 2px; }
+.emoji__item {
+  border: 0;
+  background: none;
+  cursor: pointer;
+  font-size: 20px;
+  line-height: 1;
+  padding: 4px;
+  border-radius: var(--r-sm);
+}
+.emoji__item:hover { background: var(--superficie-2); }
+
 .colunas { display: flex; gap: var(--e-4); align-items: flex-start; }
 .coluna { flex: 1 1 300px; min-width: 0; }
 .coluna--larga { flex: 2 1 520px; }

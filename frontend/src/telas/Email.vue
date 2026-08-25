@@ -148,6 +148,7 @@ async function mandar() {
     const c = corpoDoEditor()
     await api.post('/api/email/enviar',
                    { ...rascunho.value, corpo: c.texto, html: c.html,
+                     conta_id: contaAtual.value,
                      anexos: anexos.value.map((a) => a.id) })
     anexos.value = []
     recado.value = 'Enviado.'
@@ -300,6 +301,38 @@ const caixas = ref([])
    Pedido do usuário: *"o recurso de 'estrela' do gmail não poderíamos ter?
    selecionar, botão de leitura de e-mails, etc"*. Nada disto pediu
    consentimento novo -- o escopo já é `gmail.modify`. */
+/* ---- qual caixa está em uso (25/08) --------------------------------------
+   🚨 A CAIXA ATIVA PRECISA SER ÓBVIA, e foi o que o usuário pediu com todas
+   as letras: *"só precisa ficar evidente qual é a que estão usando"*. Cada
+   atendente vê as caixas que ELE conectou (migração 030) -- a dele e, por
+   exemplo, o `sac@` numa segunda aba.
+
+   ⚠️ `conta_id` vai em TODA leitura e no envio. O backend recusa envio sem
+   caixa escolhida quando há mais de uma: "pega a primeira" era o defeito que
+   mandaria o e-mail pelo endereço errado, calado. */
+const contaAtual = ref(null)
+
+const caixaAtiva = computed(
+  () => caixas.value.find((c) => c.id === contaAtual.value) || null,
+)
+
+/* A cor é derivada do endereço: a mesma caixa tem a mesma faixa todo dia, e é
+   ela que o olho usa para saber onde está antes de ler o endereço. */
+function corDaCaixa(conta) {
+  return corDe(conta.endereco)
+}
+
+async function trocarCaixa(id) {
+  if (contaAtual.value === id) return
+  contaAtual.value = id
+  localStorage.setItem('movizap.email.caixa', String(id))
+  aberta.value = null
+  marcadas.value = []
+  marcadorAtual.value = 'INBOX'
+  await carregarMarcadores()
+  await carregar()
+}
+
 const marcadas = ref([])
 const aplicandoLote = ref(false)
 
@@ -354,14 +387,22 @@ async function lote(acao) {
 async function carregarCaixas() {
   try {
     caixas.value = (await api.get('/api/email/caixas')).caixas || []
+    /* ⚠️ Guarda qual estava aberta: quem trabalha no `sac@` o dia inteiro não
+       quer voltar para a caixa pessoal a cada F5. Se a caixa guardada sumiu
+       (foi desconectada), cai na primeira em vez de ficar em nenhuma. */
+    const guardada = Number(localStorage.getItem('movizap.email.caixa') || 0)
+    const existe = caixas.value.some((c) => c.id === guardada)
+    contaAtual.value = existe ? guardada : (caixas.value[0]?.id ?? null)
   } catch {
     caixas.value = []
+    contaAtual.value = null
   }
 }
 
 async function carregarMarcadores() {
   try {
-    marcadores.value = (await api.get('/api/email/marcadores')).marcadores || []
+    const q = contaAtual.value ? `?conta_id=${contaAtual.value}` : ''
+    marcadores.value = (await api.get(`/api/email/marcadores${q}`)).marcadores || []
   } catch {
     marcadores.value = []
   }
@@ -372,6 +413,7 @@ async function carregar() {
   erro.value = ''
   try {
     const q = new URLSearchParams({ marcador: marcadorAtual.value, busca: busca.value })
+    if (contaAtual.value) q.set('conta_id', String(contaAtual.value))
     mensagens.value = (await api.get(`/api/email/mensagens?${q}`)).mensagens || []
   } catch (e) {
     erro.value = e instanceof ErroDeApi ? e.message : 'Não consegui ler a caixa.'
@@ -463,6 +505,28 @@ onMounted(async () => {
     <p v-if="erro" class="aviso aviso--erro">{{ erro }}</p>
     <p v-if="recado" class="apagado pequeno">{{ recado }}</p>
 
+    <!-- 🚨 ABAS DE CAIXA, como pasta de planilha (pedido do usuário em 25/08).
+         O endereço INTEIRO fica visível na ativa -- abreviar "sac@..." é
+         exatamente onde alguém responde pela caixa errada. A faixa de cor é
+         derivada do endereço: a mesma caixa tem a mesma cor todo dia, e é ela
+         que o olho usa antes de ler. -->
+    <div v-if="caixas.length" class="caixas" role="tablist">
+      <button
+        v-for="cx in caixas"
+        :key="cx.id"
+        class="caixas__aba"
+        :class="{ 'caixas__aba--ativa': cx.id === contaAtual }"
+        type="button"
+        role="tab"
+        :aria-selected="cx.id === contaAtual"
+        @click="trocarCaixa(cx.id)"
+      >
+        <span class="caixas__cor" :style="{ background: corDaCaixa(cx) }"
+              aria-hidden="true"></span>
+        {{ cx.endereco }}
+      </button>
+    </div>
+
     <!-- barra de orientação: onde estou, quantas há, e o que dá para fazer -->
     <div class="email__barra">
       <div class="linha">
@@ -552,6 +616,16 @@ onMounted(async () => {
       </label>
       <div class="campo">
         <span class="campo__rotulo">Mensagem</span>
+        <!-- 🚨 DE QUAL CAIXA ESTÁ SAINDO. Campo fixo, não editável: com duas
+             caixas conectadas, escrever sem ver o remetente é como o
+             destinatário acaba respondendo para o endereço errado. -->
+        <p v-if="caixaAtiva" class="email__de-fixo pequeno">
+          <span class="apagado">De:</span>
+          <span class="caixas__cor" :style="{ background: corDaCaixa(caixaAtiva) }"
+                aria-hidden="true"></span>
+          <strong>{{ caixaAtiva.endereco }}</strong>
+        </p>
+
         <div class="email__ferramentas">
           <template v-for="(f, i) in FERRAMENTAS" :key="i">
             <span v-if="f.sep" class="email__separador" aria-hidden="true"></span>
@@ -1049,6 +1123,57 @@ onMounted(async () => {
 }
 .email__estrela:hover { color: var(--aviso); }
 .email__estrela--ligada { color: var(--aviso); }
+
+/* ---- abas de caixa ------------------------------------------------------
+   Pasta de planilha: a ativa "sai" da linha, as outras ficam recuadas. */
+.caixas {
+  display: flex;
+  gap: 2px;
+  align-items: flex-end;
+  margin-bottom: -1px;
+  overflow-x: auto;
+}
+.caixas__aba {
+  display: flex;
+  align-items: center;
+  gap: var(--e-2);
+  flex: none;
+  padding: var(--e-2) var(--e-3);
+  border: var(--borda-fina) solid var(--borda);
+  border-bottom: none;
+  border-radius: var(--r-md) var(--r-md) 0 0;
+  background: var(--superficie-2);
+  color: var(--texto-fraco);
+  font-family: var(--fonte);
+  font-size: var(--txt-sm);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.caixas__aba:hover { color: var(--texto); }
+.caixas__aba--ativa {
+  background: var(--superficie);
+  color: var(--texto);
+  font-weight: var(--peso-forte);
+  /* +1px de altura e fundo igual ao painel: é o que faz a aba parecer
+     CONTINUAR na área de leitura, em vez de flutuar acima dela. */
+  padding-top: calc(var(--e-2) + 2px);
+}
+.caixas__aba:focus-visible { outline: none; box-shadow: var(--foco); }
+.caixas__cor {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--r-full);
+  flex: none;
+}
+
+.email__de-fixo {
+  display: flex;
+  align-items: center;
+  gap: var(--e-2);
+  padding: var(--e-2) 0;
+  border-bottom: var(--borda-fina) solid var(--borda);
+  margin-bottom: var(--e-2);
+}
 
 .email__lote {
   display: flex;
