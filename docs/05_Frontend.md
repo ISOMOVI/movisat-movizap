@@ -55,7 +55,7 @@ Três arquivos em `src/estilo/`, nesta ordem de import:
 
 | Arquivo | O que é |
 |---|---|
-| `tokens.css` | cor, tipografia, espaçamento, forma, movimento — claro e escuro |
+| `tokens.css` | cor, tipografia, espaçamento, forma, movimento |
 | `base.css` | reset curto e comportamento dos elementos |
 | `componentes.css` | `.botao`, `.campo`, `.cartao`, `.chip`, `.aviso`, `.tabela`, `.vazio` |
 
@@ -80,14 +80,17 @@ arquivo, não reescrita de tela.
 O menu lateral usa tokens próprios (`--menu-*`) porque é **escuro nos dois
 temas** — é a assinatura do MoviChat e não segue claro/escuro.
 
-**Tema.** `<html data-tema="claro|escuro">`. O valor é sempre resolvido, nunca
-`sistema`, então o CSS tem um caso por tema e zero duplicação. A preferência
-(`sistema` / `claro` / `escuro`) fica em `localStorage`.
+**Tema: UM SÓ, CLARO.**
 
-⚠️ **Uma duplicação é aceita:** o cálculo do tema roda inline no `<head>` do
-`index.html`, antes da primeira pintura. Sem isso o painel pisca branco a cada
-carga para quem usa escuro — e este painel fica aberto o dia inteiro. Mudou a
-regra em `src/estado/tema.js`, muda lá também.
+> 🚨 **ESTE PARÁGRAFO DESCREVIA UM MECANISMO QUE NÃO EXISTE.** Ele explicava
+> `<html data-tema="claro|escuro">`, a preferência em `localStorage` e o
+> cálculo inline no `<head>` "antes da primeira pintura". O tema escuro foi
+> **removido em 10/08, a pedido do usuário**: `tokens.css` diz, na terceira
+> linha, *"não há data-tema, não há @media prefers-color-scheme"*. Quem lia
+> este doc procurava um `src/estado/tema.js` que não existe.
+
+Um valor só, num lugar só. O menu lateral continua escuro pelos tokens
+`--menu-*`, que nunca seguiram tema nenhum — é a assinatura do MoviChat.
 
 ## 3. Cliente HTTP — um lugar só
 
@@ -128,17 +131,36 @@ Estrutura, logo e tamanhos são os mesmos dos outros três painéis — ver
   `CAD_2.1` existir: hoje o usuário vem do `.env` e não há onde gravar senha
   nova, nem envio de e-mail.
 
-## 5. Estado das telas (2026-08-05)
+## 5. Estado das telas
 
-| Situação | Telas |
-|---|---|
-| **Implementada** | `CFG_9.1` Registro de telas — a única com backend pronto |
-| **Registrada, roteada, sem conteúdo** | as outras 11 de fase 1 |
-| **Código reservado, sem rota** | `ATD_3.1` · `ATD_4.1` · `CFG_2.2` · `REL_1.1` |
+> 🚨 **ESTA SEÇÃO DESCREVIA 05/08 E FICOU ASSIM POR VINTE DIAS.** Ela dizia
+> que `CFG_9.1` era "a única com backend pronto", que "as outras 11 de fase 1"
+> estavam sem conteúdo, e listava `ATD_4.1` como código reservado — ele foi
+> **aposentado** em 10/08, quando o e-mail virou módulo próprio. É exatamente a
+> doença que a seção 7 deste mesmo arquivo denuncia: doc que descreve um
+> estágio superado é pior que doc faltando, porque quem lê para de procurar.
 
-O placeholder diz **o que vem ali e o que trava**. Dizer "em breve" sem dizer o
-motivo foi como o MoviServer ficou com 4 telas em branco sem ninguém saber por
-quê.
+**Hoje (2026-08-25): 18 telas ativas, todas com conteúdo, e 2 reservadas.**
+
+⚠️ **O NÚMERO NÃO SE ESCREVE AQUI.** Quem conta é `movizap/telas.py`, e
+`scripts/verificar_ao_vivo.py` compara os dois lados a cada deploy — foi por
+escrever "12" e "16" à mão que aquele portão passou semanas gritando à toa.
+Para saber o estado agora:
+
+```bash
+./venv/bin/python scripts/verificar_ao_vivo.py     # ativas x registradas
+```
+
+As reservadas são `CFG_2.2` (IA — analytics, fase 2) e `REL_1.1`
+(Relatórios, fase 3). `ATD_4.1` está **aposentado** desde 10/08 e nunca volta.
+
+⚠️ A **`CFG_5.1` — Automação por tipo** nasceu em 25/08 com **código novo**,
+não reaproveitando nenhum reservado: código aposentado ou já usado faria o log
+antigo mentir (`docs/03`).
+
+O placeholder — quando existir — diz **o que vem ali e o que trava**. Dizer
+"em breve" sem dizer o motivo foi como o MoviServer ficou com 4 telas em
+branco sem ninguém saber por quê.
 
 ## 6. Construir e publicar
 
