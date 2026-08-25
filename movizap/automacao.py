@@ -128,6 +128,21 @@ def boas_vindas(conversa_id: int) -> dict:
         return {"enviou": False, "motivo": "grupo"}
     if linha["boas_vindas_em"]:
         return {"enviou": False, "motivo": "ja recebeu"}
+
+    # 🚨 SÓ NA PRIMEIRA MENSAGEM DA CONVERSA. Achado na auditoria de 25/08: a
+    # trava `boas_vindas_em IS NULL` sozinha valia para as 332 conversas que
+    # já existiam -- todas com o campo nulo. Ligar a saudação hoje mandaria
+    # "olá, seja bem-vindo" para gente NO MEIO de uma conversa em andamento,
+    # conforme cada uma escrevesse de novo.
+    #
+    # ⚠️ Conta 1 porque a mensagem que disparou isto JÁ foi gravada: o
+    # processamento grava e só então chama a automação.
+    entradas = banco.um(
+        """SELECT count(*) AS n FROM mensagem
+            WHERE conversa_id = %s AND direcao = 'entrada'""",
+        (conversa_id,))["n"]
+    if entradas != 1:
+        return {"enviou": False, "motivo": "conversa ja em andamento"}
     if linha["canal_tipo"] != "atendimento" or not linha["instancia"]:
         return {"enviou": False, "motivo": "canal nao atende"}
 

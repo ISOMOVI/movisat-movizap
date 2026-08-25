@@ -1784,9 +1784,26 @@ async def responder_com_audio(conversa_id: int,
     return r
 
 
+# ⚠️ 5 é o limite do próprio WhatsApp por ação de encaminhar. Copiamos o
+# número de propósito: é o que a pessoa já conhece do aplicativo.
+#
+# ⚠️ DECLARADO ANTES DE QUEM USA. Estava depois da rota -- funciona, porque a
+# resolução é em tempo de chamada, mas quebraria em silêncio no dia em que
+# alguém o usasse como valor padrão de argumento.
+TETO_ENCAMINHAR = 5
+
+
 class EncaminharEntrada(BaseModel):
     mensagem_id: int
     conversas: list[int]
+
+
+def _conversa_da_mensagem(mensagem_id: int) -> int:
+    linha = banco.um("SELECT conversa_id FROM mensagem WHERE id = %s",
+                     (mensagem_id,))
+    if not linha:
+        raise HTTPException(status_code=404, detail="Mensagem não encontrada.")
+    return linha["conversa_id"]
 
 
 @app.post("/api/conversas/encaminhar")
@@ -1804,17 +1821,17 @@ def encaminhar_mensagem(dados: EncaminharEntrada,
             status_code=400,
             detail=f"São {len(dados.conversas)} destinos. O WhatsApp limita o "
                    f"encaminhar a {TETO_ENCAMINHAR} por vez, e nós também.")
+    # 🚨 A ORIGEM TEM DE SER SUA (achado na auditoria de 25/08). Todo caminho
+    # que ESCREVE numa conversa passa por `_exige_estar_na_conversa`;
+    # encaminhar não passava, e era o único. Sem isto, quem tem a tela repassa
+    # qualquer mensagem de qualquer conversa -- inclusive de atendimento
+    # alheio -- para até cinco clientes.
+    _exige_estar_na_conversa(_conversa_da_mensagem(dados.mensagem_id), usuario)
     r = conversas.encaminhar(dados.mensagem_id, dados.conversas,
                              _atendente_do_usuario(usuario))
     if not r["ok"]:
         raise HTTPException(status_code=409, detail=r["motivo"])
     return r
-
-
-# ⚠️ 5 é o limite do próprio WhatsApp por ação de encaminhar. Copiamos o
-# número de propósito: é o que a pessoa já conhece do aplicativo, e é o que
-# separa "repassar" de "disparar".
-TETO_ENCAMINHAR = 5
 
 
 @app.get("/api/historico")

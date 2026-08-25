@@ -624,6 +624,11 @@ async function abrir(id) {
     // marcações de um termo que ninguém procurou aqui.
     buscaNaConversa.value = ''
     achadoAtual.value = 0
+    /* ⚠️ A citação é DESTA conversa. Sem limpar, a barra continuava apontando
+       para uma mensagem da conversa anterior: o backend recusa ("só dá para
+       citar mensagem desta conversa"), mas a tela mentia até a pessoa
+       tentar. */
+    citando.value = null
     // ⚠️ Os ACHADOS também. Antes de 25/08 eles eram `computed` e sumiam
     // sozinhos com o termo; agora são estado, e estado não se limpa sozinho --
     // sobrariam marcações de balão de outra conversa.
@@ -947,6 +952,13 @@ onMounted(async () => {
 onUnmounted(() => {
   clearInterval(timer)
   document.removeEventListener('click', fecharFiltroSeForaDele)
+  /* 🚨 O MICROFONE TEM DE SER SOLTO AO SAIR (achado na auditoria de 25/08).
+     Eu tratei disso no `onstop` do gravador e esqueci a saída pela porta:
+     trocar de tela no meio de uma gravação deixava a trilha aberta e a luz
+     vermelha do navegador acesa, com a pessoa achando que o painel continua
+     ouvindo. É pior que o defeito original, porque não há nem o botão de
+     cancelar à vista. */
+  cancelarGravacao()
 })
 
 watch(filtro, () => carregar())

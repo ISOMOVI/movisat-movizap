@@ -262,7 +262,17 @@ def garantir_conversa(cur, canal_id: int, e164: str | None,
     return cur.fetchone()["id"]
 
 
-def _gravar_mensagem(cur, evento: dict, corpo: dict) -> str:
+def _gravar_mensagem(cur, evento: dict, corpo: dict,
+                     depois: list | None = None) -> str:
+    """`depois` recolhe as conversas que devem ser olhadas pela automação.
+
+    🚨 ERA UMA LISTA DE MÓDULO, E ISSO ERA UMA CORRIDA (achado na auditoria de
+    25/08). `processar_pendentes` roda no laço de 5 s E na rota
+    `/api/conversas/processar`: com as duas ao mesmo tempo, o `clear()` de uma
+    apagava os ids que a outra tinha acabado de enfileirar -- e o cliente
+    simplesmente não receberia a saudação, sem nada acusar. Estado mutável de
+    módulo compartilhado entre threads é o defeito, não o sintoma.
+    """
     data = _cavar(corpo, "data", padrao={})
     chave = _cavar(data, "key", padrao={})
     de_mim = bool(chave.get("fromMe"))
@@ -354,16 +364,10 @@ def _gravar_mensagem(cur, evento: dict, corpo: dict) -> str:
     # Evolution; segurá-la dentro da transação do webhook prenderia a conexão
     # do banco pelo tempo de uma rede alheia -- e o processamento do webhook
     # tem de ser rápido, senão o Evolution considera falha e reentrega.
-    if not de_mim:
-        _boas_vindas_depois.append(conversa_id)
+    if not de_mim and depois is not None:
+        depois.append(conversa_id)
 
     return f"conversa {conversa_id}: mensagem {tipo} gravada"
-
-
-# A lista é consumida por `processar_pendentes` ao fim de cada evento, fora da
-# transação. Existe porque `_gravar_mensagem` recebe um cursor aberto e não é
-# lugar de fazer chamada de rede.
-_boas_vindas_depois: list[int] = []
 
 
 def _atualizar_entrega(cur, evento: dict, corpo: dict) -> str:
@@ -403,14 +407,15 @@ def processar_pendentes(limite: int = 500) -> dict:
 
     contas = {"lidos": len(pendentes), "mensagens": 0, "entregas": 0,
               "ignorados": 0, "erros": 0, "boas_vindas": 0}
-    _boas_vindas_depois.clear()
+    # Local, por execução: duas execuções simultâneas não se atrapalham.
+    a_olhar: list[int] = []
 
     for evento in pendentes:
         corpo = evento["payload"] or {}
         try:
             with banco.cursor() as cur:
                 if evento["evento"] in ("messages.upsert", "send.message"):
-                    nota = _gravar_mensagem(cur, evento, corpo)
+                    nota = _gravar_mensagem(cur, evento, corpo, a_olhar)
                     contas["mensagens"] += 1
                 elif evento["evento"] == "messages.update":
                     nota = _atualizar_entrega(cur, evento, corpo)
@@ -432,8 +437,8 @@ def processar_pendentes(limite: int = 500) -> dict:
             # fala com o Evolution pela rede, e falha dela NÃO pode desfazer a
             # gravação da mensagem do cliente nem marcar o evento como erro --
             # a mensagem chegou, e é isso que importa guardar.
-            while _boas_vindas_depois:
-                alvo = _boas_vindas_depois.pop(0)
+            while a_olhar:
+                alvo = a_olhar.pop(0)
                 try:
                     if automacao.boas_vindas(alvo).get("enviou"):
                         contas["boas_vindas"] += 1
@@ -1087,7 +1092,7 @@ TETO_MENSAGEM = 4000
 
 
 def responder(conversa_id: int, texto: str, atendente_id: int | None,
-              citando_id: int | None = None) -> dict:
+              citando_id: int | None = None, assumir: bool = True) -> dict:
     """Responde o cliente pelo WhatsApp e grava a mensagem.
 
     🚨 O NÚMERO VEM DA CONVERSA, NUNCA DO PARÂMETRO. Não é regra de política:
@@ -1131,7 +1136,12 @@ def responder(conversa_id: int, texto: str, atendente_id: int | None,
 
     # Quem responde assume. Sem isto, dois atendentes respondem o mesmo cliente
     # sem nunca aparecer dono na lista.
-    if conversa_atual["atendente_id"] is None and atendente_id:
+    #
+    # 🚨 `assumir=False` EXISTE POR CAUSA DO ENCAMINHAR (achado na auditoria de
+    # 25/08). Encaminhar uma mensagem para 5 conversas sem dono tornava quem
+    # clicou DONO DAS CINCO, de uma vez, sem pedir nada -- e há 336 conversas
+    # sem dono na base. Repassar não é atender.
+    if assumir and conversa_atual["atendente_id"] is None and atendente_id:
         banco.executar(
             """UPDATE conversa SET atendente_id = %s, estado = 'humano',
                                    atualizada_em = now()
@@ -1379,7 +1389,9 @@ def encaminhar(mensagem_id: int, conversas_destino: list[int],
 
     feitos, falhas = [], []
     for destino in destinos:
-        r = responder(destino, texto, atendente_id)
+        # ⚠️ `assumir=False`: ver `responder`. Repassar não é atender, e
+        # assumir cinco conversas num clique é efeito que ninguém pediu.
+        r = responder(destino, texto, atendente_id, assumir=False)
         if r.get("ok"):
             feitos.append(destino)
             if r.get("mensagem_id"):

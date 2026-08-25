@@ -89,6 +89,16 @@ def conversa_sem_cadastro():
         """INSERT INTO conversa (canal_id, telefone_e164, estado)
            VALUES (%s, %s, 'nova') RETURNING id""",
         (canal["id"], NUMERO))["id"]
+    # 🚨 A MENSAGEM DO CLIENTE FAZ PARTE DA CENA, e não fazia. A saudação só
+    # sai na PRIMEIRA mensagem de entrada da conversa (regra corrigida na
+    # auditoria de 25/08): sem a mensagem, a fixture montava um estado que não
+    # existe na vida real -- conversa nascida do nada, sem ninguém ter escrito.
+    # O teste antigo passava porque a regra era frouxa demais.
+    banco.executar(
+        """INSERT INTO mensagem (conversa_id, id_externo, direcao, autor, tipo,
+                                 conteudo, criada_em)
+           VALUES (%s, 'zz-aut-entrada-1', 'entrada', 'cliente', 'texto',
+                   'oi, preciso de ajuda', now())""", (cid,))
     yield cid
     limpar()
 
