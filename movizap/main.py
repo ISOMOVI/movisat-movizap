@@ -451,7 +451,13 @@ def listar_clientes(busca: str = "", pagina: int = 1, por_pagina: int = 50,
 @app.get("/api/clientes/{cliente_id}")
 def ver_cliente(cliente_id: int,
                 usuario: dict = Depends(auth.requer_tela("CAD_1.1"))):
-    achado = cadastro.cliente(cliente_id)
+    """A ficha: cadastro, contatos, telefones, últimas conversas e e-mails.
+
+    ⚠️ A ficha passou a levar a algum lugar (25/08). Antes ela mostrava dados
+    e acabava ali -- quem abria um cliente para saber "já falamos com essa
+    empresa?" tinha de ir para a caixa de entrada e buscar pelo nome.
+    """
+    achado = cadastro.ficha_do_cliente(cliente_id)
     if not achado:
         raise HTTPException(status_code=404, detail="Cliente não encontrado.")
     return achado
@@ -1925,6 +1931,39 @@ def criar_atendente(dados: AtendenteEntrada,
     return operacao.criar_atendente(
         dados.nome, dados.login, dados.email, dados.perfil, dados.estado,
         dados.max_conversas, dados.fuso)
+
+
+@app.post("/api/atendentes/{atendente_id}/desligar")
+def desligar_atendente(atendente_id: int,
+                       usuario: dict = Depends(auth.requer_tela("CAD_2.1"))):
+    """Desliga e SOLTA o que a pessoa estava segurando.
+
+    🚨 O QUE FALTAVA NÃO ERA O BOTÃO, ERA O EFEITO. Desativar gravava
+    `ativo = false` e nada mais: quem saía com 12 conversas abertas deixava
+    dono que nunca mais entra, e elas ficavam invisíveis -- não aparecem em
+    "sem dono" porque TÊM dono, e ninguém as vê porque o dono não entra.
+    """
+    r = operacao.desligar(atendente_id, quem_edita=usuario.get("login"))
+    if not r["ok"]:
+        raise HTTPException(status_code=409, detail=r["motivo"])
+    return r
+
+
+class JornadaAtiva(BaseModel):
+    ligada: bool
+
+
+@app.get("/api/config/jornada")
+def ver_jornada_ativa(usuario: dict = Depends(auth.requer_tela("CAD_2.1"))):
+    """⚠️ A jornada nasce DESLIGADA: monta-se a escala com calma, e só quando
+    o owner ligar ela passa a significar alguma coisa na fila."""
+    return {"jornada_ativa": operacao.jornada_ativa()}
+
+
+@app.put("/api/config/jornada")
+def definir_jornada_ativa(dados: JornadaAtiva,
+                          usuario: dict = Depends(auth.requer_tela("CAD_2.1"))):
+    return operacao.definir_jornada_ativa(dados.ligada)
 
 
 @app.put("/api/atendentes/{atendente_id}")

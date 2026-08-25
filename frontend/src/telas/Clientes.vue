@@ -76,6 +76,16 @@ watch(busca, () => {
 
 watch([pagina, apenasAtivos], carregar)
 
+/* "há 3 min", "há 2 h", "há 4 d". Data absoluta obriga quem lê a calcular, e
+   nesta ficha o que importa é se foi ontem ou no ano passado. */
+function quando(iso) {
+  if (!iso) return '—'
+  const min = Math.round((Date.now() - new Date(iso)) / 60000)
+  if (min < 60) return `há ${min} min`
+  if (min < 1440) return `há ${Math.round(min / 60)} h`
+  return `há ${Math.round(min / 1440)} d`
+}
+
 function numero(n) {
   return (n ?? 0).toLocaleString('pt-BR')
 }
@@ -279,6 +289,61 @@ onMounted(carregar)
             <div><dt>Id no Harmonit</dt><dd class="mono">{{ selecionado.harmonit_id || '—' }}</dd></div>
           </dl>
 
+          <!-- 🚨 O ALCANCE, LOGO NO TOPO. `tem_whatsapp` distingue NULL
+               (ninguém verificou) de false (verificado e não tem), e essa
+               diferença não aparecia em tela nenhuma: quem abria a ficha não
+               sabia se dava para mandar mensagem para aquela empresa. -->
+          <div v-if="selecionado.alcance" class="cli__alcance">
+            <span class="chip chip--ok">
+              {{ selecionado.alcance.com_whatsapp }} com WhatsApp
+            </span>
+            <span v-if="selecionado.alcance.sem_whatsapp" class="chip">
+              {{ selecionado.alcance.sem_whatsapp }} sem
+            </span>
+            <span v-if="selecionado.alcance.nao_verificados" class="chip chip--aviso">
+              {{ selecionado.alcance.nao_verificados }} não verificados
+            </span>
+          </div>
+
+          <!-- ⚠️ AS ÚLTIMAS CONVERSAS, com o id que abre a tela certa. A ficha
+               mostrava dados e acabava ali: quem abria um cliente para saber
+               "já falamos com essa empresa?" tinha de ir para a caixa de
+               entrada e buscar pelo nome. -->
+          <h3 class="cad__subtitulo">Últimas conversas</h3>
+          <ul v-if="selecionado.conversas?.length" class="cli__fios">
+            <li v-for="c in selecionado.conversas" :key="c.id">
+              <button class="cli__fio" type="button"
+                      @click="$router.push(`/atendimento/${c.id}`)">
+                <span class="cli__fio-quem">{{ c.contato_nome }}</span>
+                <span class="apagado pequeno mono">{{ telefoneBonito(c.telefone_e164) }}</span>
+                <span v-if="c.estado === 'resolvida'" class="chip chip--ok chip--pequeno">
+                  concluída
+                </span>
+                <span v-else-if="c.atendente_nome" class="chip chip--acento chip--pequeno">
+                  {{ c.atendente_nome }}
+                </span>
+                <span v-else class="chip chip--pequeno">sem dono</span>
+                <span class="apagado pequeno">{{ quando(c.ultima_atividade_em) }}</span>
+              </button>
+            </li>
+          </ul>
+          <p v-else class="apagado pequeno">
+            Nunca conversamos com ninguém desta empresa pelo WhatsApp.
+          </p>
+
+          <template v-if="selecionado.emails?.length">
+            <h3 class="cad__subtitulo">Últimos e-mails</h3>
+            <ul class="cli__fios">
+              <li v-for="e in selecionado.emails" :key="e.id">
+                <span class="cli__fio">
+                  <span class="cli__fio-quem">{{ e.assunto || '(sem assunto)' }}</span>
+                  <span class="apagado pequeno">{{ e.remetente }}</span>
+                  <span class="apagado pequeno">{{ quando(e.enviado_em) }}</span>
+                </span>
+              </li>
+            </ul>
+          </template>
+
           <h3 class="cad__subtitulo">Contatos</h3>
           <div v-for="c in selecionado.contatos || []" :key="c.id" class="cad__contato">
             <p class="linha">
@@ -303,6 +368,19 @@ onMounted(carregar)
                      : t.tem_whatsapp === false ? 'sem WhatsApp' : 'não verificado' }}
                 </span>
                 <span class="pequeno fraco mono">veio como {{ t.bruto }}</span>
+                <!-- 🚨 O BOTÃO QUE FAZ A FICHA SERVIR PARA ALGUMA COISA.
+                     Falar com este número é a ação óbvia de quem está olhando
+                     a ficha, e não havia caminho: era copiar o número e ir
+                     procurar na caixa de entrada. Só aparece onde há WhatsApp
+                     -- oferecer onde não há seria oferecer erro. -->
+                <button
+                  v-if="t.tem_whatsapp === true"
+                  class="botao botao--pequeno botao--contorno"
+                  type="button"
+                  @click="$router.push(`/atendimento?numero=${encodeURIComponent(t.e164)}`)"
+                >
+                  <i class="bi bi-whatsapp" aria-hidden="true"></i> Conversar
+                </button>
               </li>
               <li v-if="!c.telefones.length" class="fraco pequeno">
                 Nenhum telefone no Harmonit.
@@ -351,6 +429,33 @@ onMounted(carregar)
   gap: var(--e-3);
   margin-top: var(--e-4);
   align-items: center;
+}
+
+.cli__alcance { display: flex; gap: var(--e-1); flex-wrap: wrap; margin-bottom: var(--e-3); }
+
+.cli__fios { list-style: none; margin: 0 0 var(--e-3); padding: 0; }
+.cli__fio {
+  display: flex;
+  align-items: center;
+  gap: var(--e-2);
+  width: 100%;
+  padding: var(--e-2);
+  border: 0;
+  border-bottom: var(--borda-fina) solid var(--borda);
+  background: none;
+  text-align: left;
+  font-family: var(--fonte);
+  font-size: var(--txt-sm);
+}
+button.cli__fio { cursor: pointer; }
+button.cli__fio:hover { background: var(--superficie-2); }
+.cli__fio-quem {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--texto);
 }
 
 .cad__detalhe {

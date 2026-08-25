@@ -33,6 +33,62 @@ const erro = ref('')
 const salvando = ref(false)
 const incluirInativos = ref(false)
 
+/* ---- o interruptor da jornada (25/08) ------------------------------------
+   Decisão do usuário: *"pode colocar interruptor na configuração do owner de
+   usar jornada ou não, daí pode montar ela mas deixando desligado"*. Monta-se
+   a escala com calma; ligar é ato separado. */
+const jornadaAtiva = ref(false)
+
+async function carregarJornadaAtiva() {
+  try {
+    jornadaAtiva.value = (await api.get('/api/config/jornada')).jornada_ativa
+  } catch { jornadaAtiva.value = false }
+}
+
+async function alternarJornadaAtiva() {
+  try {
+    const r = await api.put('/api/config/jornada', { ligada: !jornadaAtiva.value })
+    jornadaAtiva.value = r.jornada_ativa
+    recado.value = jornadaAtiva.value
+      ? 'Jornada ligada: a fila passa a avisar quem está fora do horário.'
+      : 'Jornada desligada: a escala continua gravada e não afeta a fila.'
+  } catch (e) {
+    erro.value = e instanceof ErroDeApi ? e.message : 'Não consegui mudar.'
+  }
+}
+
+/* ---- desligar ------------------------------------------------------------
+   🚨 NÃO EXISTE APAGAR. `conversa`, `transferencia` e `mensagem` apontam para
+   o atendente: apagar faria o histórico mentir sobre quem atendeu. O que
+   existe é desligar -- e desligar SOLTA as conversas dele. */
+const desligando = ref(null)
+
+async function confirmarDesligar() {
+  const alvo = desligando.value
+  try {
+    const r = await api.post(`/api/atendentes/${alvo.id}/desligar`, {})
+    recado.value = r.conversas_soltas
+      ? `${r.nome} desligado. ${r.conversas_soltas} conversa(s) voltaram para a fila.`
+      : `${r.nome} desligado.`
+    desligando.value = null
+    await carregar()
+  } catch (e) {
+    erro.value = e instanceof ErroDeApi ? e.message : 'Não consegui desligar.'
+    desligando.value = null
+  }
+}
+
+/* Total de horas por semana: é o número que RH olha, e ninguém soma faixas de
+   cabeça. */
+function horasSemana(a) {
+  const minutos = (a.jornada || []).reduce((total, f) => {
+    const [hi, mi] = f.inicio.split(':').map(Number)
+    const [hf, mf] = f.fim.split(':').map(Number)
+    return total + (hf * 60 + mf) - (hi * 60 + mi)
+  }, 0)
+  return (minutos / 60).toFixed(1).replace('.', ',')
+}
+
 const editando = ref(null)
 const form = ref(vazio())
 const timesMarcados = ref([])
@@ -71,7 +127,7 @@ async function carregar() {
   }
 }
 
-onMounted(carregar)
+onMounted(() => { carregar(); carregarJornadaAtiva() })
 
 function abrirNovo() {
   editando.value = {}
@@ -137,7 +193,9 @@ async function salvar() {
     const corpo = {
       ...form.value,
       email: form.value.email || null,
-      max_conversas: form.value.max_conversas || null,
+      // ⚠️ Continua indo `null`: a coluna existe e o backend a espera. O que
+      // saiu foi a PROMESSA na tela, não a coluna.
+      max_conversas: null,
     }
     const alvo = editando.value?.id
       ? await api.put(`/api/atendentes/${editando.value.id}`, corpo)
@@ -175,6 +233,19 @@ async function salvar() {
           <input v-model="incluirInativos" type="checkbox" @change="carregar" />
           mostrar inativos
         </label>
+        <button
+          class="botao botao--pequeno"
+          :class="jornadaAtiva ? 'botao--contorno' : 'botao--fantasma'"
+          type="button"
+          :title="jornadaAtiva
+            ? 'A fila avisa quem está fora do horário'
+            : 'A escala fica gravada e não afeta a fila'"
+          @click="alternarJornadaAtiva"
+        >
+          <i class="bi" :class="jornadaAtiva ? 'bi-toggle-on' : 'bi-toggle-off'"
+             aria-hidden="true"></i>
+          Jornada {{ jornadaAtiva ? 'ligada' : 'desligada' }}
+        </button>
         <button class="botao botao--primario" type="button" @click="abrirNovo">
           <i class="bi bi-person-plus" aria-hidden="true"></i> Novo atendente
         </button>
@@ -234,13 +305,14 @@ async function salvar() {
             </select>
           </label>
 
-          <label class="campo">
-            <span class="campo__rotulo">Teto de conversas simultâneas</span>
-            <input v-model.number="form.max_conversas" class="campo__entrada" type="number" min="1" />
-            <span class="campo__ajuda">
-              Em branco = sem teto. Evita empilhar tudo em quem é rápido.
-            </span>
-          </label>
+          <!-- 🚨 O TETO DE CONVERSAS SAIU DA TELA (25/08). Medido antes de
+               tirar: `atendente.max_conversas` era gravado e LIDO POR NADA --
+               nenhuma fila, distribuição ou transferência consultava a
+               coluna, e os 5 atendentes estavam com NULL. Campo que promete
+               comportamento inexistente é defeito, não preparação
+               (`docs/09`, item 4). A coluna fica no banco: removê-la exige
+               migração para ganhar zero. Se um dia houver distribuição
+               automática, o campo volta com o comportamento junto. -->
         </div>
 
         <fieldset class="bloco">
@@ -338,6 +410,8 @@ async function salvar() {
               <th>Perfil</th>
               <th>Times</th>
               <th>Jornada</th>
+              <th class="rh__num">Em aberto</th>
+              <th class="rh__num">Concluídas 7d</th>
               <th>Entra?</th>
               <th></th>
             </tr>
@@ -351,8 +425,22 @@ async function salvar() {
               <td><span class="chip">{{ a.perfil }}</span></td>
               <td class="pequeno fraco">{{ timesDe(a) }}</td>
               <td class="pequeno">
-                <span :class="a.jornada.length ? 'fraco' : 'chip chip--aviso'">{{ resumoJornada(a) }}</span>
+                <!-- 🚨 "FORA DO HORÁRIO" E "SEM JORNADA" SÃO COISAS
+                     DIFERENTES. Sem a distinção, quem nunca cadastrou escala
+                     aparece como se estivesse fora do expediente, e isso lê
+                     como defeito. Medido em 25/08: nenhum dos 5 tem jornada. -->
+                <template v-if="a.tem_jornada">
+                  <span class="fraco">{{ resumoJornada(a) }}</span>
+                  <br />
+                  <span class="apagado">{{ horasSemana(a) }} h/semana</span>
+                  <span v-if="jornadaAtiva && !a.no_horario"
+                        class="chip chip--aviso chip--pequeno">fora do horário</span>
+                </template>
+                <span v-else class="chip chip--aviso chip--pequeno">sem jornada</span>
               </td>
+              <!-- Os dois números que fazem esta tela ser de RH. -->
+              <td class="rh__num">{{ a.em_aberto }}</td>
+              <td class="rh__num">{{ a.concluidas_semana }}</td>
               <td>
                 <span v-if="a.tem_senha" class="chip chip--ok">sim</span>
                 <span v-else class="chip chip--aviso">sem senha</span>
@@ -361,12 +449,49 @@ async function salvar() {
                 <button class="botao botao--pequeno botao--contorno" type="button" @click="abrirEdicao(a)">
                   Editar
                 </button>
+                <!-- ⚠️ Ação NOMEADA, não uma caixinha "Ativo" perdida no fim
+                     do formulário. Desligar alguém muda o acesso e a fila: a
+                     confirmação diz o que acontece. -->
+                <button
+                  v-if="a.ativo && !a.owner"
+                  class="botao botao--pequeno botao--perigo"
+                  type="button"
+                  @click="desligando = a"
+                >
+                  Desligar
+                </button>
               </td>
             </tr>
           </tbody>
         </table>
       </div>
     </section>
+
+    <div v-if="desligando" class="modal" @click.self="desligando = null">
+      <div class="modal__caixa" role="dialog" aria-modal="true" aria-label="Desligar">
+        <p class="modal__titulo">Desligar {{ desligando.nome }}?</p>
+        <p class="modal__texto">
+          A conta <strong>sai do painel</strong> (a senha é revogada e a entrada
+          pelo Google também), sai dos times, e
+          <strong>as conversas dela voltam para a fila</strong> — hoje elas
+          ficariam presas com um dono que nunca mais entra.
+        </p>
+        <p class="modal__texto pequeno">
+          O histórico continua com o nome dela: nada é apagado.
+        </p>
+        <div class="modal__acoes">
+          <button class="botao botao--contorno" type="button"
+                  @click="desligando = null">Cancelar</button>
+          <button class="botao botao--perigo" type="button"
+                  @click="confirmarDesligar">Desligar</button>
+        </div>
+      </div>
+    </div>
+
+    <p v-if="!jornadaAtiva" class="apagado pequeno">
+      A jornada está <strong>desligada</strong>: dá para montar a escala de
+      todo mundo sem que ela afete a fila. Ligar é o botão no topo.
+    </p>
 
     <p class="apagado pequeno">
       Atendente não é apagado, é desativado — <code>conversa</code> e
@@ -377,6 +502,10 @@ async function salvar() {
 </template>
 
 <style scoped>
+/* Números alinhados à direita e tabulares: coluna de número que
+   dança de largura obriga a ler cada linha em vez de varrer. */
+.rh__num { text-align: right; font-variant-numeric: tabular-nums; }
+
 .tela { max-width: 1100px; }
 
 .tela__cabecalho {

@@ -15,6 +15,7 @@ livrar dela, e aí o cliente some do radar. `em_jornada()` existe para a tela
 AVISAR, não para impedir.
 """
 import logging
+from datetime import datetime, timezone
 from datetime import time as _hora
 
 import psycopg
@@ -59,10 +60,15 @@ def _texto(valor, campo: str, obrigatorio: bool = True, maximo: int = 200) -> st
 def listar_times(incluir_inativos: bool = False) -> list[dict]:
     """Os times com quem está dentro de cada um.
 
-    🚨 `qtd_membros` vem junto de propósito: três dos sete times do Chatwoot
-    (Contratual, Pós Venda e agendamento) estão SEM NENHUM MEMBRO, e uma
-    conversa transferida para eles hoje não chega em ninguém. A tela precisa
-    conseguir mostrar isso em vermelho sem fazer outra consulta.
+    🚨 `qtd_membros` vem junto de propósito: time sem membro aceita a
+    transferência e a conversa não chega em ninguém. A tela mostra isso em
+    vermelho sem fazer outra consulta.
+
+    ⚠️ CORREÇÃO DE 25/08: este texto dizia que três times estavam vazios
+    (Contratual, Pós Venda e agendamento). Isso é do CHATWOOT, não daqui --
+    medido no banco do painel, os 7 times têm de 2 a 4 membros cada, nenhum
+    vazio. O alerta continua existindo porque a situação pode voltar; o que
+    saiu foi a afirmação errada sobre o presente.
     """
     return banco.varios(
         """
@@ -70,7 +76,21 @@ def listar_times(incluir_inativos: bool = False) -> list[dict]:
                t.time_transbordo_id,
                tr.nome AS transbordo_nome,
                COALESCE(m.qtd, 0) AS qtd_membros,
-               COALESCE(m.membros, '[]'::json) AS membros
+               COALESCE(m.membros, '[]'::json) AS membros,
+               -- 🚨 QUANTAS ESPERAM NESTE TIME AGORA. É o número que diz se
+               -- ele está dando conta -- e sem ele o cartão mostra quem está
+               -- dentro sem dizer o que há para fazer.
+               (SELECT count(*) FROM conversa c
+                 WHERE c.time_id = t.id AND c.estado <> 'resolvida') AS na_fila,
+               -- ⚠️ Quem ENXERGA a fila deste time é outro eixo que estar
+               -- nele (`atendente_time_permissao` × `atendente_time`), e não
+               -- aparecia em tela nenhuma. Lista vazia aqui quer dizer que
+               -- TODO MUNDO vê -- padrão permissivo da migração 001.
+               COALESCE((SELECT json_agg(a2.nome ORDER BY a2.nome)
+                           FROM atendente_time_permissao p
+                           JOIN atendente a2 ON a2.id = p.atendente_id
+                          WHERE p.time_id = t.id AND a2.ativo),
+                        '[]'::json) AS quem_ve
           FROM time t
           LEFT JOIN time tr ON tr.id = t.time_transbordo_id
           LEFT JOIN (
@@ -211,9 +231,36 @@ def listar_atendentes(incluir_inativos: bool = False) -> list[dict]:
             ORDER BY nome""",
         (incluir_inativos,),
     )
+    # 🚨 O NÚMERO QUE FAZ A TELA SER DE RH. Sem ele, "Atendentes" é uma lista
+    # de logins: quem está no horário agora, quantas conversas carrega e
+    # quantas concluiu na semana são as perguntas que se faz sobre uma equipe.
+    situacao = {
+        linha["atendente_id"]: linha
+        for linha in banco.varios(
+            """SELECT a.id AS atendente_id,
+                      count(c.id) FILTER (
+                          WHERE c.estado <> 'resolvida')            AS em_aberto,
+                      count(d.id) FILTER (
+                          WHERE d.resolvida_em >= now() - interval '7 days')
+                                                                    AS concluidas_semana
+                 FROM atendente a
+                 LEFT JOIN conversa c ON c.atendente_id = a.id
+                 LEFT JOIN conversa d ON d.resolvida_por = a.id
+                GROUP BY a.id""")
+    }
+
+    agora = datetime.now(timezone.utc)
     for linha in linhas:
         linha["times"] = _times_do(linha["id"])
         linha["jornada"] = _jornada_do(linha["id"])
+        atual = situacao.get(linha["id"], {})
+        linha["em_aberto"] = atual.get("em_aberto", 0)
+        linha["concluidas_semana"] = atual.get("concluidas_semana", 0)
+        # ⚠️ `em_jornada` já existe e respeita o fuso da pessoa. Sem jornada
+        # cadastrada ele devolve False -- e a tela precisa dizer POR QUÊ, senão
+        # "fora do horário" parece defeito.
+        linha["no_horario"] = em_jornada(linha["id"], agora)
+        linha["tem_jornada"] = bool(linha["jornada"])
     return linhas
 
 
@@ -347,6 +394,64 @@ def atualizar_atendente(atendente_id: int, nome: str, login: str,
     return atendente(atendente_id)
 
 
+def desligar(atendente_id: int, quem_edita: str | None = None) -> dict:
+    """Desliga um atendente — e solta o que ele estava segurando.
+
+    🚨 NÃO EXISTE APAGAR, E NÃO DEVE EXISTIR. `conversa`, `transferencia`,
+    `mensagem` e `chat_mensagem` apontam para o atendente: apagar a linha faria
+    o histórico mentir sobre quem atendeu.
+
+    🚨 O QUE FALTAVA NÃO ERA O BOTÃO, ERA O EFEITO. Desativar gravava
+    `ativo = false` e mais nada: quem saía da empresa com 12 conversas abertas
+    deixava dono que nunca mais entra, e elas ficavam invisíveis na fila -- não
+    aparecem em "sem dono" porque TÊM dono, e ninguém as vê porque o dono não
+    entra. Agora voltam para a fila.
+
+    ⚠️ A senha é revogada e os times são desfeitos no mesmo ato. Conta sem
+    senha não entra no painel (`validar_login` barra antes do bcrypt), então
+    isto é a porta fechando junto com o crachá.
+    """
+    atual = banco.um(
+        "SELECT id, login, nome, ativo, owner FROM atendente WHERE id = %s",
+        (atendente_id,))
+    if not atual:
+        return {"ok": False, "motivo": "Atendente não encontrado."}
+    if atual["owner"]:
+        return {"ok": False,
+                "motivo": "O owner não pode ser desligado: ele é o único "
+                          "administrador do sistema."}
+    if quem_edita and quem_edita.casefold() == atual["login"].casefold():
+        return {"ok": False, "motivo": "Você não pode desligar a si mesmo."}
+    if not atual["ativo"]:
+        return {"ok": False, "motivo": "Este atendente já está desligado."}
+
+    with banco.cursor() as cur:
+        # 🚨 AS CONVERSAS PRIMEIRO. Se o desligamento falhasse depois de
+        # soltar, o pior caso é conversa na fila com a pessoa ainda ativa --
+        # visível e corrigível. Na ordem inversa, o pior caso é conversa presa
+        # com dono que não entra, que é justamente o defeito.
+        cur.execute(
+            """UPDATE conversa SET atendente_id = NULL, estado = 'fila',
+                                   atualizada_em = now()
+                WHERE atendente_id = %s AND estado <> 'resolvida'""",
+            (atendente_id,))
+        soltas = cur.rowcount
+        cur.execute(
+            """UPDATE conversa_participante SET saiu_em = now()
+                WHERE atendente_id = %s AND saiu_em IS NULL""", (atendente_id,))
+        cur.execute("DELETE FROM atendente_time WHERE atendente_id = %s",
+                    (atendente_id,))
+        cur.execute(
+            """UPDATE atendente
+                  SET ativo = false, senha_hash = NULL, google_sub = NULL,
+                      atualizado_em = now()
+                WHERE id = %s""", (atendente_id,))
+
+    log.info("atendente %s desligado; %s conversa(s) voltaram para a fila",
+             atendente_id, soltas)
+    return {"ok": True, "nome": atual["nome"], "conversas_soltas": soltas}
+
+
 def definir_senha(atendente_id: int, senha: str) -> dict:
     from . import auth  # tardio: auth importa telas, e telas não importa isto
 
@@ -436,6 +541,34 @@ def definir_jornada(atendente_id: int, faixas: list[dict]) -> dict:
                    VALUES (%s, %s, %s, %s)""",
                 (atendente_id, dia, inicio, fim))
     return atendente(atendente_id)
+
+
+# ⚠️ A JORNADA NASCE DESLIGADA (decisão do usuário em 25/08): *"pode colocar
+# interruptor na configuração do owner de usar jornada ou não, daí pode montar
+# ela mas deixando desligado"*. Monta-se a escala com calma, e só quando o
+# owner ligar ela passa a significar alguma coisa na fila.
+#
+# 🚨 Vive em `config`, não em coluna nova: é UM valor para o sistema inteiro,
+# e a tabela existe exatamente para isso desde a migração 001.
+CHAVE_JORNADA = "jornada_ativa"
+
+
+def jornada_ativa() -> bool:
+    linha = banco.um("SELECT valor FROM config WHERE chave = %s",
+                     (CHAVE_JORNADA,))
+    return bool(linha) and linha["valor"] == "true"
+
+
+def definir_jornada_ativa(ligada: bool) -> dict:
+    banco.executar(
+        """INSERT INTO config (chave, valor, descricao, atualizado_em)
+           VALUES (%s, %s, %s, now())
+           ON CONFLICT (chave) DO UPDATE
+              SET valor = EXCLUDED.valor, atualizado_em = now()""",
+        (CHAVE_JORNADA, "true" if ligada else "false",
+         "A fila considera a jornada dos atendentes. Nasce desligada."))
+    log.info("jornada %s", "ligada" if ligada else "desligada")
+    return {"ok": True, "jornada_ativa": ligada}
 
 
 def em_jornada(atendente_id: int, quando) -> bool:

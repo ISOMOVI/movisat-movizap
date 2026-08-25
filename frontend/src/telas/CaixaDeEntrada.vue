@@ -912,6 +912,15 @@ onMounted(async () => {
      confiar nos dois. */
   if (route.query.minhas) filtro.value = 'minhas'
   else if (route.query.sem_dono) filtro.value = 'sem_dono'
+
+  /* 🚨 VEM DA FICHA DO CLIENTE. O botão "Conversar" da CAD_1.1 manda o número
+     para cá: se já existe conversa aberta com ele, abre; senão, abre o painel
+     do `+` já preenchido. Sem isto, o botão levaria à caixa de entrada
+     genérica e a pessoa teria de procurar o número que acabou de clicar. */
+  const numeroPedido = route.query.numero
+  if (numeroPedido) {
+    busca.value = String(numeroPedido)
+  }
   await carregar()
   try {
     ;[times.value, classificacoes.value] = await Promise.all([
@@ -922,6 +931,15 @@ onMounted(async () => {
     // sem estes a tela ainda mostra conversa; só as ações ficam sem opção
   }
   if (route.params.id) await abrir(route.params.id)
+  else if (numeroPedido) {
+    /* A busca já rodou com o número: se achou exatamente uma, abre; se não
+       achou nenhuma, oferece começar a conversa com ele. */
+    if (lista.value.length === 1) await abrir(lista.value[0].id)
+    else if (!lista.value.length) {
+      abrirNova()
+      novoNumero.value = String(numeroPedido)
+    }
+  }
   // A fila é consumida a cada 5s no servidor; a tela reflete isso sem F5.
   timer = setInterval(() => carregar({ silencioso: true }), 8000)
 })

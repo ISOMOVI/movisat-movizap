@@ -16,6 +16,7 @@
 import { ref, computed, onMounted } from 'vue'
 
 import { api, ErroDeApi } from '../api/cliente.js'
+import { corDaInicial, iniciais } from '../util/avatar.js'
 
 const times = ref([])
 const alertas = ref([])
@@ -25,6 +26,13 @@ const salvando = ref(false)
 const incluirInativos = ref(false)
 
 /** null = nada aberto; {} = criando; {id...} = editando */
+/* O transbordo do transbordo: dois elos bastam para mostrar a direção sem
+   virar diagrama, e é onde a conversa costuma se perder. */
+function transbordoDe(id) {
+  const alvo = times.value.find((t) => t.id === id)
+  return alvo?.transbordo_nome || null
+}
+
 const editando = ref(null)
 
 const form = ref({ nome: '', descricao: '', time_transbordo_id: null, ativo: true })
@@ -204,47 +212,85 @@ async function salvar() {
       <p>Os 7 do Chatwoot deviam estar aqui — confira a importação.</p>
     </div>
 
-    <section v-else class="cartao tela__bloco">
-      <div class="tabela--rolavel">
-        <table class="tabela">
-          <thead>
-            <tr>
-              <th>Time</th>
-              <th>Membros</th>
-              <th>Transbordo</th>
-              <th>Situação</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="t in times" :key="t.id" :class="{ 'linha--inativa': !t.ativo }">
-              <td>
-                <strong>{{ t.nome }}</strong>
-                <p v-if="t.descricao" class="apagado pequeno">{{ t.descricao }}</p>
-                <p v-else class="pequeno">
-                  <span class="chip chip--aviso">sem descrição — a IA vai chutar</span>
-                </p>
-              </td>
-              <td>
-                <span v-if="!t.qtd_membros" class="chip chip--erro">
-                  ninguém — a conversa não chega
-                </span>
-                <span v-for="m in t.membros" v-else :key="m.id" class="chip">{{ m.nome }}</span>
-              </td>
-              <td class="pequeno fraco">{{ t.transbordo_nome || '—' }}</td>
-              <td>
-                <span v-if="t.ativo" class="chip chip--ok">ativo</span>
-                <span v-else class="chip">inativo</span>
-              </td>
-              <td>
-                <button class="botao botao--pequeno botao--contorno" type="button" @click="abrirEdicao(t)">
-                  Editar
-                </button>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
+    <!-- 🚨 CARTÕES, NÃO TABELA. Numa tabela, nome, descrição, membros,
+         transbordo e situação recebem o mesmo peso -- e a descrição, que é a
+         ENTRADA DA IA, virava texto miúdo numa célula. No cartão ela tem
+         lugar próprio, e a cadeia de transbordo pode ser desenhada. -->
+    <section v-else class="times">
+      <article
+        v-for="t in times"
+        :key="t.id"
+        class="cartao time"
+        :class="{ 'time--inativo': !t.ativo, 'time--vazio': !t.qtd_membros }"
+      >
+        <header class="time__topo">
+          <div>
+            <strong class="time__nome">{{ t.nome }}</strong>
+            <span v-if="!t.ativo" class="chip chip--pequeno">inativo</span>
+          </div>
+          <!-- Quantas esperam AGORA: é o número que diz se o time dá conta. -->
+          <span class="time__fila" :class="{ 'time__fila--pede': t.na_fila }">
+            <strong>{{ t.na_fila }}</strong>
+            <span class="apagado pequeno">na fila</span>
+          </span>
+        </header>
+
+        <p v-if="t.descricao" class="time__descricao">{{ t.descricao }}</p>
+        <p v-else class="chip chip--aviso">
+          sem descrição — a IA vai chutar o destino
+        </p>
+
+        <div class="time__membros">
+          <template v-if="t.qtd_membros">
+            <!-- Avatar em vez de chip com nome: cinco chips de nome ocupam a
+                 largura toda e nenhum deles é lido. -->
+            <span
+              v-for="m in t.membros"
+              :key="m.id"
+              class="time__avatar"
+              :style="{ background: corDaInicial(m.nome) }"
+              :title="m.nome + (m.transferivel ? '' : ' — não recebe transferência')"
+            >{{ iniciais(m.nome) }}</span>
+            <span class="apagado pequeno">{{ t.qtd_membros }} recebem transferência</span>
+          </template>
+          <span v-else class="chip chip--erro">ninguém dentro — a conversa não chega</span>
+        </div>
+
+        <!-- ⚠️ A CADEIA DESENHADA, não uma célula com um nome. Quem lê "vai
+             para o Geral" não sabe para onde o Geral manda, e é aí que a
+             conversa se perde. -->
+        <p class="time__cadeia pequeno">
+          <span class="time__elo">{{ t.nome }}</span>
+          <template v-if="t.transbordo_nome">
+            <i class="bi bi-arrow-right" aria-hidden="true"></i>
+            <span class="time__elo">{{ t.transbordo_nome }}</span>
+            <i v-if="transbordoDe(t.time_transbordo_id)" class="bi bi-arrow-right"
+               aria-hidden="true"></i>
+            <span v-if="transbordoDe(t.time_transbordo_id)" class="time__elo">
+              {{ transbordoDe(t.time_transbordo_id) }}
+            </span>
+          </template>
+          <span v-else class="apagado">fica na fila do próprio time</span>
+        </p>
+
+        <!-- 🚨 LISTA VAZIA AQUI SIGNIFICA O CONTRÁRIO DO QUE PARECE: sem linha
+             de permissão, TODO MUNDO vê a fila deste time. É o padrão
+             permissivo da migração 001, e ele não aparecia em tela nenhuma. -->
+        <p class="time__quemve pequeno apagado">
+          <i class="bi bi-eye" aria-hidden="true"></i>
+          <template v-if="t.quem_ve.length">
+            só {{ t.quem_ve.join(', ') }} veem esta fila
+          </template>
+          <template v-else>todos veem esta fila</template>
+        </p>
+
+        <div class="time__acoes">
+          <button class="botao botao--pequeno botao--contorno" type="button"
+                  @click="abrirEdicao(t)">
+            Editar
+          </button>
+        </div>
+      </article>
     </section>
 
     <p class="apagado pequeno">
@@ -256,6 +302,38 @@ async function salvar() {
 </template>
 
 <style scoped>
+.times {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: var(--e-3);
+}
+.time { padding: var(--e-4); display: flex; flex-direction: column; gap: var(--e-2); }
+.time--inativo { opacity: .6; }
+/* Time sem ninguém dentro aceita a transferência e a conversa não chega:
+   é o único estado que muda a borda do cartão. */
+.time--vazio { border-color: var(--erro-borda); }
+.time__topo { display: flex; justify-content: space-between; align-items: flex-start; gap: var(--e-2); }
+.time__nome { font-size: var(--txt-lg); }
+.time__fila { display: flex; flex-direction: column; align-items: flex-end; line-height: 1.1; }
+.time__fila strong { font-size: var(--txt-xl); color: var(--texto-fraco); }
+.time__fila--pede strong { color: var(--aviso); }
+.time__descricao { margin: 0; color: var(--texto-fraco); font-size: var(--txt-sm); }
+.time__membros { display: flex; align-items: center; gap: var(--e-1); flex-wrap: wrap; }
+.time__avatar {
+  width: 28px; height: 28px;
+  border-radius: var(--r-full);
+  display: inline-flex; align-items: center; justify-content: center;
+  color: #fff; font-size: var(--txt-xs); font-weight: var(--peso-forte);
+}
+.time__cadeia { display: flex; align-items: center; gap: var(--e-1); flex-wrap: wrap; }
+.time__elo {
+  padding: 2px var(--e-2);
+  background: var(--superficie-2);
+  border-radius: var(--r-full);
+}
+.time__quemve { display: flex; align-items: center; gap: var(--e-1); }
+.time__acoes { margin-top: auto; }
+
 .tela { max-width: 1100px; }
 
 .tela__cabecalho {

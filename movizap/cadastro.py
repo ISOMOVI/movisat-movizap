@@ -139,6 +139,57 @@ def cliente(cliente_id: int) -> dict | None:
     return linha
 
 
+def ficha_do_cliente(cliente_id: int) -> dict | None:
+    """O cliente com o que o ATENDIMENTO precisa — não só o cadastro.
+
+    🚨 A FICHA NÃO LEVAVA A LUGAR NENHUM. Ela mostrava dados e acabava ali:
+    quem abria um cliente para descobrir "já falamos com essa empresa?" tinha
+    de ir para a caixa de entrada e buscar pelo nome. Aqui vêm as conversas e
+    os e-mails dele, e cada um com o id que abre a tela certa.
+
+    ⚠️ Poucas linhas de cada, de propósito. Isto é a ficha lateral, não o
+    histórico: quem quer tudo abre o Histórico, que existe para isso e sabe
+    paginar.
+    """
+    base = cliente(cliente_id)
+    if not base:
+        return None
+
+    # As conversas de QUALQUER contato desta empresa. O vínculo passa pela
+    # pessoa (`conversa.contato_id`), nunca pela empresa -- ver `docs/02`.
+    base["conversas"] = banco.varios(
+        """SELECT c.id, c.estado, c.telefone_e164, c.ultima_atividade_em,
+                  c.resolvida_em, ct.nome AS contato_nome,
+                  a.nome AS atendente_nome
+             FROM conversa c
+             JOIN contato ct ON ct.id = c.contato_id
+             LEFT JOIN atendente a
+                    ON a.id = COALESCE(c.resolvida_por, c.atendente_id)
+            WHERE ct.cliente_id = %s
+            ORDER BY c.ultima_atividade_em DESC
+            LIMIT 8""", (cliente_id,))
+
+    base["emails"] = banco.varios(
+        """SELECT id, assunto, remetente, enviado_em, lida
+             FROM email_mensagem
+            WHERE cliente_id = %s
+            ORDER BY enviado_em DESC NULLS LAST
+            LIMIT 8""", (cliente_id,))
+
+    # 🚨 O NÚMERO QUE DIZ SE DÁ PARA FALAR. `tem_whatsapp` distingue NULL
+    # (não verificado) de false (verificado e não tem), e essa diferença não
+    # aparecia em tela nenhuma -- quem olhava a ficha não sabia se podia
+    # mandar mensagem.
+    base["alcance"] = banco.um(
+        """SELECT count(*) FILTER (WHERE t.tem_whatsapp)          AS com_whatsapp,
+                  count(*) FILTER (WHERE t.tem_whatsapp IS FALSE) AS sem_whatsapp,
+                  count(*) FILTER (WHERE t.tem_whatsapp IS NULL)  AS nao_verificados
+             FROM contato_telefone t
+             JOIN contato ct ON ct.id = t.contato_id
+            WHERE ct.cliente_id = %s""", (cliente_id,))
+    return base
+
+
 def _com_telefones_e_papeis(contato: dict) -> dict:
     contato["telefones"] = banco.varios(
         """SELECT id, e164, bruto, origem_campo, principal,
