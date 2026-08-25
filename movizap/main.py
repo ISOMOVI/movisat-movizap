@@ -574,25 +574,93 @@ def google_inicio():
     return RedirectResponse(google_auth.url_de_entrada(), status_code=302)
 
 
+def _caixas_do_usuario(usuario: dict) -> list[dict]:
+    """As caixas de e-mail de quem está logado — as que ELE conectou.
+
+    🚨 É A BARREIRA DA EML_1.1, E ELA NÃO EXISTIA. Até 25/08 nenhuma rota de
+    e-mail filtrava por conta: qualquer pessoa com a tela abria a caixa do
+    owner inteira. Não dava erro nem travava o acesso -- funcionava, que é o
+    pior jeito de vazar.
+
+    ⚠️ Devolve LISTA porque a tela tem abas: a pessoa pode ter a caixa dela e
+    uma compartilhada (o `sac@`) ao mesmo tempo. Lista vazia é resposta
+    legítima -- quem nunca conectou caixa nenhuma vê a tela vazia com o
+    convite, não um erro.
+    """
+    eu = _atendente_do_usuario(usuario)
+    if not eu:
+        return []
+    return banco.varios(
+        "SELECT id, endereco, nome_exibicao FROM email_conta "
+        " WHERE atendente_id = %s AND ativa ORDER BY id", (eu,))
+
+
+def _caixa_permitida(usuario: dict, conta_id: int | None) -> list[int]:
+    """Os ids que a consulta pode tocar, já validando o `conta_id` pedido.
+
+    🚨 Pedir uma caixa que não é sua devolve 404, não 403: dizer "existe, mas
+    não é sua" já entrega que aquele endereço está conectado por alguém.
+    """
+    minhas = [c["id"] for c in _caixas_do_usuario(usuario)]
+    if conta_id is None:
+        return minhas
+    if conta_id not in minhas:
+        raise HTTPException(status_code=404, detail="Caixa não encontrada.")
+    return [conta_id]
+
+
+def _exige_mensagem_minha(usuario: dict, mensagem_id: int) -> None:
+    """Barra ação sobre mensagem de caixa que não é de quem pede.
+
+    ⚠️ SEPARADO DA LEITURA de propósito: ler já filtra no WHERE, mas as rotas
+    de AÇÃO (vincular, marcar lida, baixar anexo) recebem só o id e chamavam o
+    módulo direto. Sem este guarda, bastava adivinhar um número.
+    """
+    achou = banco.um(
+        "SELECT 1 AS ok FROM email_mensagem WHERE id = %s AND conta_id = ANY(%s)",
+        (mensagem_id, _caixa_permitida(usuario, None)))
+    if not achou:
+        raise HTTPException(status_code=404, detail="Mensagem não encontrada.")
+
+
+@app.get("/api/email/caixas")
+def email_caixas(usuario: dict = Depends(auth.requer_tela("EML_1.1"))):
+    """As abas da tela: uma por caixa que a pessoa conectou."""
+    return {"caixas": _caixas_do_usuario(usuario)}
+
+
 @app.get("/api/email/marcadores")
-def email_marcadores(usuario: dict = Depends(auth.requer_tela("EML_1.1"))):
+def email_marcadores(conta_id: int | None = None,
+                     usuario: dict = Depends(auth.requer_tela("EML_1.1"))):
+    contas = _caixa_permitida(usuario, conta_id)
+    if not contas:
+        return {"marcadores": []}
     return {"marcadores": banco.varios(
         """SELECT m.id, m.id_externo, m.nome, m.natureza,
                   (SELECT count(*) FROM email_mensagem_marcador mm
                     WHERE mm.marcador_id = m.id) AS quantidade
-             FROM email_marcador m ORDER BY m.natureza, m.nome""")}
+             FROM email_marcador m
+            WHERE m.conta_id = ANY(%s)
+            ORDER BY m.natureza, m.nome""", (contas,))}
 
 
 @app.get("/api/email/mensagens")
 def email_mensagens(marcador: str = "", busca: str = "", limite: int = 60,
+                    conta_id: int | None = None,
                     usuario: dict = Depends(auth.requer_tela("EML_1.1"))):
     """A lista da caixa.
 
     ⚠️ SPAM e TRASH nunca entram: ninguém quer lixeira num painel de
     atendimento, e filtrar na tela deixaria o dado passando pela rede à toa.
+
+    🚨 SÓ AS CAIXAS DE QUEM PEDE. Sem `conta_id`, todas as dele -- nunca as
+    dos outros. Ver `_caixas_do_usuario`.
     """
-    condicoes = ["NOT e.arquivada"]
-    params: list = []
+    contas = _caixa_permitida(usuario, conta_id)
+    if not contas:
+        return {"mensagens": []}
+    condicoes = ["NOT e.arquivada", "e.conta_id = ANY(%s)"]
+    params: list = [contas]
 
     # 🚨 O PARÂMETRO EXISTIA E ERA IGNORADO. A tela mandava `?marcador=SENT` e
     # recebia a caixa de entrada -- defeito que parece funcionamento, porque a
@@ -610,7 +678,7 @@ def email_mensagens(marcador: str = "", busca: str = "", limite: int = 60,
     params.append(limite)
     return {"mensagens": banco.varios(
         f"""SELECT e.id, e.remetente, e.remetente_nome, e.assunto, e.enviado_em,
-                   e.tem_anexo, e.lida, c.nome AS cliente_nome
+                   e.tem_anexo, e.lida, e.conta_id, c.nome AS cliente_nome
               FROM email_mensagem e
               LEFT JOIN cliente c ON c.id = e.cliente_id
              WHERE {' AND '.join(condicoes)}
@@ -621,11 +689,14 @@ def email_mensagens(marcador: str = "", busca: str = "", limite: int = 60,
 @app.get("/api/email/mensagens/{mensagem_id}")
 def email_mensagem(mensagem_id: int,
                    usuario: dict = Depends(auth.requer_tela("EML_1.1"))):
+    # 🚨 A CAIXA ENTRA NO WHERE, não numa conferência depois: mensagem de
+    # caixa alheia é "não encontrada", e não "existe mas não é sua".
     linha = banco.um(
         """SELECT e.*, c.nome AS cliente_nome
              FROM email_mensagem e
              LEFT JOIN cliente c ON c.id = e.cliente_id
-            WHERE e.id = %s""", (mensagem_id,))
+            WHERE e.id = %s AND e.conta_id = ANY(%s)""",
+        (mensagem_id, _caixa_permitida(usuario, None)))
     if not linha:
         raise HTTPException(status_code=404, detail="Mensagem não encontrada.")
     # `bruto` nunca vai para a tela: ela desenha com texto/html.
@@ -643,6 +714,8 @@ class EmailNovo(BaseModel):
     para: str
     assunto: str
     corpo: str
+    # Qual caixa envia. Opcional só quando a pessoa tem uma caixa só.
+    conta_id: int | None = None
     responder_a: int | None = None
     cc: str | None = None
     cco: str | None = None
@@ -658,6 +731,7 @@ class Assinatura(BaseModel):
 def email_vincular(mensagem_id: int, corpo: VinculoEmail,
                    usuario: dict = Depends(auth.requer_tela("EML_1.1"))):
     """Diz de quem é o remetente — e o cadastro cresce pelo uso."""
+    _exige_mensagem_minha(usuario, mensagem_id)
     r = gmail.vincular(mensagem_id, corpo.cliente_id)
     if not r.get("ok"):
         raise HTTPException(status_code=400, detail=r.get("motivo"))
@@ -688,12 +762,31 @@ def email_enviar(corpo: EmailNovo,
     destinatários -- disparo é outro produto, com outra decisão, como já vale
     para o WhatsApp.
     """
-    conta = banco.um("SELECT id FROM email_conta WHERE ativa LIMIT 1")
-    if not conta:
-        raise HTTPException(status_code=503, detail="Nenhuma caixa conectada.")
+    # 🚨 O `LIMIT 1` QUE ESTAVA AQUI ERA UMA BOMBA-RELÓGIO. Com uma caixa só
+    # ele acertava sempre; com a segunda, TODO e-mail sairia pela primeira --
+    # calado, e o destinatário responderia para o endereço errado. Agora a
+    # caixa é escolhida, e escolha inválida é 404, nunca "pega a primeira".
+    # ⚠️ A CAIXA PEDIDA É CONFERIDA PRIMEIRO. Se a ordem fosse a inversa, quem
+    # não tem caixa nenhuma e pedisse a de outro receberia "você não tem caixa
+    # conectada" -- uma resposta sobre ELE, quando a pergunta era sobre a caixa
+    # alheia. `_caixa_permitida` responde 404, que é o certo: para quem pede,
+    # aquela caixa não existe.
+    if corpo.conta_id is not None:
+        conta_id = _caixa_permitida(usuario, corpo.conta_id)[0]
+    else:
+        minhas = _caixas_do_usuario(usuario)
+        if not minhas:
+            raise HTTPException(
+                status_code=409,
+                detail="Você não tem caixa conectada. Conecte uma em E-mail.")
+        if len(minhas) > 1:
+            raise HTTPException(
+                status_code=400,
+                detail="Você tem mais de uma caixa: diga por qual enviar.")
+        conta_id = minhas[0]["id"]
     try:
         return enviar_email.enviar(
-            conta_id=conta["id"], para=corpo.para, assunto=corpo.assunto,
+            conta_id=conta_id, para=corpo.para, assunto=corpo.assunto,
             corpo=corpo.corpo, atendente_id=_atendente_do_usuario(usuario),
             responder_a=corpo.responder_a, cc=corpo.cc, cco=corpo.cco,
             html=corpo.html, anexos=corpo.anexos)
@@ -740,6 +833,7 @@ def email_baixar_anexo(mensagem_id: int, indice: int,
 
     ⚠️ Nada é gravado em disco: os bytes vêm do Google e vão para o navegador.
     """
+    _exige_mensagem_minha(usuario, mensagem_id)
     try:
         achado = gmail.anexo(mensagem_id, indice)
     except gmail.GmailIndisponivel as e:
@@ -762,6 +856,7 @@ def email_baixar_anexo(mensagem_id: int, indice: int,
 @app.post("/api/email/mensagens/{mensagem_id}/lida")
 def email_marcar_lida(mensagem_id: int,
                       usuario: dict = Depends(auth.requer_tela("EML_1.1"))):
+    _exige_mensagem_minha(usuario, mensagem_id)
     try:
         return gmail.marcar_lida(mensagem_id)
     except gmail.GmailIndisponivel as e:

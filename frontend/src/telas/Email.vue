@@ -290,6 +290,21 @@ function corDaInicial(m) {
   return `hsl(${soma % 360} 45% 42%)`
 }
 
+/* ---- as caixas de quem está logado --------------------------------------
+   🚨 QUEM NÃO CONECTOU CAIXA NENHUMA PRECISA SABER DISSO. Desde a migração
+   030 a tela só mostra as caixas de quem entrou -- antes mostrava a do owner
+   para qualquer um. Sem esta verificação, a pessoa nova abriria uma tela
+   silenciosamente vazia e concluiria que o e-mail está quebrado. */
+const caixas = ref([])
+
+async function carregarCaixas() {
+  try {
+    caixas.value = (await api.get('/api/email/caixas')).caixas || []
+  } catch {
+    caixas.value = []
+  }
+}
+
 async function carregarMarcadores() {
   try {
     marcadores.value = (await api.get('/api/email/marcadores')).marcadores || []
@@ -354,6 +369,7 @@ function quando(iso) {
 }
 
 onMounted(async () => {
+  await carregarCaixas()
   await carregarMarcadores()
   await carregar()
   await carregarAssinatura()
@@ -377,6 +393,18 @@ onMounted(async () => {
         </button>
       </div>
     </header>
+
+    <!-- 🚨 SEM CAIXA, A TELA EXPLICA em vez de ficar vazia. É o estado de
+         quem entra no painel pela primeira vez: a caixa é de quem a conecta
+         (migração 030), e conectar é ação do owner na CFG_1.1. -->
+    <div v-if="!caixas.length" class="vazio">
+      <i class="bi bi-envelope-x vazio__icone" aria-hidden="true"></i>
+      <p class="vazio__titulo">Nenhuma caixa conectada à sua conta</p>
+      <p>
+        A caixa de e-mail pertence a quem a conecta — por isso você não vê a de
+        outra pessoa. Peça ao administrador para conectar a sua.
+      </p>
+    </div>
 
     <p v-if="erro" class="aviso aviso--erro">{{ erro }}</p>
     <p v-if="recado" class="apagado pequeno">{{ recado }}</p>
