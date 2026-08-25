@@ -5,6 +5,7 @@ Sem banco ainda -- ver `auth.buscar_usuario`.
 """
 import asyncio
 import logging
+import pathlib
 import secrets
 import time
 from contextlib import asynccontextmanager
@@ -857,8 +858,95 @@ def ver_assinatura(usuario: dict = Depends(auth.get_usuario)):
     eu = _atendente_do_usuario(usuario)
     if not eu:
         return {"html": ""}
-    linha = banco.um("SELECT assinatura_html FROM atendente WHERE id = %s", (eu,))
-    return {"html": (linha or {}).get("assinatura_html") or ""}
+    linha = banco.um(
+        "SELECT assinatura_html, assinatura_imagem FROM atendente WHERE id = %s",
+        (eu,))
+    caminho = (linha or {}).get("assinatura_imagem")
+    # ⚠️ CONFERE O DISCO. Coluna apontando para arquivo que sumiu faria a tela
+    # dizer "imagem ativa" e o e-mail sair sem ela -- `enviar._assinatura()` já
+    # faz a mesma conferência, pela mesma razão.
+    tem_imagem = bool(caminho and pathlib.Path(caminho).is_file())
+    return {"html": (linha or {}).get("assinatura_html") or "",
+            "tem_imagem": tem_imagem,
+            "imagem_nome": pathlib.Path(caminho).name if tem_imagem else None}
+
+
+# ⚠️ Assinatura é imagem pequena por natureza -- logo, não banner. 2 MB já é
+# generoso, e o e-mail carrega o arquivo INTEIRO em toda mensagem enviada.
+TETO_ASSINATURA = 2 * 1024 * 1024
+PASTA_ASSINATURAS = pathlib.Path("/home/claude/movizap_assinaturas")
+
+
+@app.post("/api/eu/assinatura/imagem")
+async def subir_assinatura_imagem(
+        arquivo: UploadFile = File(...),
+        usuario: dict = Depends(auth.get_usuario)):
+    """Sobe a imagem da assinatura de quem está logado.
+
+    🚨 METADE DISTO JÁ EXISTIA E NINGUÉM PODIA USAR. `atendente.assinatura_imagem`
+    existe desde a migração 017 e `enviar._assinatura()` já lê a coluna, confere
+    o arquivo no disco e embute por CID -- faltava só o caminho para pôr o
+    arquivo lá.
+
+    🚨 O CAMINHO NUNCA VEM DA TELA. O nome do arquivo é do usuário e vira só o
+    nome-base; o diretório é nosso, por atendente. Se a tela mandasse caminho,
+    `../../.env` viraria assinatura -- é a mesma razão pela qual o anexo de
+    rascunho devolve um id.
+
+    ⚠️ GUARDA O CAMINHO, NUNCA OS BYTES (decisão da 017): bytes no banco
+    engordam backup e dump para sempre.
+    """
+    eu = _atendente_do_usuario(usuario)
+    if not eu:
+        raise HTTPException(status_code=409,
+                            detail="Sua conta não tem linha em `atendente`.")
+
+    tipo = (arquivo.content_type or "").lower()
+    if not tipo.startswith("image/"):
+        raise HTTPException(
+            status_code=400,
+            detail="A assinatura tem de ser uma imagem (PNG ou JPG).")
+
+    dados = await arquivo.read()
+    if not dados:
+        raise HTTPException(status_code=400, detail="Arquivo vazio.")
+    if len(dados) > TETO_ASSINATURA:
+        raise HTTPException(
+            status_code=400,
+            detail=f"A imagem passa de {TETO_ASSINATURA // (1024 * 1024)} MB. "
+                   f"Assinatura é logo, não banner.")
+
+    seguro = pathlib.Path((arquivo.filename or "assinatura").replace("\\", "/")).name
+    pasta = PASTA_ASSINATURAS / str(eu)
+    pasta.mkdir(parents=True, exist_ok=True)
+    # Uma imagem por pessoa: a anterior sai junto, senão o disco acumula
+    # assinatura velha que ninguém vai procurar.
+    for antigo in pasta.iterdir():
+        antigo.unlink(missing_ok=True)
+    caminho = pasta / seguro
+    caminho.write_bytes(dados)
+
+    banco.executar(
+        "UPDATE atendente SET assinatura_imagem = %s, atualizado_em = now() "
+        " WHERE id = %s", (str(caminho), eu))
+    return {"ok": True, "nome": seguro, "tamanho": len(dados)}
+
+
+@app.delete("/api/eu/assinatura/imagem")
+def tirar_assinatura_imagem(usuario: dict = Depends(auth.get_usuario)):
+    """Volta para a assinatura em HTML."""
+    eu = _atendente_do_usuario(usuario)
+    if not eu:
+        raise HTTPException(status_code=409,
+                            detail="Sua conta não tem linha em `atendente`.")
+    linha = banco.um("SELECT assinatura_imagem FROM atendente WHERE id = %s",
+                     (eu,))
+    if linha and linha["assinatura_imagem"]:
+        pathlib.Path(linha["assinatura_imagem"]).unlink(missing_ok=True)
+    banco.executar(
+        "UPDATE atendente SET assinatura_imagem = NULL, atualizado_em = now() "
+        " WHERE id = %s", (eu,))
+    return {"ok": True}
 
 
 @app.put("/api/eu/assinatura")
@@ -919,6 +1007,94 @@ def email_marcar_lida(mensagem_id: int,
         return gmail.marcar_lida(mensagem_id)
     except gmail.GmailIndisponivel as e:
         raise HTTPException(status_code=503, detail=str(e))
+
+
+class AcaoEmLote(BaseModel):
+    ids: list[int]
+    # 'lida' | 'nao_lida' | 'estrela' | 'sem_estrela' | 'arquivar' | 'desarquivar'
+    acao: str
+
+
+# ⚠️ Teto do lote: a tela oferece "selecionar tudo", e tudo pode ser a caixa
+# inteira. Cada item é uma chamada ao Gmail -- 500 seria meio minuto preso
+# numa requisição.
+TETO_LOTE_EMAIL = 100
+
+_ACOES_EMAIL = {
+    "lida": lambda i: gmail.marcar_lida(i),
+    "nao_lida": lambda i: gmail.marcar_nao_lida(i),
+    "estrela": lambda i: gmail.estrela(i, True),
+    "sem_estrela": lambda i: gmail.estrela(i, False),
+    "arquivar": lambda i: gmail.arquivar(i, True),
+    "desarquivar": lambda i: gmail.arquivar(i, False),
+}
+
+
+@app.post("/api/email/mensagens/{mensagem_id}/estrela")
+def email_estrela(mensagem_id: int, ligada: bool = True,
+                  usuario: dict = Depends(auth.requer_tela("EML_1.1"))):
+    """Põe ou tira a estrela — sem consentimento novo, o escopo já cobre."""
+    _exige_mensagem_minha(usuario, mensagem_id)
+    try:
+        return gmail.estrela(mensagem_id, ligada)
+    except gmail.GmailIndisponivel as e:
+        raise HTTPException(status_code=503, detail=str(e))
+
+
+@app.post("/api/email/mensagens/{mensagem_id}/nao-lida")
+def email_nao_lida(mensagem_id: int,
+                   usuario: dict = Depends(auth.requer_tela("EML_1.1"))):
+    """O "volto nisso depois". Sem ele, abrir por engano é irreversível."""
+    _exige_mensagem_minha(usuario, mensagem_id)
+    try:
+        return gmail.marcar_nao_lida(mensagem_id)
+    except gmail.GmailIndisponivel as e:
+        raise HTTPException(status_code=503, detail=str(e))
+
+
+@app.post("/api/email/lote")
+def email_lote(dados: AcaoEmLote,
+               usuario: dict = Depends(auth.requer_tela("EML_1.1"))):
+    """Aplica a mesma ação a várias mensagens — o "selecionar" da tela.
+
+    🚨 UM ERRO NÃO DERRUBA O LOTE. Cada item é uma chamada ao Gmail, e uma
+    falhar (token expirado, mensagem apagada do outro lado) não pode fazer as
+    outras 40 não acontecerem. A resposta diz quantas foram e quantas não --
+    silêncio aqui vira "marquei e não pegou".
+
+    🚨 A DONA DA CAIXA É CONFERIDA ITEM A ITEM. Sem isso, um id alheio no meio
+    de uma lista de ids meus passaria despercebido.
+    """
+    if dados.acao not in _ACOES_EMAIL:
+        raise HTTPException(status_code=400,
+                            detail=f"Ação desconhecida: {dados.acao!r}.")
+    ids = sorted({int(i) for i in (dados.ids or []) if i})
+    if not ids:
+        raise HTTPException(status_code=400,
+                            detail="Nenhuma mensagem selecionada.")
+    if len(ids) > TETO_LOTE_EMAIL:
+        raise HTTPException(
+            status_code=400,
+            detail=f"São {len(ids)} mensagens. O lote vai até "
+                   f"{TETO_LOTE_EMAIL} por vez.")
+
+    minhas = _caixa_permitida(usuario, None)
+    feitas, falhas = 0, 0
+    for mensagem_id in ids:
+        dona = banco.um(
+            "SELECT 1 AS ok FROM email_mensagem "
+            " WHERE id = %s AND conta_id = ANY(%s)", (mensagem_id, minhas))
+        if not dona:
+            falhas += 1
+            continue
+        try:
+            _ACOES_EMAIL[dados.acao](mensagem_id)
+            feitas += 1
+        except Exception:                                     # noqa: BLE001
+            log.exception("lote de e-mail: %s falhou em %s",
+                          dados.acao, mensagem_id)
+            falhas += 1
+    return {"ok": True, "pedidas": len(ids), "feitas": feitas, "falhas": falhas}
 
 
 @app.post("/api/email/ler")

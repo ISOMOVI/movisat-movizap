@@ -11,9 +11,15 @@ Google e é buscável pelo id. Por isso:
 Guardar tudo custaria ~360 MB/ano para duplicar o que o Google já guarda, num
 banco que tem 16 MB. Ver `migracoes/015`.
 
-⚠️ SÓ LEITURA. O escopo pedido é `gmail.readonly`. Este módulo não marca como
-lida, não move, não apaga e não envia -- nem por engano, porque o token não
-permite.
+🚨 ESTE CABEÇALHO DIZIA "SÓ LEITURA -- o escopo é `gmail.readonly`", E ESTAVA
+ERRADO. O escopo concedido é `gmail.modify` + `gmail.send` (conferido em
+`google_auth.ESCOPO_CAIXA`, 25/08). Estrelar, marcar não-lida e arquivar não
+pedem consentimento novo -- a frase errada atrasou esses recursos sem motivo,
+porque quem lia concluía que faltava autorização.
+
+⚠️ O que este módulo NÃO faz continua valendo: não apaga mensagem. Tudo que
+ele escreve é reversível com um clique -- estrela sai, não-lida volta,
+arquivada desarquiva.
 """
 import base64
 import json
@@ -313,6 +319,96 @@ def marcar_lida(mensagem_id: int) -> dict:
             WHERE mk.id = mm.marcador_id AND mm.mensagem_id = %s
               AND mk.id_externo = 'UNREAD'""", (mensagem_id,))
     return {"ok": True, "ja_estava": False}
+
+
+def _mexer_rotulo(mensagem_id: int, poe: list[str], tira: list[str],
+                  o_que: str) -> dict:
+    """Liga e desliga rótulo no Gmail — a base de estrela, lida e arquivar.
+
+    🚨 UMA FUNÇÃO, NÃO TRÊS CÓPIAS. Estrela, não-lida e arquivar são a MESMA
+    chamada (`messages/{id}/modify`) com rótulos diferentes. Três cópias
+    divergiriam na primeira correção de token ou de erro -- é a lição do
+    `_condicao_busca`, que existia em dois lugares e passou a procurar em
+    campos diferentes.
+
+    ⚠️ TUDO AQUI É REVERSÍVEL. Nada nesta função apaga mensagem: estrela sai,
+    não-lida volta, arquivada desarquiva. É o que permite estas serem as
+    primeiras escritas do painel na caixa de alguém.
+    """
+    linha = banco.um(
+        """SELECT m.id, m.id_externo, c.id AS conta_id, c.endereco,
+                  c.refresh_token
+             FROM email_mensagem m JOIN email_conta c ON c.id = m.conta_id
+            WHERE m.id = %s""", (mensagem_id,))
+    if not linha:
+        return {"ok": False, "motivo": "Mensagem não encontrada."}
+
+    token = _token_de_acesso(linha)
+    corpo = {}
+    if poe:
+        corpo["addLabelIds"] = poe
+    if tira:
+        corpo["removeLabelIds"] = tira
+    r = httpx.post(
+        f"{API}/messages/{linha['id_externo']}/modify",
+        headers={"Authorization": f"Bearer {token}"},
+        json=corpo, timeout=30)
+    if r.status_code != 200:
+        raise GmailIndisponivel(
+            f"O Gmail recusou {o_que} ({r.status_code}).")
+    return {"ok": True}
+
+
+def estrela(mensagem_id: int, ligada: bool) -> dict:
+    """Põe ou tira a estrela.
+
+    ⚠️ NÃO PEDE CONSENTIMENTO NOVO. O escopo concedido é `gmail.modify` --
+    conferido em 25/08, e o comentário no topo deste módulo dizia `readonly`,
+    que estava errado desde que o escopo mudou.
+    """
+    r = _mexer_rotulo(mensagem_id,
+                      ["STARRED"] if ligada else [],
+                      [] if ligada else ["STARRED"],
+                      "mexer na estrela")
+    if not r.get("ok"):
+        return r
+    banco.executar("UPDATE email_mensagem SET estrela = %s WHERE id = %s",
+                   (ligada, mensagem_id))
+    return {"ok": True, "estrela": ligada}
+
+
+def marcar_nao_lida(mensagem_id: int) -> dict:
+    """Devolve a mensagem para não-lida — o "volto nisso depois".
+
+    🚨 É O INVERSO EXATO de `marcar_lida`, e existe porque sem ele abrir uma
+    mensagem por engano é irreversível pela tela: a pessoa perde a marca que
+    usava para saber o que ainda não tratou.
+    """
+    r = _mexer_rotulo(mensagem_id, ["UNREAD"], [], "marcar como não lida")
+    if not r.get("ok"):
+        return r
+    banco.executar("UPDATE email_mensagem SET lida = false WHERE id = %s",
+                   (mensagem_id,))
+    return {"ok": True, "lida": False}
+
+
+def arquivar(mensagem_id: int, arquivada: bool) -> dict:
+    """Tira da caixa de entrada — ou devolve.
+
+    🚨 ARQUIVA NO GMAIL TAMBÉM. Arquivar só aqui faria as duas caixas
+    divergirem em uma semana, e ninguém saberia qual é a verdade. No Gmail,
+    "arquivar" é remover o rótulo `INBOX` -- a mensagem não some, sai da
+    caixa.
+    """
+    r = _mexer_rotulo(mensagem_id,
+                      [] if arquivada else ["INBOX"],
+                      ["INBOX"] if arquivada else [],
+                      "arquivar")
+    if not r.get("ok"):
+        return r
+    banco.executar("UPDATE email_mensagem SET arquivada = %s WHERE id = %s",
+                   (arquivada, mensagem_id))
+    return {"ok": True, "arquivada": arquivada}
 
 
 def anexo(mensagem_id: int, indice: int) -> dict:

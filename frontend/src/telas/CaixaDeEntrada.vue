@@ -350,6 +350,15 @@ const TIPOS = [
   { valor: 'sem_identificacao', rotulo: 'Sem identificação' },
 ]
 const tiposMarcados = ref([])
+const filtroAberto = ref(false)
+
+/* ⚠️ FECHA AO CLICAR FORA. Popover que só fecha no próprio botão fica aberto
+   por cima da lista enquanto a pessoa tenta clicar numa conversa -- e ela
+   clica duas vezes achando que a tela travou. */
+function fecharFiltroSeForaDele(evento) {
+  if (!filtroAberto.value) return
+  if (!evento.target.closest('.filtro')) filtroAberto.value = false
+}
 
 function alternarTipo(valor) {
   tiposMarcados.value = tiposMarcados.value.includes(valor)
@@ -722,6 +731,7 @@ async function encerrar() {
 }
 
 onMounted(async () => {
+  document.addEventListener('click', fecharFiltroSeForaDele)
   /* 🚨 O FILTRO VEM DA URL QUANDO A TELA INICIAL MANDA. Os cartões da INI_1.1
      apontam para `/atendimento?minhas=1` e `?sem_dono=1`: sem ler a query, o
      clique cairia na lista inteira e o número da tela inicial não bateria com
@@ -743,7 +753,10 @@ onMounted(async () => {
   timer = setInterval(() => carregar({ silencioso: true }), 8000)
 })
 
-onUnmounted(() => clearInterval(timer))
+onUnmounted(() => {
+  clearInterval(timer)
+  document.removeEventListener('click', fecharFiltroSeForaDele)
+})
 
 watch(filtro, () => carregar())
 
@@ -1047,27 +1060,6 @@ function carregarMidiasDaConversa(c) {
             </button>
           </div>
 
-          <!-- Tipo de cadastro. Combina com as abas acima e com a busca. -->
-          <div class="linha linha--quebra tipos">
-            <button
-              v-for="t in TIPOS"
-              :key="t.valor"
-              class="chip tipos__chip"
-              :class="{ 'tipos__chip--ligado': tiposMarcados.includes(t.valor) }"
-              type="button"
-              @click="alternarTipo(t.valor)"
-            >
-              {{ t.rotulo }}
-            </button>
-            <button
-              v-if="tiposMarcados.length"
-              class="botao botao--pequeno botao--fantasma"
-              type="button"
-              @click="tiposMarcados = []; carregar()"
-            >
-              limpar
-            </button>
-          </div>
         </header>
 
         <div class="cartao__corpo">
@@ -1081,6 +1073,48 @@ function carregarMidiasDaConversa(c) {
                 placeholder="nome, telefone ou o que foi dito"
                 @keyup.enter="carregar()"
               />
+              <!-- 🚨 O FILTRO MORA NO CAMPO DE BUSCA, não numa fileira de
+                   chips acima da lista. Buscar e filtrar são a MESMA
+                   pergunta ("quais conversas eu quero ver"), e separá-los em
+                   dois lugares fazia a coluna virar uma parede de botões
+                   antes de qualquer conversa aparecer. -->
+              <div class="filtro">
+                <button
+                  class="botao botao--contorno botao--icone"
+                  type="button"
+                  :class="{ 'botao--filtrando': tiposMarcados.length }"
+                  :aria-expanded="filtroAberto"
+                  title="Filtrar por tipo de cadastro"
+                  aria-label="Filtrar por tipo de cadastro"
+                  @click.prevent="filtroAberto = !filtroAberto"
+                >
+                  <i class="bi bi-funnel" aria-hidden="true"></i>
+                  <span v-if="tiposMarcados.length" class="filtro__conta">
+                    {{ tiposMarcados.length }}
+                  </span>
+                </button>
+
+                <div v-if="filtroAberto" class="filtro__caixa">
+                  <p class="filtro__titulo">Tipo de cadastro</p>
+                  <label v-for="t in TIPOS" :key="t.valor" class="filtro__linha">
+                    <input
+                      type="checkbox"
+                      :checked="tiposMarcados.includes(t.valor)"
+                      @change="alternarTipo(t.valor)"
+                    />
+                    <span>{{ t.rotulo }}</span>
+                  </label>
+                  <button
+                    v-if="tiposMarcados.length"
+                    class="botao botao--pequeno botao--fantasma filtro__limpar"
+                    type="button"
+                    @click.prevent="tiposMarcados = []; carregar()"
+                  >
+                    limpar filtro
+                  </button>
+                </div>
+              </div>
+
               <button
                 class="botao botao--primario botao--icone"
                 type="button"
@@ -1091,6 +1125,14 @@ function carregarMidiasDaConversa(c) {
                 <i class="bi bi-search" aria-hidden="true"></i>
               </button>
             </div>
+
+            <!-- O que está filtrado aparece EMBAIXO do campo, em texto: o
+                 ícone diz que há filtro, esta linha diz qual. -->
+            <span v-if="tiposMarcados.length" class="filtro__resumo pequeno">
+              <i class="bi bi-funnel-fill" aria-hidden="true"></i>
+              {{ TIPOS.filter((t) => tiposMarcados.includes(t.valor))
+                      .map((t) => t.rotulo).join(' · ') }}
+            </span>
             <span class="campo__ajuda">
               Procura no nome do WhatsApp, no cadastro, no telefone
               (<strong>pedaço serve</strong>: <code>6168</code>) e no texto das
@@ -2169,13 +2211,63 @@ function carregarMidiasDaConversa(c) {
 .conversa:hover { background: rgba(128, 128, 128, .08); }
 .conversa--aberta { background: rgba(128, 128, 128, .14); }
 
-/* Chip que liga e desliga. Cor e borda saem dos tokens; nenhum valor de cor
-   escrito aqui. */
-.tipos { margin-top: var(--e-2); }
-.tipos__chip { cursor: pointer; font-family: var(--fonte); }
-.tipos__chip--ligado {
+/* ---- filtro dentro do campo de busca ------------------------------------
+   O popover ancora no botão do funil. `position: relative` no pai é o que
+   segura o `absolute` do painel; sem ele, ele iria para o canto da tela. */
+.filtro { position: relative; flex: none; }
+
+.botao--filtrando {
+  border-color: var(--acento);
+  color: var(--acento);
   background: var(--acento-suave);
-  border-color: var(--acento-borda);
+}
+
+/* O contador no canto do funil: diz QUE há filtro sem abrir o painel. */
+.filtro__conta {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: var(--r-full);
+  background: var(--acento);
+  color: var(--acento-texto);
+  font-size: var(--txt-xs);
+  line-height: 16px;
+  text-align: center;
+}
+
+.filtro__caixa {
+  position: absolute;
+  top: calc(100% + var(--e-1));
+  right: 0;
+  z-index: var(--z-flutuante);
+  min-width: 220px;
+  padding: var(--e-3);
+  background: var(--superficie);
+  border: var(--borda-fina) solid var(--borda);
+  border-radius: var(--r-lg);
+  box-shadow: var(--sombra-2);
+}
+.filtro__titulo {
+  margin: 0 0 var(--e-2);
+  font-size: var(--txt-sm);
+  font-weight: var(--peso-forte);
+  color: var(--texto-fraco);
+}
+.filtro__linha {
+  display: flex;
+  align-items: center;
+  gap: var(--e-2);
+  padding: var(--e-1) 0;
+  cursor: pointer;
+}
+.filtro__limpar { margin-top: var(--e-2); padding-left: 0; }
+.filtro__resumo {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--e-1);
   color: var(--acento);
 }
 

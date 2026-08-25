@@ -12,7 +12,7 @@
    acionam nada na Fase 1. Existem para o cadastro nascer completo. A tela diz
    isso, senão alguém marca "central 24h" esperando que algo aconteça.
    ============================================================================ */
-import { ref, computed, watch, onMounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 
 import { api, ErroDeApi } from '../api/cliente.js'
 
@@ -65,6 +65,14 @@ const NOME_RELACAO = {
    literal. Ninguém corrige 1.750 linhas uma a uma -- e sem base honesta o
    interruptor de automação por tipo dispara para quem não devia. */
 const tiposFiltro = ref([])
+const filtroAberto = ref(false)
+
+/* ⚠️ Fecha ao clicar fora: popover por cima da tabela faz a pessoa clicar
+   duas vezes achando que a tela travou. */
+function fecharFiltroSeForaDele(evento) {
+  if (!filtroAberto.value) return
+  if (!evento.target.closest('.filtro')) filtroAberto.value = false
+}
 const marcados = ref([])
 const relacaoDoLote = ref('')
 const aplicandoLote = ref(false)
@@ -197,7 +205,11 @@ function quando(iso) {
   return iso ? new Date(iso).toLocaleString('pt-BR') : '—'
 }
 
-onMounted(carregar)
+onMounted(() => {
+  carregar()
+  document.addEventListener('click', fecharFiltroSeForaDele)
+})
+onUnmounted(() => document.removeEventListener('click', fecharFiltroSeForaDele))
 </script>
 
 <template>
@@ -214,39 +226,65 @@ onMounted(carregar)
 
     <section class="cartao">
       <div class="cartao__corpo">
-        <label class="cad__busca">
-          <i class="bi bi-search" aria-hidden="true"></i>
-          <input
-            v-model="busca"
-            class="campo"
-            type="search"
-            placeholder="Nome, documento do cliente ou telefone…"
-            aria-label="Buscar contato"
-          />
-        </label>
-      </div>
+        <!-- 🚨 O FILTRO MORA NO CAMPO DE BUSCA. Buscar e filtrar são a
+             MESMA pergunta -- "quais contatos eu quero ver" -- e separá-los
+             em dois lugares enchia a tela de botões antes de qualquer
+             contato aparecer. -->
+        <div class="cad__linhabusca">
+          <label class="cad__busca">
+            <i class="bi bi-search" aria-hidden="true"></i>
+            <input
+              v-model="busca"
+              class="campo"
+              type="search"
+              placeholder="Nome, documento do cliente ou telefone…"
+              aria-label="Buscar contato"
+            />
+          </label>
 
-      <!-- Filtro por tipo. Combina com a busca: procurar "silva" entre os
-           fornecedores é uma pergunta só. -->
-      <div class="cartao__corpo linha linha--quebra tipos">
-        <button
-          v-for="r in RELACOES"
-          :key="r"
-          class="chip tipos__chip"
-          :class="{ 'tipos__chip--ligado': tiposFiltro.includes(r) }"
-          type="button"
-          @click="alternarTipoFiltro(r)"
-        >
-          {{ NOME_RELACAO[r] }}
-        </button>
-        <button
-          v-if="tiposFiltro.length"
-          class="botao botao--pequeno botao--fantasma"
-          type="button"
-          @click="tiposFiltro = []; pagina = 1; carregar()"
-        >
-          limpar
-        </button>
+          <div class="filtro">
+            <button
+              class="botao botao--contorno botao--icone"
+              type="button"
+              :class="{ 'botao--filtrando': tiposFiltro.length }"
+              :aria-expanded="filtroAberto"
+              title="Filtrar por tipo"
+              aria-label="Filtrar por tipo"
+              @click.prevent="filtroAberto = !filtroAberto"
+            >
+              <i class="bi bi-funnel" aria-hidden="true"></i>
+              <span v-if="tiposFiltro.length" class="filtro__conta">
+                {{ tiposFiltro.length }}
+              </span>
+            </button>
+
+            <div v-if="filtroAberto" class="filtro__caixa">
+              <p class="filtro__titulo">Tipo</p>
+              <label v-for="r in RELACOES" :key="r" class="filtro__linha">
+                <input
+                  type="checkbox"
+                  :checked="tiposFiltro.includes(r)"
+                  @change="alternarTipoFiltro(r)"
+                />
+                <span>{{ NOME_RELACAO[r] }}</span>
+              </label>
+              <button
+                v-if="tiposFiltro.length"
+                class="botao botao--pequeno botao--fantasma filtro__limpar"
+                type="button"
+                @click.prevent="tiposFiltro = []; pagina = 1; carregar()"
+              >
+                limpar filtro
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <span v-if="tiposFiltro.length" class="filtro__resumo pequeno">
+          <i class="bi bi-funnel-fill" aria-hidden="true"></i>
+          {{ RELACOES.filter((r) => tiposFiltro.includes(r))
+                     .map((r) => NOME_RELACAO[r]).join(' · ') }}
+        </span>
       </div>
 
       <!-- 🚨 A BARRA SÓ APARECE COM ALGO MARCADO. Barra de ação permanente
@@ -644,11 +682,46 @@ onMounted(carregar)
 .cad__relacao { max-width: 14rem; }
 .cad__marca { width: 2.2rem; text-align: center; }
 
-.tipos__chip { cursor: pointer; font-family: var(--fonte); }
-.tipos__chip--ligado {
-  background: var(--acento-suave);
-  border-color: var(--acento-borda);
+.cad__linhabusca { display: flex; align-items: center; gap: var(--e-2); }
+.cad__linhabusca .cad__busca { flex: 1 1 auto; }
+
+.filtro { position: relative; flex: none; }
+.botao--filtrando {
+  border-color: var(--acento);
   color: var(--acento);
+  background: var(--acento-suave);
+}
+.filtro__conta {
+  position: absolute;
+  top: -6px; right: -6px;
+  min-width: 16px; height: 16px; padding: 0 4px;
+  border-radius: var(--r-full);
+  background: var(--acento); color: var(--acento-texto);
+  font-size: var(--txt-xs); line-height: 16px; text-align: center;
+}
+.filtro__caixa {
+  position: absolute;
+  top: calc(100% + var(--e-1)); right: 0;
+  z-index: var(--z-flutuante);
+  min-width: 220px; padding: var(--e-3);
+  background: var(--superficie);
+  border: var(--borda-fina) solid var(--borda);
+  border-radius: var(--r-lg);
+  box-shadow: var(--sombra-2);
+}
+.filtro__titulo {
+  margin: 0 0 var(--e-2);
+  font-size: var(--txt-sm); font-weight: var(--peso-forte);
+  color: var(--texto-fraco);
+}
+.filtro__linha {
+  display: flex; align-items: center; gap: var(--e-2);
+  padding: var(--e-1) 0; cursor: pointer;
+}
+.filtro__limpar { margin-top: var(--e-2); padding-left: 0; }
+.filtro__resumo {
+  display: inline-flex; align-items: center; gap: var(--e-1);
+  color: var(--acento); margin-top: var(--e-2);
 }
 
 .lote {
