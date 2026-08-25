@@ -890,3 +890,30 @@ que ela representava para a triagem por IA caiu.
 ## ATD_5.1 e ATD_3.1 — não mexer
 
 Histórico e Informativos ficam como estão, por decisão do usuário em 25/08.
+
+### ✅ Validado em 25/08 — o `+` e o filtro por tipo
+
+Comportamento **real confirmado**, não spec:
+
+| O quê | Confirmado |
+|---|---|
+| Número sem WhatsApp | recusa e **não cria conversa nenhuma** — nada é gravado antes de saber que dá para falar |
+| Evolution mudo sobre o número | recusa também: `None` é "não sei", nunca "não tem" |
+| Número já com conversa aberta | **abre a que existe**, não cria outra |
+| Conversa nova | nasce com dono (quem clicou) e estado `humano` |
+| Identificação | acontece **depois** do envio; um cadastro vincula, vários ficam como sugestão |
+| Filtro medido | `sem_cadastro` 214 · `cliente` 126 · `tecnico` 0 · `sem_identificacao` 0 · sem filtro 343 |
+
+`tests/teste_conversa_nova.py`, 18 testes, com envio e consulta ao WhatsApp
+mockados por fixture `autouse` — depender de alguém lembrar de mockar é o
+mesmo que não ter.
+
+🚨 **A regra "o painel não é caixa de disparo" saiu dos docstrings** (decisão
+do usuário em 25/08: *"elimine a regra e foco no escopo atual"*). O que fica no
+lugar é a descrição do que cada função faz: `responder` responde uma conversa
+que já existe; `iniciar_conversa` fala com quem ainda não escreveu.
+
+⚠️ **Uma lição do próprio teste:** o mock de envio devolvia sempre o mesmo
+`id_externo`, e a segunda mensagem sumia. Não era defeito do código — é a
+trava de idempotência (`UNIQUE` em `mensagem.id_externo`) funcionando, porque
+o Evolution reentrega. Mock que repete id acusa o código por defeito do teste.

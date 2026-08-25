@@ -948,11 +948,55 @@ def resumo_das_conversas(usuario: dict = Depends(auth.requer_tela("ATD_1.1"))):
 @app.get("/api/conversas")
 def listar_conversas(estado: str | None = None, sem_dono: bool = False,
                      minhas: bool = False, busca: str = "",
+                     relacoes: str = "",
                      usuario: dict = Depends(auth.requer_tela("ATD_1.1"))):
-    """A lista da caixa: conversa direta e grupo juntos, como no WhatsApp."""
+    """A lista da caixa: conversa direta e grupo juntos, como no WhatsApp.
+
+    `relacoes` é a lista de chips separada por vírgula. `sem_cadastro` entra
+    junto com os valores de `contato.relacao` e quer dizer outra coisa: a
+    conversa sem contato nenhum. Ver `conversas.listar`.
+    """
+    escolhidas = [r.strip() for r in relacoes.split(",") if r.strip()]
     return conversas.listar(
         estado=estado, sem_dono=sem_dono, busca=busca,
+        relacoes=escolhidas or None,
         atendente_id=_atendente_do_usuario(usuario) if minhas else None)
+
+
+class ConversaNova(BaseModel):
+    numero: str
+    texto: str
+    canal_id: int | None = None
+
+
+@app.post("/api/conversas/nova")
+def iniciar_conversa(dados: ConversaNova,
+                     usuario: dict = Depends(auth.requer_tela("ATD_1.2"))):
+    """O botão `+`: falar primeiro com quem ainda não escreveu.
+
+    🚨 O CANAL PADRÃO É O DE ATENDIMENTO, por definição (decisão do usuário em
+    25/08). O outro canal é o de informativos, e mensagem de atendimento não
+    sai por lá.
+
+    ⚠️ Recusa com 409 e um corpo que a tela sabe ler: quando o número não tem
+    WhatsApp, vem `sem_whatsapp: true` para a tela mostrar o aviso certo em
+    vez de um erro genérico.
+    """
+    canal_id = dados.canal_id
+    if canal_id is None:
+        canal = banco.um(
+            "SELECT id FROM canal WHERE tipo = 'atendimento' AND ativo "
+            " ORDER BY id LIMIT 1")
+        if not canal:
+            raise HTTPException(status_code=503,
+                                detail="Nenhum canal de atendimento ativo.")
+        canal_id = canal["id"]
+
+    r = conversas.iniciar_conversa(
+        canal_id, dados.numero, dados.texto, _atendente_do_usuario(usuario))
+    if not r.get("ok"):
+        raise HTTPException(status_code=409, detail=r)
+    return r
 
 
 @app.get("/api/midia/{midia_id}")

@@ -142,6 +142,45 @@ def nome_do_grupo(instancia: str, jid: str) -> str | None:
     return nome or None
 
 
+def numeros_com_whatsapp(instancia: str, e164s: list[str]) -> dict[str, bool]:
+    """Pergunta ao WhatsApp quais destes números existem lá.
+
+    🚨 SUBIU DO `scripts/verificar_whatsapp.py` PARA CÁ EM 25/08. A chamada
+    vivia dentro do script, e o botão de nova conversa precisava da mesma
+    pergunta. Copiar teria criado duas versões da mesma regra -- foi
+    exatamente o defeito que `_condicao_busca` existe para lembrar: a caixa e
+    o histórico procuravam em campos diferentes porque o SQL tinha sido
+    copiado. Cópia não fica igual sozinha.
+
+    🚨 O QUE NÃO ESTÁ NA RESPOSTA FICA DE FORA DO DICIONÁRIO, e quem chama
+    trata isso como "não verificado". Nunca `False`: `tem_whatsapp = false`
+    significa "perguntei e não tem", e silenciaria o cliente para sempre se
+    fosse gravado por um silêncio do Evolution.
+
+    ⚠️ Duplicado na lista faz o Evolution recusar o lote inteiro com
+    `numbers contains duplicate item` -- medido em 07/08. A remoção é aqui, e
+    não na disciplina de quem chama.
+    """
+    limpos = []
+    for e in e164s:
+        so_digitos = "".join(c for c in (e or "") if c.isdigit())
+        if so_digitos and so_digitos not in limpos:
+            limpos.append(so_digitos)
+    if not limpos:
+        return {}
+
+    resposta = _pedir("POST", f"/chat/whatsappNumbers/{instancia}",
+                      {"numbers": limpos})
+    return {str(r.get("number") or "").lstrip("+"): bool(r.get("exists"))
+            for r in (resposta or [])}
+
+
+def tem_whatsapp(instancia: str, e164: str) -> bool | None:
+    """Um número só. `None` = o Evolution não respondeu sobre ele."""
+    return numeros_com_whatsapp(instancia, [e164]).get(
+        "".join(c for c in (e164 or "") if c.isdigit()))
+
+
 def destino_para_evolution(destino: str) -> str:
     """O que vai no campo `number` do Evolution.
 

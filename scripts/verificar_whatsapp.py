@@ -94,8 +94,11 @@ def main() -> int:
         numeros = [t["e164"].lstrip("+") for t in pedaco]
 
         try:
-            resposta = evolution._pedir(
-                "POST", f"/chat/whatsappNumbers/{INSTANCIA}", {"numbers": numeros})
+            # ⚠️ A pergunta subiu para `evolution.numeros_com_whatsapp` em
+            # 25/08, porque o botão de nova conversa precisa dela também.
+            # Aqui ficou a chamada; a regra (tirar duplicado, ignorar quem o
+            # Evolution não citou) mora lá, uma vez só.
+            por_numero = evolution.numeros_com_whatsapp(INSTANCIA, numeros)
         except Exception as e:                      # noqa: BLE001
             # ⚠️ Falha de rede NÃO vira `false`. Fica NULL para a próxima
             # rodada: "não verificado" é a verdade aqui.
@@ -106,18 +109,14 @@ def main() -> int:
             time.sleep(args.intervalo)
             continue
 
-        por_numero = {str(r.get("number") or "").lstrip("+"): r
-                      for r in (resposta or [])}
-
         with banco.cursor() as cur:
             for t in pedaco:
                 bruto = t["e164"].lstrip("+")
-                achado = por_numero.get(bruto)
-                if achado is None:
+                existe = por_numero.get(bruto)
+                if existe is None:
                     # O Evolution não falou deste número: não se inventa
                     # resposta. Continua NULL.
                     continue
-                existe = bool(achado.get("exists"))
                 existem += int(existe)
                 nao_existem += int(not existe)
                 # A resposta vale para TODAS as linhas com aquele número.

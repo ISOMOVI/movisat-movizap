@@ -559,7 +559,8 @@ def _trechos_achados(ids: list[int], termo: str) -> dict[int, str]:
 
 
 def listar(estado: str | None = None, atendente_id: int | None = None,
-           sem_dono: bool = False, busca: str = "", limite: int = 100) -> list[dict]:
+           sem_dono: bool = False, busca: str = "", limite: int = 100,
+           relacoes: list[str] | None = None) -> list[dict]:
     """As conversas para a lista da caixa de entrada.
 
     Cada linha traz o que o doc pede: nome (ou telefone, quando não
@@ -586,6 +587,30 @@ def listar(estado: str | None = None, atendente_id: int | None = None,
         params.extend([atendente_id, atendente_id])
     if sem_dono:
         condicoes.append("c.atendente_id IS NULL")
+
+    # ---- filtro por tipo de cadastro (pedido do usuário em 25/08) ----------
+    # 🚨 "SEM CADASTRO" E "SEM IDENTIFICAÇÃO" SÃO COISAS DIFERENTES, e o
+    # usuário fez questão da distinção em 25/08:
+    #
+    #   sem_cadastro       -> a conversa não tem linha em `contato` nenhuma.
+    #                         É o caso COMUM: 211 de 332 conversas (64%).
+    #   sem_identificacao  -> o contato EXISTE e o flag da ficha dele ainda não
+    #                         foi marcado por ninguém.
+    #
+    # Colapsar os dois num chip só esconderia justamente o caso majoritário --
+    # e é o `sem_cadastro` que o botão `+` e a gaveta existem para resolver.
+    if relacoes:
+        pedidos = [r for r in relacoes if r]
+        partes, params_rel = [], []
+        if "sem_cadastro" in pedidos:
+            partes.append("c.contato_id IS NULL")
+            pedidos = [r for r in pedidos if r != "sem_cadastro"]
+        if pedidos:
+            partes.append("ct.relacao = ANY(%s)")
+            params_rel.append(pedidos)
+        if partes:
+            condicoes.append("(" + " OR ".join(partes) + ")")
+            params.extend(params_rel)
     onde_busca, params_busca = _condicao_busca(busca)
     if onde_busca:
         condicoes.append(onde_busca)
@@ -959,9 +984,10 @@ TETO_MENSAGEM = 4000
 def responder(conversa_id: int, texto: str, atendente_id: int | None) -> dict:
     """Responde o cliente pelo WhatsApp e grava a mensagem.
 
-    🚨 O NÚMERO VEM DA CONVERSA, NUNCA DO QUE FOI DIGITADO. É esta linha que
-    impede o painel de virar ferramenta de disparo: não existe caminho para
-    escolher destinatário. Disparo em massa é Fase 2, com decisão própria.
+    🚨 O NÚMERO VEM DA CONVERSA, NUNCA DO PARÂMETRO. Não é regra de política:
+    é o desenho desta função -- ela responde uma conversa que já existe. Para
+    falar com quem ainda não escreveu existe `iniciar_conversa`, que é o
+    caminho do botão `+` (25/08).
 
     🚨 GRAVA COM O `key.id` QUE O WHATSAPP DEVOLVEU. O Evolution ecoa a nossa
     própria mensagem pelo webhook, com `fromMe: true` e o mesmo id; sem gravar
@@ -983,9 +1009,9 @@ def responder(conversa_id: int, texto: str, atendente_id: int | None) -> dict:
         """SELECT c.id, c.telefone_e164, c.estado, c.atendente_id, ca.instancia,
                   c.tipo, c.grupo_jid,
                   -- 🚨 O DESTINO DO ENVIO. Conversa direta vai para o
-                  -- telefone; grupo vai para o JID. Os dois saem da CONVERSA,
-                  -- nunca do que foi digitado -- é a linha que impede o
-                  -- painel de virar ferramenta de disparo.
+                  -- telefone; grupo vai para o JID. Os dois saem da CONVERSA:
+                  -- responder é responder ESTA conversa. Falar com quem ainda
+                  -- não escreveu é `iniciar_conversa`.
                   COALESCE(c.grupo_jid, c.telefone_e164) AS destino
              FROM conversa c JOIN canal ca ON ca.id = c.canal_id
             WHERE c.id = %s""", (conversa_id,))
@@ -1049,14 +1075,134 @@ TETO_ARQUIVO = TETO_ARQUIVO_MB * 1024 * 1024
 _TIPO_POR_FAMILIA = {"image": "imagem", "video": "video", "audio": "audio"}
 
 
+def iniciar_conversa(canal_id: int, numero_digitado: str, texto: str,
+                     atendente_id: int | None) -> dict:
+    """Fala primeiro com um número que ainda não escreveu — o botão `+`.
+
+    Pedido do usuário em 25/08: *"o foco do botão + seria enviar mensagem para
+    um número que ainda não temos salvo... então o + já valida se tem whatsapp
+    e envia a mensagem nova"*.
+
+    A ordem importa e é esta:
+
+      1. normaliza o número (as duas grafias do nono dígito);
+      2. **pergunta ao WhatsApp se o número existe** -- antes de criar
+         qualquer linha no banco;
+      3. se já houver conversa ABERTA com este número neste canal, ABRE ELA;
+      4. senão cria a conversa, já com dono;
+      5. envia pelo caminho normal (`responder`), que grava, assume e trata o
+         eco do webhook;
+      6. identifica DEPOIS do envio.
+
+    🚨 O PASSO 2 VEM ANTES DO 4 DE PROPÓSITO. Criar a conversa e só então
+    descobrir que o número não tem WhatsApp deixaria uma conversa órfã na
+    caixa de entrada, sem nenhuma mensagem, para sempre -- e alguém teria de
+    limpar isso à mão. Nada é gravado enquanto não se sabe que dá para falar.
+
+    🚨 NÃO SE INVENTA `false`. `evolution.tem_whatsapp` devolve `None` quando o
+    Evolution não respondeu sobre aquele número, e `None` **não** é "não tem":
+    é "não sei". Tratar os dois igual recusaria envio legítimo por uma falha
+    de rede.
+
+    ⚠️ O PASSO 3 EXISTE POR CAUSA DO BANCO. `ux_conversa_aberta` é único por
+    (canal, número) enquanto a conversa não está resolvida: criar outra
+    estouraria o índice no meio do envio, que é a pior hora para falhar. Abrir
+    a que existe é também o que a pessoa quer -- a fala continua num lugar só.
+
+    ⚠️ IDENTIFICAR DEPOIS, E SÓ QUANDO NÃO HÁ DÚVIDA. `garantir_conversa` já
+    liga o contato quando o número responde por UM cadastro. Vários cadastros
+    continuam como sugestão na gaveta, sem escolher: chutar de quem é produz
+    ficha errada, que é pior que ficha nenhuma.
+    """
+    from . import evolution  # tardio: evolution não conhece conversas
+
+    texto = (texto or "").strip()
+    if not texto:
+        return {"ok": False, "motivo": "Escreva a mensagem antes de enviar."}
+
+    analise = tel.analisar(numero_digitado)
+    e164 = analise.e164 if analise else None
+    if not e164:
+        return {"ok": False,
+                "motivo": "Não entendi este número. Use DDD + número, "
+                          "como (18) 99811-6168."}
+
+    canal = banco.um(
+        "SELECT id, instancia, tipo FROM canal WHERE id = %s AND ativo",
+        (canal_id,))
+    if not canal or not canal["instancia"]:
+        return {"ok": False, "motivo": "Canal inválido ou sem instância."}
+
+    # ---- 2. o WhatsApp existe? ---------------------------------------------
+    try:
+        existe = evolution.tem_whatsapp(canal["instancia"], e164)
+    except Exception as e:                                    # noqa: BLE001
+        log.warning("nova conversa: falha ao consultar o WhatsApp de %s (%s)",
+                    e164, e.__class__.__name__)
+        return {"ok": False,
+                "motivo": "Não consegui perguntar ao WhatsApp se este número "
+                          "existe. Tente de novo em instantes."}
+
+    if existe is False:
+        return {"ok": False, "sem_whatsapp": True, "e164": e164,
+                "motivo": "Este número não tem WhatsApp. Confira os dígitos e "
+                          "teste por um celular antes de cadastrar."}
+    if existe is None:
+        return {"ok": False,
+                "motivo": "O WhatsApp não respondeu sobre este número. Como "
+                          "não dá para saber, não enviei."}
+
+    # ---- 3 e 4. abrir a que existe, ou criar --------------------------------
+    aberta = banco.um(
+        """SELECT id FROM conversa
+            WHERE canal_id = %s AND telefone_e164 = %s AND estado <> 'resolvida'""",
+        (canal_id, e164))
+    if aberta:
+        conversa_id, nasceu = aberta["id"], False
+    else:
+        with banco.cursor() as cur:
+            conversa_id = garantir_conversa(cur, canal_id, e164)
+            if atendente_id:
+                cur.execute(
+                    """UPDATE conversa SET atendente_id = %s, estado = 'humano',
+                                           atualizada_em = now()
+                        WHERE id = %s AND atendente_id IS NULL""",
+                    (atendente_id, conversa_id))
+        nasceu = True
+
+    # ---- 5. envia pelo caminho normal --------------------------------------
+    enviado = responder(conversa_id, texto, atendente_id)
+    if not enviado.get("ok"):
+        # ⚠️ A conversa recém-criada NÃO é apagada aqui. Ela já existe, e o
+        # que falhou foi o envio -- a pessoa vê a conversa aberta e tenta de
+        # novo. Apagar deixaria a tela sem para onde voltar.
+        return {"ok": False, "conversa_id": conversa_id,
+                "motivo": enviado.get("motivo", "Não consegui enviar.")}
+
+    # ---- 6. identificar depois ---------------------------------------------
+    linha = banco.um(
+        """SELECT c.contato_id, ct.nome AS contato_nome, cl.nome AS cliente_nome
+             FROM conversa c
+             LEFT JOIN contato ct ON ct.id = c.contato_id
+             LEFT JOIN cliente cl ON cl.id = ct.cliente_id
+            WHERE c.id = %s""", (conversa_id,))
+
+    log.info("conversa %s iniciada pelo painel para %s (nova=%s)",
+             conversa_id, e164, nasceu)
+    return {"ok": True, "conversa_id": conversa_id, "nasceu": nasceu,
+            "e164": e164,
+            "identificada": bool(linha and linha["contato_id"]),
+            "contato_nome": linha["contato_nome"] if linha else None,
+            "cliente_nome": linha["cliente_nome"] if linha else None}
+
+
 def responder_com_arquivo(conversa_id: int, dados: bytes, mime: str,
                           nome_arquivo: str, legenda: str,
                           atendente_id: int | None) -> dict:
     """Manda um arquivo para o cliente. Espelha `responder` em tudo que importa.
 
-    🚨 O NÚMERO VEM DA CONVERSA, NUNCA DO QUE FOI ENVIADO. É a mesma linha que
-    impede o painel de virar ferramenta de disparo: não existe caminho para
-    escolher destinatário.
+    🚨 O NÚMERO VEM DA CONVERSA, NUNCA DO QUE FOI ENVIADO. Mesma razão de
+    `responder`: esta função responde uma conversa que já existe.
 
     🚨 ENVIA PRIMEIRO, GRAVA DEPOIS. O contrário registraria como enviado um
     arquivo que o WhatsApp recusou -- e o atendente acharia que mandou.
@@ -1086,9 +1232,9 @@ def responder_com_arquivo(conversa_id: int, dados: bytes, mime: str,
         """SELECT c.id, c.telefone_e164, c.estado, c.atendente_id, ca.instancia,
                   c.tipo, c.grupo_jid,
                   -- 🚨 O DESTINO DO ENVIO. Conversa direta vai para o
-                  -- telefone; grupo vai para o JID. Os dois saem da CONVERSA,
-                  -- nunca do que foi digitado -- é a linha que impede o
-                  -- painel de virar ferramenta de disparo.
+                  -- telefone; grupo vai para o JID. Os dois saem da CONVERSA:
+                  -- responder é responder ESTA conversa. Falar com quem ainda
+                  -- não escreveu é `iniciar_conversa`.
                   COALESCE(c.grupo_jid, c.telefone_e164) AS destino
              FROM conversa c JOIN canal ca ON ca.id = c.canal_id
             WHERE c.id = %s""", (conversa_id,))

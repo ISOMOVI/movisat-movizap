@@ -267,12 +267,87 @@ const FILTROS = [
   { valor: 'minhas', rotulo: 'Minhas' },
 ]
 
+/* ---- filtro por tipo de cadastro (pedido do usuário em 25/08) -----------
+   🚨 "SEM CADASTRO" E "SEM IDENTIFICAÇÃO" SÃO COISAS DIFERENTES, e a ordem
+   aqui reflete isso: `sem_cadastro` é a conversa que não tem contato nenhum
+   na base (211 de 332, 64%); `sem_identificacao` é o flag da ficha de um
+   contato que existe. Os dois ficam lado a lado de propósito -- juntá-los
+   esconderia o caso majoritário. */
+const TIPOS = [
+  { valor: 'sem_cadastro', rotulo: 'Sem cadastro' },
+  { valor: 'cliente', rotulo: 'Cliente' },
+  { valor: 'fornecedor', rotulo: 'Fornecedor' },
+  { valor: 'tecnico', rotulo: 'Técnico' },
+  { valor: 'teste', rotulo: 'Teste' },
+  { valor: 'sem_identificacao', rotulo: 'Sem identificação' },
+]
+const tiposMarcados = ref([])
+
+function alternarTipo(valor) {
+  tiposMarcados.value = tiposMarcados.value.includes(valor)
+    ? tiposMarcados.value.filter((t) => t !== valor)
+    : [...tiposMarcados.value, valor]
+  carregar()
+}
+
 function parametros() {
   const p = new URLSearchParams()
   if (filtro.value === 'sem_dono') p.set('sem_dono', 'true')
   if (filtro.value === 'minhas') p.set('minhas', 'true')
   if (busca.value.trim()) p.set('busca', busca.value.trim())
+  if (tiposMarcados.value.length) p.set('relacoes', tiposMarcados.value.join(','))
   return p.toString()
+}
+
+/* ---- o botão `+`: falar primeiro com quem ainda não escreveu ------------
+   🚨 Até 25/08 não havia caminho de saída: conversa só nascia quando CHEGAVA
+   mensagem. Este painel é o único lugar do painel onde se escolhe para quem
+   mandar. */
+const novaAberta = ref(false)
+const novoNumero = ref('')
+const novoTexto = ref('')
+const enviandoNova = ref(false)
+const erroNova = ref('')
+const semWhatsapp = ref(false)
+
+function abrirNova() {
+  novaAberta.value = true
+  novoNumero.value = ''
+  novoTexto.value = ''
+  erroNova.value = ''
+  semWhatsapp.value = false
+}
+
+async function enviarNova() {
+  enviandoNova.value = true
+  erroNova.value = ''
+  semWhatsapp.value = false
+  try {
+    const r = await api.post('/api/conversas/nova', {
+      numero: novoNumero.value,
+      texto: novoTexto.value,
+    })
+    novaAberta.value = false
+    /* O recado diz o que aconteceu com a IDENTIFICAÇÃO, porque é o que
+       diferencia este caminho: mandar para número desconhecido é normal. */
+    recado.value = r.identificada
+      ? `Enviado. Já vinculei a ${r.cliente_nome || r.contato_nome}.`
+      : (r.nasceu
+          ? 'Enviado. Este número não está no cadastro — dá para vincular pela ficha.'
+          : 'Enviado na conversa que já estava aberta com este número.')
+    await carregar()
+    await abrir(r.conversa_id)
+  } catch (e) {
+    /* O backend devolve o corpo inteiro no 409: `sem_whatsapp` distingue "o
+       número não existe no WhatsApp" de "falhou por outro motivo", e as duas
+       pedem reação diferente de quem está na tela. */
+    const detalhe = e instanceof ErroDeApi ? e.detalhe : null
+    semWhatsapp.value = Boolean(detalhe && detalhe.sem_whatsapp)
+    erroNova.value = (detalhe && detalhe.motivo)
+      || (e instanceof ErroDeApi ? e.message : 'Não consegui enviar.')
+  } finally {
+    enviandoNova.value = false
+  }
 }
 
 /* ⚠️ O GIRANDO SÓ APARECE DEPOIS DE 3 SEGUNDOS. Busca rápida — que é o caso
@@ -883,6 +958,41 @@ function carregarMidiasDaConversa(c) {
               @click="filtro = f.valor"
             >
               {{ f.rotulo }}
+            </button>
+
+            <!-- 🚨 O `+` FICA LOGO DEPOIS DE "MINHAS", como o usuário pediu
+                 em 25/08. É o único lugar do painel onde se escolhe para quem
+                 mandar: em todo o resto o destino sai da conversa. -->
+            <button
+              class="botao botao--pequeno botao--primario botao--icone"
+              type="button"
+              title="Nova mensagem para um número"
+              aria-label="Nova mensagem para um número"
+              @click="abrirNova"
+            >
+              <i class="bi bi-plus-lg" aria-hidden="true"></i>
+            </button>
+          </div>
+
+          <!-- Tipo de cadastro. Combina com as abas acima e com a busca. -->
+          <div class="linha linha--quebra tipos">
+            <button
+              v-for="t in TIPOS"
+              :key="t.valor"
+              class="chip tipos__chip"
+              :class="{ 'tipos__chip--ligado': tiposMarcados.includes(t.valor) }"
+              type="button"
+              @click="alternarTipo(t.valor)"
+            >
+              {{ t.rotulo }}
+            </button>
+            <button
+              v-if="tiposMarcados.length"
+              class="botao botao--pequeno botao--fantasma"
+              type="button"
+              @click="tiposMarcados = []; carregar()"
+            >
+              limpar
             </button>
           </div>
         </header>
@@ -1589,6 +1699,68 @@ function carregarMidiasDaConversa(c) {
          Ficam fora das colunas de propósito: `position: fixed` dentro de um
          container que rola acompanha a rolagem e a caixa some da vista. -->
 
+    <!-- NOVA MENSAGEM — o `+`. Um destinatário: este painel responde
+         "falar com esta pessoa". -->
+    <div v-if="novaAberta" class="modal" @click.self="novaAberta = false">
+      <div class="modal__caixa" role="dialog" aria-modal="true" aria-label="Nova mensagem">
+        <p class="modal__titulo">Nova mensagem</p>
+        <p class="modal__texto pequeno">
+          Para um número que ainda não escreveu. Confiro no WhatsApp se ele
+          existe <strong>antes</strong> de enviar.
+        </p>
+
+        <label class="campo">
+          <span class="campo__rotulo">Número</span>
+          <input
+            v-model="novoNumero"
+            class="campo__entrada"
+            type="tel"
+            placeholder="(18) 99811-6168"
+            autocomplete="off"
+          />
+          <span class="campo__ajuda">Com DDD. Pode colar como estiver.</span>
+        </label>
+
+        <label class="campo">
+          <span class="campo__rotulo">Mensagem</span>
+          <textarea
+            v-model="novoTexto"
+            class="campo__entrada"
+            rows="3"
+            maxlength="4000"
+          ></textarea>
+        </label>
+
+        <!-- 🚨 A RECUSA POR FALTA DE WHATSAPP TEM CARA PRÓPRIA. É a diferença
+             entre "erra o número" e "o sistema falhou", e a reação de quem
+             está na tela é outra em cada caso. -->
+        <p v-if="semWhatsapp" class="aviso aviso--atencao">
+          <i class="bi bi-whatsapp aviso__icone" aria-hidden="true"></i>
+          <span>{{ erroNova }}</span>
+        </p>
+        <p v-else-if="erroNova" class="aviso aviso--erro">
+          <i class="bi bi-exclamation-octagon aviso__icone" aria-hidden="true"></i>
+          <span>{{ erroNova }}</span>
+        </p>
+
+        <div class="modal__acoes">
+          <button class="botao botao--contorno" type="button" @click="novaAberta = false">
+            Cancelar
+          </button>
+          <button
+            class="botao botao--primario"
+            type="button"
+            :disabled="enviandoNova || !novoNumero.trim() || !novoTexto.trim()"
+            @click="enviarNova"
+          >
+            <span v-if="enviandoNova" class="girando"></span>
+            <i v-else class="bi bi-whatsapp" aria-hidden="true"></i>
+            Enviar
+          </button>
+        </div>
+      </div>
+    </div>
+
     <!-- CONVIDAR — vários de uma vez, por caixa de seleção -->
     <div v-if="painelAcao === 'convidar' && aberta" class="modal" @click.self="fecharPainel">
       <div class="modal__caixa" role="dialog" aria-modal="true" aria-label="Convidar atendentes">
@@ -1903,6 +2075,16 @@ function carregarMidiasDaConversa(c) {
 .conversa--grupo { border-left-color: var(--ok); }
 .conversa:hover { background: rgba(128, 128, 128, .08); }
 .conversa--aberta { background: rgba(128, 128, 128, .14); }
+
+/* Chip que liga e desliga. Cor e borda saem dos tokens; nenhum valor de cor
+   escrito aqui. */
+.tipos { margin-top: var(--e-2); }
+.tipos__chip { cursor: pointer; font-family: var(--fonte); }
+.tipos__chip--ligado {
+  background: var(--acento-suave);
+  border-color: var(--acento-borda);
+  color: var(--acento);
+}
 
 .conversa__topo { display: flex; justify-content: space-between; gap: var(--e-2); }
 .conversa__acompanham {

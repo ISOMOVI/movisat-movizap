@@ -42,11 +42,18 @@ export function temToken() {
 
 /** Erro de API: carrega o status e o req_id para a tela poder mostrá-los. */
 export class ErroDeApi extends Error {
-  constructor(mensagem, status, reqId) {
+  /* 🚨 `detalhe` GUARDA O CORPO ESTRUTURADO. Até 25/08 o cliente lia
+     `dados.detail`, e se ele não fosse string virava "Erro 409." -- o corpo
+     inteiro era jogado fora. Isso apagava exatamente a informação que faz a
+     tela reagir certo: o `+` precisa distinguir "este número não tem
+     WhatsApp" de "falhou por outro motivo", e as duas coisas chegam no mesmo
+     409. Mensagem para ler; `detalhe` para decidir. */
+  constructor(mensagem, status, reqId, detalhe = null) {
     super(mensagem)
     this.name = 'ErroDeApi'
     this.status = status
     this.reqId = reqId
+    this.detalhe = detalhe
   }
 }
 
@@ -100,10 +107,13 @@ async function pedir(metodo, caminho, corpo) {
   }
 
   const detalhe = dados && dados.detail ? dados.detail : `Erro ${resposta.status}.`
+  const ehTexto = typeof detalhe === 'string'
   throw new ErroDeApi(
-    typeof detalhe === 'string' ? detalhe : `Erro ${resposta.status}.`,
+    // Corpo estruturado costuma trazer `motivo`: é ele que a pessoa lê.
+    ehTexto ? detalhe : (detalhe.motivo || `Erro ${resposta.status}.`),
     resposta.status,
     reqId,
+    ehTexto ? null : detalhe,
   )
 }
 
