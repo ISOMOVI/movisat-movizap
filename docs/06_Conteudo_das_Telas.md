@@ -956,3 +956,257 @@ diz *"mostrando os primeiros 200 acertos"*.
 
 Fica registrado porque o padrão é o que importa: **todo teto tem de aparecer na
 resposta.** Um teto que ninguém vê não é limite, é dado sumindo.
+
+---
+
+# ✅ Validado em 2026-08-25 — o resto dos onze blocos
+
+> ⚠️ **ESTA SEÇÃO EXISTE PORQUE EU PULEI A ETAPA 4 DO CICLO.** O `+`, a rolagem
+> e a busca ganharam o "validado" no mesmo dia; os outros sete blocos foram
+> entregues, testados e commitados **sem** o comportamento confirmado voltar
+> para cá. Doc que descreve só metade do que existe manda quem lê procurar no
+> código — e o código não conta por que uma coisa é assim.
+
+---
+
+## CAD_1.2 — classificar em lote
+
+| O quê | Confirmado |
+|---|---|
+| Marcação em lote | teto de **500 por vez** |
+| A resposta | diz **quantos mudaram**, não "ok" |
+| Id repetido | conta uma vez |
+| Id inexistente | não derruba o lote |
+| Filtro por tipo | combina com a busca |
+
+⚠️ **O teto não é medo do banco:** lote sem teto aceita "marcar a base inteira"
+num clique, e não existe desfazer.
+
+⚠️ **Pedir 40 e mudar 37** quer dizer que 3 já estavam assim — silêncio aqui
+vira "marquei e não pegou".
+
+🚨 **`cadastro.RELACOES` tinha ficado para trás da migração 029:** a rota
+recusava, com "relação inválida", um valor que o banco aceita. Espelho que não
+se atualiza junto vira mentira, e agora há teste lendo o CHECK do próprio banco.
+
+---
+
+## CFG_5.1 — Automação por tipo de contato
+
+A tela que o registro de telas ganhou em 25/08. **Só owner.**
+
+```
+Objetivo:     a mensagem que chega ser filtrada antes de gastar atendimento
+Hoje:         boas-vindas por tipo de contato, acionando de verdade e nascendo
+              desligada. O interruptor de IA aparece TRAVADO, com o motivo
+Por quê:      pedido do usuário em 25/08. `docs/09` item 4: configuração não
+              afirma o que o código não faz -- e `canal.ia_ligada` é lido em
+              quatro lugares sem que nenhum aja sobre ele
+Reavaliar se: o `services/llm/` migrar. Aí o interruptor destrava num lugar só
+```
+
+| O quê | Confirmado |
+|---|---|
+| Ligar sem texto | **recusado** — mandaria mensagem em branco ao cliente |
+| Grupo | nunca recebe saudação |
+| Conversa em andamento | não recebe: só na **primeira mensagem de entrada** |
+| Reentrega de webhook | não repete: a trava é `UPDATE ... WHERE boas_vindas_em IS NULL` |
+| Autor da mensagem | `sistema`, não um atendente |
+| Tempo de primeira resposta | **não** conta a saudação |
+
+🚨 **CADA LINHA MOSTRA QUANTOS CONTATOS ALCANÇA.** Ligar "Cliente" hoje atinge
+**1.750 pessoas** — o número precisa estar à vista na hora de ligar, e não
+depois.
+
+🚨 **`sem_cadastro` é linha da automação e NÃO é valor de `contato.relacao`.**
+64% das conversas chegam de número sem contato nenhum: é o caso majoritário, e
+sem essa linha ele não teria como ser configurado.
+
+---
+
+## EML_1.1 — o que entrou no e-mail
+
+### Estrela, não lida, arquivar e lote
+
+🚨 **NADA DISSO PEDIU CONSENTIMENTO NOVO.** O escopo é `gmail.modify` +
+`gmail.send`; o cabeçalho do `gmail.py` dizia `readonly` e **estava errado**.
+Foi a frase, não a permissão, que atrasou o recurso.
+
+- `_mexer_rotulo` é **uma função, não três cópias**: estrela, não-lida e
+  arquivar são a mesma chamada com rótulos diferentes
+- **arquivar arquiva no Gmail também** — só aqui, as duas caixas divergem em
+  uma semana e ninguém sabe qual é a verdade
+- no lote, **um erro não derruba os outros**, e a dona da caixa é conferida
+  **item a item**: um id alheio no meio de ids meus passaria despercebido
+- `email_mensagem.estrela` é reflexo local do `STARRED`; quem manda é o Google
+
+### Assinatura com imagem
+
+Metade já existia desde a migração 017 e ninguém podia usar: a coluna estava
+lá e `enviar._assinatura()` já embutia por **CID**. Faltava só a rota de
+upload. O nome do arquivo **nunca vira caminho** — o diretório é nosso, por
+atendente.
+
+### Multi-caixa
+
+```
+Objetivo:     ter a caixa própria e uma compartilhada lado a lado, sem login
+              novo no painel
+Hoje:         = o objetivo. Abas por caixa, `conta_id` obrigatório na listagem
+              e no envio, e cada atendente vê só o que conectou
+Por quê:      decisão do usuário em 25/08. A migração 030 foi ANTECIPADA
+              porque nenhuma rota filtrava por conta: o próximo login abriria
+              a caixa do owner inteira -- 336 mensagens. Não dava erro
+Reavaliar se: alguém precisar ver caixa que não conectou
+```
+
+🚨 **`POST /api/email/enviar` fazia `SELECT ... ativa LIMIT 1`.** Com uma caixa
+acertava sempre; com a segunda, **todo e-mail sairia pela primeira**, calado, e
+o destinatário responderia para o endereço errado.
+
+⚠️ Caixa alheia responde **404, não 403**: dizer "existe, mas não é sua" já
+entrega que aquele endereço está conectado por alguém.
+
+### O fio, o cabeçalho e os atalhos
+
+`thread_externa` era coluna desde a 014 e **nunca foi usada** — uma troca de
+seis e-mails virava seis linhas idênticas. O maior fio da base tem 8 mensagens.
+Cabeçalho fixo na leitura (rolar fazia sumir de quem a mensagem é) e atalhos
+`j` `k` `r` `e` `u` `s`, **nunca dentro de campo de texto**.
+
+---
+
+## ATD_6.1 — chat interno
+
+| Antes | Agora |
+|---|---|
+| pessoas e grupos misturados | duas seções, com busca |
+| fileira de botões com o nome de cada atendente | some: buscar acha conversa E começa uma nova |
+| sem estado | **ponto de estado no avatar** (`atendente.estado`, coluna que nenhuma tela usava) |
+| balões sem separador | separador de dia e agrupamento de mensagens seguidas |
+| `Ctrl+Enter` | **Enter envia, Shift+Enter quebra linha** |
+| aviso "não chega ao cliente" **três vezes** | uma |
+
+⚠️ **`Ctrl+Enter` fica na caixa de entrada**, onde a mensagem vai para o cliente
+e não volta. Aqui é conversa de equipe: a fricção aparecia em toda mensagem.
+
+**Emoji: grade própria, ~150 curados, ~4 KB, zero dependência.** Emoji é
+caractere de texto — biblioteca só serve para *procurar*. `emoji-picker-element`
+custa 40 KB e `vue3-emoji-picker` 90 KB, num bundle de 300 KB, para inserir um
+caractere.
+
+---
+
+## ATD_1.2 — mídia do WhatsApp
+
+Os cinco aprovados em 12/08, nunca começados até 25/08, mais o encaminhar.
+
+| Recurso | Como ficou |
+|---|---|
+| **Reagir** | seis emojis, os mesmos do WhatsApp. **Emoji vazio TIRA a reação** — é assim que o WhatsApp desfaz |
+| **Citar** | `quoted` é **campo do `sendText`, não rota**. Citar de outra conversa é recusado |
+| **Áudio** | `sendWhatsAppAudio`, **não `sendMedia`** |
+| **Tela cheia** | clique na imagem; a foto abria do tamanho do balão |
+| **Colar print** | `Ctrl+V`, com nome carimbado pela hora |
+| **Encaminhar** | até **5 por vez** (limite do próprio WhatsApp), chega como mensagem nova marcada |
+
+🚨 **ÁUDIO PELA ROTA DE VOZ MUDA O QUE O CLIENTE VÊ.** Por `sendMedia` o mesmo
+arquivo chega como anexo para baixar; por `sendWhatsAppAudio`, como mensagem de
+voz com onda e tocar-seguido. A diferença é o recurso inteiro.
+
+🚨 **A CHAVE DO WHATSAPP É RECONSTRUÍDA, NÃO GUARDADA.** Reagir e citar precisam
+do trio `{remoteJid, fromMe, id}`; ele sai de `id_externo` + `direcao` + o
+destino da conversa. Guardar o trio seria copiar o que já está lá.
+
+⚠️ **Nota interna não reage nem é citada:** nunca foi ao WhatsApp, então não há
+chave para apontar.
+
+⚠️ **Encaminhar arquivo ainda não.** Dizer o que falta é melhor que mandar só a
+legenda e deixar o outro lado sem o anexo.
+
+⚠️ **Reação do cliente ainda não é tratada:** chega como `reactionMessage` e cai
+no ramo de "tipo ainda não tratado".
+
+---
+
+## CAD_1.1 · CAD_2.1 · CAD_2.2 — cadastro e operação
+
+**Clientes:** a ficha mostrava dados e **acabava ali**. Agora traz últimas
+conversas e e-mails com o id que abre a tela certa, botão **"Conversar"** por
+telefone (**só onde há WhatsApp** — oferecer onde não há é oferecer erro), e o
+alcance no topo, onde `tem_whatsapp` distingue NULL de false.
+
+**Atendentes como RH:** em aberto, concluídas na semana, "está no horário
+agora?" e total de horas.
+
+```
+Objetivo:     montar a escala sem que ela passe a valer antes da hora
+Hoje:         interruptor `config.jornada_ativa`, nascendo DESLIGADO
+Por quê:      decisão do usuário em 25/08
+Reavaliar se: — o interruptor É a condição. Ligar é decisão do owner
+```
+
+🚨 **"SEM JORNADA" E "FORA DO HORÁRIO" SÃO ESTADOS DIFERENTES.** Sem a
+distinção, quem nunca cadastrou escala aparece como fora do expediente — e isso
+lê como defeito. Medido: nenhum dos 5 tem jornada.
+
+🚨 **DESLIGAR SOLTA AS CONVERSAS.** O que faltava não era o botão, era o efeito:
+desativar gravava `ativo = false` e nada mais, e quem saía com 12 conversas
+abertas deixava dono que nunca mais entra — **invisíveis**, porque não aparecem
+em "sem dono" (elas *têm* dono). Agora voltam para a fila, os times são
+desfeitos e senha e `google_sub` são revogados. O histórico continua com o nome.
+
+⚠️ **O teto de conversas saiu da tela**: era gravado e lido por nada. A coluna
+fica no banco — removê-la exige migração para ganhar zero.
+
+**Times em cartões:** fila por time, cadeia de transbordo desenhada em dois
+elos, e **quem enxerga a fila** (`atendente_time_permissao`, eixo diferente de
+`atendente_time`, que não aparecia em tela nenhuma). Lista vazia ali significa
+que **todo mundo vê** — padrão permissivo da 001.
+
+---
+
+## O redesenho — e por que ele não é bloco separado
+
+⚠️ **EU TINHA POSTO DESIGN COMO ITEM 13 DE 13.** O usuário corrigiu em 25/08,
+olhando um filtro que eu tinha entregue como fileira de chips: *"ficou horrível
+assim, onde foram parar as demandas de design e UX/UI?"*. Design deixou de ser
+bloco e virou **condição de entrega** — nenhum bloco fecha com a tela em estado
+pior do que começou.
+
+O que mudou de fundo nas duas telas do dia a dia:
+
+- **filtro dentro do campo de busca**, não numa fileira de chips: buscar e
+  filtrar são a mesma pergunta, e separá-las enchia a coluna de botões
+- caixa de entrada: **4 chips do mesmo peso viraram 2 números com hierarquia**;
+  abas como controle segmentado; avatar com cor **derivada** do nome (a lista
+  recarrega a cada 8 s — cor sorteada destruiria o reconhecimento); prévia
+  truncada em uma linha (altura variável impede varrer); **separador de dia**
+- e-mail: linha única virou **duas alturas de informação**; não lida com barra
+  de 3px (negrito muda a largura das palavras e faz a lista tremer); estrela
+  clicável fora do que abre; **chip do cliente na lista**, que é o que esta
+  caixa tem e o Gmail não
+
+---
+
+## 🚨 A auditoria do mesmo dia — seis defeitos meus
+
+Nenhum quebrava nada. Todos faziam a coisa errada em silêncio, com a suíte
+inteira passando. Ficam aqui porque o padrão é o que importa.
+
+| # | Defeito | Por que passou |
+|---|---|---|
+| 1 | **Encaminhar tornava quem clicou dono de até 5 conversas** | `responder` tem "quem responde assume", e encaminhar o reusava sem pensar. Há 336 conversas sem dono |
+| 2 | **Encaminhar não exigia estar na conversa de origem** | era o único caminho de escrita sem `_exige_estar_na_conversa` |
+| 3 | **A saudação dispararia em conversa em andamento** | a trava era só `boas_vindas_em IS NULL`, e as 332 conversas existentes têm o campo nulo |
+| 4 | **A fila da automação era lista de módulo** | `processar_pendentes` roda no laço E na rota; o `clear()` de um apagava o do outro |
+| 5 | **O microfone não era solto ao sair da tela** | tratei o `onstop` e esqueci a saída pela porta |
+| 6 | **A citação não era limpa ao trocar de conversa** | o backend recusa, mas a tela mentia até a pessoa tentar |
+
+⚠️ **O teste da automação passava porque a fixture criava conversa SEM MENSAGEM
+NENHUMA** — um estado que não existe na vida real. Teste que monta cena
+impossível aprova regra frouxa.
+
+🚨 **A REGRA QUE FICOU:** *todo teto tem de aparecer na resposta.* A busca
+devolvia 200 acertos calada — a mesma mentira por omissão do teto de 1.000
+mensagens. Vale para qualquer limite novo.
