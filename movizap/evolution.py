@@ -9,10 +9,16 @@ apareceu num log em julho.
 ✅ 07/08: O ENVIO ENTROU, por decisão do usuário, e entrou como estava
 previsto — aqui, e só para responder conversa que existe.
 
-🚨 NÃO EXISTE ENVIO PARA DESTINATÁRIO ARBITRÁRIO, e isso é a trava que impede
-o painel de virar ferramenta de disparo. `enviar_texto` recebe o número, mas
-quem o chama é `conversas.responder`, que o lê da CONVERSA — nunca de algo
-digitado. Disparo em massa continua sendo Fase 2, com decisão própria.
+⚠️ ESTE CABEÇALHO DIZIA que não existia envio para destinatário arbitrário, e
+que isso era "a trava que impede o painel de virar ferramenta de disparo". A
+regra caiu por decisão do usuário em 25/08 -- e as duas frases já eram falsas
+antes disso, porque `conversas.iniciar_conversa` (o botão `+`) passou a mandar
+para número digitado no mesmo dia.
+
+O que vale agora: este módulo entrega mensagem; QUEM decide o destino é o
+módulo `conversas`, e cada caminho de lá diz de onde tirou o número --
+`responder` da conversa, `iniciar_conversa` do que foi digitado, `encaminhar`
+do destino escolhido.
 """
 import logging
 
@@ -86,7 +92,8 @@ def _pedir(metodo: str, caminho: str, corpo: dict | None = None) -> dict:
         return {}
 
 
-def enviar_texto(instancia: str, numero_e164: str, texto: str) -> dict:
+def enviar_texto(instancia: str, numero_e164: str, texto: str,
+                 citando: dict | None = None) -> dict:
     """Manda uma mensagem de texto e devolve a chave que o WhatsApp deu a ela.
 
     🚨 O `key.id` DA RESPOSTA É O QUE EVITA A MENSAGEM DUPLICADA. O Evolution
@@ -103,8 +110,15 @@ def enviar_texto(instancia: str, numero_e164: str, texto: str) -> dict:
     if not (texto or "").strip():
         raise ErroEvolution("Mensagem vazia.", 0)
 
-    resposta = _pedir("POST", f"/message/sendText/{instancia}",
-                      {"number": numero, "text": texto})
+    corpo = {"number": numero, "text": texto}
+    # 🚨 CITAR É CAMPO, NÃO ROTA. `quoted` entra no MESMO `sendText`, com a
+    # chave da mensagem original -- diferente de reagir e de áudio, que têm
+    # rota própria. Foi por isso que "responder citando" não deu para provar
+    # sondando rotas em 25/08: não há rota para sondar.
+    if citando:
+        corpo["quoted"] = {"key": citando}
+
+    resposta = _pedir("POST", f"/message/sendText/{instancia}", corpo)
 
     chave = (resposta or {}).get("key") or {}
     log.info("enviado por %s (id=%s)", instancia, chave.get("id"))
@@ -113,6 +127,43 @@ def enviar_texto(instancia: str, numero_e164: str, texto: str) -> dict:
         "status": (resposta or {}).get("status"),
         "bruto": resposta,
     }
+
+
+def enviar_reacao(instancia: str, chave: dict, emoji: str) -> dict:
+    """Reage a uma mensagem — o polegar de um clique.
+
+    🚨 A REAÇÃO É SOBRE A CHAVE, NÃO SOBRE O NÚMERO. O Evolution precisa do
+    trio `{remoteJid, fromMe, id}` da mensagem original: é ele que diz QUAL
+    mensagem recebe o emoji. Mandar só o número reagiria a nada.
+
+    ⚠️ EMOJI VAZIO TIRA A REAÇÃO. É assim que o WhatsApp desfaz -- não existe
+    "remover reação", existe reagir com nada. Por isso esta função não recusa
+    string vazia.
+
+    ⚠️ Rota conferida na instância real em 25/08 (Evolution 2.3.7).
+    """
+    return _pedir("POST", f"/message/sendReaction/{instancia}",
+                  {"key": chave, "reaction": emoji or ""})
+
+
+def enviar_audio(instancia: str, numero_e164: str, base64_dados: str) -> dict:
+    """Manda um áudio gravado no navegador, como mensagem de voz.
+
+    🚨 ROTA PRÓPRIA, E NÃO `sendMedia`. `sendWhatsAppAudio` é o que produz a
+    mensagem de VOZ -- com onda, velocidade e o comportamento de "tocar
+    seguido". Pelo `sendMedia`, o mesmo arquivo chega como anexo de áudio, que
+    o destinatário precisa baixar. São coisas diferentes na tela de quem
+    recebe.
+    """
+    numero = destino_para_evolution(numero_e164)
+    if not numero:
+        raise ErroEvolution("Sem número para enviar.", 0)
+
+    resposta = _pedir("POST", f"/message/sendWhatsAppAudio/{instancia}",
+                      {"number": numero, "audio": base64_dados})
+    chave = (resposta or {}).get("key") or {}
+    return {"id_externo": chave.get("id"),
+            "status": (resposta or {}).get("status"), "bruto": resposta}
 
 
 def nome_do_grupo(instancia: str, jid: str) -> str | None:

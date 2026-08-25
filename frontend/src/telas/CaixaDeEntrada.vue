@@ -48,6 +48,156 @@ const comentario = ref('')
 const resposta = ref('')
 const enviando = ref(false)
 
+/* ---- responder citando (aprovado em 12/08, feito em 25/08) ---------------
+   🚨 RECEBÍAMOS A CITAÇÃO E NÃO SABÍAMOS ENVIAR. O balão já desenha
+   `citada_conteudo` desde sempre -- só o caminho de volta faltava. Citar é
+   campo do `sendText` (`quoted`), não rota própria: foi por isso que não deu
+   para provar sondando rotas. */
+const citando = ref(null)
+
+function citar(m) {
+  citando.value = m
+  /* Foco no campo: citar e não poder escrever em seguida obriga a um clique
+     que não existe no WhatsApp. */
+  nextTick(() => document.querySelector('.compositor textarea')?.focus())
+}
+
+/* ---- reagir com emoji ----------------------------------------------------
+   ⚠️ Seis emojis, não a grade inteira: reação é resposta de UM clique. Quem
+   quer escrever escreve. São os mesmos seis do WhatsApp, e por isso ninguém
+   precisa aprender. */
+const REACOES = ['👍', '❤️', '😂', '😮', '😢', '🙏']
+const reagindoEm = ref(null)
+
+async function reagir(m, emoji) {
+  reagindoEm.value = null
+  /* Vira na tela antes da resposta: reação é clique de meio segundo. Se
+     falhar, desfaz e diz. */
+  const antes = m.reacao
+  m.reacao = m.reacao === emoji ? null : emoji
+  try {
+    await api.post(`/api/conversas/${aberta.value.id}/reagir`, {
+      mensagem_id: m.id,
+      emoji: m.reacao || '',
+    })
+  } catch (e) {
+    m.reacao = antes
+    erro.value = e instanceof ErroDeApi ? e.message : 'Não consegui reagir.'
+  }
+}
+
+/* ---- mídia em tela cheia -------------------------------------------------
+   🚨 A FOTO ABRIA DO TAMANHO DO BALÃO. Print de erro e foto de avaria são
+   exatamente o que precisa de zoom, e eram justamente o que não dava para
+   ver. */
+const emTelaCheia = ref(null)
+
+/* ---- gravar áudio --------------------------------------------------------
+   🚨 `sendWhatsAppAudio`, não anexo: pela rota de voz a mensagem chega com
+   onda e tocar-seguido; por `sendMedia`, chega como arquivo para baixar. */
+const gravando = ref(false)
+const segundosGravados = ref(0)
+let gravador = null
+let pedacos = []
+let relogioGravacao = null
+
+async function comecarGravacao() {
+  try {
+    const trilha = await navigator.mediaDevices.getUserMedia({ audio: true })
+    pedacos = []
+    gravador = new MediaRecorder(trilha)
+    gravador.ondataavailable = (e) => { if (e.data.size) pedacos.push(e.data) }
+    gravador.onstop = () => {
+      /* ⚠️ Solta o microfone SEMPRE. Sem isto o navegador fica com a luz de
+         gravação acesa depois de enviar, e a pessoa acha que o painel está
+         ouvindo. */
+      trilha.getTracks().forEach((t) => t.stop())
+    }
+    gravador.start()
+    gravando.value = true
+    segundosGravados.value = 0
+    relogioGravacao = setInterval(() => { segundosGravados.value += 1 }, 1000)
+  } catch {
+    erro.value = 'Não consegui usar o microfone. Verifique a permissão do navegador.'
+  }
+}
+
+function pararRelogio() {
+  clearInterval(relogioGravacao)
+  gravando.value = false
+}
+
+/* Cancelar existe porque gravar sem poder desistir faz a pessoa não gravar. */
+function cancelarGravacao() {
+  if (!gravador) return
+  gravador.onstop = null
+  gravador.stream?.getTracks().forEach((t) => t.stop())
+  gravador.stop()
+  gravador = null
+  pedacos = []
+  pararRelogio()
+}
+
+async function enviarGravacao() {
+  if (!gravador) return
+  const pronto = new Promise((resolve) => {
+    const antes = gravador.onstop
+    gravador.onstop = (e) => { antes?.(e); resolve() }
+  })
+  gravador.stop()
+  await pronto
+  pararRelogio()
+
+  const blob = new Blob(pedacos, { type: 'audio/ogg; codecs=opus' })
+  gravador = null
+  pedacos = []
+  if (!blob.size) return
+
+  enviando.value = true
+  try {
+    const dados = new FormData()
+    dados.append('arquivo', blob, 'audio.ogg')
+    const r = await fetch(`/api/conversas/${aberta.value.id}/audio`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${localStorage.getItem('movizap.token')}` },
+      body: dados,
+    })
+    if (!r.ok) throw new Error((await r.json()).detail || 'falhou')
+    await Promise.all([abrir(aberta.value.id), carregar({ silencioso: true })])
+  } catch (e) {
+    erro.value = e.message || 'Não consegui enviar o áudio.'
+  } finally {
+    enviando.value = false
+  }
+}
+
+/* ---- encaminhar ----------------------------------------------------------
+   Entrou em 25/08, quando a regra de "não é caixa de disparo" caiu. Cinco
+   destinos por vez, que é o limite do próprio WhatsApp. */
+const encaminhando = ref(null)
+const destinosEscolhidos = ref([])
+
+function abrirEncaminhar(m) {
+  encaminhando.value = m
+  destinosEscolhidos.value = []
+}
+
+async function confirmarEncaminhar() {
+  if (!destinosEscolhidos.value.length) return
+  try {
+    const r = await api.post('/api/conversas/encaminhar', {
+      mensagem_id: encaminhando.value.id,
+      conversas: destinosEscolhidos.value,
+    })
+    recado.value = r.falhas.length
+      ? `Encaminhada para ${r.enviadas}; ${r.falhas.length} não deu.`
+      : `Encaminhada para ${r.enviadas} conversa(s).`
+    encaminhando.value = null
+  } catch (e) {
+    erro.value = e instanceof ErroDeApi ? e.message : 'Não consegui encaminhar.'
+  }
+}
+
 /* ---- buscar DENTRO da conversa (ATD_1.2) --------------------------------
    Pergunta diferente da busca da lista: lá é "com quem eu falei", aqui é
    "onde ele disse isso". Por isso são dois campos e não um.
@@ -562,8 +712,14 @@ async function enviar(interna = false) {
   recado.value = ''
   const caminho = interna ? 'nota' : 'responder'
   try {
-    await api.post(`/api/conversas/${aberta.value.id}/${caminho}`, { texto })
+    await api.post(`/api/conversas/${aberta.value.id}/${caminho}`, {
+      texto,
+      /* ⚠️ Nota interna não cita: ela nunca foi ao WhatsApp, e o backend
+         recusaria a chave. */
+      citando_id: interna ? null : (citando.value?.id ?? null),
+    })
     resposta.value = ''
+    citando.value = null
     // 🚨 Recarrega a conversa em vez de empurrar o balão na mão: o que vale é
     // o que o banco gravou, não o que a tela supõe ter acontecido.
     await Promise.all([abrir(aberta.value.id), carregar({ silencioso: true })])
@@ -587,6 +743,22 @@ async function enviar(interna = false) {
 const TETO_ARQUIVO_MB = 25
 const arquivo = ref(null)
 const enviandoArquivo = ref(false)
+
+/* ---- colar print (Ctrl+V) ------------------------------------------------
+   🚨 O CAMINHO MAIS CURTO PARA MANDAR UM PRINT. Sem isto, quem tira print
+   precisa salvar em arquivo, achar a pasta e anexar -- três passos para o que
+   o WhatsApp resolve com um. */
+function colar(evento) {
+  const itens = Array.from(evento.clipboardData?.items || [])
+  const imagem = itens.find((i) => i.type.startsWith('image/'))
+  if (!imagem) return          // colar texto continua sendo colar texto
+  const arq = imagem.getAsFile()
+  if (!arq) return
+  evento.preventDefault()
+  /* Nome com hora: "image.png" três vezes na conversa não distingue nada. */
+  const carimbo = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')
+  arquivo.value = new File([arq], `print-${carimbo}.png`, { type: arq.type })
+}
 
 function escolherArquivo(evento) {
   const f = evento.target.files?.[0] || null
@@ -1722,11 +1894,15 @@ function carregarMidiasDaConversa(c) {
                 {{ m.citada_conteudo || `(${m.citada_tipo})` }}
               </p>
 
+              <!-- 🚨 CLICAR ABRE EM TELA CHEIA. A foto abria do tamanho do
+                   balão, e print de erro e foto de avaria são exatamente o
+                   que precisa de zoom. -->
               <img
                 v-if="m.midia_id && ['imagem', 'figurinha'].includes(tipoDaMidia(m)) && midias[m.midia_id]"
                 :src="midias[m.midia_id]"
-                class="balao__imagem"
+                class="balao__imagem balao__imagem--clicavel"
                 :alt="m.conteudo || 'imagem da conversa'"
+                @click="emTelaCheia = midias[m.midia_id]"
               />
               <audio
                 v-else-if="m.midia_id && tipoDaMidia(m) === 'audio' && midias[m.midia_id]"
@@ -1778,6 +1954,13 @@ function carregarMidiasDaConversa(c) {
                       :class="{ 'achado': p.casa }">{{ p.texto }}</span>
               </p>
               <p v-else class="balao__texto fraco">(sem texto)</p>
+              <!-- Veio de outra conversa: o histórico precisa dizer isso.
+                   Seis meses depois ninguém sabe se a frase foi escrita para
+                   este cliente ou repassada. -->
+              <p v-if="m.encaminhada_de" class="balao__marca pequeno">
+                <i class="bi bi-arrow-right" aria-hidden="true"></i> encaminhada
+              </p>
+
               <p class="balao__rodape apagado pequeno">
                 {{ hora(m.criada_em) }}
                 <!-- Só na saída: quem respondeu pelo painel. O eco do WhatsApp
@@ -1787,6 +1970,35 @@ function carregarMidiasDaConversa(c) {
                 </span>
                 <span v-if="m.entrega"> · {{ m.entrega }}</span>
               </p>
+
+              <!-- A reação fica PENDURADA no canto do balão, como no
+                   WhatsApp: dentro dele, viraria mais uma linha de texto. -->
+              <span v-if="m.reacao" class="balao__reacao">{{ m.reacao }}</span>
+
+              <!-- ⚠️ AS AÇÕES APARECEM NO HOVER, não sempre. Três botões fixos
+                   em cada balão transformam o fio numa grade de botões, e o
+                   que se lê é a conversa. -->
+              <div v-if="posso && m.tipo !== 'nota'" class="balao__acoes">
+                <button class="balao__acao" type="button" title="Responder citando"
+                        aria-label="Responder citando" @click="citar(m)">
+                  <i class="bi bi-reply" aria-hidden="true"></i>
+                </button>
+                <button class="balao__acao" type="button" title="Reagir"
+                        aria-label="Reagir"
+                        @click="reagindoEm = reagindoEm === m.id ? null : m.id">
+                  <i class="bi bi-emoji-smile" aria-hidden="true"></i>
+                </button>
+                <button v-if="m.conteudo && !m.midia_id" class="balao__acao"
+                        type="button" title="Encaminhar" aria-label="Encaminhar"
+                        @click="abrirEncaminhar(m)">
+                  <i class="bi bi-arrow-right" aria-hidden="true"></i>
+                </button>
+
+                <div v-if="reagindoEm === m.id" class="reacoes">
+                  <button v-for="e in REACOES" :key="e" class="reacoes__item"
+                          type="button" @click="reagir(m, e)">{{ e }}</button>
+                </div>
+              </div>
             </div>
             </template>
           </div>
@@ -1822,7 +2034,17 @@ function carregarMidiasDaConversa(c) {
                  e o usuário perguntou duas vezes para que servia. Estado que
                  não se vê é o que confunde. Agora o destino é o BOTÃO: um
                  campo, duas ações, e o que se clica é o que acontece. -->
-            <label class="campo">
+            <!-- A mensagem que está sendo citada, com um X para desistir. -->
+            <div v-if="citando" class="citando">
+              <i class="bi bi-reply" aria-hidden="true"></i>
+              <span class="citando__texto">
+                {{ citando.conteudo || `(${citando.tipo})` }}
+              </span>
+              <button class="botao botao--pequeno botao--fantasma" type="button"
+                      title="Não citar" @click="citando = null">×</button>
+            </div>
+
+            <label class="campo compositor">
               <span class="so-leitor">Mensagem</span>
               <textarea
                 v-model="resposta"
@@ -1831,6 +2053,7 @@ function carregarMidiasDaConversa(c) {
                 maxlength="4000"
                 placeholder="Escreva e escolha abaixo: enviar ao cliente ou guardar como nota"
                 @keydown.ctrl.enter.prevent="enviar"
+                @paste="colar"
               ></textarea>
             </label>
 
@@ -1851,7 +2074,30 @@ function carregarMidiasDaConversa(c) {
             </div>
 
             <div class="linha linha--quebra">
-              <label class="botao botao--contorno botao--icone" title="Anexar arquivo">
+              <!-- 🚨 GRAVAR ÁUDIO: o que o atendente mais usa no celular.
+                   Enquanto grava, os outros botões dão lugar ao contador --
+                   gravando, a única decisão é enviar ou desistir. -->
+              <template v-if="gravando">
+                <span class="gravando">
+                  <span class="gravando__ponto" aria-hidden="true"></span>
+                  gravando {{ Math.floor(segundosGravados / 60) }}:{{
+                    String(segundosGravados % 60).padStart(2, '0') }}
+                </span>
+                <button class="botao botao--pequeno botao--fantasma" type="button"
+                        @click="cancelarGravacao">Cancelar</button>
+                <button class="botao botao--primario" type="button"
+                        :disabled="enviando" @click="enviarGravacao">
+                  <i class="bi bi-send" aria-hidden="true"></i> Enviar áudio
+                </button>
+              </template>
+
+              <button v-else class="botao botao--contorno botao--icone"
+                      type="button" title="Gravar áudio" aria-label="Gravar áudio"
+                      @click="comecarGravacao">
+                <i class="bi bi-mic" aria-hidden="true"></i>
+              </button>
+
+              <label v-if="!gravando" class="botao botao--contorno botao--icone" title="Anexar arquivo">
                 <i class="bi bi-paperclip" aria-hidden="true"></i>
                 <span class="so-leitor">Anexar arquivo</span>
                 <input
@@ -1902,6 +2148,51 @@ function carregarMidiasDaConversa(c) {
     <!-- ================================================================ MODAIS
          Ficam fora das colunas de propósito: `position: fixed` dentro de um
          container que rola acompanha a rolagem e a caixa some da vista. -->
+
+    <!-- TELA CHEIA — clique em qualquer lugar fecha, como em toda galeria. -->
+    <div v-if="emTelaCheia" class="cheia" @click="emTelaCheia = null">
+      <img :src="emTelaCheia" class="cheia__img" alt="imagem da conversa" />
+      <button class="cheia__fechar" type="button" aria-label="Fechar">
+        <i class="bi bi-x-lg" aria-hidden="true"></i>
+      </button>
+    </div>
+
+    <!-- ENCAMINHAR — lista de conversas com caixas de seleção, como o
+         WhatsApp faz. Cinco por vez, que é o limite do próprio aplicativo. -->
+    <div v-if="encaminhando" class="modal" @click.self="encaminhando = null">
+      <div class="modal__caixa" role="dialog" aria-modal="true" aria-label="Encaminhar">
+        <p class="modal__titulo">Encaminhar para</p>
+        <p class="modal__texto pequeno">
+          A mensagem chega como <strong>mensagem nova</strong>, marcada como
+          encaminhada — não como citação.
+        </p>
+
+        <div class="modal__opcoes">
+          <label v-for="c in lista.filter((x) => x.id !== aberta.id
+                                                 && x.estado !== 'resolvida')"
+                 :key="c.id" class="modal__opcao">
+            <input v-model="destinosEscolhidos" type="checkbox" :value="c.id"
+                   :disabled="destinosEscolhidos.length >= 5
+                              && !destinosEscolhidos.includes(c.id)" />
+            <span>{{ quem(c) }}</span>
+          </label>
+        </div>
+
+        <p class="apagado pequeno">
+          {{ destinosEscolhidos.length }} de 5 escolhidos.
+        </p>
+
+        <div class="modal__acoes">
+          <button class="botao botao--contorno" type="button"
+                  @click="encaminhando = null">Cancelar</button>
+          <button class="botao botao--primario" type="button"
+                  :disabled="!destinosEscolhidos.length"
+                  @click="confirmarEncaminhar">
+            Encaminhar
+          </button>
+        </div>
+      </div>
+    </div>
 
     <!-- NOVA MENSAGEM — o `+`. Um destinatário: este painel responde
          "falar com esta pessoa". -->
@@ -2485,6 +2776,138 @@ function carregarMidiasDaConversa(c) {
 .abas__aba:focus-visible { outline: none; box-shadow: var(--foco); }
 
 .anteriores { display: flex; justify-content: center; padding: var(--e-2) 0; }
+
+/* ---- ações do balão -----------------------------------------------------
+   Aparecem no hover: três botões fixos em cada balão transformam o fio numa
+   grade de botões, e o que se lê é a conversa. */
+.balao { position: relative; }
+.balao__acoes {
+  position: absolute;
+  top: -10px;
+  right: var(--e-2);
+  display: none;
+  gap: 2px;
+  padding: 2px;
+  background: var(--superficie);
+  border: var(--borda-fina) solid var(--borda);
+  border-radius: var(--r-full);
+  box-shadow: var(--sombra-1);
+}
+.balao:hover .balao__acoes,
+.balao__acoes:focus-within { display: flex; }
+.balao__acao {
+  border: 0;
+  background: none;
+  cursor: pointer;
+  padding: 3px 6px;
+  border-radius: var(--r-full);
+  color: var(--texto-fraco);
+  line-height: 1;
+}
+.balao__acao:hover { background: var(--superficie-2); color: var(--texto); }
+
+.reacoes {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  display: flex;
+  gap: 2px;
+  padding: var(--e-1);
+  background: var(--superficie);
+  border: var(--borda-fina) solid var(--borda);
+  border-radius: var(--r-full);
+  box-shadow: var(--sombra-2);
+  z-index: var(--z-flutuante);
+}
+.reacoes__item {
+  border: 0;
+  background: none;
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 1;
+  padding: 3px;
+  border-radius: var(--r-full);
+}
+.reacoes__item:hover { background: var(--superficie-2); transform: scale(1.15); }
+
+/* A reação pendurada no canto: dentro do balão viraria mais uma linha. */
+.balao__reacao {
+  position: absolute;
+  bottom: -10px;
+  left: var(--e-3);
+  padding: 1px 5px;
+  background: var(--superficie);
+  border: var(--borda-fina) solid var(--borda);
+  border-radius: var(--r-full);
+  font-size: var(--txt-sm);
+  line-height: 1.4;
+}
+.balao__marca { color: var(--texto-apagado); display: flex; gap: 4px; align-items: center; }
+
+.balao__imagem--clicavel { cursor: zoom-in; }
+
+/* ---- citar --------------------------------------------------------------- */
+.citando {
+  display: flex;
+  align-items: center;
+  gap: var(--e-2);
+  padding: var(--e-2);
+  border-left: 3px solid var(--acento);
+  background: var(--acento-suave);
+  border-radius: var(--r-sm);
+}
+.citando__texto {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--txt-sm);
+  color: var(--texto-fraco);
+}
+
+/* ---- gravação ------------------------------------------------------------ */
+.gravando {
+  display: flex;
+  align-items: center;
+  gap: var(--e-2);
+  color: var(--erro);
+  font-size: var(--txt-sm);
+  font-variant-numeric: tabular-nums;
+}
+.gravando__ponto {
+  width: 9px;
+  height: 9px;
+  border-radius: var(--r-full);
+  background: var(--erro);
+  animation: pulsa 1.2s infinite;
+}
+@keyframes pulsa { 50% { opacity: .25; } }
+
+/* ---- tela cheia ---------------------------------------------------------- */
+.cheia {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-modal);
+  background: rgba(0, 0, 0, .85);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: zoom-out;
+}
+.cheia__img { max-width: 92vw; max-height: 92vh; object-fit: contain; }
+.cheia__fechar {
+  position: absolute;
+  top: var(--e-4);
+  right: var(--e-4);
+  border: 0;
+  background: rgba(255, 255, 255, .15);
+  color: #fff;
+  width: 40px;
+  height: 40px;
+  border-radius: var(--r-full);
+  cursor: pointer;
+}
 
 /* Separador de dia: linha fina atravessando, com o rótulo no meio. É o padrão
    que todo mensageiro usa, e por isso ninguém precisa aprender. */

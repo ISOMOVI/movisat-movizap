@@ -61,7 +61,10 @@ def sem_enviar(monkeypatch):
     """🚨 Nenhum teste manda mensagem de verdade."""
     enviadas = []
 
-    def falso(instancia, numero, texto):
+    # ⚠️ A ASSINATURA ACOMPANHA A REAL. `citando` entrou em 25/08, com o
+    # responder citando; mock que não aceita o argumento reprova código
+    # correto e faz procurar defeito onde não há.
+    def falso(instancia, numero, texto, citando=None):
         # 🚨 UM `id_externo` POR ENVIO. Um mock que devolve sempre o mesmo id
         # faz a segunda mensagem ser DESCARTADA pela trava de idempotência --
         # e o teste acusa o código por um defeito do próprio teste. Foi o que

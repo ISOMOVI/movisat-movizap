@@ -66,7 +66,10 @@ def sem_enviar(monkeypatch):
     """🚨 Nenhum teste manda mensagem de verdade."""
     enviadas = []
 
-    def falso(instancia, numero, texto):
+    # ⚠️ A ASSINATURA ACOMPANHA A REAL. `citando` entrou em 25/08, com o
+    # responder citando; mock que não aceita o argumento reprova código
+    # correto e faz procurar defeito onde não há.
+    def falso(instancia, numero, texto, citando=None):
         enviadas.append({"numero": numero, "texto": texto})
         return {"id_externo": f"zz-aut-{len(enviadas)}", "status": "PENDING",
                 "bruto": {}}

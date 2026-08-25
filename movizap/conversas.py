@@ -937,7 +937,12 @@ def mensagens(conversa_id: int, limite: int = JANELA_INICIAL,
                       md.nome_original AS midia_nome,
                       m.citada_id,
                       q.conteudo AS citada_conteudo, q.tipo AS citada_tipo,
-                      q.autor    AS citada_autor
+                      q.autor    AS citada_autor,
+                      -- ⚠️ CAMPO QUE A TELA DESENHA TEM DE VIR NA CONSULTA QUE
+                      -- ELA PEDE. Foi a lição do `estrela` no e-mail: a tela
+                      -- desenhava a partir de um campo que o SELECT não
+                      -- trazia, a rota respondia 200, e nada acusava.
+                      m.reacao, m.encaminhada_de
                  FROM mensagem m
                  LEFT JOIN atendente a ON a.id = m.atendente_id
                  LEFT JOIN midia md ON md.id = m.midia_id
@@ -1081,7 +1086,8 @@ def assumir(conversa_id: int, atendente_id: int) -> dict:
 TETO_MENSAGEM = 4000
 
 
-def responder(conversa_id: int, texto: str, atendente_id: int | None) -> dict:
+def responder(conversa_id: int, texto: str, atendente_id: int | None,
+              citando_id: int | None = None) -> dict:
     """Responde o cliente pelo WhatsApp e grava a mensagem.
 
     🚨 O NÚMERO VEM DA CONVERSA, NUNCA DO PARÂMETRO. Não é regra de política:
@@ -1132,9 +1138,26 @@ def responder(conversa_id: int, texto: str, atendente_id: int | None) -> dict:
                 WHERE id = %s AND atendente_id IS NULL""",
             (atendente_id, conversa_id))
 
+    # ⚠️ CITAR MENSAGEM DE OUTRA CONVERSA NÃO EXISTE. A chave carrega o
+    # `remoteJid` da conversa dela: citar de fora produziria uma citação que o
+    # destinatário não consegue abrir. Recusa aqui, com motivo.
+    chave_citada = None
+    if citando_id:
+        dona = banco.um("SELECT conversa_id FROM mensagem WHERE id = %s",
+                        (citando_id,))
+        if not dona or dona["conversa_id"] != conversa_id:
+            return {"ok": False,
+                    "motivo": "Só dá para citar mensagem desta conversa."}
+        chave_citada = _chave_da_mensagem(citando_id)
+        if not chave_citada:
+            return {"ok": False,
+                    "motivo": "Não dá para citar esta mensagem: nota interna "
+                              "ou mensagem sem identificação no WhatsApp."}
+
     try:
         enviado = evolution.enviar_texto(
-            conversa_atual["instancia"], conversa_atual["destino"], texto)
+            conversa_atual["instancia"], conversa_atual["destino"], texto,
+            citando=chave_citada)
     except evolution.ErroEvolution as e:
         log.warning("conversa %s: envio recusado pelo Evolution: %s", conversa_id, e)
         return {"ok": False, "motivo": f"O WhatsApp recusou: {e}"}
@@ -1143,11 +1166,13 @@ def responder(conversa_id: int, texto: str, atendente_id: int | None) -> dict:
         cur.execute(
             """INSERT INTO mensagem
                    (conversa_id, id_externo, direcao, autor, tipo, conteudo,
-                    atendente_id, entrega, criada_em)
-               VALUES (%s, %s, 'saida', 'atendente', 'texto', %s, %s, 'enviada', now())
+                    atendente_id, entrega, citada_id, criada_em)
+               VALUES (%s, %s, 'saida', 'atendente', 'texto', %s, %s, 'enviada',
+                       %s, now())
                ON CONFLICT (id_externo) WHERE id_externo IS NOT NULL DO NOTHING
                RETURNING id""",
-            (conversa_id, enviado["id_externo"], texto, atendente_id))
+            (conversa_id, enviado["id_externo"], texto, atendente_id,
+             citando_id))
         nova = cur.fetchone()
         cur.execute(
             """UPDATE conversa
@@ -1173,6 +1198,201 @@ TETO_ARQUIVO = TETO_ARQUIVO_MB * 1024 * 1024
 # O vocabulário de `mensagem.tipo` a partir da família do MIME. É o NOSSO
 # vocabulário, não o do Evolution -- os dois se parecem e não são iguais.
 _TIPO_POR_FAMILIA = {"image": "imagem", "video": "video", "audio": "audio"}
+
+
+def _chave_da_mensagem(mensagem_id: int) -> dict | None:
+    """O trio `{remoteJid, fromMe, id}` que o WhatsApp usa para apontar uma
+    mensagem — o que reagir e citar precisam.
+
+    🚨 A CHAVE É RECONSTRUÍDA, NÃO GUARDADA. Guardamos `id_externo` e a
+    conversa sabe o destino; `fromMe` é a nossa `direcao`. Guardar o trio
+    inteiro seria copiar o que já está aqui -- e o princípio do modelo é que
+    evento referencia, nunca copia.
+
+    ⚠️ Sem `id_externo` não há chave. Acontece com mensagem antiga gravada
+    antes de o envio existir, e com nota interna, que nunca foi ao WhatsApp.
+    """
+    linha = banco.um(
+        """SELECT m.id_externo, m.direcao, m.tipo,
+                  COALESCE(c.grupo_jid, c.telefone_e164) AS destino
+             FROM mensagem m JOIN conversa c ON c.id = m.conversa_id
+            WHERE m.id = %s""", (mensagem_id,))
+    if not linha or not linha["id_externo"] or linha["tipo"] == "nota":
+        return None
+
+    destino = linha["destino"] or ""
+    jid = destino if destino.endswith("@g.us") else (
+        "".join(ch for ch in destino if ch.isdigit()) + "@s.whatsapp.net")
+    return {"remoteJid": jid,
+            "fromMe": linha["direcao"] == "saida",
+            "id": linha["id_externo"]}
+
+
+def reagir(conversa_id: int, mensagem_id: int, emoji: str) -> dict:
+    """Reage a uma mensagem com um emoji — a resposta de um clique.
+
+    ⚠️ EMOJI VAZIO TIRA A REAÇÃO, e é assim que o WhatsApp desfaz: não existe
+    "remover", existe reagir com nada. Por isso string vazia é caminho normal
+    aqui, não erro.
+
+    🚨 NOTA INTERNA NÃO RECEBE REAÇÃO. Ela nunca foi ao WhatsApp, então não há
+    chave para apontar -- e reagir "só aqui" criaria um estado que o cliente
+    nunca vê e que ninguém saberia explicar.
+    """
+    from . import evolution
+
+    canal = banco.um(
+        """SELECT ca.instancia FROM conversa c JOIN canal ca ON ca.id = c.canal_id
+            WHERE c.id = %s""", (conversa_id,))
+    if not canal or not canal["instancia"]:
+        return {"ok": False, "motivo": "O canal desta conversa não tem instância."}
+
+    chave = _chave_da_mensagem(mensagem_id)
+    if not chave:
+        return {"ok": False,
+                "motivo": "Esta mensagem não pode receber reação: nota interna "
+                          "ou mensagem antiga, sem identificação no WhatsApp."}
+
+    try:
+        evolution.enviar_reacao(canal["instancia"], chave, emoji)
+    except evolution.ErroEvolution as e:
+        return {"ok": False, "motivo": f"O WhatsApp recusou a reação: {e}"}
+
+    banco.executar("UPDATE mensagem SET reacao = %s WHERE id = %s",
+                   (emoji or None, mensagem_id))
+    return {"ok": True, "mensagem_id": mensagem_id, "reacao": emoji or None}
+
+
+# ⚠️ Teto do áudio gravado no navegador. 16 MB é ~10 minutos de voz em
+# `opus` -- muito além do que alguém grava para um cliente, e bem abaixo do
+# teto de arquivo (25 MB), que é para documento.
+TETO_AUDIO = 16 * 1024 * 1024
+
+
+def responder_com_audio(conversa_id: int, dados: bytes,
+                        atendente_id: int | None) -> dict:
+    """Manda um áudio gravado no navegador — mensagem de VOZ, não anexo.
+
+    🚨 `sendWhatsAppAudio`, NÃO `sendMedia`. Pelo caminho de mídia o mesmo
+    arquivo chega como anexo que o destinatário precisa baixar; pela rota de
+    voz ele chega como mensagem de voz, com onda e tocar-seguido. São coisas
+    diferentes na tela de quem recebe, e a diferença é o recurso inteiro.
+
+    ⚠️ ENVIA PRIMEIRO, GRAVA DEPOIS -- igual a `responder`. O contrário
+    registraria como enviado um áudio que o WhatsApp recusou.
+    """
+    from . import evolution
+
+    if not dados:
+        return {"ok": False, "motivo": "Áudio vazio."}
+    if len(dados) > TETO_AUDIO:
+        return {"ok": False,
+                "motivo": f"Áudio maior que {TETO_AUDIO // (1024 * 1024)} MB."}
+
+    conversa_atual = banco.um(
+        """SELECT c.id, c.estado, c.atendente_id, ca.instancia,
+                  COALESCE(c.grupo_jid, c.telefone_e164) AS destino
+             FROM conversa c JOIN canal ca ON ca.id = c.canal_id
+            WHERE c.id = %s""", (conversa_id,))
+    if not conversa_atual:
+        return {"ok": False, "motivo": "Conversa não encontrada."}
+    if conversa_atual["estado"] == "resolvida":
+        return {"ok": False,
+                "motivo": "Conversa concluída. Reabra para voltar a atender."}
+    if not conversa_atual["instancia"]:
+        return {"ok": False, "motivo": "O canal desta conversa não tem instância."}
+
+    if conversa_atual["atendente_id"] is None and atendente_id:
+        banco.executar(
+            """UPDATE conversa SET atendente_id = %s, estado = 'humano',
+                                   atualizada_em = now()
+                WHERE id = %s AND atendente_id IS NULL""",
+            (atendente_id, conversa_id))
+
+    try:
+        enviado = evolution.enviar_audio(
+            conversa_atual["instancia"], conversa_atual["destino"],
+            base64.b64encode(dados).decode())
+    except evolution.ErroEvolution as e:
+        return {"ok": False, "motivo": f"O WhatsApp recusou o áudio: {e}"}
+
+    with banco.cursor() as cur:
+        cur.execute(
+            """INSERT INTO mensagem
+                   (conversa_id, id_externo, direcao, autor, tipo, conteudo,
+                    atendente_id, entrega, criada_em)
+               VALUES (%s, %s, 'saida', 'atendente', 'audio', NULL, %s,
+                       'enviada', now())
+               ON CONFLICT (id_externo) WHERE id_externo IS NOT NULL DO NOTHING
+               RETURNING id""",
+            (conversa_id, enviado["id_externo"], atendente_id))
+        nova = cur.fetchone()
+        cur.execute(
+            """UPDATE conversa
+                  SET ultima_atividade_em = now(), atualizada_em = now(),
+                      primeira_resposta_em = COALESCE(primeira_resposta_em, now()),
+                      segundos_ate_resposta = COALESCE(
+                          segundos_ate_resposta,
+                          EXTRACT(EPOCH FROM (now() - criada_em))::int)
+                WHERE id = %s""", (conversa_id,))
+
+    return {"ok": True, "conversa_id": conversa_id,
+            "mensagem_id": nova["id"] if nova else None}
+
+
+def encaminhar(mensagem_id: int, conversas_destino: list[int],
+               atendente_id: int | None) -> dict:
+    """Repassa uma mensagem para outras conversas.
+
+    Decisão do usuário em 25/08: encaminhar entra, para todo tipo de mensagem,
+    e a regra de "o painel não é caixa de disparo" cai junto.
+
+    🚨 UM ERRO NÃO DERRUBA OS OUTROS. Cada destino é um envio; um falhar
+    (número sem WhatsApp, conversa concluída) não pode fazer os outros não
+    acontecerem. A resposta diz quantos foram e quantos não.
+
+    ⚠️ MARCA A ORIGEM. `encaminhada_de` guarda de onde a frase veio: seis
+    meses depois, ninguém sabe se aquilo foi escrito para o cliente ou
+    repassado de outra conversa -- e a diferença importa quando alguém
+    reclama do que foi dito.
+
+    ⚠️ MÍDIA AINDA NÃO. Só texto e legenda: repassar arquivo exige rebaixar o
+    binário do disco e reenviar, e o caminho de mídia tem tetos próprios.
+    Encaminhar mídia diz o que falta, em vez de mandar só a legenda e deixar
+    o outro lado sem o anexo -- que seria pior do que recusar.
+    """
+    origem = banco.um(
+        """SELECT id, conteudo, tipo, midia_id FROM mensagem WHERE id = %s""",
+        (mensagem_id,))
+    if not origem:
+        return {"ok": False, "motivo": "Mensagem não encontrada."}
+    if origem["midia_id"]:
+        return {"ok": False,
+                "motivo": "Encaminhar arquivo ainda não: por enquanto só texto."}
+    texto = (origem["conteudo"] or "").strip()
+    if not texto:
+        return {"ok": False, "motivo": "Esta mensagem não tem texto para repassar."}
+
+    destinos = sorted({int(c) for c in (conversas_destino or []) if c})
+    if not destinos:
+        return {"ok": False, "motivo": "Escolha para onde encaminhar."}
+
+    feitos, falhas = [], []
+    for destino in destinos:
+        r = responder(destino, texto, atendente_id)
+        if r.get("ok"):
+            feitos.append(destino)
+            if r.get("mensagem_id"):
+                banco.executar(
+                    "UPDATE mensagem SET encaminhada_de = %s WHERE id = %s",
+                    (mensagem_id, r["mensagem_id"]))
+        else:
+            falhas.append({"conversa_id": destino, "motivo": r.get("motivo")})
+
+    log.info("mensagem %s encaminhada para %s conversa(s), %s falha(s)",
+             mensagem_id, len(feitos), len(falhas))
+    return {"ok": bool(feitos), "enviadas": len(feitos), "falhas": falhas,
+            "motivo": None if feitos else "Nenhum destino recebeu."}
 
 
 def gravar_saida_automatica(conversa_id: int, texto: str,

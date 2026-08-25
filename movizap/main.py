@@ -1501,19 +1501,24 @@ def entrar_na_conversa(conversa_id: int,
 
 class RespostaEntrada(BaseModel):
     texto: str = Field(min_length=1, max_length=4000)
+    # Citar uma mensagem DESTA conversa. O backend recusa citar de fora: a
+    # chave carrega o `remoteJid` da conversa dela.
+    citando_id: int | None = None
 
 
 @app.post("/api/conversas/{conversa_id}/responder")
 def responder_conversa(conversa_id: int, dados: RespostaEntrada,
                        usuario: dict = Depends(auth.requer_tela("ATD_1.2"))):
-    """🚨 A ÚNICA rota do sistema que manda mensagem para cliente real.
+    """Responde o cliente nesta conversa, opcionalmente citando uma mensagem.
 
-    O destinatário NÃO é parâmetro: sai da conversa. Não existe caminho para
-    escolher para quem enviar, e é isso que impede o painel de virar
-    ferramenta de disparo -- que é Fase 2, com decisão própria.
+    ⚠️ O destinatário não é parâmetro: sai da conversa. Isso não é mais uma
+    trava de política -- a regra de "não é caixa de disparo" caiu em 25/08 --,
+    é o desenho desta rota. Para falar com quem ainda não escreveu existe
+    `/api/conversas/nova`; para repassar, `/api/conversas/encaminhar`.
     """
     eu = _exige_estar_na_conversa(conversa_id, usuario)
-    resultado = conversas.responder(conversa_id, dados.texto, eu)
+    resultado = conversas.responder(conversa_id, dados.texto, eu,
+                                    citando_id=dados.citando_id)
     if not resultado["ok"]:
         raise HTTPException(status_code=409, detail=resultado["motivo"])
     return resultado
@@ -1714,6 +1719,70 @@ def encerrar_conversa(conversa_id: int, dados: EncerramentoEntrada,
     if not resultado["ok"]:
         raise HTTPException(status_code=409, detail=resultado["motivo"])
     return resultado
+
+
+class ReacaoEntrada(BaseModel):
+    mensagem_id: int
+    # Vazio TIRA a reação: é assim que o WhatsApp desfaz.
+    emoji: str = ""
+
+
+@app.post("/api/conversas/{conversa_id}/reagir")
+def reagir_na_conversa(conversa_id: int, dados: ReacaoEntrada,
+                       usuario: dict = Depends(auth.requer_tela("ATD_1.2"))):
+    """Reage a uma mensagem com um emoji."""
+    _exige_estar_na_conversa(conversa_id, usuario)
+    r = conversas.reagir(conversa_id, dados.mensagem_id, dados.emoji)
+    if not r["ok"]:
+        raise HTTPException(status_code=409, detail=r["motivo"])
+    return r
+
+
+@app.post("/api/conversas/{conversa_id}/audio")
+async def responder_com_audio(conversa_id: int,
+                              arquivo: UploadFile = File(...),
+                              usuario: dict = Depends(auth.requer_tela("ATD_1.2"))):
+    """O áudio gravado no navegador — mensagem de VOZ, não anexo."""
+    _exige_estar_na_conversa(conversa_id, usuario)
+    dados = await arquivo.read()
+    r = conversas.responder_com_audio(
+        conversa_id, dados, _atendente_do_usuario(usuario))
+    if not r["ok"]:
+        raise HTTPException(status_code=409, detail=r["motivo"])
+    return r
+
+
+class EncaminharEntrada(BaseModel):
+    mensagem_id: int
+    conversas: list[int]
+
+
+@app.post("/api/conversas/encaminhar")
+def encaminhar_mensagem(dados: EncaminharEntrada,
+                        usuario: dict = Depends(auth.requer_tela("ATD_1.2"))):
+    """Repassa uma mensagem para outras conversas.
+
+    🚨 A REGRA DE "NÃO É CAIXA DE DISPARO" CAIU em 25/08, por decisão do
+    usuário. O que fica no lugar é o teto: encaminhar leva uma mensagem
+    EXISTENTE para destinos escolhidos um a um, e a resposta diz quantos
+    receberam.
+    """
+    if len(dados.conversas or []) > TETO_ENCAMINHAR:
+        raise HTTPException(
+            status_code=400,
+            detail=f"São {len(dados.conversas)} destinos. O WhatsApp limita o "
+                   f"encaminhar a {TETO_ENCAMINHAR} por vez, e nós também.")
+    r = conversas.encaminhar(dados.mensagem_id, dados.conversas,
+                             _atendente_do_usuario(usuario))
+    if not r["ok"]:
+        raise HTTPException(status_code=409, detail=r["motivo"])
+    return r
+
+
+# ⚠️ 5 é o limite do próprio WhatsApp por ação de encaminhar. Copiamos o
+# número de propósito: é o que a pessoa já conhece do aplicativo, e é o que
+# separa "repassar" de "disparar".
+TETO_ENCAMINHAR = 5
 
 
 @app.get("/api/historico")
