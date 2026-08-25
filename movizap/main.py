@@ -425,9 +425,13 @@ def ver_cliente(cliente_id: int,
 
 @app.get("/api/contatos")
 def listar_contatos(busca: str = "", pagina: int = 1, por_pagina: int = 50,
-                    apenas_ativos: bool = False,
+                    apenas_ativos: bool = False, relacoes: str = "",
                     usuario: dict = Depends(auth.requer_tela("CAD_1.2"))):
-    return cadastro.listar_contatos(busca, pagina, por_pagina, apenas_ativos)
+    """`relacoes` é a lista de chips separada por vírgula, e combina com a
+    busca: procurar "silva" entre os fornecedores é uma pergunta só."""
+    escolhidas = [r.strip() for r in relacoes.split(",") if r.strip()]
+    return cadastro.listar_contatos(busca, pagina, por_pagina, apenas_ativos,
+                                    relacoes=escolhidas or None)
 
 
 @app.get("/api/contatos/{contato_id}")
@@ -448,15 +452,36 @@ def definir_relacao_contato(contato_id: int, dados: RelacaoEntrada,
                             usuario: dict = Depends(auth.requer_tela("CAD_1.2"))):
     """O que a pessoa é para a Movisat: cliente, fornecedor, técnico, lead…
 
-    🚨 A PRIMEIRA ESCRITA NESTE CAMPO. Ele existe desde a migração 001 e nunca
-    teve rota: o sync grava 'cliente' para todo mundo e não havia como corrigir.
-    Não existe chave dura que diga quem é fornecedor -- conferido em 12/08 --
-    então quem classifica é gente, uma linha por vez, aqui.
+    🚨 NÃO EXISTE CHAVE DURA QUE DIGA QUEM É FORNECEDOR -- conferido em 12/08.
+    Quem classifica é gente. O sync deixou de escrever este campo na migração
+    031: ele casa por número e não opina sobre o que a pessoa é.
     """
     resultado = cadastro.definir_relacao(contato_id, dados.relacao)
     if not resultado["ok"]:
         codigo = 404 if "não encontrado" in resultado["motivo"] else 400
         raise HTTPException(status_code=codigo, detail=resultado["motivo"])
+    return resultado
+
+
+class RelacaoEmLote(BaseModel):
+    ids: list[int]
+    relacao: str
+
+
+@app.put("/api/contatos/relacao-em-lote")
+def definir_relacao_em_lote(dados: RelacaoEmLote,
+                            usuario: dict = Depends(auth.requer_tela("CAD_1.2"))):
+    """Marca o tipo de vários contatos de uma vez.
+
+    🚨 SEM LOTE A BASE NUNCA FICA HONESTA. 1.750 dos 1.754 contatos dizem
+    "cliente" porque até a migração 031 o sync gravava essa palavra literal --
+    e ninguém corrige 1.750 linhas uma a uma. É esta rota que destrava o
+    interruptor de automação por tipo: ligar boas-vindas para "cliente" com a
+    base como está hoje alcançaria quase todo mundo.
+    """
+    resultado = cadastro.definir_relacao_em_lote(dados.ids, dados.relacao)
+    if not resultado["ok"]:
+        raise HTTPException(status_code=400, detail=resultado["motivo"])
     return resultado
 
 

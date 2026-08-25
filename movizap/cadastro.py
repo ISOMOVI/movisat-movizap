@@ -156,7 +156,8 @@ def _com_telefones_e_papeis(contato: dict) -> dict:
 
 def listar_contatos(busca: str = "", pagina: int = 1,
                     por_pagina: int = POR_PAGINA_PADRAO,
-                    apenas_ativos: bool = False) -> dict:
+                    apenas_ativos: bool = False,
+                    relacoes: list[str] | None = None) -> dict:
     interpretacao = interpretar_busca(busca)
     salto, limite = _paginacao(pagina, por_pagina)
 
@@ -179,6 +180,12 @@ def listar_contatos(busca: str = "", pagina: int = 1,
     elif interpretacao["tipo"] == "nome":
         onde.append("lower(c.nome) LIKE lower(%s)")
         params.append(f"%{interpretacao['termo']}%")
+
+    # ⚠️ O filtro por tipo COMBINA com a busca, não a substitui: procurar
+    # "silva" entre os fornecedores é uma pergunta só.
+    if relacoes:
+        onde.append("c.relacao = ANY(%s)")
+        params.append(list(relacoes))
 
     filtro = (" WHERE " + " AND ".join(onde)) if onde else ""
 
@@ -226,22 +233,27 @@ def contato(contato_id: int) -> dict | None:
 # contrato (docs/02); esta tupla existe só para a tela montar o <select> e para
 # a rota recusar cedo, com mensagem legível, em vez de deixar o psycopg
 # devolver CheckViolation. Ampliar o vocabulário é migração, não edição aqui.
+# 🚨 ESTA TUPLA TINHA FICADO PARA TRÁS. A migração 029 acrescentou
+# `sem_identificacao` ao CHECK em 25/08 e esta lista não foi junto -- a rota
+# recusaria, com "relação inválida", um valor que o banco aceita. Espelho que
+# não se atualiza junto vira mentira: é a mesma lição das duas tabelas de
+# telas no `docs/03`.
 RELACOES = ('cliente', 'fornecedor', 'parceiro', 'tecnico', 'lead',
-            'colaborador', 'teste')
+            'colaborador', 'teste', 'sem_identificacao')
 
 
 def definir_relacao(contato_id: int, relacao: str) -> dict:
     """Diz o que a pessoa é para a Movisat. Editável desde 12/08.
 
-    🚨 ATÉ AQUI NINGUÉM PODIA MUDAR ISTO. `sync._gravar_contato` grava
-    `relacao = 'cliente'` LITERAL para todo contato do Harmonit, e não havia
-    rota de escrita: por isso 1.751 dos 1.752 contatos estavam como 'cliente'.
-    O número media uma constante no código, não a realidade.
+    ⚠️ O SYNC NÃO ESCREVE NEM DESFAZ ISTO (migração 031, 25/08). Ele casa por
+    número; o `ON CONFLICT ... DO UPDATE` de `_gravar_contato` atualiza nome,
+    e-mail, cliente_id e ativo, e não toca em `relacao`. É isso que faz o que
+    a pessoa marcar aqui sobreviver ao sync de madrugada.
 
-    ⚠️ O SYNC NÃO DESFAZ O QUE FOR MARCADO AQUI. O `ON CONFLICT ... DO UPDATE`
-    de `_gravar_contato` atualiza nome, e-mail, cliente_id e ativo, e não toca
-    em `relacao` -- conferido antes de expor esta rota. Se um dia mexer, o que
-    a pessoa marcou volta a virar 'cliente' amanhã de madrugada, sem aviso.
+    🚨 O NÚMERO DA BASE NÃO MEDE A REALIDADE. Medido em 25/08: 1.750 dos 1.754
+    contatos estão como 'cliente' porque até a 031 o INSERT do sync gravava
+    essa palavra literal. É constante no código virada estatística -- e é por
+    isso que a marcação em LOTE existe: ninguém corrige 1.750 linhas uma a uma.
     """
     if relacao not in RELACOES:
         return {"ok": False,
@@ -253,6 +265,47 @@ def definir_relacao(contato_id: int, relacao: str) -> dict:
     if not linha:
         return {"ok": False, "motivo": "Contato não encontrado."}
     return {"ok": True, **linha}
+
+
+TETO_LOTE = 500
+
+
+def definir_relacao_em_lote(ids: list[int], relacao: str) -> dict:
+    """Marca o tipo de vários contatos de uma vez — a CAD_1.2.
+
+    🚨 EXISTE PORQUE 1.750 CONTATOS DIZEM "cliente" SEM QUE NINGUÉM TENHA
+    MARCADO. Até a migração 031 o INSERT do sync gravava essa palavra literal.
+    Corrigir isso um contato por vez são 1.750 idas ao painel: sem lote, a
+    base nunca fica honesta, e sem base honesta o interruptor de automação por
+    tipo dispara para quem não devia.
+
+    ⚠️ TETO NO TAMANHO DO LOTE. Não é medo do banco -- é que um lote sem teto
+    aceita "marcar a base inteira" num clique, e não existe desfazer. 500 é
+    grande para o trabalho real e pequeno para o acidente.
+
+    ⚠️ Devolve QUANTOS mudaram, não "ok". Pedir 40 e mudar 37 quer dizer que 3
+    ids não existem, e quem marcou precisa saber disso -- silêncio aqui vira
+    "marquei e não pegou".
+    """
+    if relacao not in RELACOES:
+        return {"ok": False,
+                "motivo": f"Relação inválida. Vale uma de: {', '.join(RELACOES)}."}
+
+    limpos = sorted({int(i) for i in (ids or []) if i})
+    if not limpos:
+        return {"ok": False, "motivo": "Nenhum contato selecionado."}
+    if len(limpos) > TETO_LOTE:
+        return {"ok": False,
+                "motivo": f"São {len(limpos)} contatos. O lote vai até "
+                          f"{TETO_LOTE} por vez."}
+
+    mudados = banco.executar(
+        """UPDATE contato SET relacao = %s, atualizado_em = now()
+            WHERE id = ANY(%s) AND relacao IS DISTINCT FROM %s""",
+        (relacao, limpos, relacao))
+    log.info("relação em lote: %s contatos marcados como %s", mudados, relacao)
+    return {"ok": True, "pedidos": len(limpos), "mudados": mudados,
+            "relacao": relacao}
 
 
 def por_telefone(bruto: str) -> list[dict]:

@@ -44,7 +44,82 @@ const PAPEIS = {
    gravação recusa. Mudar o vocabulário é migração, e as duas listas andam
    juntas -- `cadastro.RELACOES` no backend é a terceira. */
 const RELACOES = ['cliente', 'fornecedor', 'parceiro', 'tecnico', 'lead',
-                  'colaborador', 'teste']
+                  'colaborador', 'teste', 'sem_identificacao']
+
+/* Nome legível do valor cru do banco. `sem_identificacao` é o DEFAULT desde a
+   migração 031: é como o contato nasce, e não uma marcação de ninguém. */
+const NOME_RELACAO = {
+  cliente: 'Cliente',
+  fornecedor: 'Fornecedor',
+  parceiro: 'Parceiro',
+  tecnico: 'Técnico',
+  lead: 'Lead',
+  colaborador: 'Colaborador',
+  teste: 'Teste',
+  sem_identificacao: 'Sem identificação',
+}
+
+/* ---- filtro e marcação em lote (25/08) -----------------------------------
+   🚨 O LOTE EXISTE PORQUE A BASE MENTE. 1.750 dos 1.754 contatos dizem
+   "cliente" porque até a migração 031 o INSERT do sync gravava essa palavra
+   literal. Ninguém corrige 1.750 linhas uma a uma -- e sem base honesta o
+   interruptor de automação por tipo dispara para quem não devia. */
+const tiposFiltro = ref([])
+const marcados = ref([])
+const relacaoDoLote = ref('')
+const aplicandoLote = ref(false)
+const recadoLote = ref('')
+
+function alternarTipoFiltro(valor) {
+  tiposFiltro.value = tiposFiltro.value.includes(valor)
+    ? tiposFiltro.value.filter((t) => t !== valor)
+    : [...tiposFiltro.value, valor]
+  pagina.value = 1
+  carregar()
+}
+
+function alternarMarcado(id) {
+  marcados.value = marcados.value.includes(id)
+    ? marcados.value.filter((m) => m !== id)
+    : [...marcados.value, id]
+}
+
+const todosMarcados = computed(
+  () => itens.value.length > 0 && itens.value.every(
+    (i) => marcados.value.includes(i.id)),
+)
+
+function alternarTodos() {
+  const daPagina = itens.value.map((i) => i.id)
+  marcados.value = todosMarcados.value
+    ? marcados.value.filter((m) => !daPagina.includes(m))
+    : [...new Set([...marcados.value, ...daPagina])]
+}
+
+async function aplicarLote() {
+  if (!marcados.value.length || !relacaoDoLote.value) return
+  aplicandoLote.value = true
+  recadoLote.value = ''
+  erro.value = ''
+  try {
+    const r = await api.put('/api/contatos/relacao-em-lote', {
+      ids: marcados.value,
+      relacao: relacaoDoLote.value,
+    })
+    /* ⚠️ Diz quantos MUDARAM, não "pronto". Pedir 40 e mudar 37 quer dizer
+       que 3 já estavam assim -- e quem marcou precisa saber. */
+    recadoLote.value = r.mudados === r.pedidos
+      ? `${r.mudados} contato(s) marcados como ${NOME_RELACAO[r.relacao]}.`
+      : `${r.mudados} de ${r.pedidos} mudaram — os outros já estavam assim.`
+    marcados.value = []
+    relacaoDoLote.value = ''
+    await carregar()
+  } catch (e) {
+    erro.value = e instanceof ErroDeApi ? e.message : 'Não consegui marcar.'
+  } finally {
+    aplicandoLote.value = false
+  }
+}
 
 const salvandoRelacao = ref(false)
 const relacaoSalva = ref(false)
@@ -79,6 +154,7 @@ async function carregar() {
       busca: busca.value,
       pagina: String(pagina.value),
     })
+    if (tiposFiltro.value.length) p.set('relacoes', tiposFiltro.value.join(','))
     dados.value = await api.get(`/api/contatos?${p}`)
     erro.value = ''
   } catch (e) {
@@ -150,6 +226,66 @@ onMounted(carregar)
         </label>
       </div>
 
+      <!-- Filtro por tipo. Combina com a busca: procurar "silva" entre os
+           fornecedores é uma pergunta só. -->
+      <div class="cartao__corpo linha linha--quebra tipos">
+        <button
+          v-for="r in RELACOES"
+          :key="r"
+          class="chip tipos__chip"
+          :class="{ 'tipos__chip--ligado': tiposFiltro.includes(r) }"
+          type="button"
+          @click="alternarTipoFiltro(r)"
+        >
+          {{ NOME_RELACAO[r] }}
+        </button>
+        <button
+          v-if="tiposFiltro.length"
+          class="botao botao--pequeno botao--fantasma"
+          type="button"
+          @click="tiposFiltro = []; pagina = 1; carregar()"
+        >
+          limpar
+        </button>
+      </div>
+
+      <!-- 🚨 A BARRA SÓ APARECE COM ALGO MARCADO. Barra de ação permanente
+           num cadastro de 1.754 linhas é convite para clique errado, e marcar
+           tipo em massa não tem desfazer. -->
+      <div v-if="marcados.length" class="cartao__corpo lote">
+        <strong>{{ marcados.length }} selecionado(s)</strong>
+        <label class="campo lote__campo">
+          <span class="so-leitor">Marcar como</span>
+          <select v-model="relacaoDoLote" class="campo__entrada">
+            <option value="">marcar como…</option>
+            <option v-for="r in RELACOES" :key="r" :value="r">
+              {{ NOME_RELACAO[r] }}
+            </option>
+          </select>
+        </label>
+        <button
+          class="botao botao--pequeno botao--primario"
+          type="button"
+          :disabled="!relacaoDoLote || aplicandoLote"
+          @click="aplicarLote"
+        >
+          <span v-if="aplicandoLote" class="girando"></span>
+          Aplicar
+        </button>
+        <button
+          class="botao botao--pequeno botao--fantasma"
+          type="button"
+          @click="marcados = []"
+        >
+          limpar seleção
+        </button>
+      </div>
+
+      <p v-if="recadoLote" class="aviso aviso--ok">
+        <i class="bi bi-check-circle aviso__icone" aria-hidden="true"></i>
+        <span>{{ recadoLote }}</span>
+      </p>
+
       <p v-if="interpretacao.tipo === 'telefone'" class="aviso aviso--info">
         <i class="bi bi-telephone aviso__icone" aria-hidden="true"></i>
         <span>
@@ -184,6 +320,14 @@ onMounted(carregar)
         <table class="tabela">
           <thead>
             <tr>
+              <th class="cad__marca">
+                <input
+                  type="checkbox"
+                  :checked="todosMarcados"
+                  :aria-label="todosMarcados ? 'Desmarcar a página' : 'Marcar a página'"
+                  @change="alternarTodos"
+                />
+              </th>
               <th>Nome</th>
               <th>Cliente</th>
               <th>Relação</th>
@@ -197,9 +341,21 @@ onMounted(carregar)
               :key="item.id"
               :class="{ 'cad__inativo': !item.ativo }"
             >
+              <td class="cad__marca">
+                <input
+                  type="checkbox"
+                  :checked="marcados.includes(item.id)"
+                  :aria-label="`Selecionar ${item.nome}`"
+                  @change="alternarMarcado(item.id)"
+                />
+              </td>
               <td><strong>{{ item.nome }}</strong></td>
               <td class="pequeno fraco">{{ item.cliente_nome || '—' }}</td>
-              <td><span class="chip">{{ item.relacao }}</span></td>
+              <td>
+                <!-- ⚠️ Nome legível, não o valor cru: a tela mostrava
+                     `sem_identificacao` com underscore. -->
+                <span class="chip">{{ NOME_RELACAO[item.relacao] || item.relacao }}</span>
+              </td>
               <td class="mono pequeno">
                 {{ telefoneBonito(item.telefone) }}
                 <span v-if="item.telefones > 1" class="fraco">
@@ -286,7 +442,9 @@ onMounted(carregar)
                 :disabled="salvandoRelacao"
                 @change="salvarRelacao($event.target.value)"
               >
-                <option v-for="r in RELACOES" :key="r" :value="r">{{ r }}</option>
+                <option v-for="r in RELACOES" :key="r" :value="r">
+                  {{ NOME_RELACAO[r] || r }}
+                </option>
               </select>
               <span v-if="salvandoRelacao" class="apagado pequeno"> gravando…</span>
               <span v-else-if="relacaoSalva" class="chip chip--ok">gravado</span>
@@ -484,6 +642,24 @@ onMounted(carregar)
 }
 
 .cad__relacao { max-width: 14rem; }
+.cad__marca { width: 2.2rem; text-align: center; }
+
+.tipos__chip { cursor: pointer; font-family: var(--fonte); }
+.tipos__chip--ligado {
+  background: var(--acento-suave);
+  border-color: var(--acento-borda);
+  color: var(--acento);
+}
+
+.lote {
+  display: flex;
+  align-items: center;
+  gap: var(--e-3);
+  flex-wrap: wrap;
+  background: var(--acento-suave);
+  border-top: var(--borda-fina) solid var(--acento-borda);
+}
+.lote__campo { margin: 0; min-width: 12rem; }
 
 .cad__papeis {
   list-style: none;
