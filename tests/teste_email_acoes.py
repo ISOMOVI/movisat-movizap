@@ -123,6 +123,29 @@ class TestEstrela:
         assert sem_google == []
 
 
+class TestAListaCarregaOQueATelaDESENHA:
+    """🚨 ACHADO EXERCITANDO, NÃO POR TESTE. A tela desenha a estrela de cada
+    linha a partir de `m.estrela` -- e o SELECT da listagem não trazia a
+    coluna. Toda estrela apareceria vazia, em qualquer estado, e nada acusaria:
+    a rota respondia 200 e a lista vinha completa em tudo o mais.
+
+    Vale como regra: campo que a tela desenha tem de estar na consulta que a
+    tela pede, e é isto que este teste prende.
+    """
+
+    def test_a_listagem_traz_estrela_e_lida(self, cena):
+        m = _cliente("dono").get("/api/email/mensagens").json()["mensagens"]
+        assert m, "a caixa de teste veio vazia"
+        assert "estrela" in m[0]
+        assert "lida" in m[0]
+
+    def test_estrelar_aparece_na_proxima_listagem(self, cena, sem_google):
+        c = _cliente("dono")
+        c.post(f"/api/email/mensagens/{cena['msgs'][0]}/estrela?ligada=true")
+        m = {x["id"]: x for x in c.get("/api/email/mensagens").json()["mensagens"]}
+        assert m[cena["msgs"][0]]["estrela"] is True
+
+
 class TestNaoLida:
     def test_devolve_para_nao_lida(self, cena, sem_google):
         """O "volto nisso depois". Sem ele, abrir por engano é irreversível

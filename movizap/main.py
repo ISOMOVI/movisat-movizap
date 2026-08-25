@@ -737,7 +737,8 @@ def email_mensagens(marcador: str = "", busca: str = "", limite: int = 60,
     params.append(limite)
     return {"mensagens": banco.varios(
         f"""SELECT e.id, e.remetente, e.remetente_nome, e.assunto, e.enviado_em,
-                   e.tem_anexo, e.lida, e.conta_id, c.nome AS cliente_nome
+                   e.tem_anexo, e.lida, e.estrela, e.conta_id,
+                   c.nome AS cliente_nome
               FROM email_mensagem e
               LEFT JOIN cliente c ON c.id = e.cliente_id
              WHERE {' AND '.join(condicoes)}

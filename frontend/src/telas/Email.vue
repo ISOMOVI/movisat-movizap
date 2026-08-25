@@ -17,6 +17,7 @@
 import { ref, computed, onMounted } from 'vue'
 
 import { api, pedirBlob, ErroDeApi } from '../api/cliente.js'
+import { corDaInicial as corDe, iniciais as iniciaisDe } from '../util/avatar.js'
 
 const marcadores = ref([])
 const mensagens = ref([])
@@ -275,19 +276,17 @@ const visiveis = computed(() =>
     }),
 )
 
-/* Iniciais do remetente, como toda caixa moderna. Sem foto: não temos, e
-   inventar avatar genérico é ruído. */
+/* 🚨 AS DUAS FUNÇÕES SAÍRAM DAQUI EM 25/08. Viviam neste arquivo, e quando a
+   caixa de entrada precisou do mesmo avatar, copiar teria criado duas versões
+   da mesma regra. Agora vivem em `util/avatar.js` e recebem o NOME, não a
+   mensagem -- assim servem contato, atendente e remetente sem saber o que
+   cada tela chama de quê. */
 function iniciais(m) {
-  const base = (m.remetente_nome || m.remetente || '?').trim()
-  const partes = base.replace(/[<>"]/g, '').split(/[\s@.]+/).filter(Boolean)
-  return ((partes[0]?.[0] || '?') + (partes[1]?.[0] || '')).toUpperCase()
+  return iniciaisDe(m.remetente_nome || m.remetente)
 }
 
 function corDaInicial(m) {
-  const base = (m.remetente || '?')
-  let soma = 0
-  for (const c of base) soma += c.charCodeAt(0)
-  return `hsl(${soma % 360} 45% 42%)`
+  return corDe(m.remetente || m.remetente_nome)
 }
 
 /* ---- as caixas de quem está logado --------------------------------------
@@ -296,6 +295,61 @@ function corDaInicial(m) {
    para qualquer um. Sem esta verificação, a pessoa nova abriria uma tela
    silenciosamente vazia e concluiria que o e-mail está quebrado. */
 const caixas = ref([])
+
+/* ---- seleção e estrela (25/08) -------------------------------------------
+   Pedido do usuário: *"o recurso de 'estrela' do gmail não poderíamos ter?
+   selecionar, botão de leitura de e-mails, etc"*. Nada disto pediu
+   consentimento novo -- o escopo já é `gmail.modify`. */
+const marcadas = ref([])
+const aplicandoLote = ref(false)
+
+function alternarMarcada(id) {
+  marcadas.value = marcadas.value.includes(id)
+    ? marcadas.value.filter((m) => m !== id)
+    : [...marcadas.value, id]
+}
+
+const todasMarcadas = computed(
+  () => mensagens.value.length > 0
+    && mensagens.value.every((m) => marcadas.value.includes(m.id)),
+)
+
+function alternarTodas() {
+  marcadas.value = todasMarcadas.value ? [] : mensagens.value.map((m) => m.id)
+}
+
+async function alternarEstrela(m) {
+  /* ⚠️ Vira na tela ANTES da resposta: estrela é clique de meio segundo, e
+     esperar o Gmail para o ícone mudar faz a pessoa clicar de novo. Se falhar,
+     desfaz e diz. */
+  const antes = m.estrela
+  m.estrela = !antes
+  try {
+    await api.post(`/api/email/mensagens/${m.id}/estrela?ligada=${!antes}`)
+  } catch (e) {
+    m.estrela = antes
+    erro.value = e instanceof ErroDeApi ? e.message : 'Não consegui mexer na estrela.'
+  }
+}
+
+async function lote(acao) {
+  if (!marcadas.value.length) return
+  aplicandoLote.value = true
+  erro.value = ''
+  try {
+    const r = await api.post('/api/email/lote',
+                             { ids: marcadas.value, acao })
+    recado.value = r.falhas
+      ? `${r.feitas} de ${r.pedidas} — ${r.falhas} não deu.`
+      : `${r.feitas} mensagem(ns).`
+    marcadas.value = []
+    await carregar()
+  } catch (e) {
+    erro.value = e instanceof ErroDeApi ? e.message : 'Não consegui aplicar.'
+  } finally {
+    aplicandoLote.value = false
+  }
+}
 
 async function carregarCaixas() {
   try {
@@ -570,30 +624,104 @@ onMounted(async () => {
 
       <!-- lista -->
       <div class="cartao email__lista">
+        <!-- 🚨 A BARRA SÓ EXISTE COM ALGO MARCADO. Barra de ação permanente
+             numa caixa de 336 mensagens é convite para clique errado, e
+             ocupa a altura que a lista precisa. -->
+        <div v-if="marcadas.length" class="email__lote">
+          <strong class="pequeno">{{ marcadas.length }} selecionada(s)</strong>
+          <span class="espaco"></span>
+          <button class="botao botao--pequeno botao--fantasma" type="button"
+                  :disabled="aplicandoLote" title="Marcar como lida"
+                  @click="lote('lida')">
+            <i class="bi bi-envelope-open" aria-hidden="true"></i>
+          </button>
+          <button class="botao botao--pequeno botao--fantasma" type="button"
+                  :disabled="aplicandoLote" title="Marcar como não lida"
+                  @click="lote('nao_lida')">
+            <i class="bi bi-envelope" aria-hidden="true"></i>
+          </button>
+          <button class="botao botao--pequeno botao--fantasma" type="button"
+                  :disabled="aplicandoLote" title="Marcar com estrela"
+                  @click="lote('estrela')">
+            <i class="bi bi-star" aria-hidden="true"></i>
+          </button>
+          <button class="botao botao--pequeno botao--fantasma" type="button"
+                  :disabled="aplicandoLote" title="Arquivar"
+                  @click="lote('arquivar')">
+            <i class="bi bi-archive" aria-hidden="true"></i>
+          </button>
+          <button class="botao botao--pequeno botao--fantasma" type="button"
+                  @click="marcadas = []">
+            limpar
+          </button>
+        </div>
+
+        <label v-if="mensagens.length" class="email__todas pequeno">
+          <input type="checkbox" :checked="todasMarcadas" @change="alternarTodas" />
+          <span>selecionar tudo</span>
+        </label>
+
         <p v-if="carregando" class="apagado pequeno">carregando…</p>
         <div v-else-if="!mensagens.length" class="email__vazio">
           <i class="bi bi-inbox" aria-hidden="true"></i>
           <p>Nenhuma mensagem por aqui.</p>
           <p class="apagado pequeno">Clique em <strong>Atualizar</strong> para buscar as novas.</p>
         </div>
-        <button
+        <!-- 🚨 DUAS ALTURAS DE INFORMAÇÃO, NÃO UMA FILA. A linha antiga punha
+             remetente, assunto, cliente, clipe e hora lado a lado, todos com
+             o mesmo peso -- e numa caixa de 336 mensagens isso obriga a LER
+             cada linha inteira para achar qualquer coisa. Remetente e hora em
+             cima, assunto embaixo: o olho varre a primeira coluna e só desce
+             onde interessa. -->
+        <div
           v-for="m in mensagens"
           :key="m.id"
           class="email__item"
           :class="{ 'email__item--aberta': aberta && aberta.id === m.id,
                     'email__item--nova': !m.lida }"
-          type="button"
-          @click="abrir(m.id)"
         >
-          <span class="email__inicial" :style="{ background: corDaInicial(m) }" aria-hidden="true">
-            {{ iniciais(m) }}
-          </span>
-          <span class="email__de">{{ m.remetente_nome || m.remetente }}</span>
-          <span class="email__assunto">{{ m.assunto || '(sem assunto)' }}</span>
-          <span v-if="m.cliente_nome" class="chip email__cliente">{{ m.cliente_nome }}</span>
-          <i v-if="m.tem_anexo" class="bi bi-paperclip apagado" aria-hidden="true"></i>
-          <span class="apagado pequeno email__quando">{{ quando(m.enviado_em) }}</span>
-        </button>
+          <input
+            class="email__marca"
+            type="checkbox"
+            :checked="marcadas.includes(m.id)"
+            :aria-label="`Selecionar: ${m.assunto || 'sem assunto'}`"
+            @change="alternarMarcada(m.id)"
+          />
+
+          <!-- ⚠️ A estrela é botão PRÓPRIO, fora do que abre a mensagem:
+               estrelar sem abrir é metade do uso dela. -->
+          <button
+            class="email__estrela"
+            :class="{ 'email__estrela--ligada': m.estrela }"
+            type="button"
+            :title="m.estrela ? 'Tirar a estrela' : 'Marcar com estrela'"
+            :aria-label="m.estrela ? 'Tirar a estrela' : 'Marcar com estrela'"
+            @click.stop="alternarEstrela(m)"
+          >
+            <i class="bi" :class="m.estrela ? 'bi-star-fill' : 'bi-star'"></i>
+          </button>
+
+          <button class="email__abrir" type="button" @click="abrir(m.id)">
+            <span class="email__linha1">
+              <span class="email__inicial"
+                    :style="{ background: corDaInicial(m) }" aria-hidden="true">
+                {{ iniciais(m) }}
+              </span>
+              <span class="email__de">{{ m.remetente_nome || m.remetente }}</span>
+              <i v-if="m.tem_anexo" class="bi bi-paperclip apagado" aria-hidden="true"></i>
+              <span class="apagado pequeno email__quando">{{ quando(m.enviado_em) }}</span>
+            </span>
+            <span class="email__linha2">
+              <span class="email__assunto">{{ m.assunto || '(sem assunto)' }}</span>
+              <!-- 🚨 O CHIP DO CLIENTE É O QUE ESTA CAIXA TEM E O GMAIL NÃO.
+                   Ficava só dentro da mensagem aberta; na lista, é ele que
+                   transforma "um e-mail" em "um e-mail da Pastelaria". -->
+              <span v-if="m.cliente_nome" class="chip chip--pequeno email__cliente">
+                {{ m.cliente_nome }}
+              </span>
+            </span>
+          </button>
+        </div>
       </div>
 
       <!-- leitura -->
@@ -850,7 +978,6 @@ onMounted(async () => {
   gap: 2px;
   min-height: 0;   /* sem isto o filho de grid não encolhe e a rolagem não nasce */
 }
-/* Uma linha, como no Gmail: mostra o dobro de mensagens na mesma altura. */
 .email__item {
   display: flex;
   align-items: center;
@@ -859,14 +986,88 @@ onMounted(async () => {
   padding: var(--e-2);
   border: none;
   border-bottom: var(--borda-fina) solid var(--borda);
+  /* 🚨 A BARRA DE NÃO LIDA. 3px à esquerda em vez de negrito no texto inteiro:
+     negrito muda a largura das palavras e faz a lista "tremer" conforme as
+     mensagens são abertas. A barra não mexe em nada. */
+  border-left: 3px solid transparent;
   background: transparent;
-  cursor: pointer;
   text-align: left;
   font-family: var(--fonte);
 }
 .email__item:hover { background: var(--superficie-2); }
 .email__item--aberta { background: var(--acento-suave); }
-.email__assunto { font-size: var(--txt-sm); color: var(--texto-fraco); overflow-wrap: anywhere; }
+.email__item--nova { border-left-color: var(--acento); background: var(--superficie); }
+.email__item--nova .email__de { font-weight: var(--peso-forte); color: var(--texto); }
+
+/* O que abre a mensagem é só o miolo: caixa de seleção e estrela ficam de
+   fora, senão marcar uma mensagem a abriria junto. */
+.email__abrir {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border: 0;
+  background: none;
+  padding: 0;
+  cursor: pointer;
+  text-align: left;
+  font-family: var(--fonte);
+}
+.email__linha1 { display: flex; align-items: center; gap: var(--e-2); min-width: 0; }
+.email__linha2 { display: flex; align-items: center; gap: var(--e-2); min-width: 0; }
+
+.email__de {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--texto-fraco);
+}
+.email__quando { flex: none; white-space: nowrap; }
+.email__assunto {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: var(--txt-sm);
+  color: var(--texto-fraco);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.email__cliente { flex: none; }
+
+.email__marca { flex: none; }
+.email__estrela {
+  flex: none;
+  border: 0;
+  background: none;
+  padding: 2px;
+  cursor: pointer;
+  color: var(--texto-apagado);
+  line-height: 1;
+}
+.email__estrela:hover { color: var(--aviso); }
+.email__estrela--ligada { color: var(--aviso); }
+
+.email__lote {
+  display: flex;
+  align-items: center;
+  gap: var(--e-1);
+  padding: var(--e-2);
+  background: var(--acento-suave);
+  border-bottom: var(--borda-fina) solid var(--acento-borda);
+  position: sticky;
+  top: 0;
+  z-index: var(--z-conteudo);
+}
+.email__todas {
+  display: flex;
+  align-items: center;
+  gap: var(--e-2);
+  padding: var(--e-1) var(--e-2);
+  color: var(--texto-fraco);
+}
 
 .email__leitura { padding: var(--e-4); overflow-y: auto; min-height: 0; }
 .email__lado { overflow-y: auto; min-height: 0; }

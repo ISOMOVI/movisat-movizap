@@ -22,6 +22,7 @@ import { useRoute, useRouter } from 'vue-router'
 
 import { api, pedirBlob, ErroDeApi } from '../api/cliente.js'
 import { marcar, partir } from '../util/destaque.js'
+import { corDaInicial, iniciais } from '../util/avatar.js'
 
 const route = useRoute()
 const router = useRouter()
@@ -791,6 +792,36 @@ function quando(iso) {
   return d.toLocaleDateString('pt-BR')
 }
 
+/* ---- separador de dia ---------------------------------------------------
+   🚨 SEM ISTO O FIO É UM BLOCO SÓ. Uma conversa de meses desenhava mensagem
+   atrás de mensagem sem nenhuma marca de tempo além da hora -- e "14:32" não
+   diz se foi hoje ou em julho. É a primeira coisa que falta quando se compara
+   com o WhatsApp lado a lado. */
+function _diaDe(iso) {
+  return iso ? new Date(iso).toDateString() : ''
+}
+
+function comecaODia(m, i) {
+  if (!aberta.value) return false
+  if (i === 0) return true
+  return _diaDe(m.criada_em) !== _diaDe(aberta.value.mensagens[i - 1].criada_em)
+}
+
+function rotuloDoDia(iso) {
+  if (!iso) return ''
+  const d = new Date(iso)
+  const hoje = new Date()
+  const ontem = new Date()
+  ontem.setDate(hoje.getDate() - 1)
+  if (d.toDateString() === hoje.toDateString()) return 'Hoje'
+  if (d.toDateString() === ontem.toDateString()) return 'Ontem'
+  /* Menos de um ano: dia e mês bastam. Mais que isso, o ano importa. */
+  const mesmoAno = d.getFullYear() === hoje.getFullYear()
+  return d.toLocaleDateString('pt-BR', mesmoAno
+    ? { day: '2-digit', month: 'long' }
+    : { day: '2-digit', month: 'long', year: 'numeric' })
+}
+
 function hora(iso) {
   return new Date(iso).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })
 }
@@ -994,17 +1025,20 @@ function carregarMidiasDaConversa(c) {
           O que chegou pelo WhatsApp. A conversa abre ao lado.
         </p>
       </div>
-      <div v-if="resumo" class="linha">
-        <span class="chip">{{ resumo.conversas }} conversas</span>
-        <span class="chip chip--aviso">{{ resumo.sem_dono }} sem dono</span>
-        <span class="chip">{{ resumo.mensagens }} mensagens</span>
-        <!-- Ignorado é NÚMERO, não problema: informativo e grupo são descarte
-             de propósito. Ficava no contador de erro até 07/08. -->
-        <span
-          v-if="resumo.eventos_ignorados"
-          class="chip"
-          title="Eventos descartados de propósito: canal informativo e grupo. Não é falha."
-        >{{ resumo.eventos_ignorados }} ignorados</span>
+      <!-- 🚨 DOIS NÚMEROS, NÃO QUATRO. Havia quatro chips do mesmo peso
+           (conversas, sem dono, mensagens, ignorados): "mensagens" é volume e
+           não pede ação, e "ignorados" é detalhe técnico que interessa a mim,
+           não a quem atende. O que decide trabalho é quantas esperam e
+           quantas não têm dono. -->
+      <div v-if="resumo" class="placar">
+        <div class="placar__item">
+          <strong class="placar__numero">{{ resumo.conversas }}</strong>
+          <span class="placar__rotulo">conversas</span>
+        </div>
+        <div class="placar__item" :class="{ 'placar__item--pede': resumo.sem_dono }">
+          <strong class="placar__numero">{{ resumo.sem_dono }}</strong>
+          <span class="placar__rotulo">sem dono</span>
+        </div>
       </div>
     </header>
 
@@ -1035,16 +1069,23 @@ function carregarMidiasDaConversa(c) {
       <section class="cartao coluna">
         <header class="cartao__cabecalho">
           <div class="linha linha--quebra">
-            <button
-              v-for="f in FILTROS"
-              :key="f.valor"
-              class="botao botao--pequeno"
-              :class="filtro === f.valor ? 'botao--primario' : 'botao--fantasma'"
-              type="button"
-              @click="filtro = f.valor"
-            >
-              {{ f.rotulo }}
-            </button>
+            <!-- ⚠️ CONTROLE SEGMENTADO, não três botões soltos. Três botões
+                 com cores diferentes leem como três ações; segmentado lê como
+                 UMA escolha entre três -- que é o que é. -->
+            <div class="abas" role="tablist">
+              <button
+                v-for="f in FILTROS"
+                :key="f.valor"
+                class="abas__aba"
+                :class="{ 'abas__aba--ativa': filtro === f.valor }"
+                type="button"
+                role="tab"
+                :aria-selected="filtro === f.valor"
+                @click="filtro = f.valor"
+              >
+                {{ f.rotulo }}
+              </button>
+            </div>
 
             <!-- 🚨 O `+` FICA LOGO DEPOIS DE "MINHAS", como o usuário pediu
                  em 25/08. É o único lugar do painel onde se escolhe para quem
@@ -1172,14 +1213,27 @@ function carregarMidiasDaConversa(c) {
               type="button"
               @click="abrir(c.id)"
             >
+              <!-- 🚨 AVATAR COM INICIAL, NÃO ÍCONE GENÉRICO. A lista é lida
+                   de relance, dezenas de vezes por dia: cor estável derivada
+                   do nome distingue a conversa antes de a pessoa ler. Grupo
+                   troca a inicial pelo ícone de pessoas -- ali a inicial de
+                   um nome de grupo não identifica ninguém. -->
+              <span
+                class="conversa__avatar"
+                :style="{ background: c.tipo === 'grupo' ? null : corDaInicial(quem(c)) }"
+                :class="{ 'conversa__avatar--grupo': c.tipo === 'grupo' }"
+                aria-hidden="true"
+              >
+                <i v-if="c.tipo === 'grupo'" class="bi bi-people"></i>
+                <template v-else>{{ iniciais(quem(c)) }}</template>
+              </span>
+
+              <span class="conversa__corpo">
               <div class="conversa__topo">
-                <strong class="conversa__quem">
-                  <!-- Grupo e conversa direta na MESMA lista, como no
-                       WhatsApp. O ícone é o que distingue. -->
-                  <i v-if="c.tipo === 'grupo'" class="bi bi-people" aria-hidden="true"></i>
-                  {{ quem(c) }}
-                </strong>
-                <span class="apagado pequeno">{{ quando(c.ultima_atividade_em) }}</span>
+                <strong class="conversa__quem">{{ quem(c) }}</strong>
+                <span class="apagado pequeno conversa__hora">
+                  {{ quando(c.ultima_atividade_em) }}
+                </span>
               </div>
               <!-- ⚠️ Fui CHAMADO para esta, não sou o dono. Sem a marca, ela
                    fica igual às minhas na lista — e só o dono responde por ela. -->
@@ -1202,15 +1256,27 @@ function carregarMidiasDaConversa(c) {
                 <span v-if="c.ultima_direcao === 'saida'" class="fraco">você: </span>
                 {{ c.ultima_mensagem || '(sem texto)' }}
               </p>
-              <div class="linha pequeno">
-                <!-- "não identificado" fala do CADASTRO, não do nome: ter apelido
-                     do WhatsApp não quer dizer que se saiba de qual cliente é. -->
-                <span v-if="!c.contato_nome" class="chip chip--aviso">não identificado</span>
-                <span v-if="c.cliente_nome" class="chip">{{ c.cliente_nome }}</span>
-                <span v-if="c.estado === 'resolvida'" class="chip chip--ok">concluída</span>
-                <span v-if="c.atendente_nome" class="chip chip--acento">{{ c.atendente_nome }}</span>
-                <span v-else class="chip">sem dono</span>
+              <!-- 🚨 UMA LINHA DE MARCAS, NÃO CINCO CHIPS. Antes toda
+                   conversa carregava até cinco chips do mesmo peso -- e
+                   "sem dono" aparecia em TODAS as 336, virando ruído puro. O
+                   que fica é o que diferencia esta conversa das outras: quem
+                   responde (quando há), a empresa (quando se sabe) e o
+                   estado excepcional. -->
+              <div class="conversa__marcas pequeno">
+                <span v-if="!c.contato_nome" class="chip chip--aviso chip--pequeno">
+                  sem cadastro
+                </span>
+                <span v-else-if="c.cliente_nome" class="chip chip--pequeno">
+                  {{ c.cliente_nome }}
+                </span>
+                <span v-if="c.estado === 'resolvida'" class="chip chip--ok chip--pequeno">
+                  concluída
+                </span>
+                <span v-if="c.atendente_nome" class="chip chip--acento chip--pequeno">
+                  {{ c.atendente_nome }}
+                </span>
               </div>
+              </span>
             </button>
 
             <!-- Sem dono, ou encerrada: dá para pegar daqui, sem abrir antes.
@@ -1636,9 +1702,11 @@ function carregarMidiasDaConversa(c) {
                 Carregar {{ aberta.janela }} anteriores
               </button>
             </div>
+            <template v-for="(m, i) in aberta.mensagens" :key="m.id">
+            <p v-if="comecaODia(m, i)" class="diario">
+              <span class="diario__marca">{{ rotuloDoDia(m.criada_em) }}</span>
+            </p>
             <div
-              v-for="m in aberta.mensagens"
-              :key="m.id"
               class="balao"
               :class="[`balao--${m.direcao}`, {
                 'balao--casa': casaNaConversa(m),
@@ -1720,6 +1788,7 @@ function carregarMidiasDaConversa(c) {
                 <span v-if="m.entrega"> · {{ m.entrega }}</span>
               </p>
             </div>
+            </template>
           </div>
 
           <div v-if="aberta.estado === 'resolvida'" class="cartao__corpo pilha">
@@ -2197,7 +2266,9 @@ function carregarMidiasDaConversa(c) {
    "não identificado" e "concluída" continuam como CHIP, não como cor de
    borda. Os tokens são os do sistema: nenhum valor de cor escrito aqui. */
 .conversa {
-  display: block;
+  display: flex;
+  align-items: flex-start;
+  gap: var(--e-3);
   flex: 1 1 auto;
   min-width: 0;
   text-align: left;
@@ -2206,8 +2277,50 @@ function carregarMidiasDaConversa(c) {
   border-left: 4px solid var(--acento);
   padding: var(--e-3);
   cursor: pointer;
+  font-family: var(--fonte);
 }
 .conversa--grupo { border-left-color: var(--ok); }
+
+/* `min-width: 0` é o que permite o texto TRUNCAR dentro do flex: sem ele o
+   item cresce e a hora sai da coluna. */
+.conversa__corpo { flex: 1 1 auto; min-width: 0; display: block; }
+
+.conversa__avatar {
+  flex: none;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--r-full);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-size: var(--txt-sm);
+  font-weight: var(--peso-forte);
+  letter-spacing: .02em;
+}
+.conversa__avatar--grupo {
+  background: var(--superficie-3);
+  color: var(--texto-fraco);
+}
+
+.conversa__hora { flex: none; white-space: nowrap; }
+
+/* 🚨 UMA LINHA SÓ, COM RETICÊNCIAS. A prévia com duas linhas fazia o item
+   pular de altura conforme o texto -- e uma lista que muda de ritmo é mais
+   difícil de varrer do que uma lista densa. */
+.conversa__quem,
+.conversa__previa {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.conversa__marcas {
+  display: flex;
+  gap: var(--e-1);
+  flex-wrap: wrap;
+  margin-top: 2px;
+}
+.conversa__marcas:empty { display: none; }
 .conversa:hover { background: rgba(128, 128, 128, .08); }
 .conversa--aberta { background: rgba(128, 128, 128, .14); }
 
@@ -2332,7 +2445,65 @@ function carregarMidiasDaConversa(c) {
 .busca .campo__entrada { flex: 1 1 auto; min-width: 0; }
 .campo--busca { margin-bottom: var(--e-2); }
 
+/* ---- placar do cabeçalho -------------------------------------------------
+   Número grande + rótulo pequeno: dois números com hierarquia leem-se de
+   relance; quatro chips iguais obrigam a ler todos. */
+.placar { display: flex; gap: var(--e-5); }
+.placar__item { display: flex; flex-direction: column; line-height: 1.1; }
+.placar__numero { font-size: var(--txt-xl); color: var(--texto); }
+.placar__rotulo { font-size: var(--txt-sm); color: var(--texto-fraco); }
+/* O que pede trabalho ganha cor. O resto fica neutro -- se tudo grita,
+   nada grita. */
+.placar__item--pede .placar__numero { color: var(--aviso); }
+
+/* ---- controle segmentado -------------------------------------------------
+   Uma escolha entre três, e não três ações. */
+.abas {
+  display: inline-flex;
+  padding: 2px;
+  background: var(--superficie-2);
+  border: var(--borda-fina) solid var(--borda);
+  border-radius: var(--r-full);
+}
+.abas__aba {
+  border: 0;
+  background: none;
+  padding: 5px var(--e-3);
+  border-radius: var(--r-full);
+  font-family: var(--fonte);
+  font-size: var(--txt-sm);
+  color: var(--texto-fraco);
+  cursor: pointer;
+}
+.abas__aba:hover { color: var(--texto); }
+.abas__aba--ativa {
+  background: var(--superficie);
+  color: var(--texto);
+  font-weight: var(--peso-forte);
+  box-shadow: var(--sombra-1);
+}
+.abas__aba:focus-visible { outline: none; box-shadow: var(--foco); }
+
 .anteriores { display: flex; justify-content: center; padding: var(--e-2) 0; }
+
+/* Separador de dia: linha fina atravessando, com o rótulo no meio. É o padrão
+   que todo mensageiro usa, e por isso ninguém precisa aprender. */
+.diario {
+  display: flex;
+  align-items: center;
+  gap: var(--e-3);
+  margin: var(--e-4) 0 var(--e-2);
+  color: var(--texto-apagado);
+  font-size: var(--txt-sm);
+}
+.diario::before,
+.diario::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--borda);
+}
+.diario__marca { flex: none; text-transform: lowercase; }
 
 .buscaconversa {
   display: flex;
