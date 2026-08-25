@@ -56,14 +56,35 @@ independentes.
 | `id` | bigserial PK | |
 | `cliente_id` | FK NULL | lead e fornecedor podem não ter cliente |
 | `nome` | text | |
-| `relacao` | enum(`cliente`,`fornecedor`,`parceiro`,`tecnico`,`lead`) | **o que a pessoa é para a Movisat**. 🆕 `parceiro` entrou |
+| `relacao` | enum(`cliente`,`fornecedor`,`parceiro`,`tecnico`,`lead`,`colaborador`,`teste`,`sem_identificacao`) | **o que a pessoa é para a Movisat**. `colaborador` e `teste` entraram na migração 023; `sem_identificacao` na 029, por decisão do usuário em 25/08 |
 | `email` | text NULL | 🆕 |
 | `origem` / `harmonit_id` / `ativo` | | igual acima |
 | `criado_em` / `atualizado_em` | timestamptz | |
 
-🆕 **A cor da etiqueta não é coluna.** É constante no código, mapeada de
-`relacao`: cliente 🔵 · fornecedor 🔴 · parceiro 🟡 · técnico 🟣 · lead ⚪.
-Vira tabela **só** se você quiser trocar cor pela tela — o que não é Fase 1.
+🆕 **A cor da etiqueta não é coluna.** Se existir, é constante no código,
+mapeada de `relacao`. Vira tabela **só** se alguém quiser trocar cor pela tela
+— o que não é Fase 1.
+
+🚨 **NÃO HÁ PALETA DECIDIDA, E ESTE PARÁGRAFO JÁ AFIRMOU QUE HAVIA.** Até 25/08
+ele listava cliente 🔵 · fornecedor 🔴 · parceiro 🟡 · técnico 🟣 · lead ⚪ como
+se fosse decisão. Corrigido depois de o usuário perguntar de onde tinha saído a
+cor de `sem_identificacao`: a **ideia** das cores é dele (o `docs/06` diz "a sua
+ideia das cores"), a **paleta** é sugestão minha, a coluna do `06` se chama
+"Cor sugerida", e **nada disso foi construído** — os chips têm só acento, ok,
+aviso e erro, e roxo e cinza nem existem como token.
+
+⚠️ E há **três eixos de cor** escritos em documentos diferentes, que se
+contradizem no símbolo: relação (aqui e no `06`), prova de identidade (`docs/11`:
+verde vinculado, azul confirmado por você, amarelo aparece no Bitrix, branco
+desconhecido) e tipo de conversa (a margem da lista). Azul quer dizer "é
+cliente" num e "você confirmou" no outro; amarelo e branco também colidem.
+**Cor nova só entra numa proposta que resolva os três de uma vez.**
+
+⚠️ **O valor gravado hoje não mede a realidade.** Medido em 25/08: 1.750 dos
+1.754 contatos estão como `cliente`, porque `sync._gravar_contato` grava essa
+palavra **literal** para todo mundo que vem do Harmonit. O número mede uma
+constante no código. Quem classifica é gente, na CAD_1.2 — e é por isso que a
+marcação em lote vem antes de qualquer automação por tipo.
 
 ### `contato_papel`
 Papel **dentro do cliente** — eixo diferente de `relacao`.
@@ -136,7 +157,8 @@ conectado há, reconexões nas últimas 24h.
 | `telefone_e164` | text — a identidade antes de haver contato |
 | `estado` | enum(`nova`,`bot`,`fila`,`humano`,`resolvida`,`adiada`) |
 | `time_id` | FK NULL |
-| `atendente_id` | FK NULL — quem é o dono agora |
+| `atendente_id` | FK NULL — quem é o dono agora. 🚨 **Volta a NULL ao concluir** (25/08): conversa concluída não tem dono |
+| ⚠️ `resolvida_por` | FK NULL — **quem concluiu o atendimento** (migração 029). Gravada ANTES de soltar `atendente_id`, na mesma instrução. NULL nas conversas fechadas antes de 25/08: a informação nunca foi gravada, e preencher com o dono de então seria chute |
 | `prompt_versao_id` | FK NULL — **qual versão da IA atendeu esta conversa** |
 | `classificacao_id` | FK NULL — preenchida no fechamento |
 | ⚠️ `classificacao_texto` | **acrescentado na implementação.** A v2 exige comentário quando a classificação é `Outro`, mas não disse onde ele fica. É aqui |
@@ -723,3 +745,58 @@ qual ele responde.
 operação usa todo dia. `tests/teste_listagem.py` foi escrito **antes** da
 mudança e fixa o comportamento anterior — 7 testes de regressão mais 7 do
 comportamento novo.
+
+---
+
+## Concluir atendimento — migração 029 (2026-08-25)
+
+Pedido do usuário: *"ao 'encerrar' conversa que vamos mudar para 'concluir
+atendimento', a conversa deve voltar para a coluna de 'sem dono'"*, e *"concluir
+a conversa mesmo que tenham outras pessoas, ainda é uma conclusão; sair da
+conversa que deixa ela somente com quem estiver nela"*.
+
+### Concluir solta o dono, e por isso `resolvida_por` existe
+
+```
+Objetivo:     conversa concluída não continuar contando como trabalho de
+              ninguém, e ainda assim saber quem atendeu
+Hoje:         = o objetivo. `encerrar()` grava `resolvida_por` e zera
+              `atendente_id` na MESMA instrução; os participantes recebem
+              `saiu_em`; o Histórico lê COALESCE(resolvida_por, atendente_id)
+Por quê:      decisão do usuário em 25/08. `resolvida_por` não é extra: era
+              `atendente_id` o único lugar que dizia quem atendeu, e soltá-lo
+              sem gravar antes apagaria o desfecho -- que é justamente o que a
+              INI_1.1 passou a contar
+Reavaliar se: aparecer necessidade de saber quem era o dono NO MOMENTO do
+              fechamento, separado de quem clicou em concluir. Hoje os dois
+              são a mesma pessoa em todo caso observado
+```
+
+🚨 **Reabrir limpa `resolvida_por` junto com `resolvida_em`.** Conversa
+reaberta que guardasse o autor do fechamento seria contada como desfecho sem
+ter desfecho, e o número da tela inicial subiria sozinho a cada
+reabrir/concluir do mesmo atendimento.
+
+⚠️ **A ordem da aba "Sem dono" precisa mudar junto.** A lista ordena por
+`ultima_atividade_em`, e concluir não toca nesse campo -- então a conversa
+concluída logo após a última mensagem do cliente **fica no topo**, acima de
+quem espera. O usuário descreveu o comportamento esperado em 25/08: *"vai para
+o fim da fila"*. Isso é ordenação explícita, não efeito colateral.
+
+### `sem_identificacao` entra no vocabulário
+
+```
+Objetivo:     poder dizer "não sei o que esta pessoa é" sem confundir com lead
+Hoje:         = o objetivo. Oitavo valor do CHECK, migração 029
+Por quê:      decisão do usuário em 25/08, para o interruptor de automação por
+              tipo de contato. `lead` é quem ainda não comprou -- é uma
+              afirmação; `sem_identificacao` é a ausência de afirmação
+Reavaliar se: a marcação em lote mostrar que ninguém usa o valor, o que
+              significaria que `lead` já bastava
+```
+
+🚨 **Não confundir com a conversa sem cadastro.** São 211 conversas com
+`contato_id IS NULL` (64% do total, medido em 25/08) -- essas não têm linha em
+`contato` para receber marcação nenhuma, e o interruptor de automação as trata
+por uma linha própria. `sem_identificacao` é para o contato que **existe** na
+base e ninguém sabe o que é.

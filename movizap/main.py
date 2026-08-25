@@ -830,8 +830,16 @@ def agenda_de_hoje(usuario: dict = Depends(auth.requer_tela("INI_1.1"))):
 
 @app.get("/api/inicio")
 def estado_inicial(usuario: dict = Depends(auth.requer_tela("INI_1.1"))):
-    """INI_1.1 — o que precisa de gente agora."""
-    return tela_inicial.resumo(_atendente_do_usuario(usuario))
+    """INI_1.1 — o que precisa de gente agora, e o que já foi concluído.
+
+    🚨 CANAIS SÓ PARA OWNER. Até 25/08 esta rota devolvia o estado dos canais,
+    a fila técnica e o alcance do cadastro para QUALQUER perfil -- enquanto a
+    CFG_1.1, que mostra o mesmo, é tela de owner desde sempre. A tela inicial
+    era a porta dos fundos da permissão. Quem não é owner recebe, no lugar, a
+    explicação do próprio acesso (`configuracao`).
+    """
+    return tela_inicial.resumo(_atendente_do_usuario(usuario),
+                               owner=bool(usuario.get("owner")))
 
 
 @app.get("/api/conversas/resumo")
@@ -1268,15 +1276,23 @@ def devolver_conversa(conversa_id: int,
 @app.post("/api/conversas/{conversa_id}/encerrar")
 def encerrar_conversa(conversa_id: int, dados: EncerramentoEntrada,
                       usuario: dict = Depends(auth.requer_tela("ATD_1.2"))):
-    """Fecha a conversa. Classificar é OPCIONAL desde 11/08 — a
+    """Conclui o atendimento. Classificar é OPCIONAL desde 11/08 — a
     obrigatoriedade do escopo item 11 servia a um analytics que não
     existe, com rótulos que ninguém pediu.
 
-    🚨 Exige estar na conversa desde 12/08: encerrar atendimento alheio era
-    livre para qualquer um com a tela."""
+    🚨 Exige estar na conversa desde 12/08: concluir atendimento alheio era
+    livre para qualquer um com a tela.
+
+    ⚠️ A rota continua `/encerrar` e a tela diz "Concluir atendimento" desde
+    25/08. Rótulo é da tela; trocar o caminho derrubaria quem estivesse com o
+    painel aberto no meio do deploy, sem ganhar nada."""
     _exige_estar_na_conversa(conversa_id, usuario)
+    # 🚨 QUEM CONCLUIU VAI JUNTO. A conversa volta para "sem dono" no
+    # fechamento (decisão de 25/08), então `atendente_id` deixa de responder
+    # "quem atendeu" -- sem este argumento o desfecho nasceria anônimo.
     resultado = conversas.encerrar(conversa_id, dados.classificacao_id,
-                                   dados.comentario)
+                                   dados.comentario,
+                                   atendente_id=_atendente_do_usuario(usuario))
     if not resultado["ok"]:
         raise HTTPException(status_code=409, detail=resultado["motivo"])
     return resultado

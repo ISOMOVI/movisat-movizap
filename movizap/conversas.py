@@ -914,10 +914,16 @@ def assumir(conversa_id: int, atendente_id: int) -> dict:
     # fechamento. Deixá-las preenchidas numa conversa que voltou a andar faria
     # a ATD_5.1 listar como encerrada uma conversa aberta. Quem fecha de novo
     # recalcula as duas.
+    #
+    # 🚨 `resolvida_por` LIMPA JUNTO, pela MESMA razão. Ela é o que a tela
+    # inicial conta em "concluídos por mim": conversa reaberta que continuasse
+    # com o autor do fechamento seria contada como desfecho sem ter desfecho --
+    # e o número subiria sozinho a cada reabrir/concluir do mesmo atendimento.
     reaberta = banco.um(
         """UPDATE conversa
               SET atendente_id = %s, estado = 'humano',
                   resolvida_em = NULL, segundos_total = NULL,
+                  resolvida_por = NULL,
                   atualizada_em = now()
             WHERE id = %s AND estado = 'resolvida'
             RETURNING id""", (atendente_id, conversa_id))
@@ -1331,8 +1337,13 @@ def devolver_para_fila(conversa_id: int, de_atendente_id: int | None,
 
 
 def encerrar(conversa_id: int, classificacao_id: int | None = None,
-             comentario: str | None = None) -> dict:
-    """Fecha a conversa. Classificar é OPCIONAL desde 11/08.
+             comentario: str | None = None,
+             atendente_id: int | None = None) -> dict:
+    """Conclui o atendimento. Classificar é OPCIONAL desde 11/08.
+
+    ⚠️ A TELA CHAMA ISTO DE "CONCLUIR ATENDIMENTO" desde 25/08. O nome interno
+    e a rota continuam `encerrar`: rótulo é da tela, e renomear rota derruba
+    quem estiver com o painel aberto no meio do deploy.
 
     🚨 ERA OBRIGATÓRIO, E A OBRIGATORIEDADE ERA CIRCULAR. O escopo (docs/01,
     item 11) justificava com "é o que alimenta analytics depois" -- mas
@@ -1345,13 +1356,31 @@ def encerrar(conversa_id: int, classificacao_id: int | None = None,
     ⚠️ Se vier classificação, ela continua sendo validada: id inexistente ou
     inativo é erro, e a que exige comentário continua exigindo. Aceitar
     qualquer número faria o histórico apontar para nada.
+
+    ----------------------------------------------------------------------
+    O QUE MUDOU EM 25/08 (decisão do usuário)
+
+    🚨 CONCLUIR SOLTA O DONO: `atendente_id` volta a NULL e a conversa aparece
+    em "sem dono". Concluir é conclusão do ATENDIMENTO, não posse do assunto --
+    e conversa fechada que continua contando como "minha" fazia o painel de
+    quem atende nunca esvaziar.
+
+    🚨 POR ISSO `resolvida_por` EXISTE (migração 029). Soltar o dono sem
+    gravar quem concluiu apagaria o desfecho: `atendente_id` era o único lugar
+    onde o autor do fechamento aparecia. Grava-se ANTES de soltar, na mesma
+    instrução -- não são dois passos que podem ficar pela metade.
+
+    ⚠️ CONCLUIR VALE COM OUTRAS PESSOAS DENTRO, e os convidados saem junto.
+    Quem quer apenas se retirar usa `sair()`, que deixa a conversa com quem
+    ficou. São ações diferentes e continuam diferentes.
     """
     conversa_atual = banco.um(
-        "SELECT id, criada_em, estado FROM conversa WHERE id = %s", (conversa_id,))
+        "SELECT id, criada_em, estado, atendente_id FROM conversa WHERE id = %s",
+        (conversa_id,))
     if not conversa_atual:
         return {"ok": False, "motivo": "Conversa não encontrada."}
     if conversa_atual["estado"] == "resolvida":
-        return {"ok": False, "motivo": "Esta conversa já está encerrada."}
+        return {"ok": False, "motivo": "Este atendimento já foi concluído."}
 
     classificacao = None
     if classificacao_id is not None:
@@ -1367,25 +1396,48 @@ def encerrar(conversa_id: int, classificacao_id: int | None = None,
                 "motivo": f"A classificação {classificacao['nome']!r} exige um "
                           f"comentário dizendo o que foi."}
 
-    banco.executar(
-        """UPDATE conversa
-              SET estado = 'resolvida', resolvida_em = now(),
-                  classificacao_id = %s, classificacao_texto = %s,
-                  segundos_total = EXTRACT(EPOCH FROM (now() - criada_em))::int,
-                  atualizada_em = now()
-            WHERE id = %s""",
-        (classificacao_id, comentario, conversa_id))
-    log.info("conversa %s encerrada%s", conversa_id,
-             f" como {classificacao['nome']}" if classificacao else "")
-    return {"ok": True, "conversa_id": conversa_id}
+    # ⚠️ Quem chamou sem dizer o autor (teste, rotina) cai no dono de então:
+    # é a melhor resposta disponível, e é melhor que NULL. Nunca o contrário --
+    # quem concluiu ganha de quem era dono.
+    autor = atendente_id or conversa_atual["atendente_id"]
+
+    with banco.cursor() as cur:
+        cur.execute(
+            """UPDATE conversa
+                  SET estado = 'resolvida', resolvida_em = now(),
+                      resolvida_por = %s, atendente_id = NULL,
+                      classificacao_id = %s, classificacao_texto = %s,
+                      segundos_total = EXTRACT(EPOCH FROM (now() - criada_em))::int,
+                      atualizada_em = now()
+                WHERE id = %s""",
+            (autor, classificacao_id, comentario, conversa_id))
+        # Os convidados saem junto: conversa concluída não fica na lista de
+        # ninguém. `saiu_em` já é como `sair()` marca a saída -- mesmo campo,
+        # mesma leitura, e o histórico continua sabendo quem esteve dentro.
+        cur.execute(
+            """UPDATE conversa_participante SET saiu_em = now()
+                WHERE conversa_id = %s AND saiu_em IS NULL""", (conversa_id,))
+        sairam = cur.rowcount
+
+    log.info("conversa %s concluída por %s%s%s", conversa_id, autor,
+             f" como {classificacao['nome']}" if classificacao else "",
+             f", {sairam} participante(s) saíram" if sairam else "")
+    return {"ok": True, "conversa_id": conversa_id,
+            "resolvida_por": autor, "participantes_saidos": sairam}
 
 
 def historico(busca: str = "", classificacao_id: int | None = None,
               limite: int = 100) -> list[dict]:
-    """ATD_5.1 — as conversas encerradas, pesquisáveis.
+    """ATD_5.1 — os atendimentos concluídos, pesquisáveis.
 
     ⚠️ A busca por telefone passa pelo normalizador, como em toda a casa: as
     três grafias do mesmo número acham a mesma conversa.
+
+    🚨 O NOME VEM DE `resolvida_por`, COM `atendente_id` DE RESERVA. Desde
+    25/08 concluir solta o dono, então o JOIN antigo em `c.atendente_id` daria
+    "—" em toda conversa nova -- o histórico passaria a não saber quem atendeu
+    justamente a partir do dia em que a regra melhorou. O COALESCE cobre as
+    concluídas ANTES da migração 029, que têm dono e não têm `resolvida_por`.
     """
     condicoes, params = ["c.estado = 'resolvida'"], []
     if classificacao_id:
@@ -1411,7 +1463,8 @@ def historico(busca: str = "", classificacao_id: int | None = None,
           FROM conversa c
           LEFT JOIN contato ct ON ct.id = c.contato_id
           LEFT JOIN cliente cl ON cl.id = ct.cliente_id
-          LEFT JOIN atendente a ON a.id = c.atendente_id
+          LEFT JOIN atendente a
+                 ON a.id = COALESCE(c.resolvida_por, c.atendente_id)
           LEFT JOIN time t ON t.id = c.time_id
           LEFT JOIN classificacao cf ON cf.id = c.classificacao_id
          WHERE {' AND '.join(condicoes)}

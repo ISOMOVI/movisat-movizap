@@ -181,11 +181,21 @@ Está escrito para não ser redescoberto:
 - **nenhuma verificação em navegador automatizada** — o `verificar_ao_vivo.py`
   prova a API e o HTML servido, não a renderização. Tela nova continua exigindo
   um humano abrindo e clicando;
-- **nenhuma rolagem virtual** — a conversa desenha todos os balões de uma vez.
-  O teto é de 1.000 mensagens (`conversas.TETO_MENSAGENS_NA_TELA`) e a maior
-  conversa da base tem 130, então sobra folga; se uma chegar perto do teto, o
-  custo é do **navegador**, não da API, e a saída é rolagem virtual — não
-  baixar o teto de volta.
+- **nenhuma rolagem virtual, e ela não é mais o plano** — a conversa desenha
+  todos os balões de uma vez, com teto de 1.000
+  (`conversas.TETO_MENSAGENS_NA_TELA`).
+
+  🚨 **AS TRÊS AFIRMAÇÕES ANTERIORES DESTE ITEM ESTAVAM ERRADAS.** Ele dizia
+  que a maior conversa tinha 130 e que "sobra folga" — medido em 25/08, a
+  maior tem **776**, 78% do teto. E dizia que a saída seria rolagem virtual,
+  "não baixar o teto de volta": isso era **recomendação minha**, e o usuário
+  fechou rolagem virtual como demanda que eu inventei. Doc meu não é decisão
+  dele.
+
+  A saída decidida por ele em 25/08 é **paginar**: 60 mensagens ao abrir,
+  "carregar 200 anteriores" no topo, sem teto rígido — **e a busca dentro da
+  conversa vai para o servidor no mesmo bloco**, senão ela deixa de achar o
+  que existe. Ver `06_Conteudo_das_Telas.md`, revisão de 25/08.
 
 ## 8. Documentos irmãos
 

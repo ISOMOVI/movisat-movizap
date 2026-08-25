@@ -542,9 +542,12 @@ function pedirParaSair() {
   perguntar('Sair da conversa?', texto, 'Sair da conversa', sairDaConversa)
 }
 
+/* CONCLUIR ATENDIMENTO — era "Encerrar" até 25/08.
+   ⚠️ A rota continua `/encerrar`: rótulo é da tela, e trocar o caminho
+   derrubaria quem estivesse com o painel aberto no meio do deploy. */
 async function encerrar() {
   try {
-    await api.post(`/api/conversas/${aberta.value.id}/encerrar`, {
+    const r = await api.post(`/api/conversas/${aberta.value.id}/encerrar`, {
       // 🚨 `Number('')` é 0, e 0 não é "sem classificação" -- é um id que
       // não existe. Classificar virou opcional em 11/08, então o que vai é
       // null quando ninguém escolheu.
@@ -553,17 +556,31 @@ async function encerrar() {
         : null,
       comentario: comentario.value || null,
     })
-    recado.value = 'Encerrada. Ela passa a aparecer no Histórico.'
+    // O recado diz o que MUDOU, não que "deu certo": a conversa saiu da sua
+    // lista e voltou para "sem dono", e isso surpreende quem não esperava.
+    recado.value = r.participantes_saidos
+      ? `Atendimento concluído. A conversa voltou para "sem dono" e saiu da `
+        + `lista de ${r.participantes_saidos} pessoa(s) que acompanhavam.`
+      : 'Atendimento concluído. A conversa voltou para "sem dono" e está no Histórico.'
     painelAcao.value = ''
     classificacaoEscolhida.value = ''
     comentario.value = ''
     await Promise.all([abrir(aberta.value.id), carregar({ silencioso: true })])
   } catch (e) {
-    erro.value = e instanceof ErroDeApi ? e.message : 'Não consegui encerrar.'
+    erro.value = e instanceof ErroDeApi
+      ? e.message
+      : 'Não consegui concluir o atendimento.'
   }
 }
 
 onMounted(async () => {
+  /* 🚨 O FILTRO VEM DA URL QUANDO A TELA INICIAL MANDA. Os cartões da INI_1.1
+     apontam para `/atendimento?minhas=1` e `?sem_dono=1`: sem ler a query, o
+     clique cairia na lista inteira e o número da tela inicial não bateria com
+     o que aparece aqui -- que é a forma mais rápida de a pessoa parar de
+     confiar nos dois. */
+  if (route.query.minhas) filtro.value = 'minhas'
+  else if (route.query.sem_dono) filtro.value = 'sem_dono'
   await carregar()
   try {
     ;[times.value, classificacoes.value] = await Promise.all([
@@ -962,7 +979,7 @@ function carregarMidiasDaConversa(c) {
                      do WhatsApp não quer dizer que se saiba de qual cliente é. -->
                 <span v-if="!c.contato_nome" class="chip chip--aviso">não identificado</span>
                 <span v-if="c.cliente_nome" class="chip">{{ c.cliente_nome }}</span>
-                <span v-if="c.estado === 'resolvida'" class="chip chip--ok">encerrada</span>
+                <span v-if="c.estado === 'resolvida'" class="chip chip--ok">concluída</span>
                 <span v-if="c.atendente_nome" class="chip chip--acento">{{ c.atendente_nome }}</span>
                 <span v-else class="chip">sem dono</span>
               </div>
@@ -975,7 +992,7 @@ function carregarMidiasDaConversa(c) {
               class="botao botao--pequeno botao--primario conversas__assumir"
               type="button"
               :title="c.estado === 'resolvida'
-                ? 'Reabrir esta conversa e passar a responder por ela'
+                ? 'Reabrir este atendimento e passar a responder por ele'
                 : 'Assumir esta conversa'"
               @click="assumirDaLista(c)"
             >
@@ -1133,7 +1150,8 @@ function carregarMidiasDaConversa(c) {
                 type="button"
                 @click="abrirPainel('encerrar')"
               >
-                <i class="bi bi-check2-square" aria-hidden="true"></i> Encerrar
+                <i class="bi bi-check2-square" aria-hidden="true"></i>
+                Concluir atendimento
               </button>
             </div>
           </div>
@@ -1443,7 +1461,7 @@ function carregarMidiasDaConversa(c) {
             <p class="aviso aviso--ok">
               <i class="bi bi-check-circle aviso__icone" aria-hidden="true"></i>
               <span>
-                Conversa encerrada. Ela está no Histórico (ATD_5.1).
+                Atendimento concluído. A conversa está no Histórico (ATD_5.1) e sem dono.
                 <strong>Para voltar a responder, reabra.</strong>
               </span>
             </p>
@@ -1630,12 +1648,21 @@ function carregarMidiasDaConversa(c) {
          opcional desde 11/08: ninguém pediu a lista, e o analytics que a
          justificava é Fase 3. -->
     <div v-if="painelAcao === 'encerrar' && aberta" class="modal" @click.self="fecharPainel">
-      <div class="modal__caixa" role="dialog" aria-modal="true" aria-label="Encerrar conversa">
-        <p class="modal__titulo">Encerrar esta conversa?</p>
+      <div class="modal__caixa" role="dialog" aria-modal="true" aria-label="Concluir atendimento">
+        <p class="modal__titulo">Concluir este atendimento?</p>
         <p class="modal__texto">
-          Ela sai da caixa de entrada e passa para o Histórico. O cliente
-          <strong>não</strong> é avisado. Se ele escrever de novo, uma conversa
-          nova é aberta — e você pode reabrir esta a qualquer momento.
+          A conversa passa para o Histórico e <strong>volta para "sem
+          dono"</strong> — concluir é o fim do atendimento, não a posse do
+          assunto. O cliente <strong>não</strong> é avisado. Se ele escrever de
+          novo, uma conversa nova é aberta — e você pode reabrir esta a
+          qualquer momento.
+        </p>
+        <!-- ⚠️ Concluir vale mesmo com gente dentro: concluir é conclusão.
+             Quem quer só se retirar usa "Sair da conversa", que é outra ação
+             e continua existindo. -->
+        <p v-if="acompanham.length" class="modal__texto pequeno">
+          <strong>{{ acompanham.length }} pessoa(s) acompanham</strong> esta
+          conversa. Concluir tira todo mundo — inclusive elas.
         </p>
 
         <details class="encerrar__extra">
@@ -1647,7 +1674,7 @@ function carregarMidiasDaConversa(c) {
               <option v-for="c in classificacoes" :key="c.id" :value="c.id">{{ c.nome }}</option>
             </select>
             <span class="campo__ajuda">
-              Deixou de ser obrigatória em 11/08. Encerrar sem classificar é o
+              Deixou de ser obrigatória em 11/08. Concluir sem classificar é o
               caminho normal.
             </span>
           </label>
@@ -1670,7 +1697,7 @@ function carregarMidiasDaConversa(c) {
             :disabled="exigeComentario && !comentario.trim()"
             @click="encerrar"
           >
-            Encerrar conversa
+            Concluir atendimento
           </button>
         </div>
       </div>

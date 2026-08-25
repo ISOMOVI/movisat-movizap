@@ -508,3 +508,385 @@ reusar faz o log antigo mentir.
 resumo na transferência, a triagem por IA não entrega o que promete.
 
 Os outros cabem na Fase 2 sem prejuízo.
+
+---
+
+# Revisão das telas — 2026-08-25
+
+> Escrito a partir dos pedidos do usuário em 25/08, com o estado de cada tela
+> **medido no código e no banco antes de propor**. Substitui o
+> `16_Repaginacao_das_Telas.md`, que era doc paralelo sobre este mesmo assunto
+> e foi apagado: uma fonte só.
+
+**Medido em 25/08:** 332 conversas (326 diretas, 6 grupos) · **211 sem cadastro
+(64%)** · maior conversa com **776 mensagens** de um teto de 1.000 · 1.750 de
+1.754 contatos como `cliente` · 5 atendentes ativos, nenhum com teto de
+conversas · 7 times, todos com membro · 1 caixa de e-mail com 336 mensagens ·
+Evolution **2.3.7** · escopo Google `gmail.modify` + `gmail.send`.
+
+---
+
+## INI_1.1 — no ar em 25/08
+
+### A tela mostra desfecho, não só pendência
+
+```
+Objetivo:     a tela inicial responder "o que espera alguém" E "o que eu já
+              concluí" -- o mini-CRM de atendimento que o usuário pediu
+Hoje:         = o objetivo. Três faixas: o seu dia (esperando você,
+              acompanhando, concluídos por você com período) · a operação (em
+              aberto, sem dono, adiadas vencidas) · owner
+Por quê:      decisão do usuário em 25/08. A régua anterior ("aqui não entra
+              número, isso é relatório") era MINHA, e vale para VOLUME --
+              mensagens processadas continua fora. Desfecho é o outro lado do
+              que está aberto
+Reavaliar se: a REL_1.1 nascer. Aí o que é análise sai daqui e fica lá; o que
+              fica é o número do dia, com rota
+```
+
+### Canais só para owner, travado no servidor
+
+```
+Objetivo:     dado de owner não sair pela porta da frente
+Hoje:         = o objetivo. `inicio.resumo()` não monta as chaves `canais`,
+              `saude` e `alcance` quando quem pede não é owner
+Por quê:      a CFG_1.1 é tela de owner desde sempre, e esta rota entregava a
+              mesma informação para qualquer perfil. Esconder no `v-if` deixa
+              a rota respondendo a quem souber pedir
+Reavaliar se: — fechado
+```
+
+⚠️ No lugar, quem não é owner recebe **"Como você está configurado"**: perfil,
+estado, jornada de hoje, times, filas que enxerga e se recebe transferência,
+tudo só-leitura. Existe porque quem não é owner não abre CAD_2.1 nem CAD_2.2 e
+não tinha **nenhum** lugar onde descobrir por que não vê uma tela ou uma fila —
+a conclusão natural era "o painel está quebrado".
+
+---
+
+## ATD_1.1 / ATD_1.2 — caixa de entrada
+
+### Concluir atendimento (no ar em 25/08)
+
+Rótulo, comportamento e a coluna `resolvida_por` estão no `02_Modelo_Dados.md`.
+O que é da tela: o botão diz **"Concluir atendimento"**, o modal avisa que a
+conversa volta para "sem dono", e quando há gente acompanhando ele diz quantas
+pessoas serão tiradas.
+
+### A ordem da aba "Sem dono"
+
+```
+Objetivo:     "Sem dono" responder "o que ninguém assumiu ainda", em ordem de
+              quem espera há mais tempo por resposta
+Hoje:         ordena só por `ultima_atividade_em` -- e concluir não toca nesse
+              campo, então a conversa concluída logo após a última mensagem
+              FICA NO TOPO, acima de quem espera
+Por quê:      o usuário descreveu o comportamento esperado em 25/08: a
+              concluída "volta a ficar sem dono, mas vai para o fim da fila".
+              Isso é ordenação explícita, não efeito colateral da data
+Reavaliar se: — a construir no bloco 1: `ORDER BY (estado = 'resolvida'),
+              ultima_atividade_em DESC`
+```
+
+### O botão `+` — falar primeiro com quem ainda não é cadastro
+
+🚨 **Hoje não existe caminho de saída**: conversa só nasce quando CHEGA
+mensagem (`garantir_conversa` roda no webhook). Não há tela para falar antes.
+
+Spec, conforme o usuário em 25/08 (*"o foco do botão + seria enviar mensagem
+para um número que ainda não temos salvo"*):
+
+1. `+` logo depois da aba **Minhas**;
+2. campo de número **ou** busca no cadastro;
+3. 🚨 **valida se tem WhatsApp antes de enviar** — `/chat/whatsappNumbers`, que
+   hoje só existe dentro de `scripts/verificar_whatsapp.py` e sobe para
+   `evolution.py` como função. Cópia que diverge é defeito que esta base já
+   pagou uma vez (ver `_condicao_busca`);
+4. número que **não** tem WhatsApp não envia, e a tela diz isso — metodologia
+   §4 proíbe enviar para `tem_whatsapp = false`;
+5. envia a mensagem e abre a conversa já com dono (quem clicou);
+6. **depois de enviar**, tenta identificar: casou com exatamente um cadastro,
+   vincula; casou com vários, fica como sugestão, exatamente como a gaveta já
+   faz hoje; não casou, nasce contato com `origem = movizap`;
+7. **cadastrar cliente novo pela tela também entra** (resposta do usuário:
+   "ambos").
+
+⚠️ Um destinatário por vez neste caminho — não por regra de disparo, que caiu
+(ver abaixo), mas porque este botão responde "falar com esta pessoa".
+
+### Encaminhar entra, e a regra de "não é caixa de disparo" cai
+
+```
+Objetivo:     poder repassar o que já foi dito, de qualquer tipo
+Hoje:         não existe. `enviar_texto` e `enviar_midia` são as duas únicas
+              rotas do Evolution que o painel usa
+Por quê:      decisão do usuário em 25/08: "pode sim, para todo tipo de
+              mensagem, a regra que não é caixa de disparo pode cair já que
+              voltamos ao projeto"
+Reavaliar se: aparecer uso de encaminhar como disparo em massa. Aí o que
+              falta é a ferramenta certa (lista, template, ritmo), não uma
+              trava no encaminhar
+```
+
+⚠️ **Encaminhar não é disparo em massa.** Encaminhar leva uma mensagem
+existente a destinatários escolhidos, com confirmação mostrando quais. Disparo
+com lista, template e ritmo continua sendo outra construção — e quando for
+pedida, o §4 da metodologia (ritmo, não rajada; teto por hora em código) vale
+inteiro.
+
+### Rolagem
+
+```
+Objetivo:     ninguém perder mensagem antiga, e a busca dentro da conversa
+              nunca dizer "não achei" sobre algo que existe
+Hoje:         1.000 carregadas de uma vez; a maior conversa tem 776
+Por quê:      60 iniciais + 200 por vez, decisão do usuário em 25/08. A
+              recomendação contrária do `05_Frontend.md` ("a saída é rolagem
+              virtual, não baixar o teto") é justificativa escrita por MIM, e
+              rolagem virtual está na lista de fechado como demanda que eu
+              inventei
+Reavaliar se: o navegador travar com 260 balões -- aí o problema é render, e
+              aí sim a conversa é sobre virtualizar
+```
+
+🚨 **A busca dentro da conversa vai para o servidor no mesmo bloco.** Ela roda
+hoje no navegador sobre o que foi carregado; paginar sem mover a busca faz ela
+deixar de achar o que existe — e o usuário registrou em 25/08 que essa busca
+"está ótima". É um item só, não dois.
+
+### Margem lateral, e o que ela NÃO carrega
+
+Faixa de 4px na borda esquerda do item, com **um significado só: conversa
+direta × grupo**. É o fichário que o usuário pediu. "Não identificado" e
+"concluída" continuam como chip — duas leituras na mesma faixa é a faixa não
+querer dizer nada.
+
+### Filtro por tipo de cadastro
+
+Chips de `relacao` acima da lista, combináveis com Todas / Sem dono / Minhas,
+entrando como mais uma condição no `listar()`. A busca de hoje já varre nome do
+WhatsApp, nome do contato, nome do cliente, telefone inteiro e em pedaço, e o
+texto das mensagens inclusive notas — nada disso muda.
+
+### Ver ficha
+
+Botão de contorno com o nome dentro (*"Ficha · Pastelaria Velasco"*) ou, sem
+cadastro, *"Sem ficha — vincular"* em âmbar. Com 64% das conversas sem
+cadastro, o segundo é o estado mais comum e é o convite para resolver.
+
+---
+
+## O que o WhatsApp tem e nós não temos — medido em 25/08
+
+🚨 **Medido contra a instância real (Evolution 2.3.7)**, probando cada rota com
+corpo vazio: 400 significa que a rota existe e recusou o corpo, nunca um envio.
+Antes disso eu havia afirmado suporte de memória, que é o `M5`.
+
+| Recurso | Rota | Estado |
+|---|---|---|
+| Reagir com emoji | `POST /message/sendReaction` | existe |
+| Enviar áudio | `POST /message/sendWhatsAppAudio` | existe |
+| Apagar mensagem enviada | `DELETE /chat/deleteMessageForEveryone` | existe |
+| Marcar lida no WhatsApp | `POST /chat/markMessageAsRead` | existe |
+| Enviar contato / localização | `sendContact` / `sendLocation` | existem |
+| Digitando | `POST /chat/sendPresence` | existe |
+| Arquivar conversa | `POST /chat/archiveChat` | existe |
+| Responder citando | campo `quoted` do `sendText` | **parâmetro, não rota — só se prova enviando** |
+
+Do nosso lado, faltam ainda: emoji no compositor, colar print (Ctrl+V), mídia
+em tela cheia, rascunho por conversa, respostas rápidas (`/atalhos`), galeria
+da conversa, fixar, silenciar grupo e info do grupo.
+
+---
+
+## EML_1.1 — e-mail
+
+### Estrela, seleção e leitura
+
+O escopo concedido é `gmail.modify` + `gmail.send` — o comentário no topo do
+`gmail.py` diz `readonly` e **está errado**. Estrelar, marcar não lida e
+arquivar não pedem consentimento novo.
+
+Spec: ícone de estrela clicável na linha e no cabeçalho · caixa de seleção por
+linha com barra de ações (lida · não lida · estrela · arquivar) · selecionar
+tudo com contagem. *"Botão de leitura"* é **marcar como lida/não lida**,
+confirmado pelo usuário em 25/08 — não é painel de leitura.
+
+⚠️ Arquivar no painel arquiva **no Gmail também**, senão as duas caixas
+divergem em uma semana e ninguém sabe qual é a verdade.
+
+### Assinatura com imagem
+
+`atendente.assinatura_imagem` existe desde a migração 017, guarda o **caminho**
+(nunca os bytes) e `enviar._assinatura()` já a embute por **CID**. Falta rota de
+upload e interface: duas abas, `HTML` e `Imagem`, com pré-visualização
+renderizada; a ativa é a que sai no e-mail.
+
+### Mais de uma caixa — cada um vê a que conectou
+
+```
+Objetivo:     um atendente poder ter a caixa dele e uma caixa compartilhada
+              (sac@) lado a lado, sem login novo no painel
+Hoje:         `email_conta` já é tabela de N contas e `ler()` já lê todas as
+              ativas -- mas a listagem NÃO filtra por conta e
+              `POST /api/email/enviar` faz `SELECT ... WHERE ativa LIMIT 1`.
+              Com a segunda caixa, todo e-mail sairia pela primeira, calado
+Por quê:      decisão do usuário em 25/08: "cada um vê a que logou no seu
+              acesso... a Erika poderia logar o sac@movisat na caixa dela
+              também, na outra aba"
+Reavaliar se: alguém precisar ver caixa que não conectou -- aí quem concede é
+              o owner, pela tabela de acesso, e não se duplica a caixa
+```
+
+🚨 **UMA caixa, N acessos — não N cópias da caixa.** `email_conta.endereco` é
+UNIQUE e continua sendo: a caixa é sincronizada uma vez só. Quem vê é uma
+tabela de ligação `email_conta_acesso (conta_id, atendente_id)`. Sem isso, o
+dia em que a Karla também precisar do `sac@` esbarra no UNIQUE — e a saída
+errada seria duplicar a conta, o que duplicaria a leitura e as mensagens.
+
+Na tela: abas no topo, estilo pasta de planilha, com o endereço inteiro visível
+na ativa e faixa de cor por caixa; o compositor herda a aba e mostra "De:" em
+campo fixo; `conta_id` obrigatório na listagem e no envio — sem ele, erro,
+nunca "escolhe a primeira".
+
+### Design da tela
+
+Três painéis fixos (pastas 240px recolhível · lista 380px · mensagem no resto).
+Linha com remetente, assunto e trecho; não lida com barra de 3px à esquerda.
+**Chip do cliente vinculado na linha** — é o que faz esta caixa valer mais que
+o Gmail, e hoje o vínculo só aparece dentro da mensagem. Corpo com
+`max-width: 68ch` pelo token `--largura-texto`, que existe e não é usado.
+Compositor em gaveta lateral, não modal. Agrupamento por fio — `thread_externa`
+é coluna e não é usada. Atalhos `j` `k` `e` `r` `s`.
+
+---
+
+## ATD_6.1 — chat interno
+
+Estado hoje: pessoas e grupos misturados numa coluna, uma **fileira de botões
+com o nome de cada atendente** embaixo, balões sem separador de dia, sem foto,
+sem estado, `Ctrl+Enter` para enviar, sem busca, sem anexo, e o aviso "não
+chega ao cliente" repetido **três vezes** na mesma tela.
+
+Spec: seções **Pessoas** e **Grupos** com busca no topo (a fileira de botões
+sai) · avatar com iniciais e cor derivada do nome — a função já existe pronta
+na tela de e-mail · **ponto de estado no avatar**, de `atendente.estado`, que é
+coluna e nenhuma tela usa · separador de dia e agrupamento de mensagens
+seguidas · **Enter envia, Shift+Enter quebra linha** · um aviso de "interno",
+não três · busca · linha divisória "novas" · anexo · menção `@nome`.
+
+⚠️ **Continua sendo 1-a-1 mais grupos**, não canais por assunto — decisão do
+usuário em 25/08: *"podemos criar grupos com os temas"*.
+
+⚠️ **`Ctrl+Enter` fica na caixa de entrada.** Lá a mensagem vai para o cliente
+e não volta; aqui é conversa de equipe, e a fricção não se paga.
+
+### Emoji
+
+Não existe biblioteca nenhuma no projeto (as dependências são Vue, vue-router,
+bootstrap-icons e Vite/Vitest). **Grade própria, ~150 emojis curados, ~4 KB,
+zero dependência**, servindo os dois compositores. Emoji é caractere de texto —
+biblioteca só serve para *procurar*. Se faltar busca por nome, troca-se pelo
+`emoji-picker-element` (40 KB) sem mexer no resto.
+
+---
+
+## CAD_1.1 / CAD_1.2 — clientes e contatos
+
+🚨 **Cliente é EMPRESA, contato é PESSOA.** Cliente tem documento e **não tem
+telefone**; contato tem os telefones (tabela própria, N por pessoa) e pode
+existir sem empresa. **A conversa liga no contato, nunca na empresa** — um
+número identifica quem fala, não a empresa do assunto; a empresa vem por
+tabela, via `contato.cliente_id`. É por isso que existe a gaveta "Empresas
+vinculadas": a mesma pessoa responde por várias.
+
+Spec: mestre-detalhe lado a lado (hoje o detalhe abre embaixo da tabela e some
+da vista) · ficha de cliente com contatos, telefones, se tem WhatsApp, últimas
+conversas, últimos e-mails e **botão "Abrir conversa" por telefone** — hoje a
+ficha não leva a lugar nenhum · filtro por relação e por "tem WhatsApp / não
+verificado / não tem" (`tem_whatsapp` distingue NULL de false e isso não
+aparece em tela nenhuma) · **marcação de relação em lote**, que é o que
+destrava a automação por tipo · selo de origem · lista de duplicados por
+documento ou telefone.
+
+⚠️ Os papéis (assinar · central 24h · financeiro) continuam gravando e não
+acionando nada. O aviso na tela fica.
+
+---
+
+## CAD_2.1 — atendentes, como controle de RH
+
+### O teto de conversas simultâneas sai da tela
+
+```
+Objetivo:     a tela não prometer comportamento que não existe
+Hoje:         `atendente.max_conversas` é gravado e LIDO POR NADA -- nenhuma
+              fila, distribuição ou transferência consulta a coluna, e os 5
+              atendentes estão com NULL
+Por quê:      decisão do usuário em 25/08: "essa função não precisa"
+Reavaliar se: existir distribuição automática. Aí o campo volta com o
+              comportamento junto, não antes
+```
+
+A coluna fica no banco: removê-la exige migração para ganhar zero.
+
+### Exclusão é desligamento, e desligamento solta as conversas
+
+🚨 **Não existe apagar, e não deve existir**: `conversa`, `transferencia`,
+`mensagem` e `chat_mensagem` apontam para o atendente, e apagar a linha faria o
+histórico mentir sobre quem atendeu.
+
+⚠️ **O que falta é o que o desligamento NÃO faz hoje.** Ele só grava
+`ativo = false`: as conversas da pessoa continuam com ela, os times continuam,
+a senha continua. Quem sai da empresa com conversas abertas deixa dono que
+nunca mais entra. Spec: ação nomeada **"Desligar atendente"**, com confirmação
+dizendo o que acontece, devolvendo as conversas dele à fila e informando
+quantas, tirando dos times e revogando a senha no mesmo ato; lista com filtro
+Ativos / Desligados.
+
+### Jornada com interruptor
+
+```
+Objetivo:     poder montar a escala sem que ela passe a valer antes da hora
+Hoje:         a jornada existe em tabela, não bloqueia nada, e nenhuma tela
+              mostra se a pessoa está no horário
+Por quê:      decisão do usuário em 25/08: "pode colocar interruptor na
+              configuração do owner de usar jornada ou não, daí pode montar
+              ela mas deixando desligado"
+Reavaliar se: — o interruptor É a condição de reavaliar. Ligar é decisão do
+              owner, na tela dele
+```
+
+Spec: grade semanal com blocos e total de horas · coluna "está no horário
+agora?" usando `atendente.fuso`, que existe e não é usado · interruptor
+`jornada_ativa` na configuração do owner, **nascendo desligado** · e enquanto
+desligado, nada na fila muda de comportamento.
+
+⚠️ Mesmo ligada, a jornada **avisa, não bloqueia** — bloquear faria o atendente
+fechar a conversa para se livrar dela, e aí o cliente some do radar de vez.
+
+Mais na ficha: acesso (último login, tem senha, entra por Google ou senha,
+convite pendente — `convite_token` existe e não aparece), assinatura de e-mail,
+e `transferivel` (migração 013), que é o "não me mandem conversa" e não está em
+tela nenhuma.
+
+---
+
+## CAD_2.2 — times
+
+Cartões em vez de tabela: nome, descrição (que é entrada da IA), membros como
+avatares, transbordo como seta. **Cadeia de transbordo desenhada** — hoje é uma
+célula com um nome e a cadeia inteira ninguém enxerga. Contagem de fila por
+time no cartão. **Quem enxerga a fila deste time**
+(`atendente_time_permissao` é eixo diferente de `atendente_time` e não aparece
+em nenhuma tela; sem linha = vê a fila inteira, que é o padrão permissivo).
+
+⚠️ Medido em 25/08: **os 7 times têm de 2 a 4 membros, nenhum vazio.** A
+anotação de "3 times sem ninguém" é do **Chatwoot**, não daqui, e o bloqueio
+que ela representava para a triagem por IA caiu.
+
+---
+
+## ATD_5.1 e ATD_3.1 — não mexer
+
+Histórico e Informativos ficam como estão, por decisão do usuário em 25/08.
