@@ -752,6 +752,32 @@ def email_mensagens(marcador: str = "", busca: str = "", limite: int = 60,
              LIMIT %s""", tuple(params))}
 
 
+@app.get("/api/email/fio")
+def email_fio(thread: str,
+              usuario: dict = Depends(auth.requer_tela("EML_1.1"))):
+    """As mensagens do mesmo fio de conversa.
+
+    🚨 `thread_externa` É COLUNA DESDE A MIGRAÇÃO 014 E NUNCA FOI USADA. Uma
+    troca de seis e-mails virava seis linhas idênticas na lista, sem ninguém
+    saber que eram a mesma conversa -- e responder a mensagem errada de um fio
+    é como se perde contexto com o cliente.
+
+    ⚠️ Escopada pela caixa, como toda rota de e-mail: fio de caixa alheia não
+    é fio nenhum.
+
+    ⚠️ ROTA ANTES DE `/{mensagem_id}` DE PROPÓSITO. O FastAPI casa na ordem de
+    declaração: depois dela, "fio" seria lido como id e daria 422.
+    """
+    contas = _caixa_permitida(usuario, None)
+    if not contas or not thread.strip():
+        return {"mensagens": []}
+    return {"mensagens": banco.varios(
+        """SELECT id, remetente, remetente_nome, assunto, enviado_em, lida
+             FROM email_mensagem
+            WHERE thread_externa = %s AND conta_id = ANY(%s)
+            ORDER BY enviado_em NULLS LAST""", (thread.strip(), contas))}
+
+
 @app.get("/api/email/mensagens/{mensagem_id}")
 def email_mensagem(mensagem_id: int,
                    usuario: dict = Depends(auth.requer_tela("EML_1.1"))):

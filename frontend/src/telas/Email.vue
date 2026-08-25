@@ -14,7 +14,7 @@
    ⚠️ EM CONSTRUÇÃO, e a tela diz isso. Hoje ela LÊ; responder e encaminhar
    exigem o escopo `gmail.send`, que é outro consentimento.
    ============================================================================ */
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 
 import { api, pedirBlob, ErroDeApi } from '../api/cliente.js'
 import { corDaInicial as corDe, iniciais as iniciaisDe } from '../util/avatar.js'
@@ -422,9 +422,86 @@ async function carregar() {
   }
 }
 
+/* ---- o fio da conversa (25/08) -------------------------------------------
+   🚨 `thread_externa` É COLUNA DESDE A MIGRAÇÃO 014 E NUNCA FOI USADA. Uma
+   troca de seis e-mails virava seis linhas idênticas na lista, sem ninguém
+   saber que eram a mesma conversa -- e responder a mensagem errada de um fio
+   é como se perde contexto com o cliente. */
+const fio = ref([])
+
+async function carregarFio() {
+  if (!aberta.value?.thread_externa) { fio.value = []; return }
+  try {
+    const r = await api.get(
+      `/api/email/fio?thread=${encodeURIComponent(aberta.value.thread_externa)}`)
+    fio.value = r.mensagens || []
+  } catch { fio.value = [] }
+}
+
+/* ---- ações da mensagem aberta -------------------------------------------- */
+async function marcarNaoLida(m) {
+  try {
+    await api.post(`/api/email/mensagens/${m.id}/nao-lida`, {})
+    const naLista = mensagens.value.find((x) => x.id === m.id)
+    if (naLista) naLista.lida = false
+    recado.value = 'Marcada como não lida.'
+  } catch (e) {
+    erro.value = e instanceof ErroDeApi ? e.message : 'Não consegui marcar.'
+  }
+}
+
+async function arquivarAberta() {
+  if (!aberta.value) return
+  const id = aberta.value.id
+  try {
+    await api.post('/api/email/lote', { ids: [id], acao: 'arquivar' })
+    aberta.value = null
+    await carregar()
+    recado.value = 'Arquivada — saiu da caixa aqui e no Gmail.'
+  } catch (e) {
+    erro.value = e instanceof ErroDeApi ? e.message : 'Não consegui arquivar.'
+  }
+}
+
+/* ---- atalhos de teclado --------------------------------------------------
+   🚨 CAIXA DE E-MAIL SEM ATALHO OBRIGA O MOUSE PARA TUDO, e quem passa o dia
+   nela sente isso em toda mensagem. São os mesmos do Gmail: quem vem de lá
+   não reaprende.
+
+   ⚠️ NUNCA DENTRO DE CAMPO DE TEXTO. Sem esta guarda, escrever "responder"
+   num e-mail dispararia `r`, `e`, `s`... e a pessoa perderia o que digitou. */
+function atalho(evento) {
+  const alvo = evento.target
+  const digitando = alvo?.isContentEditable
+    || ['INPUT', 'TEXTAREA', 'SELECT'].includes(alvo?.tagName)
+  if (digitando || evento.ctrlKey || evento.metaKey || evento.altKey) return
+  if (escrevendo.value) return
+
+  const ordem = mensagens.value
+  const atual = ordem.findIndex((m) => aberta.value && m.id === aberta.value.id)
+
+  if (evento.key === 'j' || evento.key === 'k') {
+    evento.preventDefault()
+    const passo = evento.key === 'j' ? 1 : -1
+    const proximo = ordem[Math.min(Math.max(atual + passo, 0), ordem.length - 1)]
+    if (proximo) abrir(proximo.id)
+    return
+  }
+  if (!aberta.value) return
+  if (evento.key === 'r') { evento.preventDefault(); responder(false) }
+  if (evento.key === 'e') { evento.preventDefault(); arquivarAberta() }
+  if (evento.key === 'u') { evento.preventDefault(); marcarNaoLida(aberta.value) }
+  if (evento.key === 's') {
+    evento.preventDefault()
+    const naLista = mensagens.value.find((m) => m.id === aberta.value.id)
+    if (naLista) alternarEstrela(naLista)
+  }
+}
+
 async function abrir(id) {
   try {
     aberta.value = await api.get(`/api/email/mensagens/${id}`)
+    carregarFio()
     /* Marca lida no Gmail, não só aqui. Falha em silêncio: não conseguir
        marcar não pode impedir a pessoa de LER a mensagem. */
     const naLista = mensagens.value.find((m) => m.id === id)
@@ -465,11 +542,14 @@ function quando(iso) {
 }
 
 onMounted(async () => {
+  document.addEventListener('keydown', atalho)
   await carregarCaixas()
   await carregarMarcadores()
   await carregar()
   await carregarAssinatura()
 })
+
+onUnmounted(() => document.removeEventListener('keydown', atalho))
 </script>
 
 <template>
@@ -805,10 +885,35 @@ onMounted(async () => {
           <p>Escolha uma mensagem para ler</p>
         </div>
         <template v-else>
-          <h2 class="email__titulo">{{ aberta.assunto || '(sem assunto)' }}</h2>
-          <p class="apagado pequeno mono">
-            {{ aberta.remetente }} · {{ new Date(aberta.enviado_em).toLocaleString('pt-BR') }}
-          </p>
+          <!-- 🚨 CABEÇALHO FIXO. Numa mensagem longa, rolar fazia sumir de
+               QUEM ela é -- e responder sem ver o remetente é como se
+               responde para a pessoa errada. -->
+          <header class="email__cabecalho">
+            <div class="email__cabecalho-topo">
+              <h2 class="email__titulo">{{ aberta.assunto || '(sem assunto)' }}</h2>
+              <div class="linha">
+                <button class="botao botao--pequeno botao--contorno" type="button"
+                        title="Responder (r)" @click="responder(false)">
+                  <i class="bi bi-reply" aria-hidden="true"></i> Responder
+                </button>
+                <button class="botao botao--pequeno botao--fantasma botao--icone"
+                        type="button" title="Marcar como não lida (u)"
+                        aria-label="Marcar como não lida"
+                        @click="marcarNaoLida(aberta)">
+                  <i class="bi bi-envelope" aria-hidden="true"></i>
+                </button>
+                <button class="botao botao--pequeno botao--fantasma botao--icone"
+                        type="button" title="Arquivar (e)" aria-label="Arquivar"
+                        @click="arquivarAberta">
+                  <i class="bi bi-archive" aria-hidden="true"></i>
+                </button>
+              </div>
+            </div>
+            <p class="apagado pequeno mono">
+              {{ aberta.remetente }} ·
+              {{ new Date(aberta.enviado_em).toLocaleString('pt-BR') }}
+            </p>
+          </header>
 
           <!-- a mesma faixa da ficha do WhatsApp: quem é, ou como vincular -->
           <p v-if="aberta.cliente_nome" class="chip chip--acento">
@@ -868,6 +973,27 @@ onMounted(async () => {
           </div>
 
           <pre class="email__corpo">{{ aberta.texto || '(sem texto legível)' }}</pre>
+
+          <!-- 🚨 O FIO. `thread_externa` é coluna desde a migração 014 e nunca
+               foi usada: cada mensagem aparecia solta, e uma troca de seis
+               e-mails virava seis linhas idênticas na lista, sem ninguém saber
+               que eram a mesma conversa. -->
+          <section v-if="fio.length > 1" class="email__fio">
+            <h3 class="email__subtitulo">
+              Nesta conversa ({{ fio.length }} mensagens)
+            </h3>
+            <button
+              v-for="f in fio"
+              :key="f.id"
+              class="email__fio-item"
+              :class="{ 'email__fio-item--atual': f.id === aberta.id }"
+              type="button"
+              @click="abrir(f.id)"
+            >
+              <span class="email__fio-de">{{ f.remetente_nome || f.remetente }}</span>
+              <span class="apagado pequeno">{{ quando(f.enviado_em) }}</span>
+            </button>
+          </section>
         </template>
       </div>
     </div>
@@ -1194,7 +1320,53 @@ onMounted(async () => {
   color: var(--texto-fraco);
 }
 
-.email__leitura { padding: var(--e-4); overflow-y: auto; min-height: 0; }
+.email__leitura { padding: 0; overflow-y: auto; min-height: 0; }
+
+/* Cabeçalho fixo: numa mensagem longa, rolar fazia sumir de quem ela é. */
+.email__cabecalho {
+  position: sticky;
+  top: 0;
+  z-index: var(--z-conteudo);
+  padding: var(--e-4);
+  background: var(--superficie);
+  border-bottom: var(--borda-fina) solid var(--borda);
+}
+.email__cabecalho-topo {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: var(--e-3);
+}
+.email__leitura > *:not(.email__cabecalho) { padding-left: var(--e-4); padding-right: var(--e-4); }
+
+.email__subtitulo {
+  font-size: var(--txt-sm);
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--texto-apagado);
+  margin: var(--e-4) 0 var(--e-2);
+}
+.email__fio { padding-bottom: var(--e-4); }
+.email__fio-item {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--e-2);
+  width: 100%;
+  padding: var(--e-2);
+  border: 0;
+  border-bottom: var(--borda-fina) solid var(--borda);
+  background: none;
+  cursor: pointer;
+  text-align: left;
+  font-family: var(--fonte);
+  font-size: var(--txt-sm);
+}
+.email__fio-item:hover { background: var(--superficie-2); }
+.email__fio-item--atual {
+  background: var(--acento-suave);
+  border-left: 3px solid var(--acento);
+}
+.email__fio-de { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .email__lado { overflow-y: auto; min-height: 0; }
 .email__titulo { font-size: var(--txt-lg); margin: 0 0 var(--e-1); }
 /* Largura de leitura confortável. Texto esticado até a borda de uma tela
@@ -1205,7 +1377,11 @@ onMounted(async () => {
   font-family: var(--fonte);
   font-size: var(--txt-md);
   line-height: 1.55;
-  max-width: 65ch;
+  /* ⚠️ O token `--largura-texto` existia desde o primeiro dia e não era
+     usado: havia um `65ch` escrito à mão aqui. Texto esticado até a borda de
+     uma tela larga cansa -- o olho perde a linha na volta. */
+  max-width: var(--largura-texto);
   margin-top: var(--e-3);
+  padding-bottom: var(--e-4);
 }
 </style>

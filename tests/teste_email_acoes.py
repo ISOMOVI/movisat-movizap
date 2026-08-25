@@ -218,6 +218,34 @@ class TestLote:
         assert corpo["falhas"] == 1
 
 
+class TestOFioDaConversa:
+    """🚨 `thread_externa` era coluna desde a migração 014 e NUNCA foi usada.
+    Uma troca de seis e-mails virava seis linhas idênticas na lista, sem
+    ninguém saber que eram a mesma conversa."""
+
+    def test_junta_as_do_mesmo_fio(self, cena):
+        banco.executar(
+            "UPDATE email_mensagem SET thread_externa = 'zz-fio-1' "
+            " WHERE id = ANY(%s)", (cena["msgs"][:2],))
+        r = _cliente("dono").get("/api/email/fio?thread=zz-fio-1")
+        assert r.status_code == 200
+        assert len(r.json()["mensagens"]) == 2
+
+    def test_fio_de_caixa_alheia_nao_aparece(self, cena):
+        """Escopada pela caixa, como toda rota de e-mail."""
+        banco.executar(
+            "UPDATE email_mensagem SET thread_externa = 'zz-fio-2' "
+            " WHERE id = ANY(%s)", (cena["msgs"],))
+        r = _cliente("outro").get("/api/email/fio?thread=zz-fio-2")
+        assert r.json()["mensagens"] == []
+
+    def test_thread_vazia_devolve_vazio(self, cena):
+        """⚠️ Sem esta guarda, `thread=` casaria com todas as mensagens sem
+        fio -- e a tela mostraria a caixa inteira como se fosse uma conversa."""
+        assert _cliente("dono").get(
+            "/api/email/fio?thread=").json()["mensagens"] == []
+
+
 class TestAssinaturaComImagem:
     def test_sobe_e_a_ficha_passa_a_dizer_que_tem(self, cena):
         c = _cliente("dono")
