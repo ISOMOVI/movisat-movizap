@@ -800,3 +800,29 @@ Reavaliar se: a marcação em lote mostrar que ninguém usa o valor, o que
 `contato` para receber marcação nenhuma, e o interruptor de automação as trata
 por uma linha própria. `sem_identificacao` é para o contato que **existe** na
 base e ninguém sabe o que é.
+
+### `relacao` é flag da ficha — migração 031 (2026-08-25)
+
+```
+Objetivo:     o campo dizer o que uma PESSOA marcou, e nada além disso
+Hoje:         = o objetivo. O sync não escreve nem atualiza `relacao`; o
+              DEFAULT é `sem_identificacao`; quem marca é gente, na CAD_1.2
+Por quê:      decisão do usuário em 25/08 -- "o sync não usará esse campo, o
+              sync usa o número; o que pedi foi um flag de tipo no cadastro,
+              somente será usado para regra de automação boas vindas".
+              O `INSERT` de `sync._gravar_contato` tinha `'cliente'` LITERAL
+              desde 06/08: não era regra, era constante. É de lá que vinham os
+              1.750 de 1.754 contatos "cliente" que ninguém classificou
+Reavaliar se: aparecer origem externa que saiba de verdade o que a pessoa é.
+              Aí ela escreve o flag -- mas dizendo de onde veio, não como
+              padrão silencioso
+```
+
+⚠️ **Os 1.754 que já existem não foram tocados.** Reclassificar cadastro é
+mexer em dado, e não foi pedido. A consequência fica registrada aqui para quem
+for ligar a automação: **enquanto 1.750 disserem "cliente", ligar boas-vindas
+para `cliente` alcança quase a base inteira.** É por isso que a marcação em
+lote vem ANTES do interruptor por tipo, e não depois.
+
+⚠️ O `DEFAULT` era `'lead'` desde a 001. `lead` é uma afirmação — "ainda não
+comprou" —, e contato recém-nascido não sustenta afirmação nenhuma.

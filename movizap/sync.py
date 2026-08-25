@@ -186,11 +186,23 @@ def _gravar_contato(cur, cliente_id: int, bruto: dict) -> int:
             or _texto(bruto.get("nome"))
             or f"(sem nome) {id_harmonit_cliente}")
 
+    # 🚨 `relacao` SAIU DAQUI (25/08). Havia `'cliente'` LITERAL na lista de
+    # valores -- não era regra, era constante escrita em 06/08, quando o campo
+    # ainda não tinha dono. Medido antes de tirar: 1.750 dos 1.754 contatos
+    # diziam "cliente" sem que ninguém tivesse classificado nenhum.
+    #
+    # Decisão do usuário: `relacao` é FLAG DA FICHA, marcado por gente na
+    # CAD_1.2 e consumido só pela automação por tipo. O sync casa por NÚMERO e
+    # não opina sobre o que a pessoa é. Sem a coluna na lista, vale o DEFAULT
+    # (`sem_identificacao`, migração 031).
+    #
+    # ⚠️ O `DO UPDATE` abaixo já não tocava em `relacao`, e é isso que faz a
+    # marcação de uma pessoa sobreviver ao sync do dia seguinte.
     cur.execute(
         """
         INSERT INTO contato
-            (cliente_id, nome, relacao, email, origem, harmonit_id, ativo, atualizado_em)
-        VALUES (%s, %s, 'cliente', %s, 'harmonit', %s, %s, now())
+            (cliente_id, nome, email, origem, harmonit_id, ativo, atualizado_em)
+        VALUES (%s, %s, %s, 'harmonit', %s, %s, now())
         ON CONFLICT (harmonit_id) WHERE harmonit_id IS NOT NULL
         DO UPDATE SET
             cliente_id    = EXCLUDED.cliente_id,
