@@ -940,7 +940,10 @@ function carregarMidiasDaConversa(c) {
           <li v-for="c in lista" :key="c.id" class="conversas__item">
             <button
               class="conversa"
-              :class="{ 'conversa--aberta': aberta && aberta.id === c.id }"
+              :class="{
+                'conversa--aberta': aberta && aberta.id === c.id,
+                'conversa--grupo': c.tipo === 'grupo',
+              }"
               type="button"
               @click="abrir(c.id)"
             >
@@ -1021,15 +1024,32 @@ function carregarMidiasDaConversa(c) {
               <!-- 🚨 GRUPO NÃO TEM FICHA. A gaveta mostra UM cliente, e num
                    grupo há vários ou nenhum -- abri-la ali mostraria a ficha
                    de quem, exatamente? -->
+              <!-- 🚨 O BOTÃO DIZ DE QUEM É A FICHA, e muda de cara quando não
+                   há ficha. Era um botão fantasma com "Ver ficha", do mesmo
+                   peso de tudo na barra. Medido em 25/08: 211 das 332
+                   conversas (64%) não têm cadastro -- então "Sem ficha" é o
+                   estado mais COMUM, e é o convite para resolver, não um
+                   detalhe. Por isso ele é contorno âmbar quando falta, e
+                   contorno normal com o nome dentro quando existe. -->
               <button
                 v-if="!ehGrupo"
-                class="botao botao--pequeno botao--fantasma"
+                class="botao botao--pequeno"
+                :class="aberta.contato_id ? 'botao--contorno' : 'botao--faltando'"
                 type="button"
                 :aria-expanded="gaveta"
                 @click="gaveta = !gaveta"
               >
-                <i class="bi bi-person-lines-fill" aria-hidden="true"></i>
-                {{ gaveta ? 'Fechar ficha' : 'Ver ficha' }}
+                <i class="bi" :class="aberta.contato_id
+                     ? 'bi-person-lines-fill' : 'bi-person-exclamation'"
+                   aria-hidden="true"></i>
+                <template v-if="gaveta">Fechar ficha</template>
+                <template v-else-if="aberta.empresa && aberta.empresa.cliente">
+                  Ficha · {{ aberta.empresa.cliente.nome }}
+                </template>
+                <template v-else-if="aberta.contato_nome">
+                  Ficha · {{ aberta.contato_nome }}
+                </template>
+                <template v-else>Sem ficha — vincular</template>
               </button>
               <p class="apagado pequeno mono">
                 {{ aberta.telefone_e164 }}
@@ -1864,6 +1884,11 @@ function carregarMidiasDaConversa(c) {
 .conversas__item:hover { background: rgba(128, 128, 128, .08); }
 .conversas__assumir { flex: none; }
 
+/* 🚨 A MARGEM CARREGA UM SIGNIFICADO SÓ: conversa direta × grupo.
+   É o fichário que o usuário pediu em 25/08 -- "para sabermos qual é".
+   Duas leituras na mesma faixa é a faixa não querer dizer nada, e por isso
+   "não identificado" e "concluída" continuam como CHIP, não como cor de
+   borda. Os tokens são os do sistema: nenhum valor de cor escrito aqui. */
 .conversa {
   display: block;
   flex: 1 1 auto;
@@ -1871,9 +1896,11 @@ function carregarMidiasDaConversa(c) {
   text-align: left;
   background: none;
   border: 0;
+  border-left: 4px solid var(--acento);
   padding: var(--e-3);
   cursor: pointer;
 }
+.conversa--grupo { border-left-color: var(--ok); }
 .conversa:hover { background: rgba(128, 128, 128, .08); }
 .conversa--aberta { background: rgba(128, 128, 128, .14); }
 

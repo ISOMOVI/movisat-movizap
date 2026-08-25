@@ -54,6 +54,17 @@
 }
 .botao--perigo:hover:not(:disabled) { background: var(--erro-suave); }
 
+/* Falta alguma coisa aqui, e resolver isso é o trabalho — não é erro nem
+   perigo. Nasceu em 25/08 para o "Sem ficha — vincular" da ATD_1.2, onde 64%
+   das conversas não têm cadastro: o estado mais comum precisa convidar a
+   resolver, sem gritar como `--perigo`. */
+.botao--faltando {
+  background: transparent;
+  border-color: var(--aviso-borda);
+  color: var(--aviso);
+}
+.botao--faltando:hover:not(:disabled) { background: var(--aviso-suave); }
+
 .botao--fantasma {
   background: transparent;
   color: var(--texto-fraco);

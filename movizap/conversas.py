@@ -591,6 +591,23 @@ def listar(estado: str | None = None, atendente_id: int | None = None,
         condicoes.append(onde_busca)
         params.extend(params_busca)
 
+    # ---- a ordem ------------------------------------------------------------
+    # 🚨 CONCLUÍDA VAI PARA O FIM DA FILA. A lista é a fila de quem espera, e
+    # ordenar só por `ultima_atividade_em` punha a conversa concluída LOGO
+    # APÓS a última mensagem do cliente no TOPO de "Sem dono" -- acima de quem
+    # ainda espera resposta. Concluir não toca em `ultima_atividade_em` (nem
+    # deve: esse campo mede atividade do cliente, não do atendente), então a
+    # posição vinha da data da mensagem e não do desfecho.
+    #
+    # O usuário descreveu o comportamento esperado em 25/08: a conversa
+    # concluída "volta a ficar sem dono, mas vai para o fim da fila".
+    #
+    # ⚠️ NA BUSCA, NÃO. Quem digita um termo está procurando UMA conversa, e
+    # empurrar a concluída para depois de 300 abertas é escondê-la de quem
+    # sabe que ela existe. Buscar é outra pergunta que listar.
+    ordem = ("c.ultima_atividade_em DESC" if busca.strip()
+             else "(c.estado = 'resolvida'), c.ultima_atividade_em DESC")
+
     # 🚨 ORDEM POSICIONAL: os dois %s do SELECT são os PRIMEIROS da query, então
     # entram na frente de tudo que o WHERE já empilhou. Errar isso não dá erro
     # de sintaxe -- dá resultado errado, que é pior.
@@ -631,7 +648,7 @@ def listar(estado: str | None = None, atendente_id: int | None = None,
                  ORDER BY m.criada_em DESC, m.id DESC LIMIT 1
           ) u ON true
          WHERE {' AND '.join(condicoes)}
-         ORDER BY c.ultima_atividade_em DESC
+         ORDER BY {ordem}
          LIMIT %s
         """, tuple(params))
 

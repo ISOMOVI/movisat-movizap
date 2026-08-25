@@ -29,20 +29,24 @@ pytestmark = pytest.mark.skipif(
     reason="banco nao configurado no .env")
 
 FONE = "+5599933330000"
+# ⚠️ A limpeza varre pelo PREFIXO, não pelo número exato: um dos testes cria
+# uma segunda conversa (`...0001`) para provar ordenação, e assert que falha
+# antes do delete deixaria lixo em produção para sempre.
+PREFIXO = "+559993333%"
 LOGIN = "zz_teste_concluir_"
 
 
 def limpar():
     banco.executar(
         """DELETE FROM conversa_participante WHERE conversa_id IN
-           (SELECT id FROM conversa WHERE telefone_e164 = %s)""", (FONE,))
+           (SELECT id FROM conversa WHERE telefone_e164 LIKE %s)""", (PREFIXO,))
     banco.executar(
         """DELETE FROM transferencia WHERE conversa_id IN
-           (SELECT id FROM conversa WHERE telefone_e164 = %s)""", (FONE,))
+           (SELECT id FROM conversa WHERE telefone_e164 LIKE %s)""", (PREFIXO,))
     banco.executar(
         """DELETE FROM mensagem WHERE conversa_id IN
-           (SELECT id FROM conversa WHERE telefone_e164 = %s)""", (FONE,))
-    banco.executar("DELETE FROM conversa WHERE telefone_e164 = %s", (FONE,))
+           (SELECT id FROM conversa WHERE telefone_e164 LIKE %s)""", (PREFIXO,))
+    banco.executar("DELETE FROM conversa WHERE telefone_e164 LIKE %s", (PREFIXO,))
     banco.executar("DELETE FROM atendente WHERE login LIKE %s", (LOGIN + "%",))
 
 
@@ -207,3 +211,37 @@ class TestOwnerNaTelaInicial:
         # é o padrão permissivo da migração 001, e a leitura oposta da lista
         # vazia é exatamente o que este campo existe para impedir.
         assert config["ve_a_fila_inteira"] is True
+
+
+class TestConcluidaVaiParaOFimDaFila:
+    """🚨 A LISTA É A FILA DE QUEM ESPERA. Ordenar só por
+    `ultima_atividade_em` punha a conversa concluída logo após a última
+    mensagem do cliente no TOPO de "Sem dono", acima de quem ainda espera --
+    porque concluir não toca nesse campo, e nem deve: ele mede atividade do
+    cliente, não do atendente.
+    """
+
+    def test_concluida_fica_abaixo_de_uma_aberta_mais_antiga(self, cena):
+        canal = banco.um("SELECT canal_id FROM conversa WHERE id = %s",
+                         (cena["conversa"],))["canal_id"]
+        # A aberta é MAIS VELHA de propósito: pela data, ela perderia.
+        antiga = banco.um(
+            """INSERT INTO conversa (canal_id, telefone_e164, estado,
+                                     ultima_atividade_em)
+               VALUES (%s, %s, 'nova', now() - interval '3 days')
+               RETURNING id""", (canal, FONE.replace("0000", "0001")))["id"]
+        banco.executar(
+            "UPDATE conversa SET ultima_atividade_em = now() WHERE id = %s",
+            (cena["conversa"],))
+        conversas.encerrar(cena["conversa"], atendente_id=cena["dono"])
+
+        ordem = [c["id"] for c in conversas.listar(sem_dono=True, limite=500)]
+        assert ordem.index(antiga) < ordem.index(cena["conversa"])
+        banco.executar("DELETE FROM conversa WHERE id = %s", (antiga,))
+
+    def test_na_BUSCA_a_concluida_nao_e_empurrada(self, cena):
+        """Quem digita um termo procura UMA conversa. Empurrar a concluída
+        para depois de 300 abertas é escondê-la de quem sabe que existe."""
+        conversas.encerrar(cena["conversa"], atendente_id=cena["dono"])
+        achadas = [c["id"] for c in conversas.listar(busca=FONE)]
+        assert cena["conversa"] in achadas
