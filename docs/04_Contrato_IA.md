@@ -2,7 +2,7 @@
 
 O que a IA do MoviZap faz, o que ela **nunca** faz, e como se prova que ela continua fazendo certo.
 
-Motor reaproveitado do MoviChat: `services/llm/` (gateway multi-provider, DeepSeek + Groq, 706 linhas). **Não se reescreve o motor — herda-se.**
+Motor herdado do MoviChat e **migrado em 2026-08-26**: vive em `movizap/llm/` + `movizap/ia.py`. **Não se reescreve o motor — herda-se** — mas o que se herda são as DECISÕES, não a biblioteca; ver a seção do passo 8, no fim.
 
 ---
 
@@ -200,3 +200,145 @@ atendente, que é pior que ficha nenhuma.
 - Chave separada por projeto dá **custo discriminado** e permite revogar uma sem derrubar as outras.
 - Em tela de configuração, mostra-se `sk-...a3f9`. Nunca o valor.
 - 🚨 `httpx` / `httpcore` / `hpack` silenciados desde a primeira linha — é por ali que a chave da WESO vazou para um log.
+
+---
+
+# 🟢 O PASSO 8 ENTROU EM 2026-08-26 — o que foi construído, e o que não
+
+Tudo acima continua sendo o contrato. Esta seção diz **o que dele existe em
+código hoje**, e o que ficou de fora com o motivo. Ela é o estado; o resto do
+documento é o desenho.
+
+## Onde o motor mora
+
+| Peça | Arquivo | O que faz |
+|---|---|---|
+| Adaptadores de modelo | `movizap/llm/provedores.py` | DeepSeek e Groq, pelo REST compatível com OpenAI |
+| Parâmetros | `movizap/llm/params.py` | `temperature`, `max_tokens=900` — herdados do MoviChat, medidos lá |
+| O laço de ferramentas | `movizap/llm/gateway.py` | genérico: recebe catálogo e executor por parâmetro |
+| A IA do atendimento | `movizap/ia.py` | contexto, catálogo, conduta, envio, transferência |
+| A trava de repetição | migração `035` (`conversa.ia_atendeu_ate`) | não responder duas vezes |
+
+🚨 **O `movizap/llm/` é o ÚNICO lugar que lê a chave**, e há um teste que
+mede isso — varrendo o `settings.deepseek_api_key` **fora de comentário e
+docstring**, porque trava que mede palavra já reprovou código correto oito
+vezes neste projeto.
+
+## Herdado do MoviChat — e o que NÃO foi herdado
+
+O contrato dizia *"não se reescreve o motor — herda-se"*, e as decisões foram
+herdadas inteiras: o modelo (`deepseek-v4-flash`, porque `deepseek-chat` foi
+desativado em 24/07), o `thinking` desligado, o teto de 45 s abaixo do da
+borda, 1 retry, a estratégia `single`/`fallback`, o teto de rodadas, **a última
+rodada sem `tools`** e **a conduta diante da falha vinda de nós**.
+
+⚠️ **O que não foi herdado é o SDK `openai`.** O adaptador fala por `httpx`
+síncrono. Motivo, e é um só: o caminho que chama a IA no MoviZap é síncrono de
+ponta a ponta — `conversas.processar_pendentes` é `def`, e roda em
+`asyncio.to_thread` justamente porque `async def` ali **não executa nada**.
+Trazer o SDK arrastaria um mundo `async` e uma cadeia de dependência para
+dentro de um laço que é `def`, por **um POST**.
+
+⚠️ **`gateway.py`, `schema_map.py` e `query_catalog.py` do MoviChat NÃO foram
+copiados.** São de frota: mapa da base do MoviChat, recorte por placa, frescor
+de posição, catálogo de SQL de telemetria. Nada disso existe aqui. O que se
+herdou foi o **desenho** do laço, não o conteúdo dele.
+
+## As ferramentas — 5 de 8, e por quê
+
+| Ferramenta do contrato | Estado |
+|---|---|
+| `identificar_contato` | ✅ **sem argumento**, olha só a conversa em curso |
+| `dados_cliente` | ✅ **sem argumento**, a empresa desta conversa |
+| `historico_conversas` | ✅ os 5 atendimentos anteriores do mesmo contato |
+| `transferir(time, resumo, despedida)` | ✅ escreve nota interna e usa `conversas.transferir` com `motivo='ia_triagem'` |
+| `encerrar(motivo, despedida)` | ✅ marca `resolvida_pela_ia` |
+| `listar_veiculos` | ❌ **não existe fonte** |
+| `posicao_veiculo` | ❌ **não existe fonte** |
+| `consultar_faturas` | ❌ **não existe fonte** |
+
+🚨 **AS TRÊS QUE FALTAM NÃO SÃO ESQUECIMENTO, SÃO CONTRADIÇÃO DO PRÓPRIO
+DOCUMENTO.** A seção "Os dados que ela pode consultar" decide que *"a IA não
+fala com o Harmonit nem com a WESO: fala com o cadastro que o sync já
+trouxe"* — e o banco do MoviZap **não tem tabela de veículo, contrato nem
+fatura** (medido em 26/08: 35 tabelas, nenhuma delas). As três só existem
+levantando dado de outro sistema, que é justamente o que está proibido.
+
+⚠️ **A saída não foi fingir que dá.** O prompt de sistema diz, em voz alta, que
+ela **não consegue** consultar veículo, posição, contrato e fatura, e que nesses
+casos **transfira** — sem dizer que não encontrou e sem falar de acesso. É a
+correção da CLASSE de erro que reincidiu três vezes no MoviChat (02/07, 15/07,
+28/07): *a IA não distingue "não achei" de "não consigo ler", e reporta ausência
+como fato*.
+
+🔵 **Decisão que fica com você:** se essas três ferramentas devem existir, elas
+exigem uma ponte para o FPSL (que já tem `FPSL_BASE_URL` no `.env`) ou para o
+espelho do Harmonit. Isso **é escopo novo**, não é dívida deste passo.
+
+⚠️ **`identificar_contato` e `dados_cliente` perderam o parâmetro de propósito.**
+O contrato os descrevia como `identificar_contato(telefone)` e
+`dados_cliente(cliente_id)`. Parâmetro livre é um caminho para convencer a IA a
+ler a ficha de outra pessoa, e a tabela deste mesmo documento já diz que ela
+nunca enxerga "conversa de outro contato". **Um parâmetro que só aceita um
+valor não é um parâmetro.**
+
+## As três travas — e uma quarta que faltava
+
+| # | Trava | Onde |
+|---|---|---|
+| 1 | `canal.ia_ligada` | por canal. O informativo não tem como ligar |
+| 2 | `relacao_automacao.ia_ligada` | por tipo de contato — o filtro de desgaste de 25/08 |
+| 3 | `conversa.ia_atendeu_ate` | por mensagem — não responder duas vezes |
+| 4 | **`canal.ia_ligada_em`** | **por hora — não responder o passado** |
+
+🚨 **A QUARTA NÃO ESTAVA NO CONTRATO E FOI ACHADA ESCREVENDO O TESTE.** A base
+tinha **357 conversas abertas** quando o motor entrou. Sem ela, ligar o
+interruptor faria a IA responder a todas de uma vez — mensagens de dias atrás,
+no meio de conversas que já seguiram sem ela. É a mesma lição que a saudação
+automática deu na auditoria de 25/08, cometida de novo em outro lugar.
+A coluna já existia, para registrar *quem e quando*; agora ela **decide**.
+
+## Como se prova que ele funciona
+
+**A suíte não prova.** `tests/teste_ia.py` (38 verificações) troca o provedor
+por um duplo e nunca sai da máquina — ela prova as travas, o laço e o que é
+gravado. Quem prova que o modelo responde é:
+
+| Ferramenta | O que faz | Custa |
+|---|---|---|
+| `scripts/exercitar_ia.py` | 4 casos contra o modelo real, sem tocar em conversa nenhuma | centavos |
+| **Sala de ensaio** (CFG_2.1) | roda o motor contra uma **conversa de verdade** e mostra o que ela TERIA feito — sem enviar, sem gravar, sem transferir | centavos |
+
+🚨 **A SALA DE ENSAIO É O PASSO 3 DA SEQUÊNCIA DE ATIVAÇÃO**, que até 25/08 não
+tinha como ser cumprido. Sem ela, o primeiro erro da IA acontece em público —
+que é exatamente o que a decisão de 06/08 existe para evitar.
+
+### O que o primeiro ensaio contra conversa real achou (26/08)
+
+Duas coisas, nenhuma delas visível em teste:
+
+1. **Markdown.** O modelo devolveu `**Fulano**`, e no WhatsApp os asteriscos
+   aparecem literalmente. Corrigido em `ia.para_whatsapp()` — **instrução em
+   prompt é pedido, não regra**, então a conversão é código.
+2. 🚨 **Anunciou uma transferência que não fez.** Escreveu *"vou te passar
+   para o time de manutenção"* e **não chamou a ferramenta**: o cliente
+   ficaria esperando alguém que nunca viria, sem ninguém saber. Corrigido
+   endurecendo a `CONDUTA` — e reconferido contra a mesma conversa, que passou
+   a chamar `transferir` com nota interna útil e despedida sem citar o time.
+
+⚠️ **A `CONDUTA` fica em CÓDIGO, não no texto versionado da tela.** O prompt é
+editável, e o que ela **nunca** pode fazer não pode depender de alguém lembrar
+de reescrever "não prometa prazo" na versão seguinte.
+
+## O que continua faltando, e é honesto dizer
+
+| Item | Estado |
+|---|---|
+| **Teste de aceite** (168 perguntas + 17 negativas) | ❌ o insumo está no MoviChat e é de FROTA, não de atendimento. Reaproveitá-lo exigiria reescrever as perguntas |
+| **"digitando…" e atraso proporcional** | ❌ não implementado. A resposta sai num balão só |
+| **Nunca mais de 2 balões** | ✅ por construção: é sempre um |
+| **Devolver a conversa ao bot** depois do humano | ❌ não há caminho. Hoje, transferiu, acabou |
+| **Reação do cliente** (`reactionMessage`) | ❌ segue no ramo de "tipo ainda não tratado" |
+
+⚠️ **Nada disso impede ligar.** São lacunas declaradas, não defeitos escondidos
+— e a diferença é a razão desta tabela existir.

@@ -52,7 +52,11 @@ def registrar_evento(canal_id: int, estado: str, motivo: str | None = None) -> b
 def listar() -> list[dict]:
     """Os canais do banco, cada um com o estado ao vivo do Evolution."""
     canais = banco.varios(
-        "SELECT id, nome, tipo, gateway, instancia, modo, ativo, criado_em "
+        "SELECT id, nome, tipo, gateway, instancia, modo, ativo, criado_em, "
+        # A CFG_1.1 desenha o interruptor da IA, e ele é por canal. Sem estas
+        # três colunas a tela teria de adivinhar o estado -- ou pior, mostrar
+        # um interruptor que não sabe se está ligado.
+        "       ia_ligada, ia_ligada_em, ia_ligada_por "
         "FROM canal ORDER BY id"
     )
     for c in canais:
@@ -137,6 +141,54 @@ def confirmar_pareamento(canal_id: int, quem: str) -> dict:
     registrar_evento(canal_id, "conectado", f"pareado por {quem}")
     log.info("canal %s pareado; settings aplicadas: %s", canal_id, aplicadas)
     return aplicadas
+
+
+def ligar_ia(canal_id: int, ligada: bool, quem: str) -> dict:
+    """O passo 4 da sequência de ativação do `docs/04_Contrato_IA.md`.
+
+    🚨 É O ATO DELIBERADO. A IA nasce desligada por decisão do usuário em
+    06/08 -- *"ninguém liga por acidente; ligar é um ato"* --, e este é o
+    único caminho que a liga. O banco registra QUEM e QUANDO: no dia em que
+    alguém perguntar "desde quando a IA está respondendo os clientes?", a
+    resposta não pode ser um encolher de ombros.
+
+    🚨 SÓ O CANAL DE ATENDIMENTO. O informativo é disparo, não conversa: IA
+    ali seria resposta num canal que ninguém lê. A recusa é a coluna, não a
+    disciplina de lembrar de desligar antes de cada disparo.
+
+    ⚠️ LIGAR EXIGE MOTOR; DESLIGAR NÃO. Desligar tem de funcionar mesmo com o
+    motor fora do ar -- é exatamente quando alguém quer desligar.
+    """
+    from . import ia as motor
+
+    canal = por_id(canal_id)
+    if not canal:
+        return {"ok": False, "motivo": "Canal não existe."}
+    if canal["tipo"] != "atendimento":
+        return {"ok": False,
+                "motivo": "Só o canal de atendimento tem IA. O informativo é "
+                          "disparo, não conversa."}
+
+    ligada = bool(ligada)
+    if ligada:
+        estado_motor = motor.estado()
+        if not estado_motor["disponivel"]:
+            return {"ok": False, "motivo": estado_motor.get(
+                "motivo", "O motor de IA não está disponível.")}
+
+    banco.executar(
+        """UPDATE canal
+              SET ia_ligada = %s,
+                  ia_ligada_em = CASE WHEN %s THEN now() ELSE ia_ligada_em END,
+                  ia_ligada_por = CASE WHEN %s THEN %s ELSE ia_ligada_por END
+            WHERE id = %s""", (ligada, ligada, ligada, quem, canal_id))
+    # ⚠️ NÃO passa por `registrar_evento`: aquela tabela é o estado da CONEXÃO
+    # (`canal_evento.estado` é CHECK com o vocabulário do Evolution), e ligar a
+    # IA não muda conexão nenhuma. Quem e quando ficam em `ia_ligada_em` /
+    # `ia_ligada_por`, que existem exatamente para isto.
+    log.info("canal %s: IA %s por %s", canal_id,
+             "ligada" if ligada else "desligada", quem)
+    return {"ok": True, "canal_id": canal_id, "ia_ligada": ligada}
 
 
 def desconectar(canal_id: int, quem: str) -> None:

@@ -79,6 +79,24 @@ class Settings:
     # caminho da URL é o que o protege.
     webhook_segredo: str = _ler("MOVIZAP_WEBHOOK_SEGREDO")
 
+    # ---- IA (passo 8, 2026-08-26) ----
+    # 🚨 SÓ O `movizap/llm/` LÊ ESTES VALORES. `docs/04_Contrato_IA.md`:
+    # *"chave lida do .env por um único gateway; nenhum outro módulo sabe que
+    # ela existe"*. Chave própria do MoviZap (não a do MoviChat) é o que dá
+    # custo discriminado e permite revogar uma sem derrubar as outras.
+    #
+    # ⚠️ NOME PREFIXADO. `DEEPSEEK_API_KEY` puro colidiria com a variável de
+    # ambiente que o MoviChat usa, e uma unidade systemd que exportasse a dele
+    # passaria a alimentar este painel sem ninguém pedir.
+    deepseek_api_key: str = _ler("MOVIZAP_DEEPSEEK_API_KEY")
+    groq_api_key: str = _ler("MOVIZAP_GROQ_API_KEY")
+    llm_provider: str = _ler("MOVIZAP_LLM_PROVIDER", "deepseek")
+    # `single` = só o principal. `fallback` = o reserva entra se o principal
+    # falhar. Fica em `single` porque hoje só há uma chave: com `fallback` e
+    # sem a segunda chave, a falha do principal viraria "todos falharam", que
+    # é a mesma coisa dita de um jeito mais confuso.
+    llm_strategy: str = _ler("MOVIZAP_LLM_STRATEGY", "single")
+
     # 🚨 SÓ EXISTE DURANTE UMA ROTAÇÃO, e sair é parte do procedimento.
     # Segredo errado devolve 404, e o Evolution trata 404 como falha: trocar o
     # valor e reiniciar criaria uma janela em que todo evento é recusado. Com
@@ -122,6 +140,11 @@ class Settings:
             avisos.append("credenciais do Harmonit ausentes -- a CFG_3.1 não vai sincronizar")
         if not self.webhook_segredo:
             avisos.append("MOVIZAP_WEBHOOK_SEGREDO ausente -- o webhook recusa tudo")
+        if not (self.deepseek_api_key or self.groq_api_key):
+            # ⚠️ AVISO, NÃO FALTA. Sem chave a IA fica indisponível e a CFG_5.1
+            # mostra o motivo -- derrubar o painel inteiro por causa disso
+            # trocaria um problema por um maior.
+            avisos.append("nenhuma chave de modelo no .env -- a IA fica indisponível")
         return avisos
 
 

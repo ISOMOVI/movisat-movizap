@@ -30,6 +30,7 @@ from . import enviar as enviar_email
 from . import gmail
 from . import google_auth
 from . import automacao
+from . import ia
 from . import inicio as tela_inicial
 from . import informativos
 from . import midia
@@ -253,26 +254,31 @@ def ver_automacao(usuario: dict = Depends(auth.requer_tela("CFG_5.1"))):
     ⚠️ Vem junto `contatos`: quantas pessoas cada tipo alcança hoje. Sem esse
     número, ligar "cliente" parece inofensivo e atinge 1.750 pessoas.
 
-    🚨 `ia_disponivel` é FALSO e a tela trava o interruptor de IA por causa
-    dele. Não há motor: o `services/llm/` do `IA_agente_Movichat` nunca
-    migrou. `docs/09`, item 4 -- configuração não afirma o que o código não
-    faz. O dia em que o motor entrar, isto vira `True` num lugar só.
+    🚨 `ia_disponivel` É MEDIDO, NÃO ESCRITO. Foi literal `False` até 25/08
+    porque o motor não existia; desde 26/08 ele existe (`movizap/ia.py` +
+    `movizap/llm/`) e quem responde é o próprio motor -- `False` com o motivo
+    quando falta chave ou versão de prompt publicada. `docs/09`, item 4:
+    configuração não afirma o que o código não faz, **e também não nega o que
+    ele faz**.
     """
-    return {"tipos": automacao.listar(), "ia_disponivel": False,
-            "ia_motivo": "O motor de IA ainda não migrou para o painel "
-                         "(services/llm do IA_agente_Movichat)."}
+    motor = ia.estado()
+    return {"tipos": automacao.listar(),
+            "ia_disponivel": motor["disponivel"],
+            "ia_motivo": motor.get("motivo"),
+            "ia_modelo": motor.get("modelo")}
 
 
 class AutomacaoEntrada(BaseModel):
     boas_vindas_ligado: bool | None = None
     boas_vindas_texto: str | None = None
+    ia_ligada: bool | None = None
 
 
 @app.put("/api/automacao/{relacao}")
 def definir_automacao(relacao: str, dados: AutomacaoEntrada,
                       usuario: dict = Depends(auth.requer_tela("CFG_5.1"))):
     r = automacao.definir(relacao, dados.boas_vindas_ligado,
-                          dados.boas_vindas_texto)
+                          dados.boas_vindas_texto, dados.ia_ligada)
     if not r["ok"]:
         raise HTTPException(status_code=400, detail=r["motivo"])
     return r
@@ -2280,6 +2286,56 @@ def prompt_montado(versao_id: int | None = None,
         return prompt_ia.montado(versao_id)
     except prompt_ia.SemVersao as e:
         raise HTTPException(status_code=404, detail=str(e))
+
+
+# ------------------------------------------------------- IA: a sala de ensaio
+#
+# 🚨 É O PASSO 3 DA SEQUÊNCIA DE ATIVAÇÃO (`docs/04_Contrato_IA.md`): parear o
+# chip, conferir que a mensagem chega, **validar o bot respondendo**, e só
+# então ligar o interruptor. Sem este passo, o primeiro erro da IA é em
+# público -- que é exatamente o que a decisão de 06/08 existe para evitar.
+#
+# ⚠️ ENSAIO NÃO ENVIA, NÃO GRAVA E NÃO TRANSFERE. Roda o motor inteiro contra
+# uma conversa de verdade e devolve o que ELA TERIA feito. Se ensaiar operasse,
+# não seria ensaio.
+
+class EnsaioEntrada(BaseModel):
+    conversa_id: int
+    # Opcional: a pergunta a fazer POR CIMA do histórico da conversa. Sem ela,
+    # ensaia contra a última coisa que o cliente escreveu de verdade.
+    texto: str | None = Field(default=None, max_length=4000)
+
+
+@app.post("/api/ia/ensaio")
+def ensaiar_ia(dados: EnsaioEntrada,
+               usuario: dict = Depends(auth.requer_tela("CFG_2.1"))):
+    r = ia.responder(dados.conversa_id, ensaio=True,
+                     texto_de_ensaio=dados.texto)
+    if not r.get("texto") and r.get("motivo") not in (None, "ensaio: nada foi enviado"):
+        # Motivo com nome, não "nada aconteceu": é o que a tela mostra quando
+        # a IA não falaria nesta conversa (grupo, humano assumiu, sem chave).
+        raise HTTPException(status_code=409, detail=r["motivo"])
+    return r
+
+
+@app.get("/api/ia/motor")
+def estado_do_motor(usuario: dict = Depends(auth.requer_tela("CFG_2.1"))):
+    """🚨 A chave sai MASCARADA (`sk-...a3f9`), nunca o valor."""
+    return ia.estado()
+
+
+class CanalIaEntrada(BaseModel):
+    ligada: bool
+
+
+@app.put("/api/canais/{canal_id}/ia")
+def ligar_ia_do_canal(canal_id: int, dados: CanalIaEntrada,
+                      usuario: dict = Depends(auth.requer_tela("CFG_1.1"))):
+    """O ato deliberado. Registra QUEM e QUANDO em `ia_ligada_por`/`_em`."""
+    r = registro_canais.ligar_ia(canal_id, dados.ligada, usuario["login"])
+    if not r["ok"]:
+        raise HTTPException(status_code=409, detail=r["motivo"])
+    return r
 
 
 # ---------------------------------------------------------------- saúde

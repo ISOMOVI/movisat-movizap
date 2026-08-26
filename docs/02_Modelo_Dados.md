@@ -863,7 +863,7 @@ continua certo assim). É o preço de "cada um vê a que logou".
 | `relacao` | PK. Os oito valores de `contato.relacao` **mais `sem_cadastro`** |
 | `boas_vindas_ligado` | aciona de verdade. Nasce **false** |
 | `boas_vindas_texto` | sem texto não se liga: ligado e vazio mandaria mensagem em branco |
-| `ia_ligada` | **guardado, não acionado** — não há motor no painel |
+| `ia_ligada` | **aciona de verdade desde 26/08** — é a 2ª das três travas da IA (canal, tipo, `ia_atendeu_ate`). Nasce **false** |
 
 🚨 **`sem_cadastro` É LINHA AQUI E NÃO É VALOR DE `contato.relacao`.** 64% das
 conversas chegam de número sem contato nenhum (211 de 332, medido em 25/08) —
@@ -912,3 +912,48 @@ documento.
 O interruptor da jornada é **um valor para o sistema inteiro**, e a tabela
 `config` existe exatamente para isso desde a 001. Nasce desligado: monta-se a
 escala com calma, e ligar é ato separado (decisão do usuário em 25/08).
+
+### `conversa.ia_atendeu_ate` (035) — a trava de não responder duas vezes
+
+| Campo | Nota |
+|---|---|
+| `ia_atendeu_ate` | Id da última mensagem de **entrada** que a IA já atendeu. NULL = nenhuma |
+
+🚨 **É A MESMA LIÇÃO DE `boas_vindas_em`, EM OUTRO LUGAR.** A trava é do
+BANCO: `UPDATE ... WHERE ia_atendeu_ate IS NULL OR ia_atendeu_ate < %s` só
+passa uma vez, mesmo com duas execuções simultâneas — e há duas, porque
+`processar_pendentes` roda no laço de 5 s **e** na rota
+`/api/conversas/processar`. Um `if` no Python perde a corrida, e o cliente
+recebe duas respostas da IA para a mesma pergunta.
+
+⚠️ **GUARDA O ID DA MENSAGEM, NÃO UM `timestamp` NEM UM `bool`.**
+
+| Alternativa | Por que não |
+|---|---|
+| `bool` | serviria uma vez: a IA responderia a primeira mensagem da conversa e mais nenhuma |
+| `timestamp` | compararia com `criada_em`, que é a hora **do provedor** e chega fora de ordem por desenho — mensagem atrasada pareceria já respondida |
+
+O id é monotônico e é nosso. `ia_atendeu_ate < <id da última entrada>` é a
+pergunta exata: *existe entrada que a IA ainda não viu?*
+
+🚨 **A MARCA VEM ANTES DA CHAMADA AO MODELO.** Falha depois da marca custa uma
+resposta; na ordem inversa, uma falha entre responder e marcar faria a próxima
+passada responder de novo. **Repetir é pior do que faltar** — a mesma regra da
+saudação automática.
+
+### `canal.ia_ligada_em` deixou de ser só registro (035)
+
+A coluna existe desde a 007 para responder *"desde quando a IA está
+respondendo os clientes?"*. Desde 26/08 ela também **decide**: a varredura da
+IA só olha mensagem com `criada_em > canal.ia_ligada_em`.
+
+🚨 **SEM ISSO, LIGAR O INTERRUPTOR RESPONDERIA A BASE INTEIRA DE UMA VEZ.**
+Havia **357 conversas abertas** quando o motor entrou. A IA sairia respondendo
+a todas, a mensagens de dias atrás, no meio de conversas que já seguiram sem
+ela — exatamente o que a auditoria de 25/08 achou na saudação automática, que
+mandaria "seja bem-vindo" para gente no meio de uma conversa em andamento.
+Achado ao escrever o teste da varredura, não pelo placar.
+
+⚠️ **Ligado sem hora não atende nada.** Pelo caminho oficial isso não
+acontece (a rota grava as duas coisas juntas), mas quem editar a coluna na mão
+não pode com isso fazer a IA varrer o passado inteiro.

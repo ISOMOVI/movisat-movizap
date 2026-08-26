@@ -129,6 +129,37 @@ async function desconectar(canal) {
   }
 }
 
+/* 🚨 LIGAR A IA É UM ATO, E A TELA TRATA COMO ATO. A confirmação diz o que vai
+   acontecer com o cliente do outro lado, não "tem certeza?" — e diz também o
+   que NÃO vai: ela não responde nada que tenha chegado antes deste clique.
+   Decisão do usuário em 06/08: "ninguém liga por acidente". */
+async function alternarIa(canal) {
+  const ligando = !canal.ia_ligada
+  const pergunta = ligando
+    ? `Ligar a IA em "${canal.nome}"?\n\n`
+      + 'A partir de agora ela responde sozinha a quem escrever — nos tipos de '
+      + 'contato que estiverem ligados na CFG_5.1.\n\n'
+      + 'Ela NÃO responde nada que já esteja na caixa: só o que chegar depois '
+      + 'deste momento.'
+    : `Desligar a IA em "${canal.nome}"?\n\n`
+      + 'As conversas que ela estava atendendo ficam onde estão, esperando gente.'
+  if (!window.confirm(pergunta)) return
+  ocupado.value = true
+  try {
+    await api.put(`/api/canais/${canal.id}/ia`, { ligada: ligando })
+    aviso.value = ligando
+      ? 'IA ligada. Ela atende o que chegar a partir de agora.'
+      : 'IA desligada.'
+    /* Relê em vez de confiar no 200: o que vale é o que o banco gravou. */
+    await carregar(true)
+  } catch (e) {
+    aviso.value = e instanceof ErroDeApi ? e.message : 'Falha ao mudar a IA.'
+    await carregar(true)
+  } finally {
+    ocupado.value = false
+  }
+}
+
 const historico = ref({ canalId: null, linhas: [] })
 
 async function verHistorico(canal) {
@@ -218,9 +249,16 @@ onBeforeUnmount(() => {
             <i class="bi bi-whatsapp" aria-hidden="true"></i>
             {{ canal.nome }}
           </span>
-          <span class="chip" :class="'chip--' + (ROTULO[canal.estado]?.cor || '')">
-            <span class="canal__ponto" :class="'canal__ponto--' + canal.estado"></span>
-            {{ ROTULO[canal.estado]?.texto || canal.estado }}
+          <span class="linha">
+            <!-- ⚠️ O chip da IA vem ANTES do estado da conexão, e só quando
+                 ligada: é a informação mais consequente desta tela. -->
+            <span v-if="canal.ia_ligada" class="chip chip--acento">
+              <i class="bi bi-robot" aria-hidden="true"></i> IA no ar
+            </span>
+            <span class="chip" :class="'chip--' + (ROTULO[canal.estado]?.cor || '')">
+              <span class="canal__ponto" :class="'canal__ponto--' + canal.estado"></span>
+              {{ ROTULO[canal.estado]?.texto || canal.estado }}
+            </span>
           </span>
         </header>
 
@@ -264,6 +302,18 @@ onBeforeUnmount(() => {
             <button class="botao botao--contorno" type="button" @click="verHistorico(canal)">
               <i class="bi bi-clock-history" aria-hidden="true"></i>
               {{ historico.canalId === canal.id ? 'Ocultar' : 'Histórico' }}
+            </button>
+
+            <!-- 🚨 O ATO DELIBERADO (docs/04, passo 4 da sequência de
+                 ativação). Só no canal de atendimento: o informativo é
+                 disparo, e a rota recusa — a tela nem oferece. -->
+            <button v-if="canal.tipo === 'atendimento'"
+                    class="botao"
+                    :class="canal.ia_ligada ? 'botao--perigo' : 'botao--contorno'"
+                    type="button" :disabled="ocupado"
+                    @click="alternarIa(canal)">
+              <i class="bi bi-robot" aria-hidden="true"></i>
+              {{ canal.ia_ligada ? 'Desligar IA' : 'Ligar IA' }}
             </button>
 
             <span class="espaco"></span>

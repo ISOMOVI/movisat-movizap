@@ -26,7 +26,7 @@ import base64
 import logging
 from datetime import datetime, timezone
 
-from . import (automacao, banco, bitrix, cadastro, midia as midia_mod,
+from . import (automacao, banco, bitrix, cadastro, ia, midia as midia_mod,
                telefone as tel)
 
 log = logging.getLogger("movizap.conversas")
@@ -456,6 +456,24 @@ def processar_pendentes(limite: int = 500) -> dict:
         log.info("processados %(lidos)s eventos: %(mensagens)s mensagens, "
                  "%(entregas)s entregas, %(ignorados)s ignorados, %(erros)s erros",
                  contas)
+
+    # 🚨 A IA NÃO É CHAMADA PELA FILA, E ISSO É O DESENHO. A saudação sai por
+    # evento (`a_olhar`); a IA sai por ESTADO -- "existe pergunta que ela ainda
+    # não atendeu, e o cliente parou de digitar há 5 segundos". É o que faz o
+    # agrupamento de entrada funcionar: três mensagens seguidas viram UMA
+    # resposta, porque quando a terceira chega a conversa continua pendente e
+    # nada saiu ainda. Chamar por evento responderia três vezes -- e responder
+    # cada mensagem isoladamente é a coisa que mais denuncia um robô
+    # (`docs/04_Contrato_IA.md`).
+    #
+    # ⚠️ FORA DO LAÇO DOS EVENTOS, e com try próprio: uma falha da IA não pode
+    # deixar evento por processar. A mensagem do cliente chegou, e é isso que
+    # importa guardar.
+    try:
+        contas["ia"] = ia.atender_pendentes()
+    except Exception:                                         # noqa: BLE001
+        log.exception("varredura da IA falhou")
+        contas["ia"] = {"olhadas": 0, "respondidas": 0, "falhas": 1}
     return contas
 
 

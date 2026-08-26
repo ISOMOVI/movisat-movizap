@@ -4,12 +4,15 @@ Pedido do usuário: *"terá um interruptor nela que aciona IA ou bot, por tipo
 de contato, então quando a mensagem chegar, será um filtro de uso ou não,
 assim evitamos desgaste"*.
 
-🚨 O QUE ACIONA HOJE É **BOAS-VINDAS**, E SÓ ISSO. Medido em 25/08:
-`canal.ia_ligada` é lido em quatro lugares do código e nenhum age sobre ele --
-não existe motor de IA no painel (o `services/llm/` do `IA_agente_Movichat`
-nunca migrou) e não existe bot. `ia_ligada` fica guardado por relação e a tela
-o mostra travado, com o motivo. `docs/09`, item 4: configuração não afirma o
-que o código não faz.
+🚨 DESDE 26/08 SÃO DOIS: **boas-vindas** e **IA**. O motor migrou (passo 8,
+`movizap/ia.py` + `movizap/llm/`), e `relacao_automacao.ia_ligada` deixou de
+ser uma coluna que ninguém lê -- é a segunda das três travas da IA, a que
+filtra por TIPO de contato. Até 25/08 a tela a mostrava travada com o motivo,
+porque `docs/09` item 4 diz que configuração não afirma o que o código não faz.
+
+🚨 LIGAR A IA POR TIPO NÃO BASTA PARA ELA FALAR. `canal.ia_ligada` também tem
+de estar ligado, na CFG_1.1, e as duas coisas são deliberadamente separadas:
+o tipo é o filtro de desgaste, o canal é o ato de colocar no ar.
 
 🚨 O TIPO DE QUEM ESCREVEU, NÃO O DA CONVERSA. A conversa não tem tipo: quem
 tem é a pessoa. E quando não há pessoa no cadastro -- 64% dos casos em 25/08 --
@@ -47,19 +50,25 @@ def listar() -> list[dict]:
 
 
 def definir(relacao: str, boas_vindas_ligado: bool | None = None,
-            boas_vindas_texto: str | None = None) -> dict:
-    """Liga, desliga ou reescreve a mensagem de um tipo.
+            boas_vindas_texto: str | None = None,
+            ia_ligada: bool | None = None) -> dict:
+    """Liga, desliga ou reescreve a automação de um tipo.
 
     🚨 NÃO SE LIGA SEM TEXTO. Interruptor ligado com texto vazio mandaria uma
     mensagem em branco para o cliente -- e o defeito só apareceria do lado
     dele. A recusa é aqui, com o motivo, e não no envio.
+
+    🚨 E NÃO SE LIGA A IA SEM MOTOR. Mesma regra, outro assunto: sem chave de
+    modelo ou sem versão de prompt publicada, ligar aqui deixaria o painel
+    dizendo que a IA atende esse tipo enquanto ninguém responde. A recusa vem
+    com o motivo que a tela mostra.
     """
     if relacao not in CHAVES:
         return {"ok": False, "motivo": f"Tipo desconhecido: {relacao!r}."}
 
     atual = banco.um(
-        "SELECT boas_vindas_ligado, boas_vindas_texto FROM relacao_automacao "
-        " WHERE relacao = %s", (relacao,))
+        "SELECT boas_vindas_ligado, boas_vindas_texto, ia_ligada "
+        "  FROM relacao_automacao WHERE relacao = %s", (relacao,))
     if not atual:
         return {"ok": False, "motivo": "Tipo sem linha de automação."}
 
@@ -67,6 +76,7 @@ def definir(relacao: str, boas_vindas_ligado: bool | None = None,
               else bool(boas_vindas_ligado))
     texto = (atual["boas_vindas_texto"] if boas_vindas_texto is None
              else (boas_vindas_texto or "").strip() or None)
+    ia = atual["ia_ligada"] if ia_ligada is None else bool(ia_ligada)
 
     if texto and len(texto) > TETO_TEXTO:
         return {"ok": False,
@@ -76,24 +86,44 @@ def definir(relacao: str, boas_vindas_ligado: bool | None = None,
                 "motivo": "Escreva a mensagem antes de ligar: ligado sem texto "
                           "mandaria uma mensagem em branco para o cliente."}
 
+    # ⚠️ Só confere quando está LIGANDO. Desligar tem de funcionar mesmo com o
+    # motor fora do ar -- é justamente quando alguém quer desligar.
+    if ia and not atual["ia_ligada"]:
+        from . import ia as motor
+        estado_motor = motor.estado()
+        if not estado_motor["disponivel"]:
+            return {"ok": False, "motivo": estado_motor.get(
+                "motivo", "O motor de IA não está disponível.")}
+
     banco.executar(
         """UPDATE relacao_automacao
               SET boas_vindas_ligado = %s, boas_vindas_texto = %s,
-                  atualizado_em = now()
-            WHERE relacao = %s""", (ligado, texto, relacao))
-    log.info("automação de %s: boas-vindas %s", relacao,
-             "ligada" if ligado else "desligada")
-    return {"ok": True, "relacao": relacao, "boas_vindas_ligado": ligado}
+                  ia_ligada = %s, atualizado_em = now()
+            WHERE relacao = %s""", (ligado, texto, ia, relacao))
+    log.info("automação de %s: boas-vindas %s, IA %s", relacao,
+             "ligada" if ligado else "desligada",
+             "ligada" if ia else "desligada")
+    return {"ok": True, "relacao": relacao, "boas_vindas_ligado": ligado,
+            "ia_ligada": ia}
 
 
-def _chave_do_contato(contato_id: int | None) -> str:
-    """Qual linha de `relacao_automacao` vale para quem escreveu."""
+def chave_do_contato(contato_id: int | None) -> str:
+    """Qual linha de `relacao_automacao` vale para quem escreveu.
+
+    ⚠️ Pública porque a IA precisa da MESMA regra. Duplicar a consulta em
+    `ia.py` faria a saudação e a IA divergirem no dia em que a regra mudasse,
+    e o `sem_cadastro` (64% dos casos) é justamente onde isso doeria.
+    """
     if not contato_id:
         return "sem_cadastro"
     linha = banco.um("SELECT relacao FROM contato WHERE id = %s", (contato_id,))
     if not linha:
         return "sem_cadastro"
     return linha["relacao"] if linha["relacao"] in CHAVES else "sem_cadastro"
+
+
+# O nome antigo continua valendo: é chamado em `boas_vindas` e nos testes.
+_chave_do_contato = chave_do_contato
 
 
 def boas_vindas(conversa_id: int) -> dict:

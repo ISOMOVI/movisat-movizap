@@ -11,11 +11,15 @@
    semana passada" é irrespondível: o texto já mudou e ninguém sabe o que ela
    estava lendo na hora.
 
-   ⚠️ O doc pede "rascunho testável antes de publicar". Testável de verdade
-   exige o modelo, que é o passo 8. O que dá para fazer hoje — e está aqui — é
-   ver o texto FINAL montado, com as descrições dos times encaixadas, e
-   descobrir que um time entrou sem descrição antes de a IA chutar por causa
-   disso.
+   ⚠️ O doc pedia "rascunho testável antes de publicar", e até 25/08 isso era
+   só ver o texto montado — testar de verdade exigia o modelo. Em 26/08 o motor
+   entrou, e a SALA DE ENSAIO no fim desta tela é o passo 3 da sequência de
+   ativação do `docs/04`: *validar o bot respondendo, em conversa de teste*.
+
+   🚨 ENSAIAR NÃO É OPERAR. O ensaio roda o motor inteiro contra uma conversa
+   de verdade — prompt, ferramentas, modelo — e NÃO envia, NÃO grava, NÃO
+   transfere e NÃO liga nada. Ele mostra o que ela TERIA feito. Se ensaiar
+   operasse, não seria ensaio.
    ============================================================================ */
 import { ref, computed, onMounted } from 'vue'
 
@@ -127,6 +131,30 @@ function quando(iso) {
   if (!iso) return '—'
   return new Date(iso).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })
 }
+
+/* ── A sala de ensaio ───────────────────────────────────────────────────── */
+
+const ensaio = ref({ conversaId: '', texto: '', rodando: false, r: null, erro: '' })
+
+async function ensaiar() {
+  const id = Number(ensaio.value.conversaId)
+  if (!id) { ensaio.value.erro = 'Informe o número da conversa.'; return }
+  ensaio.value.rodando = true
+  ensaio.value.erro = ''
+  ensaio.value.r = null
+  try {
+    ensaio.value.r = await api.post('/api/ia/ensaio', {
+      conversa_id: id,
+      texto: ensaio.value.texto || null,
+    })
+  } catch (e) {
+    /* 🚨 O motivo vem com NOME — "grupo", "humano assumiu", "motor sem chave".
+       "Nada aconteceu" mandaria alguém procurar defeito onde há regra. */
+    ensaio.value.erro = e instanceof ErroDeApi ? e.message : 'Falha no ensaio.'
+  } finally {
+    ensaio.value.rodando = false
+  }
+}
 </script>
 
 <template>
@@ -149,10 +177,16 @@ function quando(iso) {
       <i class="bi bi-robot aviso__icone" aria-hidden="true"></i>
       <span>
         <strong>A IA está desligada em todos os canais</strong>
-        ({{ estado.canais.map((c) => c.nome).join(', ') }}), e o motor ainda não
-        existe no sistema. Escrever e publicar aqui <strong>não faz a IA
-        responder para ninguém</strong> — o interruptor é por canal, na CFG_1.1,
-        e ligar é decisão sua depois que ela estiver pronta.
+        ({{ estado.canais.map((c) => c.nome).join(', ') }}).
+        <template v-if="estado.motor_existe">
+          O motor está pronto ({{ estado.motor?.modelo }}) — dá para
+          <strong>ensaiar</strong> aqui embaixo sem enviar nada a ninguém.
+        </template>
+        <template v-else>
+          O motor está indisponível: {{ estado.motor?.motivo }}
+        </template>
+        Escrever e publicar aqui <strong>não faz a IA responder para
+        ninguém</strong> — o interruptor é por canal, na CFG_1.1.
       </span>
     </p>
     <p v-else-if="canaisComIa.length" class="aviso aviso--atencao" role="status">
@@ -283,6 +317,82 @@ function quando(iso) {
       </section>
     </template>
 
+    <!-- ════════════════════════════════════════════════════════════════════
+         SALA DE ENSAIO — o passo 3 da sequência de ativação do docs/04.
+         🚨 Não envia, não grava, não transfere. Mostra o que ela TERIA feito.
+         ════════════════════════════════════════════════════════════════════ -->
+    <section v-if="estado?.motor_existe" class="cartao">
+      <header class="cartao__cabecalho">
+        <div>
+          <strong>Sala de ensaio</strong>
+          <p class="apagado pequeno">
+            Roda a IA de verdade contra uma conversa de verdade —
+            <strong>sem enviar nada para o cliente</strong>, sem gravar e sem
+            transferir. É aqui que o primeiro erro dela acontece em particular,
+            em vez de em público.
+          </p>
+        </div>
+        <span class="chip chip--acento">{{ estado.motor?.modelo }}</span>
+      </header>
+
+      <div class="cartao__corpo pilha">
+        <div class="linha linha--quebra">
+          <label class="campo">
+            <span class="campo__rotulo">Número da conversa</span>
+            <input v-model="ensaio.conversaId" class="campo__entrada mono"
+                   type="number" inputmode="numeric" placeholder="16224" />
+            <span class="campo__ajuda">
+              O número que aparece na barra de endereço ao abrir a conversa.
+            </span>
+          </label>
+        </div>
+
+        <label class="campo">
+          <span class="campo__rotulo">Pergunta a fazer (opcional)</span>
+          <textarea v-model="ensaio.texto" class="campo__entrada" rows="2"
+                    maxlength="4000"
+                    placeholder="Vazio = ensaia contra a última coisa que o cliente escreveu."></textarea>
+        </label>
+
+        <div class="linha">
+          <button class="botao botao--primario" type="button"
+                  :disabled="ensaio.rodando" @click="ensaiar()">
+            <span v-if="ensaio.rodando" class="girando"></span>
+            <i v-else class="bi bi-play-circle" aria-hidden="true"></i>
+            Ensaiar
+          </button>
+        </div>
+
+        <p v-if="ensaio.erro" class="aviso aviso--atencao" role="alert">
+          <i class="bi bi-info-circle aviso__icone" aria-hidden="true"></i>
+          <span>{{ ensaio.erro }}</span>
+        </p>
+
+        <div v-if="ensaio.r" class="pilha">
+          <p class="ensaio__fala">{{ ensaio.r.texto }}</p>
+          <p class="apagado pequeno">
+            Ferramentas:
+            <strong>{{ (ensaio.r.ferramentas || []).join(' → ') || 'nenhuma' }}</strong>
+            · {{ ensaio.r.tokens }} tokens · {{ ensaio.r.provedor }}
+          </p>
+          <!-- ⚠️ A AÇÃO É O QUE MAIS IMPORTA VER, e é o que não aconteceu.
+               Sem mostrar isto, um ensaio que transferiria pareceria um
+               ensaio que só respondeu. -->
+          <p v-for="(a, i) in (ensaio.r.acoes || [])" :key="i"
+             class="aviso aviso--info">
+            <i class="bi bi-arrow-right-circle aviso__icone" aria-hidden="true"></i>
+            <span v-if="a.acao === 'transferir'">
+              <strong>Teria transferido para {{ a.time }}</strong>, com a nota
+              interna: “{{ a.resumo }}”
+            </span>
+            <span v-else>
+              <strong>Teria encerrado</strong> a conversa: “{{ a.motivo }}”
+            </span>
+          </p>
+        </div>
+      </div>
+    </section>
+
     <p class="apagado pequeno">
       Nenhuma versão é sobrescrita ou apagada: gravar sempre cria a próxima, e
       voltar atrás é republicar a antiga. É isso que torna respondível
@@ -323,5 +433,19 @@ function quando(iso) {
   margin: 0;
   max-height: 30rem;
   overflow: auto;
+}
+
+/* O balão do ensaio tem cara de mensagem de WhatsApp de propósito: é assim
+   que o texto vai chegar, e ler num parágrafo comum esconde o comprimento. */
+.ensaio__fala {
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: var(--fundo-2, rgba(127, 127, 127, 0.1));
+  border-radius: var(--r-2, 0.75rem);
+  border-top-left-radius: 0.25rem;
+  padding: var(--e-3, 0.75rem) var(--e-4, 1rem);
+  margin: 0;
+  max-width: 34rem;
+  line-height: 1.5;
 }
 </style>

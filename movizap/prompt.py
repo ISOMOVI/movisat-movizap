@@ -1,12 +1,14 @@
 """Versões do prompt da IA — a `CFG_2.1`.
 
-🚨 ESTE MÓDULO NÃO FALA COM NENHUM MODELO. Não importa `services/llm`, não lê
-chave de API, não faz requisição para fora. Ele guarda texto versionado e
-monta a pré-visualização do que a IA receberia. O motor é o passo 8, e o
-interruptor `canal.ia_ligada` continua `false` nos dois canais.
+🚨 ESTE MÓDULO CONTINUA NÃO FALANDO COM MODELO NENHUM, mesmo depois que o
+motor entrou em 26/08. Ele guarda texto versionado e monta a pré-visualização
+do que a IA receberia; quem chama o modelo é `movizap/ia.py`, e quem sabe da
+chave é `movizap/llm/`. A separação é o que permite escrever, revisar e
+versionar o prompt inteiro sem risco de responder a um cliente de verdade.
 
-Isso é de propósito: dá para escrever, revisar e versionar o prompt inteiro
-antes de existir qualquer risco de a IA responder para um cliente de verdade.
+⚠️ `motor_existe` DEIXOU DE SER CONSTANTE. Ele agora pergunta ao motor, e o
+motor responde `False` quando falta chave -- então a tela continua honesta nos
+dois mundos, sem ninguém lembrar de trocar um literal.
 
 🚨 A CONVERSA GRAVA QUAL VERSÃO A ATENDEU (`conversa.prompt_versao_id`, que já
 existe no banco). Sem isso, "a IA respondeu errado semana passada" é uma
@@ -167,15 +169,25 @@ def estado() -> dict:
     a IA responde: quem decide isso é `canal.ia_ligada`, por canal, e hoje os
     dois estão desligados. Mostrar só o prompt faria a tela sugerir que a IA
     está no ar.
+
+    ⚠️ Importação tardia do `ia`: ele importa este módulo. No topo, os dois se
+    importariam em círculo e o painel não subiria.
     """
+    from . import ia
+
     canais = banco.varios(
         "SELECT nome, tipo, ia_ligada, ia_ligada_em FROM canal WHERE ativo ORDER BY nome")
     versao = ativa()
+    motor = ia.estado()
     return {
         "versao_ativa": ({"id": versao["id"], "versao": versao["versao"],
                           "criado_em": versao["criado_em"],
                           "autor_nome": versao["autor_nome"]} if versao else None),
         "total_versoes": banco.um("SELECT COUNT(*) AS n FROM prompt_versao")["n"],
         "canais": canais,
-        "motor_existe": False,  # o passo 8 troca isto quando o services/llm entrar
+        # 🚨 MEDIDO, NÃO ESCRITO. Era um literal `False` e teria continuado
+        # `False` depois de o motor entrar -- exatamente o tipo de contador em
+        # prosa que nasce errado e ninguém percebe.
+        "motor_existe": bool(motor["disponivel"]),
+        "motor": motor,
     }

@@ -5,8 +5,9 @@ deles PUBLICA. Publicar mexe no que estaria valendo: por isso a fixture guarda
 qual versão estava ativa antes e a devolve no fim. Sem isso, rodar a suíte
 deixaria a IA apontando para um texto de teste — e nada falharia para avisar.
 
-⚠️ Nada aqui chama modelo nenhum. O módulo `prompt` é texto versionado; o
-motor é o passo 8.
+⚠️ Nada aqui chama modelo nenhum. O módulo `prompt` continua sendo só texto
+versionado, mesmo depois de o motor entrar em 26/08: quem fala com o modelo é
+`movizap/ia.py`, e quem sabe da chave é `movizap/llm/`.
 """
 import sys
 from pathlib import Path
@@ -95,9 +96,19 @@ def test_sem_a_marca_os_times_entram_no_fim():
 
 def test_estado_mostra_que_a_ia_esta_desligada():
     """🚨 Ter prompt publicado NÃO é a IA estar no ar. Quem decide é
-    `canal.ia_ligada`, por canal."""
+    `canal.ia_ligada`, por canal.
+
+    ⚠️ ATÉ 25/08 ESTE TESTE EXIGIA `motor_existe is False`, e estava certo: não
+    havia motor. Em 26/08 o motor entrou e a exigência virou mentira sobre o
+    mundo — o teste reprovaria código correto. O que ele defende continua
+    idêntico e é a linha de baixo: **motor existir não liga a IA para
+    ninguém.**
+    """
+    from movizap import ia
+
     estado = prompt.estado()
-    assert estado["motor_existe"] is False
+    assert estado["motor_existe"] == ia.estado()["disponivel"], \
+        "motor_existe é medido, não escrito -- literal aqui apodrece em silêncio"
     assert estado["canais"], "nenhum canal ativo para responder pela IA"
     assert all(c["ia_ligada"] is False for c in estado["canais"]), \
         "algum canal está com a IA ligada -- isso é decisão do usuário, não do código"
