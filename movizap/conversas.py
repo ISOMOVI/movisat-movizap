@@ -25,6 +25,7 @@ import asyncio
 import base64
 import logging
 from datetime import datetime, timezone
+from pathlib import Path
 
 from . import (automacao, banco, bitrix, cadastro, ia, midia as midia_mod,
                telefone as tel)
@@ -117,6 +118,65 @@ def _tipo_e_texto(mensagem: dict) -> tuple[str, str | None]:
         log.info("tipo de mensagem desconhecido: %s", conhecidas[0])
         return "texto", f"[{conhecidas[0]} — tipo ainda não tratado]"
     return "texto", None
+
+
+def _aplicar_reacao(cur, data: dict, e_grupo: bool, e164: str | None) -> str:
+    """Uma reação NÃO é uma mensagem. Ela muda uma mensagem que já existe.
+
+    🚨 ATÉ 26/08 ELA VIRAVA MENSAGEM, e o custo estava medido: **161 linhas**
+    `[reactionMessage — tipo ainda não tratado]` no meio de conversas reais,
+    para o atendente ler. O defeito não era a reação faltar: era ela virar
+    lixo visível.
+
+    ⚠️ EMOJI VAZIO É REMOÇÃO, não erro. No WhatsApp não existe "desreagir":
+    existe reagir com nada. Por isso o caminho normal aqui apaga a linha.
+
+    ⚠️ ALVO QUE NÃO TEMOS NÃO VIRA NADA. A pessoa pode reagir a uma mensagem
+    anterior ao painel. Antes isso virava mensagem falsa; agora a reação
+    simplesmente não aparece -- que é o que o atendente veria de qualquer
+    jeito, já que a mensagem reagida também não está lá. Medido: 159 das 161
+    apontam para mensagem que temos.
+    """
+    r = data.get("message", {}).get("reactionMessage") or {}
+    alvo = (r.get("key") or {}).get("id")
+    emoji = (r.get("text") or "").strip()
+    if not alvo:
+        return "reação sem alvo"
+
+    cur.execute("SELECT id FROM mensagem WHERE id_externo = %s", (alvo,))
+    linha = cur.fetchone()
+    if not linha:
+        return f"reação a mensagem que não temos ({alvo})"
+
+    # 🚨 QUEM REAGIU, e é o `key` DE FORA. O `reactionMessage.key` aponta para
+    # a mensagem REAGIDA -- usar o `fromMe` dele diria de quem é a mensagem, não
+    # de quem é a reação, e toda reação nossa a uma mensagem do cliente ficaria
+    # marcada como dele.
+    chave = data.get("key") or {}
+    if chave.get("fromMe"):
+        quem, quem_nome = "nos", None
+    elif e_grupo:
+        quem = chave.get("participant") or "desconhecido"
+        quem_nome = _nome_whatsapp(data)
+    else:
+        quem, quem_nome = (e164 or chave.get("remoteJid") or "desconhecido"), None
+
+    if not emoji:
+        cur.execute(
+            "DELETE FROM mensagem_reacao WHERE mensagem_id = %s AND quem = %s",
+            (linha["id"], quem))
+        return f"reação removida da mensagem {linha['id']}"
+
+    cur.execute(
+        """INSERT INTO mensagem_reacao (mensagem_id, quem, quem_nome, emoji)
+           VALUES (%s, %s, %s, %s)
+           ON CONFLICT (mensagem_id, quem)
+           DO UPDATE SET emoji = EXCLUDED.emoji,
+                         quem_nome = COALESCE(EXCLUDED.quem_nome,
+                                              mensagem_reacao.quem_nome),
+                         em = now()""",
+        (linha["id"], quem, quem_nome, emoji[:16]))
+    return f"reação {emoji} na mensagem {linha['id']}"
 
 
 def _nome_whatsapp(data: dict) -> str | None:
@@ -296,6 +356,13 @@ def _gravar_mensagem(cur, evento: dict, corpo: dict,
     # Rastreamento e Gestão de Frotas" em 12/08. O nome se pergunta ao
     # Evolution, e só quando a conversa AINDA NÃO TEM nome -- uma chamada por
     # grupo, não por mensagem.
+    # 🚨 REAÇÃO SAI ANTES DE QUALQUER GRAVAÇÃO. Ela não é mensagem: muda uma
+    # que já existe. Tratá-la depois de `garantir_conversa` criaria conversa
+    # nova a partir de um emoji -- e antes de 26/08 ela criava MENSAGEM,
+    # 161 vezes.
+    if isinstance(data.get("message"), dict) and "reactionMessage" in data["message"]:
+        return _aplicar_reacao(cur, data, e_grupo, e164)
+
     conversa_id = garantir_conversa(
         cur, evento["canal_id"],
         None if e_grupo else e164,
@@ -965,7 +1032,21 @@ def mensagens(conversa_id: int, limite: int = JANELA_INICIAL,
                       -- ELA PEDE. Foi a lição do `estrela` no e-mail: a tela
                       -- desenhava a partir de um campo que o SELECT não
                       -- trazia, a rota respondia 200, e nada acusava.
-                      m.reacao, m.encaminhada_de
+                      --
+                      -- 🚨 AS REAÇÕES VÊM AGRUPADAS POR EMOJI, com quantas
+                      -- pessoas e se NÓS estamos entre elas. Num grupo de
+                      -- quinze, listar uma por uma encheria o balão; e sem o
+                      -- `nosso`, o botão de reagir não saberia se está aceso.
+                      -- ⚠️ Subconsulta, não JOIN: com `LEFT JOIN` a mesma
+                      -- mensagem viria repetida uma vez por reação, e o
+                      -- `LIMIT` de 60 passaria a contar reação como mensagem.
+                      (SELECT json_agg(x ORDER BY x.n DESC, x.emoji)
+                         FROM (SELECT emoji, count(*) AS n,
+                                      bool_or(quem = 'nos') AS nosso
+                                 FROM mensagem_reacao r
+                                WHERE r.mensagem_id = m.id
+                                GROUP BY emoji) x) AS reacoes,
+                      m.encaminhada_de
                  FROM mensagem m
                  LEFT JOIN atendente a ON a.id = m.atendente_id
                  LEFT JOIN midia md ON md.id = m.midia_id
@@ -1286,8 +1367,21 @@ def reagir(conversa_id: int, mensagem_id: int, emoji: str) -> dict:
     except evolution.ErroEvolution as e:
         return {"ok": False, "motivo": f"O WhatsApp recusou a reação: {e}"}
 
-    banco.executar("UPDATE mensagem SET reacao = %s WHERE id = %s",
-                   (emoji or None, mensagem_id))
+    # 🚨 `quem = 'nos'`, a mesma chave que o eco do webhook vai usar. O
+    # Evolution devolve a nossa própria reação como evento `fromMe`, e sem a
+    # chave igual ela entraria DUAS vezes -- a nossa e a do eco -- e o balão
+    # mostraria o mesmo emoji repetido.
+    if emoji:
+        banco.executar(
+            """INSERT INTO mensagem_reacao (mensagem_id, quem, emoji)
+               VALUES (%s, 'nos', %s)
+               ON CONFLICT (mensagem_id, quem)
+               DO UPDATE SET emoji = EXCLUDED.emoji, em = now()""",
+            (mensagem_id, emoji[:16]))
+    else:
+        banco.executar(
+            "DELETE FROM mensagem_reacao WHERE mensagem_id = %s AND quem = 'nos'",
+            (mensagem_id,))
     return {"ok": True, "mensagem_id": mensagem_id, "reacao": emoji or None}
 
 
@@ -1384,32 +1478,58 @@ def encaminhar(mensagem_id: int, conversas_destino: list[int],
     repassado de outra conversa -- e a diferença importa quando alguém
     reclama do que foi dito.
 
-    ⚠️ MÍDIA AINDA NÃO. Só texto e legenda: repassar arquivo exige rebaixar o
-    binário do disco e reenviar, e o caminho de mídia tem tetos próprios.
-    Encaminhar mídia diz o que falta, em vez de mandar só a legenda e deixar
-    o outro lado sem o anexo -- que seria pior do que recusar.
+    🚨 ARQUIVO VAI JUNTO DESDE 26/08. Até 25/08 encaminhar recusava mídia com
+    o motivo escrito -- que era honesto, mas continuava sendo "não dá". O
+    arquivo é relido do DISCO e reenviado pelo mesmo caminho de quem anexa na
+    tela, com a legenda original.
+
+    ⚠️ O TETO DE RECEBER É MAIOR QUE O DE ENVIAR (32 MB contra 25). Um arquivo
+    que chegou pode não caber na saída, e isso vira falha COM MOTIVO em cada
+    destino -- nunca um envio silencioso só da legenda, que deixaria o outro
+    lado sem o anexo achando que recebeu tudo.
+
+    ⚠️ O ARQUIVO NÃO É DUPLICADO NO DISCO. `midia.guardar` grava por SHA256 e
+    só escreve se o caminho não existir: encaminhar para cinco conversas cria
+    cinco linhas em `midia` (uma por conversa, que é o vínculo) e **um**
+    arquivo.
     """
     origem = banco.um(
         """SELECT id, conteudo, tipo, midia_id FROM mensagem WHERE id = %s""",
         (mensagem_id,))
     if not origem:
         return {"ok": False, "motivo": "Mensagem não encontrada."}
-    if origem["midia_id"]:
-        return {"ok": False,
-                "motivo": "Encaminhar arquivo ainda não: por enquanto só texto."}
+
     texto = (origem["conteudo"] or "").strip()
-    if not texto:
+    anexo = None
+    if origem["midia_id"]:
+        anexo = midia_mod.arquivo(origem["midia_id"])
+        if not anexo:
+            # 🚨 A LINHA EXISTE E O ARQUIVO NÃO. Recusar com o motivo é o
+            # certo: mandar só a legenda deixaria o outro lado sem o anexo
+            # sem ninguém saber -- e o balão diria "encaminhada".
+            return {"ok": False,
+                    "motivo": "O arquivo desta mensagem não está mais no disco."}
+    elif not texto:
         return {"ok": False, "motivo": "Esta mensagem não tem texto para repassar."}
 
     destinos = sorted({int(c) for c in (conversas_destino or []) if c})
     if not destinos:
         return {"ok": False, "motivo": "Escolha para onde encaminhar."}
 
+    dados = Path(anexo["caminho"]).read_bytes() if anexo else None
+
     feitos, falhas = [], []
     for destino in destinos:
-        # ⚠️ `assumir=False`: ver `responder`. Repassar não é atender, e
-        # assumir cinco conversas num clique é efeito que ninguém pediu.
-        r = responder(destino, texto, atendente_id, assumir=False)
+        # ⚠️ `assumir=False` NOS DOIS CAMINHOS: ver `responder`. Repassar não é
+        # atender, e assumir cinco conversas num clique é efeito que ninguém
+        # pediu -- achado na auditoria de 25/08.
+        if anexo:
+            r = responder_com_arquivo(
+                destino, dados, anexo["mime"],
+                midia_mod.nome_para_baixar(anexo), texto, atendente_id,
+                assumir=False)
+        else:
+            r = responder(destino, texto, atendente_id, assumir=False)
         if r.get("ok"):
             feitos.append(destino)
             if r.get("mensagem_id"):
@@ -1584,8 +1704,15 @@ def iniciar_conversa(canal_id: int, numero_digitado: str, texto: str,
 
 def responder_com_arquivo(conversa_id: int, dados: bytes, mime: str,
                           nome_arquivo: str, legenda: str,
-                          atendente_id: int | None) -> dict:
+                          atendente_id: int | None,
+                          assumir: bool = True) -> dict:
     """Manda um arquivo para o cliente. Espelha `responder` em tudo que importa.
+
+    🚨 `assumir=False` EXISTE POR CAUSA DO ENCAMINHAR, e a razão está medida:
+    a auditoria de 25/08 achou que encaminhar tornava quem clicou **dono de
+    até 5 conversas** de uma vez. Repassar não é atender. O texto já tinha
+    este parâmetro; o arquivo não tinha, e sem ele encaminhar arquivo traria o
+    defeito de volta pela outra porta.
 
     🚨 O NÚMERO VEM DA CONVERSA, NUNCA DO QUE FOI ENVIADO. Mesma razão de
     `responder`: esta função responde uma conversa que já existe.
@@ -1632,8 +1759,8 @@ def responder_com_arquivo(conversa_id: int, dados: bytes, mime: str,
     if not conversa_atual["instancia"]:
         return {"ok": False, "motivo": "O canal desta conversa não tem instância."}
 
-    # Quem responde assume, igual ao texto.
-    if conversa_atual["atendente_id"] is None and atendente_id:
+    # Quem responde assume, igual ao texto -- mas quem só repassa, não.
+    if assumir and conversa_atual["atendente_id"] is None and atendente_id:
         banco.executar(
             """UPDATE conversa SET atendente_id = %s, estado = 'humano',
                                    atualizada_em = now()

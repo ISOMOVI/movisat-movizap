@@ -69,19 +69,41 @@ function citar(m) {
 const REACOES = ['👍', '❤️', '😂', '😮', '😢', '🙏']
 const reagindoEm = ref(null)
 
+/* 🚨 `m.reacoes` É LISTA DESDE 26/08, e não mais um emoji só. O cliente passou
+   a reagir também, e 40% das reações são em GRUPO: com um campo só, o último
+   que reagisse apagaria os outros em silêncio. Cada item é
+   `{emoji, n, nosso}` — o `nosso` é o que deixa o botão aceso. */
+function nossaReacao(m) {
+  return (m.reacoes || []).find((r) => r.nosso)?.emoji || null
+}
+
 async function reagir(m, emoji) {
   reagindoEm.value = null
   /* Vira na tela antes da resposta: reação é clique de meio segundo. Se
      falhar, desfaz e diz. */
-  const antes = m.reacao
-  m.reacao = m.reacao === emoji ? null : emoji
+  const antes = m.reacoes ? [...m.reacoes] : []
+  const atual = nossaReacao(m)
+  const novo = atual === emoji ? '' : emoji
+
+  /* O eco otimista mexe só NA NOSSA parte da lista: tirar a linha inteira
+     apagaria da tela a reação de outra pessoa, que não mudou. */
+  const outros = antes.map((r) => ({ ...r, n: r.nosso ? r.n - 1 : r.n }))
+    .filter((r) => r.n > 0)
+    .map((r) => ({ ...r, nosso: false }))
+  if (novo) {
+    const igual = outros.find((r) => r.emoji === novo)
+    if (igual) { igual.n += 1; igual.nosso = true }
+    else outros.push({ emoji: novo, n: 1, nosso: true })
+  }
+  m.reacoes = outros
+
   try {
     await api.post(`/api/conversas/${aberta.value.id}/reagir`, {
       mensagem_id: m.id,
-      emoji: m.reacao || '',
+      emoji: novo,
     })
   } catch (e) {
-    m.reacao = antes
+    m.reacoes = antes
     erro.value = e instanceof ErroDeApi ? e.message : 'Não consegui reagir.'
   }
 }
@@ -189,8 +211,12 @@ async function confirmarEncaminhar() {
       mensagem_id: encaminhando.value.id,
       conversas: destinosEscolhidos.value,
     })
+    /* 🚨 A FALHA DIZ O MOTIVO, não só o número. "1 não deu" manda o atendente
+       adivinhar; com arquivo, o motivo costuma ser o teto de 25 MB, e é isso
+       que ele precisa ler para saber que não foi o número que está errado. */
     recado.value = r.falhas.length
-      ? `Encaminhada para ${r.enviadas}; ${r.falhas.length} não deu.`
+      ? `Encaminhada para ${r.enviadas}; ${r.falhas.length} não deu — `
+        + r.falhas.map((f) => f.motivo).filter(Boolean).join(' · ')
       : `Encaminhada para ${r.enviadas} conversa(s).`
     encaminhando.value = null
   } catch (e) {
@@ -2002,8 +2028,18 @@ function carregarMidiasDaConversa(c) {
               </p>
 
               <!-- A reação fica PENDURADA no canto do balão, como no
-                   WhatsApp: dentro dele, viraria mais uma linha de texto. -->
-              <span v-if="m.reacao" class="balao__reacao">{{ m.reacao }}</span>
+                   WhatsApp: dentro dele, viraria mais uma linha de texto.
+                   ⚠️ A CONTA SÓ APARECE A PARTIR DE DOIS. Num grupo, "👍 3"
+                   é informação; numa conversa direta, "👍 1" é ruído em todo
+                   balão. -->
+              <span v-if="(m.reacoes || []).length" class="balao__reacao">
+                <span v-for="r in m.reacoes" :key="r.emoji"
+                      class="balao__reacao-item"
+                      :class="{ 'balao__reacao-item--nosso': r.nosso }"
+                      :title="r.nosso ? 'inclui a sua reação' : ''">
+                  {{ r.emoji }}<em v-if="r.n > 1">{{ r.n }}</em>
+                </span>
+              </span>
 
               <!-- ⚠️ AS AÇÕES APARECEM NO HOVER, não sempre. Três botões fixos
                    em cada balão transformam o fio numa grade de botões, e o
@@ -2025,7 +2061,11 @@ function carregarMidiasDaConversa(c) {
                 </button>
 
                 <div v-if="reagindoEm === m.id" class="reacoes">
+                  <!-- ⚠️ A NOSSA FICA MARCADA NO SELETOR TAMBÉM: clicar nela
+                       de novo é o que TIRA a reação, e sem a marca o gesto
+                       parece não fazer nada. -->
                   <button v-for="e in REACOES" :key="e" class="reacoes__item"
+                          :class="{ 'reacoes__item--nosso': nossaReacao(m) === e }"
                           type="button" @click="reagir(m, e)">{{ e }}</button>
                 </div>
               </div>
@@ -2195,6 +2235,13 @@ function carregarMidiasDaConversa(c) {
         <p class="modal__texto pequeno">
           A mensagem chega como <strong>mensagem nova</strong>, marcada como
           encaminhada — não como citação.
+          <!-- ⚠️ O ARQUIVO PASSOU A IR JUNTO EM 26/08. Dizer isso aqui evita
+               a dúvida de quem lembra que antes só ia o texto — e avisa do
+               teto ANTES do clique, não depois da falha. -->
+          <template v-if="encaminhando.midia_id">
+            <br />O <strong>arquivo vai junto</strong>, com a legenda. Acima de
+            25 MB o WhatsApp recusa, e cada destino diz o que houve.
+          </template>
         </p>
 
         <div class="modal__opcoes">
@@ -2859,18 +2906,35 @@ function carregarMidiasDaConversa(c) {
   border-radius: var(--r-full);
 }
 .reacoes__item:hover { background: var(--superficie-2); transform: scale(1.15); }
+.reacoes__item--nosso { background: var(--superficie-2); outline: 2px solid var(--acento); }
 
 /* A reação pendurada no canto: dentro do balão viraria mais uma linha. */
 .balao__reacao {
   position: absolute;
   bottom: -10px;
   left: var(--e-3);
+  display: flex;
+  gap: 3px;
+  line-height: 1.4;
+}
+.balao__reacao-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
   padding: 1px 5px;
   background: var(--superficie);
   border: var(--borda-fina) solid var(--borda);
   border-radius: var(--r-full);
   font-size: var(--txt-sm);
-  line-height: 1.4;
+}
+/* A nossa fica marcada: sem isso, num balão com três reações ninguém sabe
+   qual foi a sua — e clicar de novo tiraria a de outra pessoa na cabeça de
+   quem clica. */
+.balao__reacao-item--nosso { border-color: var(--acento); }
+.balao__reacao-item em {
+  font-style: normal;
+  font-size: var(--txt-xs);
+  color: var(--texto-apagado);
 }
 .balao__marca { color: var(--texto-apagado); display: flex; gap: 4px; align-items: center; }
 

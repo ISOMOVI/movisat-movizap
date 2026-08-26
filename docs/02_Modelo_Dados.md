@@ -895,12 +895,12 @@ estar na consulta que a tela pede.**
 
 | Campo | Nota |
 |---|---|
-| `reacao` | O emoji com que NÓS reagimos. Uma coluna, não tabela: no WhatsApp cada participante tem UMA reação por mensagem, e do nosso lado só há um participante |
+| `reacao` | ⚠️ **REMOVIDA na 036.** A razão escrita aqui — *"do nosso lado só há um participante"* — caiu quando o cliente passou a reagir. Ver `mensagem_reacao`, no fim |
 | `encaminhada_de` | FK para `mensagem`, `ON DELETE SET NULL`. NULL = escrita aqui |
 
-⚠️ **Reação do CLIENTE ainda não é tratada:** chega como `reactionMessage` e
-cai no ramo de "tipo ainda não tratado". A migração não finge que esse
-trabalho existe.
+✅ **A reação do CLIENTE passou a ser tratada em 26/08** (migração 036). O que
+esta nota descrevia — cair no ramo de "tipo ainda não tratado" — produziu **161
+mensagens falsas** antes de ser consertado.
 
 🚨 **A chave do WhatsApp (`{remoteJid, fromMe, id}`) NÃO é guardada.** Reagir e
 citar a reconstroem de `id_externo` + `direcao` + o destino da conversa —
@@ -957,3 +957,44 @@ Achado ao escrever o teste da varredura, não pelo placar.
 ⚠️ **Ligado sem hora não atende nada.** Pelo caminho oficial isso não
 acontece (a rota grava as duas coisas juntas), mas quem editar a coluna na mão
 não pode com isso fazer a IA varrer o passado inteiro.
+
+### `mensagem_reacao` (036) — a reação do cliente, e o fim da coluna única
+
+| Campo | Nota |
+|---|---|
+| `mensagem_id` | FK, `ON DELETE CASCADE`. Apagou a mensagem, some a reação |
+| `quem` | `'nos'` se saiu do painel; senão o **JID de quem reagiu** |
+| `quem_nome` | o `pushName` de quem reagiu. Só existe em grupo, e é apelido |
+| `emoji` | `CHECK (emoji <> '')` — vazio não é reação, é a remoção dela |
+
+`UNIQUE (mensagem_id, quem)` — **reagir de novo TROCA** (upsert), reagir com
+nada **APAGA** a linha. É assim que o WhatsApp funciona: não existe "remover
+reação", existe reagir com nada.
+
+🚨 **O QUE ISTO CONSERTOU, MEDIDO EM 26/08: 161 mensagens falsas.** Cada vez
+que alguém reagia com um emoji, o painel gravava no meio da conversa uma linha
+`[reactionMessage — tipo ainda não tratado]`, para o atendente ler. O defeito
+não era a reação faltar — era ela virar **lixo visível** em conversa real.
+`scripts/migrar_reacoes.py` recuperou **159** delas para o lugar certo e só
+então apagou as falsas; **2 ficaram** porque reagiam a mensagens anteriores ao
+painel, e o que não pôde ser recuperado não foi apagado.
+
+🚨 **`mensagem.reacao` SAIU, E A RAZÃO DA 034 CAIU COM O CLIENTE ENTRANDO.**
+Aquela migração escolheu coluna e escreveu o porquê: *"do nosso lado só existe
+um participante (o painel)"*. Estava certo enquanto só nós reagíamos. Das 161
+medidas, **64 são em GRUPO** (40%): num grupo de quinze, uma coluna guarda o
+último que reagiu e **apaga os outros em silêncio**. Duas colunas resolveriam a
+conversa direta e continuariam erradas no grupo.
+
+⚠️ **Sair não custou dado: zero linhas usavam a coluna** (a 034 é de 25/08 e
+ninguém reagiu pelo painel desde então). Mantê-la seria manter **duas verdades
+sobre a mesma coisa**, que é o que o princípio 1 deste documento proíbe.
+
+🚨 **QUEM REAGIU VEM DO `key` DE FORA, NÃO DO DE DENTRO.** O
+`reactionMessage.key` aponta para a mensagem **reagida**: usar o `fromMe` dele
+diria de quem é a mensagem, não de quem é a reação — e toda reação nossa a uma
+mensagem do cliente ficaria marcada como dele. Tem teste que prende isso.
+
+⚠️ **A tela lê `reacoes` agrupado por emoji**, com `n` e `nosso`, por
+subconsulta e não por `JOIN`: com `LEFT JOIN` a mesma mensagem viria repetida
+uma vez por reação, e o `LIMIT` de 60 passaria a contar reação como mensagem.
