@@ -9,7 +9,28 @@ devolve o que o teste mandar. Quem exercita contra o modelo de verdade é
 assume, e o nunca-em-grupo. Uma IA que responde a mais é pior que uma IA
 desligada -- ela fala com cliente real no lugar errado.
 
-🚨 Escreve em `conversa`, `mensagem` e `relacao_automacao`, tabelas de
+🚨🚨 ESTE ARQUIVO MANDOU UMA MENSAGEM DA IA PARA UM CLIENTE REAL EM 26/08.
+
+A versão anterior ligava `canal.ia_ligada` **no canal de produção** e publicava
+uma versão de prompt para poder exercitar o motor. O serviço roda em OUTRO
+PROCESSO, lendo o MESMO banco, com um laço de 5 segundos — e os `monkeypatch`
+desta suíte só existem aqui dentro. Durante a rodada, a produção viu a IA
+ligada, pegou uma conversa de verdade e respondeu. Uma mensagem, um cliente.
+
+**O que segurou o resto foi sorte, não desenho:** a guarda de `ia_ligada_em`
+limitava às conversas com mensagem na última hora, e só uma qualificava.
+
+Ficaram três coisas, e nenhuma delas é "tomar cuidado":
+
+  1. **A suíte tem um CANAL SÓ DELA**, `ativo = false`, e nunca toca no de
+     produção. A conversa de teste nasce nesse canal.
+  2. **`ia.pendentes()` exige `ca.ativo`** — o laço de produção não enxerga o
+     canal do teste, e canal desligado deixou de ser atendido sozinho, que é
+     correto por si.
+  3. **Um teste prende a regra 1**: se alguém voltar a usar o canal de
+     produção aqui, ele reprova.
+
+⚠️ Escreve em `canal`, `conversa`, `mensagem` e `relacao_automacao`, tabelas de
 PRODUÇÃO. Telefone de DDD inexistente; o estado anterior volta no fim.
 """
 import sys
@@ -32,6 +53,24 @@ pytestmark = pytest.mark.skipif(
 PREFIXO = "+559995556%"
 NUMERO = "+5599955560001"
 
+# 🚨 O CANAL DA SUÍTE. `ativo = false` é o que mantém o laço de produção longe
+# dele: `ia.pendentes()` exige `ca.ativo`. Sem isto, ligar a IA aqui liga a IA
+# para o serviço que está rodando ao lado, no mesmo banco.
+CANAL_TESTE = "zz-teste-ia"
+
+
+def _canal_da_suite() -> int:
+    linha = banco.um("SELECT id FROM canal WHERE instancia = %s", (CANAL_TESTE,))
+    if linha:
+        return linha["id"]
+    # ⚠️ `modo` É CHECK NO BANCO (`baileys | cloud_api`) e eu tinha escrito
+    # 'atendimento', confundindo com `tipo`. O CHECK pegou na primeira rodada
+    # -- é para isso que ele existe.
+    return banco.um(
+        """INSERT INTO canal (nome, tipo, gateway, instancia, modo, ativo)
+           VALUES (%s, 'atendimento', 'evolution', %s, 'baileys', false)
+           RETURNING id""", ("zz teste da IA", CANAL_TESTE))["id"]
+
 
 def limpar():
     banco.executar(
@@ -46,10 +85,10 @@ def limpar():
 @pytest.fixture(scope="module", autouse=True)
 def pool():
     banco.abrir()
-    # ⚠️ `ia_ligada_em` VAI JUNTO. A primeira versão restaurava só `ia_ligada`
-    # e deixava a hora gravada num canal desligado -- rastro de teste em tabela
-    # de produção. Inofensivo (ligar reescreve a hora), mas mentira: a coluna
-    # existe para responder "desde quando a IA responde os clientes?".
+    # ⚠️ O canal de PRODUÇÃO é guardado e restaurado, mas isto é rede de
+    # segurança, não a proteção: a proteção é a suíte não o tocar. Se algum
+    # teste voltar a ligá-lo, `test_a_suite_nunca_liga_o_canal_de_producao`
+    # reprova.
     antes_canal = banco.varios("SELECT id, ia_ligada, ia_ligada_em FROM canal")
     antes_relacao = banco.varios("SELECT relacao, ia_ligada FROM relacao_automacao")
     limpar()
@@ -144,10 +183,7 @@ def com_motor(monkeypatch, respostas):
 @pytest.fixture()
 def conversa():
     limpar()
-    canal = banco.um(
-        "SELECT id FROM canal WHERE tipo = 'atendimento' AND ativo LIMIT 1")
-    if not canal:
-        pytest.skip("nenhum canal de atendimento ativo")
+    canal = {"id": _canal_da_suite()}
     cid = banco.um(
         """INSERT INTO conversa (canal_id, telefone_e164, estado)
            VALUES (%s, %s, 'nova') RETURNING id""",
@@ -165,7 +201,7 @@ def conversa():
     # regra recusa, e o teste mediria a recusa em vez do comportamento.
     banco.executar(
         "UPDATE canal SET ia_ligada = true, ia_ligada_em = now() - interval '1 hour' "
-        " WHERE id = %s", (canal["id"],))
+        " WHERE id = %s AND instancia = %s", (canal["id"], CANAL_TESTE))
     banco.executar(
         "UPDATE relacao_automacao SET ia_ligada = true WHERE relacao = 'sem_cadastro'")
     yield cid
@@ -239,7 +275,8 @@ class TestFormatoDaResposta:
 class TestNaoResponde:
     def test_canal_desligado_nao_responde(self, conversa, monkeypatch):
         com_motor(monkeypatch, [texto("não deveria sair")])
-        banco.executar("UPDATE canal SET ia_ligada = false")
+        banco.executar("UPDATE canal SET ia_ligada = false WHERE instancia = %s",
+                       (CANAL_TESTE,))
         r = ia.responder(conversa)
         assert r["respondeu"] is False
         assert r["motivo"] == "IA desligada no canal"
@@ -388,44 +425,82 @@ class TestNaoRespondeOPassado:
     def test_mensagem_anterior_a_ligar_nao_e_respondida(self, conversa, monkeypatch,
                                                         sem_enviar):
         com_motor(monkeypatch, [texto("não deveria sair")])
-        banco.executar("UPDATE canal SET ia_ligada_em = now()")
+        banco.executar("UPDATE canal SET ia_ligada_em = now() WHERE instancia = %s",
+                       (CANAL_TESTE,))
         r = ia.responder(conversa)
         assert r["respondeu"] is False
         assert r["motivo"] == "anterior a IA ser ligada"
         assert sem_enviar == []
 
     def test_varredura_ignora_o_passado(self, conversa):
-        banco.executar("UPDATE canal SET ia_ligada_em = now()")
+        """⚠️ Aqui o canal fica INATIVO mesmo: o que se prova é a exclusão, e
+        exclusão não precisa de janela nenhuma."""
+        banco.executar("UPDATE canal SET ia_ligada_em = now() WHERE instancia = %s",
+                       (CANAL_TESTE,))
         assert conversa not in ia.pendentes(limite=500)
 
     def test_canal_sem_hora_de_ligar_nao_atende(self, conversa):
         """Ligado sem hora é estado impossível pelo caminho oficial -- mas se
         alguém ligar a coluna na mão, a IA não pode sair respondendo o passado
         inteiro por causa disso."""
-        banco.executar("UPDATE canal SET ia_ligada_em = NULL")
+        banco.executar("UPDATE canal SET ia_ligada_em = NULL WHERE instancia = %s",
+                       (CANAL_TESTE,))
         assert ia.responder(conversa)["motivo"] == "anterior a IA ser ligada"
         assert conversa not in ia.pendentes(limite=500)
 
 
 class TestVarredura:
-    def test_pega_conversa_com_pergunta_esperando(self, conversa):
+    """🚨 A VARREDURA SÓ OLHA CANAL ATIVO, e o canal da suíte é inativo de
+    propósito -- é o que impede o serviço de produção, rodando ao lado no mesmo
+    banco, de enxergar as conversas daqui.
+
+    Para provar que ela PEGA alguma coisa, o canal precisa ficar ativo por um
+    instante. A janela não é fechada com sorte: durante ela, a **segunda
+    porta** fica trancada. `sem_cadastro.ia_ligada = false` faz o `responder()`
+    de produção sair em "IA desligada para este tipo" **antes** de falar com o
+    modelo, antes de enviar e antes de marcar. Uma passada de produção nessa
+    janela não faz nada além de uma consulta.
+    """
+
+    @pytest.fixture()
+    def canal_visivel(self, conversa):
+        """Liga o canal da suíte e tranca a porta do tipo de contato."""
+        banco.executar(
+            "UPDATE relacao_automacao SET ia_ligada = false WHERE relacao = 'sem_cadastro'")
+        banco.executar("UPDATE canal SET ativo = true WHERE instancia = %s",
+                       (CANAL_TESTE,))
+        try:
+            yield conversa
+        finally:
+            banco.executar("UPDATE canal SET ativo = false WHERE instancia = %s",
+                           (CANAL_TESTE,))
+
+    def test_pega_conversa_com_pergunta_esperando(self, canal_visivel):
         # ⚠️ `limite=500`: a varredura ordena pela mais ANTIGA e a conversa do
         # teste é a mais nova da base. Com o teto padrão de 20 ela ficaria de
         # fora e o teste reprovaria código correto.
-        assert conversa in ia.pendentes(limite=500)
+        assert canal_visivel in ia.pendentes(limite=500)
 
-    def test_nao_pega_o_que_ja_foi_atendido(self, conversa, monkeypatch):
-        com_motor(monkeypatch, [texto("respondi")])
-        ia.responder(conversa)
+    def test_canal_INATIVO_e_invisivel_para_a_varredura(self, conversa):
+        """🚨 A trava do pior defeito de 26/08, medida pelo lado do código: com
+        o canal inativo, a varredura não enxerga a conversa nem com a IA
+        ligada, o prompt publicado e a mensagem esperando."""
         assert conversa not in ia.pendentes(limite=500)
 
-    def test_nao_pega_conversa_com_dono(self, conversa):
+    def test_nao_pega_o_que_ja_foi_atendido(self, canal_visivel, monkeypatch):
+        com_motor(monkeypatch, [texto("respondi")])
+        banco.executar(
+            "UPDATE relacao_automacao SET ia_ligada = true WHERE relacao = 'sem_cadastro'")
+        ia.responder(canal_visivel)
+        assert canal_visivel not in ia.pendentes(limite=500)
+
+    def test_nao_pega_conversa_com_dono(self, canal_visivel):
         atendente = banco.um("SELECT id FROM atendente LIMIT 1")
         if not atendente:
             pytest.skip("nenhum atendente cadastrado")
         banco.executar("UPDATE conversa SET atendente_id = %s WHERE id = %s",
-                       (atendente["id"], conversa))
-        assert conversa not in ia.pendentes(limite=500)
+                       (atendente["id"], canal_visivel))
+        assert canal_visivel not in ia.pendentes(limite=500)
 
     def test_falha_da_ia_nao_derruba_a_fila_de_eventos(self, conversa, monkeypatch):
         """⚠️ A mensagem do cliente chegou, e é isso que importa guardar."""
@@ -481,8 +556,7 @@ class TestInterruptor:
         from movizap import canais
         monkeypatch.setattr(ia, "estado",
                             lambda: {"disponivel": False, "motivo": "sem chave"})
-        c = banco.um("SELECT id FROM canal WHERE tipo = 'atendimento' LIMIT 1")
-        assert canais.ligar_ia(c["id"], False, "teste")["ok"] is True
+        assert canais.ligar_ia(_canal_da_suite(), False, "teste")["ok"] is True
 
     def test_ligar_ia_por_tipo_exige_motor(self, monkeypatch):
         monkeypatch.setattr(ia, "estado",
@@ -521,14 +595,14 @@ class TestEnsaio:
     def test_ensaio_ignora_os_interruptores(self, conversa, monkeypatch):
         """O ensaio existe justamente para rodar ANTES de ligar."""
         com_motor(monkeypatch, [texto("oi")])
-        banco.executar("UPDATE canal SET ia_ligada = false")
+        banco.executar("UPDATE canal SET ia_ligada = false WHERE instancia = %s",
+                       (CANAL_TESTE,))
         assert ia.responder(conversa, ensaio=True)["texto"] == "oi"
 
     def test_ensaio_respeita_o_nunca_em_grupo(self, monkeypatch):
         """`docs/04`: nunca responde em grupo. Nem em ensaio."""
         com_motor(monkeypatch, [texto("oi")])
-        canal = banco.um(
-            "SELECT id FROM canal WHERE tipo = 'atendimento' AND ativo LIMIT 1")
+        canal = {"id": _canal_da_suite()}
         cid = banco.um(
             """INSERT INTO conversa (canal_id, tipo, grupo_jid, estado)
                VALUES (%s, 'grupo', %s, 'nova') RETURNING id""",
@@ -552,6 +626,37 @@ class TestEstadoDoMotor:
         """Era literal `False` e teria continuado `False` depois de o motor
         entrar -- contador em prosa nasce errado e ninguém percebe."""
         assert prompt_ia.estado()["motor_existe"] == ia.estado()["disponivel"]
+
+
+def test_a_suite_nunca_liga_o_canal_de_producao():
+    """🚨🚨 A TRAVA DO PIOR DEFEITO DO DIA 26/08.
+
+    A versão anterior desta suíte ligava `ia_ligada` no canal de produção. O
+    serviço roda em outro processo, lendo o mesmo banco, a cada 5 segundos —
+    e mandou uma mensagem da IA para um cliente real enquanto os testes
+    corriam. Os `monkeypatch` daqui não alcançam aquele processo.
+
+    Este teste roda no fim, com a suíte inteira já tendo passado, e mede o
+    ESTADO: nenhum canal de produção pode estar com a IA ligada. Se alguém
+    voltar a mexer no canal real, reprova aqui.
+    """
+    ligados = banco.varios(
+        "SELECT nome, instancia FROM canal WHERE ia_ligada AND instancia <> %s",
+        (CANAL_TESTE,))
+    assert ligados == [], (
+        f"a suíte deixou a IA ligada em canal de produção: {ligados}. "
+        f"Um serviço rodando ao lado responde cliente de verdade com isso.")
+
+
+def test_o_canal_da_suite_e_invisivel_para_a_varredura():
+    """⚠️ A outra metade: o canal do teste tem de ser inerte para produção.
+    `ia.pendentes()` exige `ca.ativo`, e o da suíte nasce inativo."""
+    linha = banco.um("SELECT ativo FROM canal WHERE instancia = %s", (CANAL_TESTE,))
+    if not linha:
+        pytest.skip("o canal da suíte ainda não foi criado nesta rodada")
+    assert linha["ativo"] is False, (
+        "o canal da suíte ficou ATIVO -- a varredura de produção passa a "
+        "enxergar as conversas de teste")
 
 
 def test_o_pacote_llm_e_o_unico_que_le_a_chave():

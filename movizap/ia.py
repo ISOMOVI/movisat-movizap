@@ -582,6 +582,17 @@ def _gravar_saida_da_ia(conversa_id: int, texto: str, enviado: dict,
     automática: se contasse, o tempo de primeira resposta humana viraria zero
     no dia em que a IA fosse ligada, e a métrica pareceria excelente
     justamente porque ninguém atendeu.
+
+    🚨 DUAS TRANSAÇÕES, E A MENSAGEM VEM PRIMEIRO. Descoberto na auditoria de
+    26/08: as duas escritas estavam juntas, a segunda estourou, e o `rollback`
+    levou junto a PRIMEIRA -- a mensagem já tinha SIDO ENVIADA ao cliente e o
+    painel ficou sem registro do que a IA disse. O eco do Evolution acabou
+    gravando-a como `autor = 'atendente'`, e o histórico passou a dizer que
+    uma pessoa escreveu o que a máquina escreveu.
+
+    **O que já saiu não pode depender de o resto dar certo.** Falhar ao anotar
+    a versão do prompt é um recado no log; perder a mensagem é o painel mentir
+    sobre uma conversa real.
     """
     with banco.cursor() as cur:
         cur.execute(
@@ -591,11 +602,22 @@ def _gravar_saida_da_ia(conversa_id: int, texto: str, enviado: dict,
                VALUES (%s, %s, 'saida', 'ia', 'texto', %s, 'enviada', now())
                ON CONFLICT (id_externo) WHERE id_externo IS NOT NULL DO NOTHING""",
             (conversa_id, enviado.get("id_externo"), texto))
-        cur.execute(
-            """UPDATE conversa
-                  SET ultima_atividade_em = now(), atualizada_em = now(),
-                      prompt_versao_id = COALESCE(%s, prompt_versao_id)
-                WHERE id = %s""", (versao_id, conversa_id))
+
+    try:
+        with banco.cursor() as cur:
+            cur.execute(
+                """UPDATE conversa
+                      SET ultima_atividade_em = now(), atualizada_em = now(),
+                          prompt_versao_id = COALESCE(
+                              (SELECT id FROM prompt_versao WHERE id = %s),
+                              prompt_versao_id)
+                    WHERE id = %s""", (versao_id, conversa_id))
+    except Exception:                                         # noqa: BLE001
+        # ⚠️ A subconsulta acima já evita o caso conhecido (versão apagada
+        # entre montar e gravar). Este `except` é para o que eu não previ: a
+        # mensagem está registrada, e nada aqui pode desfazer isso.
+        log.exception("conversa %s: a IA respondeu mas o carimbo da conversa "
+                      "falhou (a mensagem ESTÁ gravada)", conversa_id)
 
 
 # ── A varredura ──────────────────────────────────────────────────────────────
@@ -622,6 +644,13 @@ def pendentes(limite: int = 20) -> list[int]:
              FROM conversa c
              JOIN canal ca ON ca.id = c.canal_id
             WHERE ca.ia_ligada AND ca.tipo = 'atendimento'
+              -- 🚨 `ca.ativo` ENTROU NA AUDITORIA DE 26/08, e o motivo é o
+              -- pior defeito do dia: canal desligado não pode ser atendido
+              -- sozinho. É também o que permite a suíte ter um canal SÓ DELA,
+              -- inativo, sem que este laço -- que roda a cada 5 s em produção,
+              -- lendo o MESMO banco -- comece a responder cliente de verdade
+              -- enquanto o teste corre.
+              AND ca.ativo
               AND ca.ia_ligada_em IS NOT NULL
               AND c.tipo = 'direta' AND c.atendente_id IS NULL
               AND c.estado IN ('nova', 'bot')
