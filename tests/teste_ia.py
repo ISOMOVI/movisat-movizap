@@ -46,7 +46,11 @@ def limpar():
 @pytest.fixture(scope="module", autouse=True)
 def pool():
     banco.abrir()
-    antes_canal = banco.varios("SELECT id, ia_ligada FROM canal")
+    # ⚠️ `ia_ligada_em` VAI JUNTO. A primeira versão restaurava só `ia_ligada`
+    # e deixava a hora gravada num canal desligado -- rastro de teste em tabela
+    # de produção. Inofensivo (ligar reescreve a hora), mas mentira: a coluna
+    # existe para responder "desde quando a IA responde os clientes?".
+    antes_canal = banco.varios("SELECT id, ia_ligada, ia_ligada_em FROM canal")
     antes_relacao = banco.varios("SELECT relacao, ia_ligada FROM relacao_automacao")
     limpar()
 
@@ -67,8 +71,9 @@ def pool():
             (minha["id"],))
         banco.executar("DELETE FROM prompt_versao WHERE id = %s", (minha["id"],))
     for c in antes_canal:
-        banco.executar("UPDATE canal SET ia_ligada = %s WHERE id = %s",
-                       (c["ia_ligada"], c["id"]))
+        banco.executar(
+            "UPDATE canal SET ia_ligada = %s, ia_ligada_em = %s WHERE id = %s",
+            (c["ia_ligada"], c["ia_ligada_em"], c["id"]))
     for r in antes_relacao:
         banco.executar("UPDATE relacao_automacao SET ia_ligada = %s WHERE relacao = %s",
                        (r["ia_ligada"], r["relacao"]))
