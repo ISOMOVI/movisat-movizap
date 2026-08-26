@@ -21,6 +21,7 @@ import { ref, reactive, computed, onMounted, onUnmounted, watch, nextTick } from
 import { useRoute, useRouter } from 'vue-router'
 
 import { api, pedirBlob, ErroDeApi } from '../api/cliente.js'
+import { codigosPermitidos } from '../estado/sessao.js'
 import { marcar, partir } from '../util/destaque.js'
 import { corDaInicial, iniciais } from '../util/avatar.js'
 
@@ -190,6 +191,44 @@ async function enviarGravacao() {
     erro.value = e.message || 'Não consegui enviar o áudio.'
   } finally {
     enviando.value = false
+  }
+}
+
+/* ---- o TIPO da pessoa, na própria ficha -----------------------------------
+   🚨 A FAIXA MOSTRAVA A EMPRESA E NÃO MOSTRAVA O TIPO. Apontado por ele em
+   26/08. Até 25/08 o tipo era só uma etiqueta de cadastro e a falta passava;
+   desde então ele decide se a **saudação automática** dispara, e desde 26/08
+   se a **IA** atende — quem está falando com a pessoa é quem sabe o que ela
+   é, e mandá-lo a outra tela para marcar isso é o caminho que ninguém faz.
+
+   ⚠️ A LISTA É CÓPIA DO CHECK DO BANCO (`contato_relacao_check`, migração
+   031), igual à da tela de Contatos. Divergir aqui daria 400 na cara do
+   atendente com o valor que a própria tela ofereceu.
+
+   ⚠️ QUEM NÃO TEM `CAD_1.2` VÊ, MAS NÃO TROCA. A rota exige essa permissão, e
+   oferecer um seletor que responde 403 é pior que mostrar o valor: o
+   frontend desenha, não decide. */
+const RELACOES = [
+  ['cliente', 'Cliente'], ['fornecedor', 'Fornecedor'], ['parceiro', 'Parceiro'],
+  ['tecnico', 'Técnico'], ['lead', 'Lead'], ['colaborador', 'Colaborador'],
+  ['teste', 'Teste'], ['sem_identificacao', 'Sem identificação'],
+]
+const NOME_RELACAO = Object.fromEntries(RELACOES)
+const podeTrocarTipo = computed(() => codigosPermitidos.value.has('CAD_1.2'))
+const tipoSalvo = ref(false)
+
+async function trocarTipo(nova) {
+  const contato = aberta.value?.empresa?.contato
+  if (!contato || nova === contato.relacao) return
+  tipoSalvo.value = false
+  const antes = contato.relacao
+  contato.relacao = nova
+  try {
+    await api.put(`/api/contatos/${contato.id}/relacao`, { relacao: nova })
+    tipoSalvo.value = true
+  } catch (e) {
+    contato.relacao = antes
+    erro.value = e instanceof ErroDeApi ? e.message : 'Não consegui marcar o tipo.'
   }
 }
 
@@ -1778,6 +1817,31 @@ function carregarMidiasDaConversa(c) {
                   <dt>E-mail do contato</dt>
                   <dd>{{ aberta.empresa.contato.email }}</dd>
                 </template>
+
+                <!-- 🚨 O TIPO DECIDE SE A AUTOMAÇÃO E A IA ATENDEM ESTA
+                     PESSOA (CFG_5.1). Fica na ficha porque quem fala com ela
+                     é quem sabe o que ela é. -->
+                <dt>Tipo</dt>
+                <dd>
+                  <select
+                    v-if="podeTrocarTipo"
+                    :value="aberta.empresa.contato.relacao"
+                    class="campo__entrada gaveta__tipo"
+                    @change="trocarTipo($event.target.value)"
+                  >
+                    <option v-for="[valor, rotulo] in RELACOES" :key="valor" :value="valor">
+                      {{ rotulo }}
+                    </option>
+                  </select>
+                  <span v-else class="chip">
+                    {{ NOME_RELACAO[aberta.empresa.contato.relacao]
+                       || aberta.empresa.contato.relacao }}
+                  </span>
+                  <span v-if="tipoSalvo" class="chip chip--ok">gravado</span>
+                  <span class="apagado pequeno gaveta__tipo-ajuda">
+                    Decide se a automação por tipo e a IA atendem esta pessoa.
+                  </span>
+                </dd>
               </dl>
               <button class="botao botao--pequeno botao--fantasma" type="button" @click="desvincular">
                 <i class="bi bi-x-circle" aria-hidden="true"></i> Desvincular
@@ -2503,6 +2567,13 @@ function carregarMidiasDaConversa(c) {
   display: flex;
   flex-direction: column;
   gap: var(--e-2);
+  /* ⚠️ A COLUNA PASSOU A TER ALTURA, então a ficha também precisa saber
+     encolher: aberta numa pessoa com muitas empresas, ela empurraria o fio e
+     o compositor para fora do cartão -- e `.coluna { overflow: hidden }`
+     cortaria em silêncio, sem barra para rolar. */
+  flex: 0 1 auto;
+  max-height: 45%;
+  overflow-y: auto;
 }
 .gaveta__topo {
   display: flex;
@@ -2554,6 +2625,11 @@ function carregarMidiasDaConversa(c) {
   border-radius: var(--r-sm);
   background: var(--superficie);
 }
+/* O seletor de tipo na ficha: largura de conteúdo, não de formulário. Um
+   `<select>` de 100% ao lado de "Empresa" e "CNPJ" desequilibra a lista. */
+.gaveta__tipo { max-width: 12rem; display: inline-block; }
+.gaveta__tipo-ajuda { display: block; margin-top: var(--e-1); }
+
 .gaveta__achado {
   width: 100%;
   display: flex;
@@ -2612,6 +2688,21 @@ function carregarMidiasDaConversa(c) {
 }
 
 .coluna { overflow: hidden; }
+
+/* 🚨 A COLUNA DA CONVERSA VIRA UMA PILHA COM ALTURA, e o fio ocupa o que
+   sobra. Apontado por ele em 26/08: o fio tinha `max-height: 52vh` fixo, então
+   metade da tela ficava vazia embaixo enquanto a conversa rolava numa
+   janelinha. Altura fixa em `vh` é chute sobre o monitor de quem usa.
+
+   ⚠️ `max-height`, NÃO `height`: conversa curta continua sendo um cartão
+   curto, sem um vão cinza embaixo. O `calc` desconta o cabeçalho da tela e as
+   margens; o `min` impede que num monitor muito alto o fio fique maior do que
+   se lê de uma vez. */
+.coluna--larga {
+  display: flex;
+  flex-direction: column;
+  max-height: min(calc(100vh - 9rem), 60rem);
+}
 
 .conversas { list-style: none; margin: 0; padding: 0; max-height: 60vh; overflow-y: auto; }
 
@@ -2777,9 +2868,21 @@ function carregarMidiasDaConversa(c) {
   display: flex;
   flex-direction: column;
   gap: var(--e-2);
-  padding: var(--e-3);
-  max-height: 52vh;
+  /* 🚨 A MESMA MARGEM LATERAL DO COMPOSITOR. O fio usava `--e-3` e o campo de
+     escrever vive dentro de `.cartao__corpo`, que usa `--e-4`: 4px de
+     diferença de cada lado, e o campo aparecia mais estreito que as mensagens.
+     Apontado por ele em 26/08. Alinhar é usar o mesmo token, não somar um
+     ajuste -- valor escolhido a olho volta a desalinhar na próxima mudança. */
+  padding: var(--e-3) var(--e-4);
+  /* Ocupa o que sobra da coluna em vez de um `vh` fixo. `min-height: 0` é o
+     que permite o filho de um flex ENCOLHER e rolar; sem ele o fio empurra o
+     compositor para fora da tela em conversa longa. */
+  flex: 1 1 auto;
+  min-height: 12rem;
   overflow-y: auto;
+  /* Balão já quebra palavra; barra horizontal aqui só apareceria por acidente
+     de conteúdo largo, e rolar a conversa de lado não serve para nada. */
+  overflow-x: hidden;
 }
 
 .balao {

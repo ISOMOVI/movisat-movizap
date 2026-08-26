@@ -1121,8 +1121,10 @@ destino da conversa. Guardar o trio seria copiar o que já está lá.
 ⚠️ **Nota interna não reage nem é citada:** nunca foi ao WhatsApp, então não há
 chave para apontar.
 
-⚠️ **Encaminhar arquivo ainda não.** Dizer o que falta é melhor que mandar só a
-legenda e deixar o outro lado sem o anexo.
+✅ **Encaminhar arquivo ENTROU em 26/08.** O arquivo é relido do disco e vai
+junto com a legenda. O que esta nota dizia — mandar só a legenda seria pior que
+recusar — continua valendo e virou regra: arquivo que sumiu do disco é
+**recusado com o motivo**, nunca enviado só como legenda.
 
 ⚠️ **Reação do cliente ainda não é tratada:** chega como `reactionMessage` e cai
 no ramo de "tipo ainda não tratado".
@@ -1210,3 +1212,122 @@ impossível aprova regra frouxa.
 🚨 **A REGRA QUE FICOU:** *todo teto tem de aparecer na resposta.* A busca
 devolvia 200 acertos calada — a mesma mentira por omissão do teto de 1.000
 mensagens. Vale para qualquer limite novo.
+
+---
+
+# 2026-08-26 — o que mudou nas telas
+
+⚠️ **ESTA SEÇÃO EXISTE PORQUE O DOC TINHA ATRASADO.** Ele perguntou, em 26/08,
+se a documentação das telas estava em dia. Estava para o **registro** (as 20
+telas do `movizap/telas.py` aparecem todas no `docs/03`), e **não estava para o
+conteúdo**: este arquivo ainda dizia *"encaminhar arquivo ainda não"* depois de
+o encaminhar arquivo existir. Ficou a trava
+`tests/teste_telas_documentadas.py`, que reprova tela sem seção aqui.
+
+## CFG_2.1 — a sala de ensaio
+
+O `docs/04` sempre teve uma sequência de ativação de quatro passos: parear o
+chip, conferir que a mensagem chega, **validar o bot respondendo**, ligar o
+interruptor. O passo 3 não tinha como ser cumprido — não havia motor.
+
+| O quê | Onde |
+|---|---|
+| Campo com o **número da conversa** e uma pergunta opcional | fim da CFG_2.1 |
+| Devolve o texto, as **ferramentas** que ela usou e a **ação** que teria tomado | balão, no formato de mensagem |
+
+🚨 **ENSAIAR NÃO É OPERAR.** Roda o motor inteiro — prompt publicado, catálogo
+de ferramentas, modelo — e **não envia, não grava, não transfere e não liga
+nada**. Ele mostra o que ela *teria* feito. Se ensaiar operasse, não seria
+ensaio, e o primeiro erro da IA aconteceria em público.
+
+⚠️ **A seção só aparece com o motor disponível.** Sem chave ou sem versão de
+prompt publicada, no lugar dela fica o motivo escrito.
+
+## CFG_5.1 — o interruptor de IA destravou
+
+Até 25/08 o botão de IA aparecia **cinza com o motivo**, porque não havia
+motor. Ele agora liga e desliga de verdade — e continua cinza, com o motivo,
+sempre que o motor estiver indisponível. **A tela não decide:** `ia_disponivel`
+vem do próprio motor.
+
+🚨 **LIGAR AQUI NÃO PÕE A IA NO AR, E A TELA DIZ ISSO.** São duas travas
+separadas de propósito: aqui é o **filtro por tipo de contato**; quem coloca no
+ar é o interruptor do **canal**, na CFG_1.1. Sem esse aviso, alguém liga
+"Cliente", sai da tela achando que a IA está atendendo, e nada acontece — o
+pior tipo de silêncio.
+
+⚠️ **O alcance aparece na hora de ligar:** *"ligar a IA aqui a coloca para
+conversar com 1.750 pessoas"*. É o mesmo número que a saudação já mostrava, na
+mesma lógica.
+
+## CFG_1.1 — "Ligar IA", o ato
+
+Botão novo no cartão do canal, e um selo **"IA no ar"** antes do estado da
+conexão — é a informação mais consequente da tela.
+
+🚨 **A CONFIRMAÇÃO DIZ O QUE VAI ACONTECER, E O QUE NÃO VAI:** que ela passa a
+responder sozinha, e que **não responde nada que já esteja na caixa** — só o
+que chegar depois do clique. Sem essa segunda frase, ligar responderia às 363
+conversas abertas.
+
+⚠️ **Só no canal de atendimento.** O informativo é disparo; a rota recusa e a
+tela nem oferece.
+
+## ATD_1.2 — reação do cliente
+
+| Antes (até 25/08) | Agora |
+|---|---|
+| a reação virava **uma mensagem** `[reactionMessage — tipo ainda não tratado]` no meio da conversa | ela fica **pendurada no balão reagido**, como no WhatsApp |
+| um emoji só, o nosso | **lista agrupada por emoji, com a contagem** a partir de 2 |
+| — | a **nossa** fica com a borda de acento, no balão e no seletor |
+
+🚨 **Eram 161 mensagens falsas em conversas reais.** 159 foram recuperadas para
+o lugar certo e as falsas apagadas; **2 ficaram**, porque reagiam a mensagens
+anteriores ao painel.
+
+⚠️ **A conta só aparece a partir de dois.** Num grupo, "👍 3" é informação; numa
+conversa direta, "👍 1" seria ruído em todo balão.
+
+## ATD_1.2 — encaminhar arquivo
+
+**O arquivo vai junto, com a legenda.** O aviso no modal diz isso antes do
+clique, junto com o teto de 25 MB.
+
+⚠️ **A falha agora diz o MOTIVO, não só o número.** "1 não deu" manda o
+atendente adivinhar; com arquivo o motivo costuma ser o teto, e é isso que ele
+precisa ler para não achar que o número está errado.
+
+🚨 **Arquivo que sumiu do disco é RECUSADO.** Mandar só a legenda deixaria o
+outro lado sem o anexo — e o balão diria "encaminhada".
+
+## ATD_1.2 — a ficha ganhou o TIPO da pessoa
+
+**Apontado por ele em 26/08:** a faixa mostrava empresa, CNPJ e e-mail, e não
+mostrava nem deixava escolher o tipo — cliente, técnico, fornecedor, lead.
+
+🚨 **ISSO DEIXOU DE SER ETIQUETA DE CADASTRO EM 25/08.** O tipo decide se a
+**saudação automática** dispara e, desde 26/08, se a **IA atende**. Quem fala
+com a pessoa é quem sabe o que ela é; mandá-lo a outra tela para marcar isso é
+o caminho que ninguém faz.
+
+⚠️ **Quem não tem `CAD_1.2` vê o tipo, mas não troca.** A rota exige essa
+permissão, e oferecer um seletor que responde 403 é pior que mostrar o valor —
+o frontend desenha, não decide.
+
+## ATD_1.2 — o alinhamento do fio com o compositor
+
+**Apontado por ele em 26/08**, e os dois defeitos eram reais:
+
+| Sintoma | Causa | Correção |
+|---|---|---|
+| o campo de escrever parecia **mais estreito** que as mensagens | o fio usava `--e-3` de margem lateral e o compositor vive em `.cartao__corpo`, que usa `--e-4` — 4px de cada lado | o fio passou a usar o **mesmo token**, não um ajuste a olho |
+| o fio rolava numa **janelinha** com metade da tela vazia embaixo | `max-height: 52vh` fixo | a coluna virou pilha com altura, e o fio **ocupa o que sobra** |
+
+⚠️ **`max-height`, não `height`:** conversa curta continua sendo um cartão
+curto, sem vão cinza embaixo. **Altura fixa em `vh` é chute sobre o monitor de
+quem usa.**
+
+⚠️ **A ficha também passou a saber encolher.** Com a coluna tendo altura, uma
+ficha de pessoa com muitas empresas empurraria o fio e o compositor para fora
+do cartão — e `.coluna { overflow: hidden }` cortaria **em silêncio**, sem
+barra para rolar.
