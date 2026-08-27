@@ -120,6 +120,29 @@
   --info-suave:  #EFF6FF;
   --info-borda:  #BFDBFE;
 
+  /* ---- a conversa (ATD_1.1 / ATD_1.2) --------------------------------- */
+  /* 🚨 ESCOLHA DO USUÁRIO EM 27/08, entre cinco desenhos que ele viu lado a
+     lado: a opção "Familiar". A razão é de uso, não de gosto — quem atende
+     passa o dia no WhatsApp, e uma tela que se parece com o que a pessoa já
+     sabe usar custa quase nada de treinamento.
+
+     🚨 ESTES TOKENS EXISTEM PORQUE O BALÃO TINHA ESCAPADO DO SISTEMA. Até
+     27/08 ele usava `var(--raio, 12px)` -- token que **não existe**, então
+     caía no valor de emergência -- e três `rgba()` escritos à mão. É a peça
+     mais vista do painel e era a menos governada.
+
+     ⚠️ SÓ A CONVERSA. O menu lateral, a paleta da casa e as outras telas não
+     mudam: decisão dele no mesmo dia. O padrão visual dos quatro painéis
+     (05/08) continua de pé. */
+  --conversa-fundo:      #EFE7DE;  /* o papel da conversa, com textura */
+  --conversa-balao:      #FFFFFF;  /* o que o cliente escreveu */
+  --conversa-saida:      #D9FDD3;  /* o que nós respondemos */
+  --conversa-nota:       #FFF6D6;  /* nota interna: nunca sai para o cliente */
+  --conversa-nota-texto: #7A5A00;
+  --conversa-lida:       #53BDEB;  /* o segundo tique */
+  --conversa-raio:       8px;      /* 🚨 substitui o `--raio` que nunca existiu */
+  --conversa-bico:       7px;      /* a ponta do balão */
+
   /* ---- menu lateral: ESCURO mesmo no tema claro ----------------------- */
   /* É a assinatura do MoviChat, e o que mais distingue os painéis à
      primeira vista. Tokens próprios porque não seguem o tema. */

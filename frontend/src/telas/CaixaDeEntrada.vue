@@ -1222,6 +1222,12 @@ const ICONE = {
 const midias = reactive({})
 const MOSTRAM_SOZINHAS = ['imagem', 'figurinha', 'audio', 'video']
 
+/* O estado de entrega, no símbolo que quem atende já lê sem pensar (27/08).
+   🚨 SÓ OS ESTADOS QUE TÊM TIQUE. `pendente` e `falhou` continuam saindo por
+   extenso: um relógio e um "x" pequenininho no canto seriam justamente os dois
+   casos em que a pessoa PRECISA parar e ler. */
+const TIQUE = { enviada: '✓', entregue: '✓✓', lida: '✓✓' }
+
 /* Que tipo de mídia é esta mensagem, para decidir se mostra foto, áudio ou só
    o link de baixar.
 
@@ -2196,7 +2202,19 @@ function carregarMidiasDaConversa(c) {
                 <span v-if="m.direcao === 'saida' && m.atendente_nome">
                   · {{ m.atendente_nome }}
                 </span>
-                <span v-if="m.entrega"> · {{ m.entrega }}</span>
+                <!-- 🚨 O TIQUE, não a palavra (27/08). "enviada / entregue /
+                     lida" é vocabulário nosso, do CHECK do banco; quem atende
+                     lê ✓ e ✓✓ sem pensar. O segundo tique fica AZUL só quando
+                     foi lida -- é a única diferença entre entregue e lida, e é
+                     a que o atendente procura.
+                     ⚠️ `title` mantém a palavra, para quem passar o mouse e
+                     para leitor de tela: o símbolo não pode ser a única
+                     fonte. -->
+                <span v-if="TIQUE[m.entrega]"
+                      class="balao__tique"
+                      :class="{ 'balao__lida': m.entrega === 'lida' }"
+                      :title="m.entrega">{{ TIQUE[m.entrega] }}</span>
+                <span v-else-if="m.entrega"> · {{ m.entrega }}</span>
               </p>
 
               <!-- A reação fica PENDURADA no canto do balão, como no
@@ -2887,10 +2905,13 @@ function carregarMidiasDaConversa(c) {
    item cresce e a hora sai da coluna. */
 .conversa__corpo { flex: 1 1 auto; min-width: 0; display: block; }
 
+/* ⚠️ 44px, não 36 (27/08). É o mesmo número do alvo de toque (`--altura-toque`)
+   e o que dá presença à lista sem trocar a densidade: a linha já tinha essa
+   altura por causa das duas linhas de texto. */
 .conversa__avatar {
   flex: none;
-  width: 36px;
-  height: 36px;
+  width: var(--altura-toque);
+  height: var(--altura-toque);
   border-radius: var(--r-full);
   display: flex;
   align-items: center;
@@ -3026,20 +3047,90 @@ function carregarMidiasDaConversa(c) {
   /* Balão já quebra palavra; barra horizontal aqui só apareceria por acidente
      de conteúdo largo, e rolar a conversa de lado não serve para nada. */
   overflow-x: hidden;
+
+  /* 🚨 O PAPEL DA CONVERSA (27/08, escolha dele entre cinco desenhos). A
+     textura é o que o olho reconhece antes de ler: quem atende passa o dia no
+     WhatsApp, e a semelhança vale treinamento.
+
+     ⚠️ PADRÃO EM SVG EMBUTIDO, não arquivo: sem requisição, sem asset para
+     versionar, e some junto com o CSS se um dia isto mudar. */
+  background-color: var(--conversa-fundo);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='52' height='52' viewBox='0 0 52 52'%3E%3Cg fill='%23000' fill-opacity='.028'%3E%3Ccircle cx='9' cy='9' r='1.6'/%3E%3Ccircle cx='35' cy='22' r='1.2'/%3E%3Ccircle cx='20' cy='40' r='1.4'/%3E%3Ccircle cx='45' cy='47' r='1'/%3E%3C/g%3E%3C/svg%3E");
+  gap: 3px;
 }
 
+/* ---- o balão ------------------------------------------------------------
+   🚨 ELE TINHA ESCAPADO DO SISTEMA, e é a peça mais vista do painel: usava
+   `var(--raio, 12px)` -- token que NUNCA EXISTIU, então caía no valor de
+   emergência -- e três `rgba()` escritos à mão, fora da paleta. Agora cada
+   valor é token, e o token está documentado no `tokens.css`. */
 .balao {
-  max-width: 78%;
-  padding: var(--e-2) var(--e-3);
-  border-radius: var(--raio, 12px);
-  background: rgba(128, 128, 128, .12);
+  position: relative;
+  max-width: min(66%, 520px);
+  padding: 7px 11px 6px;
+  border-radius: var(--conversa-raio);
+  background: var(--conversa-balao);
+  box-shadow: var(--sombra-1);
+  line-height: 1.5;
 }
-.balao--saida { align-self: flex-end; background: rgba(37, 211, 102, .16); }
-.balao--interna { align-self: center; background: rgba(255, 193, 7, .16); font-style: italic; }
+
+/* 🚨 O BICO. É o detalhe que faz a tela ser reconhecida de longe, e ele é
+   feito com borda -- nenhuma imagem, nenhum pseudo-elemento posicionado a
+   olho. O canto do lado do bico perde o raio: é o que encaixa os dois. */
+.balao--entrada { align-self: flex-start; border-top-left-radius: 0; }
+.balao--entrada::before {
+  content: "";
+  position: absolute;
+  left: calc(var(--conversa-bico) * -1);
+  top: 0;
+  border: var(--conversa-bico) solid transparent;
+  border-left: 0;
+  border-right-color: var(--conversa-balao);
+  border-top-color: var(--conversa-balao);
+}
+
+.balao--saida {
+  align-self: flex-end;
+  background: var(--conversa-saida);
+  border-top-right-radius: 0;
+}
+.balao--saida::before {
+  content: "";
+  position: absolute;
+  right: calc(var(--conversa-bico) * -1);
+  top: 0;
+  border: var(--conversa-bico) solid transparent;
+  border-right: 0;
+  border-left-color: var(--conversa-saida);
+  border-top-color: var(--conversa-saida);
+}
+
+/* ⚠️ A NOTA INTERNA NÃO TEM BICO, e isso é significado: ela não veio de
+   ninguém e não vai para o cliente. Fica centrada, em papel próprio. */
+.balao--interna {
+  align-self: center;
+  max-width: min(70%, 460px);
+  background: var(--conversa-nota);
+  color: var(--conversa-nota-texto);
+  text-align: center;
+  font-size: var(--txt-sm);
+  font-style: normal;
+}
+.balao--interna::before { display: none; }
 
 .balao__texto { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 .balao__tipo { margin: 0 0 var(--e-1); }
-.balao__rodape { margin: var(--e-1) 0 0; }
+
+/* ⚠️ HORA À DIREITA, sempre -- inclusive no balão de entrada. É onde o olho
+   já procura, e alinhar à esquerda faria a hora competir com o texto. */
+.balao__rodape {
+  margin: 2px 0 0;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+/* O segundo tique só existe quando a mensagem foi lida. */
+.balao__tique { margin-left: 3px; letter-spacing: -2px; }
+.balao__lida { color: var(--conversa-lida); font-weight: var(--peso-forte); }
 
 /* Quem escreveu a nota. Fora do itálico do balão interno: é etiqueta, não
    parte do texto que a pessoa digitou. */
@@ -3102,7 +3193,30 @@ function carregarMidiasDaConversa(c) {
 
 /* ---- chamar alguém com @, só em grupo (27/08) --------------------------- */
 /* `position: relative` porque a lista do `@` se ancora no compositor. */
-.compositor { position: relative; }
+/* ---- o compositor (27/08) -----------------------------------------------
+   🚨 O CAMPO É UMA ILHA BRANCA SOBRE FUNDO CINZA, e isso é a coisa que mais
+   separa "campo de formulário" de "lugar de escrever mensagem". O fio tem
+   papel próprio; sem o contraste aqui, o compositor sumia dentro do cartão. */
+.compositor {
+  position: relative;
+  background: var(--superficie);
+  border: var(--borda-fina) solid var(--borda);
+  border-radius: var(--r-lg);
+  transition: border-color var(--tempo) var(--curva),
+              box-shadow var(--tempo) var(--curva);
+}
+.compositor:focus-within {
+  border-color: var(--acento-borda);
+  box-shadow: 0 0 0 3px var(--acento-suave);
+}
+/* O `.campo__entrada` de dentro perde a própria borda: quem desenha a caixa
+   agora é o compositor inteiro, senão ficam duas molduras concêntricas. */
+.compositor .campo__entrada {
+  border: 0;
+  background: none;
+  box-shadow: none;
+}
+.compositor .campo__entrada:focus { box-shadow: none; outline: 0; }
 
 /* A lista SOBE: o compositor mora no rodapé da conversa, e abaixo dele a
    lista sairia da tela. */
@@ -3157,21 +3271,36 @@ function carregarMidiasDaConversa(c) {
 /* ---- ações do balão -----------------------------------------------------
    Aparecem no hover: três botões fixos em cada balão transformam o fio numa
    grade de botões, e o que se lê é a conversa. */
-.balao { position: relative; }
 .balao__acoes {
   position: absolute;
-  top: -10px;
+  top: -11px;
   right: var(--e-2);
-  display: none;
+  display: flex;
   gap: 2px;
   padding: 2px;
   background: var(--superficie);
   border: var(--borda-fina) solid var(--borda);
   border-radius: var(--r-full);
-  box-shadow: var(--sombra-1);
+  box-shadow: var(--sombra-2);
+  /* 🚨 `opacity`, NÃO `display: none` (27/08). Medido: com `display:none` o
+     bloco sai do fluxo de foco, então `:focus-within` NUNCA dispara -- a linha
+     existia e era código morto, e reagir, citar e encaminhar eram
+     inalcançáveis por teclado.
+
+     ⚠️ `pointer-events` acompanha a opacidade: invisível não pode continuar
+     clicável por acidente, senão vira alvo fantasma sobre o balão. */
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(3px);
+  transition: opacity var(--tempo) var(--curva),
+              transform var(--tempo) var(--curva);
 }
 .balao:hover .balao__acoes,
-.balao__acoes:focus-within { display: flex; }
+.balao:focus-within .balao__acoes {
+  opacity: 1;
+  pointer-events: auto;
+  transform: none;
+}
 .balao__acao {
   border: 0;
   background: none;
@@ -3365,7 +3494,9 @@ function carregarMidiasDaConversa(c) {
 
 /* A mensagem em que a busca está parada AGORA, distinta das outras que também
    casaram: sem isso, num balão longo, não se sabe qual das 17 é a "3". */
-.balao--casa { outline: 1px solid rgba(255, 193, 7, .5); }
+/* ⚠️ `--aviso-borda`, nao um ambar escrito a mao: a trava de estilo
+   pegou este aqui em 27/08, junto com as tres cores do balao. */
+.balao--casa { outline: 1px solid var(--aviso-borda); }
 .balao--atual { outline: 2px solid var(--acento); }
 
 .acoes { border-top: 1px solid var(--borda, rgba(128, 128, 128, .25)); }
