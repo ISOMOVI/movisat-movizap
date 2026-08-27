@@ -58,8 +58,11 @@ def pool():
 def sem_whatsapp(monkeypatch):
     saiu = []
 
-    def texto(instancia, numero, txt, citando=None):
-        saiu.append({"numero": numero, "texto": txt})
+    # ⚠️ `mencionados` entrou em 27/08. Este duble o recebe e o grava, como o
+    # do `teste_midia_whatsapp`: duble que engole argumento novo passa verde
+    # sem provar nada.
+    def texto(instancia, numero, txt, citando=None, mencionados=None):
+        saiu.append({"numero": numero, "texto": txt, "mencionados": mencionados})
         return {"id_externo": f"zz-aud-{len(saiu)}", "status": "PENDING",
                 "bruto": {}}
 

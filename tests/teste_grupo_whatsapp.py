@@ -186,7 +186,7 @@ class TestOEnvioVaiParaOJID:
         cid = criar_grupo(canal)
         enviados = []
 
-        def fingir(instancia, destino, texto, citando=None):
+        def fingir(instancia, destino, texto, citando=None, mencionados=None):
             enviados.append(destino)
             return {"id_externo": "TESTE_GRUPO_1"}
 
@@ -201,7 +201,8 @@ class TestOEnvioVaiParaOJID:
             cid = conversas.garantir_conversa(cur, canal, FONE)
         enviados = []
         monkeypatch.setattr(evolution, "enviar_texto",
-                            lambda i, d, t, citando=None: enviados.append(d)
+                            lambda i, d, t, citando=None, mencionados=None:
+                            enviados.append(d)
                             or {"id_externo": "TESTE_DIRETA_1"})
         conversas.responder(cid, "oi", None)
         assert enviados == [FONE]

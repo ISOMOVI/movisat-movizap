@@ -139,7 +139,7 @@ class TestReabrir:
         from movizap import evolution
         enviados = []
 
-        def fingir(instancia, e164, texto, citando=None):
+        def fingir(instancia, e164, texto, citando=None, mencionados=None):
             enviados.append((instancia, e164, texto))
             return {"id_externo": "TESTE_REABRIR_1"}
 

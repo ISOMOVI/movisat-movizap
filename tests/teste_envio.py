@@ -52,7 +52,7 @@ def sem_enviar(monkeypatch):
     # ⚠️ A ASSINATURA ACOMPANHA A REAL. `citando` entrou em 25/08, com o
     # responder citando; mock que não aceita o argumento reprova código
     # correto e faz procurar defeito onde não há.
-    def falso(instancia, numero, texto, citando=None):
+    def falso(instancia, numero, texto, citando=None, mencionados=None):
         enviadas.append({"instancia": instancia, "numero": numero, "texto": texto})
         return {"id_externo": ID_FALSO, "status": "PENDING", "bruto": {}}
 
@@ -145,7 +145,7 @@ class TestEnvio:
         """⚠️ Envia primeiro, grava depois. O contrário registraria como enviada
         uma mensagem que o WhatsApp recusou -- e o atendente acharia que
         respondeu."""
-        def recusa(instancia, numero, texto, citando=None):
+        def recusa(instancia, numero, texto, citando=None, mencionados=None):
             raise evolution.ErroEvolution("numero nao existe no whatsapp", 400)
 
         monkeypatch.setattr(evolution, "enviar_texto", recusa)

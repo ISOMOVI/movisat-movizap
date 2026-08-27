@@ -64,10 +64,14 @@ def _cliente() -> httpx.Client:
     )
 
 
-def _pedir(metodo: str, caminho: str, corpo: dict | None = None) -> dict:
+def _pedir(metodo: str, caminho: str, corpo: dict | None = None,
+           params: dict | None = None) -> dict:
+    # ⚠️ `params` entrou em 27/08 para o `GET /group/participants`, que pede o
+    # JID do grupo na query. Nenhuma credencial vai por aqui -- a chave viaja
+    # no cabeçalho, como sempre.
     try:
         with _cliente() as c:
-            r = c.request(metodo, caminho, json=corpo)
+            r = c.request(metodo, caminho, json=corpo, params=params)
     except httpx.RequestError as e:
         # 🚨 Nunca colocar `e` inteiro na mensagem: a URL do httpx pode
         # carregar credencial em query em outros provedores, e o hábito é o
@@ -93,7 +97,8 @@ def _pedir(metodo: str, caminho: str, corpo: dict | None = None) -> dict:
 
 
 def enviar_texto(instancia: str, numero_e164: str, texto: str,
-                 citando: dict | None = None) -> dict:
+                 citando: dict | None = None,
+                 mencionados: list[str] | None = None) -> dict:
     """Manda uma mensagem de texto e devolve a chave que o WhatsApp deu a ela.
 
     🚨 O `key.id` DA RESPOSTA É O QUE EVITA A MENSAGEM DUPLICADA. O Evolution
@@ -118,6 +123,19 @@ def enviar_texto(instancia: str, numero_e164: str, texto: str,
     if citando:
         corpo["quoted"] = {"key": citando}
 
+    # 🚨 MENÇÃO É CAMPO, COMO A CITAÇÃO -- não rota. `mentioned` entra no mesmo
+    # `sendText` com os JIDs de quem foi chamado (API v2 do Evolution).
+    #
+    # 🚨 SÓ FAZ EFEITO EM GRUPO. Numa conversa direta o WhatsApp ignora: só há
+    # uma pessoa do outro lado e chamá-la pelo nome não notifica nada além do
+    # que a própria mensagem já notifica. A tela não oferece fora de grupo.
+    #
+    # ⚠️ VAI O JID, NÃO O TELEFONE. `5518998116168@s.whatsapp.net`, não
+    # `+5518998116168` -- e é por isso que quem monta a lista é quem tem os
+    # participantes, não esta função.
+    if mencionados:
+        corpo["mentioned"] = list(mencionados)
+
     resposta = _pedir("POST", f"/message/sendText/{instancia}", corpo)
 
     chave = (resposta or {}).get("key") or {}
@@ -127,6 +145,36 @@ def enviar_texto(instancia: str, numero_e164: str, texto: str,
         "status": (resposta or {}).get("status"),
         "bruto": resposta,
     }
+
+
+def participantes_do_grupo(instancia: str, grupo_jid: str) -> list[dict]:
+    """Quem está no grupo, com os DOIS jeitos de identificar a pessoa.
+
+    🚨 É A ÚNICA FONTE QUE LIGA `@lid` A TELEFONE. Desde que o WhatsApp passou
+    a usar LID nos grupos, `mensagem.remetente_jid` guarda `...@lid` -- medido
+    em 27/08: **todos** os remetentes de grupo da base estão nesse formato, e
+    `@lid` não é telefone nem dá para virar um por conta própria.
+
+    O Evolution devolve os dois: `id` (`...@lid`) e `phoneNumber`
+    (`...@s.whatsapp.net`), mais o nome quando a pessoa tem um no perfil.
+
+    ⚠️ CHAMADA AO VIVO, e por isso ela não entra em caminho de mensagem. Serve
+    a tela que monta a lista do `@` -- é uma consulta por vez que alguém abre a
+    lista, não uma por mensagem que chega.
+    """
+    resposta = _pedir("GET", f"/group/participants/{instancia}",
+                      params={"groupJid": grupo_jid})
+    pessoas = []
+    for p in (resposta or {}).get("participants") or []:
+        if not isinstance(p, dict):
+            continue
+        pessoas.append({
+            "lid": p.get("id"),
+            "jid": p.get("phoneNumber") or p.get("id"),
+            "nome": p.get("name"),
+            "admin": bool(p.get("admin")),
+        })
+    return pessoas
 
 
 def enviar_reacao(instancia: str, chave: dict, emoji: str) -> dict:

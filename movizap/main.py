@@ -1542,6 +1542,37 @@ class RespostaEntrada(BaseModel):
     # Citar uma mensagem DESTA conversa. O backend recusa citar de fora: a
     # chave carrega o `remoteJid` da conversa dela.
     citando_id: int | None = None
+    # 🚨 OS JIDS DE QUEM FOI CHAMADO, resolvidos pela tela na lista do `@`.
+    # Só vale em GRUPO -- fora dele o WhatsApp ignora, e `conversas.responder`
+    # não repassa. Ver `quem_da_para_chamar`.
+    mencionados: list[str] = Field(default_factory=list)
+
+
+@app.get("/api/conversas/{conversa_id}/quem-chamar")
+def participantes_para_chamar(conversa_id: int,
+                              usuario: dict = Depends(auth.requer_tela("ATD_1.2"))):
+    """Quem da para chamar com `@` nesta conversa.
+
+    ⚠️ VAZIO FORA DE GRUPO, e isso nao e erro: mencionar numa conversa de duas
+    pessoas nao notifica nada alem do que a mensagem ja notifica. A tela nao
+    oferece o `@` quando esta lista vem vazia.
+
+    🚨 CONSULTA AO VIVO ao Evolution -- e a unica fonte que liga o `@lid` do
+    participante a um telefone. Por isso ela e chamada quando alguem ABRE a
+    lista, nunca por mensagem.
+    """
+    # ⚠️ O CAMINHO E `/quem-chamar`, NAO `/participantes`: aquele ja existe e
+    # significa outra coisa -- os ATENDENTES convidados para a conversa. Duas
+    # rotas com o mesmo caminho: a primeira registrada vence e a segunda vira
+    # codigo morto. A suite pegou em 27/08.
+    _exige_estar_na_conversa(conversa_id, usuario)
+    try:
+        return {"participantes": conversas.quem_da_para_chamar(conversa_id)}
+    except Exception as e:
+        # A lista do `@` nao pode derrubar a conversa: sem ela, o atendente
+        # continua escrevendo normalmente.
+        log.warning("participantes da conversa %s: %s", conversa_id, e)
+        return {"participantes": [], "erro": "Nao consegui ler o grupo agora."}
 
 
 @app.post("/api/conversas/{conversa_id}/responder")
@@ -1556,7 +1587,8 @@ def responder_conversa(conversa_id: int, dados: RespostaEntrada,
     """
     eu = _exige_estar_na_conversa(conversa_id, usuario)
     resultado = conversas.responder(conversa_id, dados.texto, eu,
-                                    citando_id=dados.citando_id)
+                                    citando_id=dados.citando_id,
+                                    mencionados=dados.mencionados)
     if not resultado["ok"]:
         raise HTTPException(status_code=409, detail=resultado["motivo"])
     return resultado

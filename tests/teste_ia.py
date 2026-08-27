@@ -144,7 +144,7 @@ def sem_enviar(monkeypatch):
     """🚨 Nenhum teste manda mensagem de verdade."""
     enviadas = []
 
-    def falso(instancia, numero, texto, citando=None):
+    def falso(instancia, numero, texto, citando=None, mencionados=None):
         enviadas.append({"numero": numero, "texto": texto})
         return {"id_externo": f"zz-ia-{len(enviadas)}", "status": "PENDING",
                 "bruto": {}}

@@ -51,8 +51,12 @@ def sem_whatsapp(monkeypatch):
     """Grava o que teria ido para o Evolution, e não manda nada."""
     saiu = {"texto": [], "reacao": [], "audio": []}
 
-    def texto(instancia, numero, txt, citando=None):
-        saiu["texto"].append({"numero": numero, "texto": txt, "citando": citando})
+    # ⚠️ `mencionados` ENTROU EM 27/08, e o duble o RECEBE de propósito em vez
+    # de aceitar `**kwargs`: gravar o que saiu é o que permite afirmar sobre a
+    # menção. Duble que engole argumento novo passa verde sem provar nada.
+    def texto(instancia, numero, txt, citando=None, mencionados=None):
+        saiu["texto"].append({"numero": numero, "texto": txt, "citando": citando,
+                              "mencionados": mencionados})
         return {"id_externo": f"zz-mid-{len(saiu['texto'])}",
                 "status": "PENDING", "bruto": {}}
 

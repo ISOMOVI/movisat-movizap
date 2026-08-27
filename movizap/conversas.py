@@ -1382,7 +1382,8 @@ TETO_MENSAGEM = 4000
 
 
 def responder(conversa_id: int, texto: str, atendente_id: int | None,
-              citando_id: int | None = None, assumir: bool = True) -> dict:
+              citando_id: int | None = None, assumir: bool = True,
+              mencionados: list[str] | None = None) -> dict:
     """Responde o cliente pelo WhatsApp e grava a mensagem.
 
     🚨 O NÚMERO VEM DA CONVERSA, NUNCA DO PARÂMETRO. Não é regra de política:
@@ -1457,7 +1458,12 @@ def responder(conversa_id: int, texto: str, atendente_id: int | None,
     try:
         enviado = evolution.enviar_texto(
             conversa_atual["instancia"], conversa_atual["destino"], texto,
-            citando=chave_citada)
+            citando=chave_citada,
+            # 🚨 SO EM GRUPO. Fora dele o WhatsApp ignora `mentioned`, e mandar
+            # assim mesmo seria prometer na tela o que o outro lado nao faz.
+            mencionados=(mencionados
+                         if mencionados and conversa_atual["tipo"] == "grupo"
+                         else None))
     except evolution.ErroEvolution as e:
         log.warning("conversa %s: envio recusado pelo Evolution: %s", conversa_id, e)
         return {"ok": False, "motivo": f"O WhatsApp recusou: {e}"}
@@ -1580,6 +1586,71 @@ def reagir(conversa_id: int, mensagem_id: int, emoji: str) -> dict:
 # `opus` -- muito além do que alguém grava para um cliente, e bem abaixo do
 # teto de arquivo (25 MB), que é para documento.
 TETO_AUDIO = 16 * 1024 * 1024
+
+
+def quem_da_para_chamar(conversa_id: int) -> list[dict]:
+    """Os participantes do grupo, com o melhor nome que temos para cada um.
+
+    🚨 TRES FONTES, NESTA ORDEM DE PREFERENCIA, e cada uma existe por um
+    motivo medido:
+
+      1. o nome do CADASTRO, casado pelo telefone -- e o nome que o atendente
+         reconhece, porque e o mesmo que ele ve na ficha;
+      2. o `remetente_nome` que ja gravamos, casado pelo `@lid` -- e como a
+         pessoa aparece no balao dela nesta mesma conversa;
+      3. o nome do perfil que o Evolution devolve.
+
+    ⚠️ SEM NENHUM DOS TRES, entra o telefone. Nunca o `@lid`: `1387...@lid` nao
+    diz nada a ninguem e escolher por ele seria escolher as cegas.
+
+    🚨 O `@lid` E POR QUE ISTO PRECISA DO EVOLUTION. Desde que o WhatsApp
+    passou a usar LID nos grupos, `mensagem.remetente_jid` guarda `...@lid` --
+    medido em 27/08: TODOS os remetentes de grupo da base. So o Evolution liga
+    esse lid ao telefone.
+    """
+    from . import evolution
+
+    linha = banco.um(
+        """SELECT c.tipo, c.grupo_jid, ca.instancia
+             FROM conversa c JOIN canal ca ON ca.id = c.canal_id
+            WHERE c.id = %s""", (conversa_id,))
+    if not linha or linha["tipo"] != "grupo" or not linha["grupo_jid"]:
+        return []
+
+    participantes = evolution.participantes_do_grupo(
+        linha["instancia"], linha["grupo_jid"])
+    if not participantes:
+        return []
+
+    # Como cada um ja apareceu nesta conversa (fonte 2).
+    por_lid = {}
+    for m in banco.varios(
+        """SELECT DISTINCT ON (remetente_jid) remetente_jid, remetente_nome
+             FROM mensagem
+            WHERE conversa_id = %s AND remetente_jid IS NOT NULL
+              AND remetente_nome IS NOT NULL
+            ORDER BY remetente_jid, criada_em DESC""", (conversa_id,)):
+        por_lid[m["remetente_jid"]] = m["remetente_nome"]
+
+    # Como o cadastro conhece cada um (fonte 1).
+    fones = [tel.normalizar(p["jid"]) for p in participantes]
+    fones = [f for f in fones if f]
+    por_fone = {}
+    if fones:
+        for c in banco.varios(
+            """SELECT t.e164, ct.nome
+                 FROM contato_telefone t JOIN contato ct ON ct.id = t.contato_id
+                WHERE t.e164 = ANY(%s)""", (fones,)):
+            por_fone[c["e164"]] = c["nome"]
+
+    saida = []
+    for p in participantes:
+        e164 = tel.normalizar(p["jid"])
+        nome = (por_fone.get(e164) or por_lid.get(p["lid"]) or p["nome"]
+                or (e164 or p["jid"]))
+        saida.append({"jid": p["jid"], "nome": nome, "admin": p["admin"]})
+    saida.sort(key=lambda x: x["nome"].lower())
+    return saida
 
 
 def responder_com_audio(conversa_id: int, dados: bytes,

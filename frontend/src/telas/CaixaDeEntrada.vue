@@ -685,6 +685,13 @@ async function abrir(id) {
     painelAcao.value = ''
     confirmacao.value = null
     limparPaineis()
+    // 🚨 PELA MESMA RAZÃO, A MENÇÃO NÃO ATRAVESSA A TROCA. Um chamado montado
+    // no grupo A seguiria para o grupo B — e lá o JID nem existe. A lista de
+    // quem dá para chamar também é da conversa, e é remontada sob demanda.
+    mencionados.value = []
+    listaArroba.value = []
+    chamaveis.value = []
+    chamaveisDaConversa = null
     // A busca é DESTA conversa: carregá-la em outra mostraria contador e
     // marcações de um termo que ninguém procurou aqui.
     buscaNaConversa.value = ''
@@ -782,14 +789,22 @@ async function enviar(interna = false) {
   recado.value = ''
   const caminho = interna ? 'nota' : 'responder'
   try {
+    /* ⚠️ Só vai quem AINDA está escrito: apagar o "@Fulano" à mão tem de
+       desfazer a menção, senão a pessoa é chamada sem aparecer nada.
+       ⚠️ Nota interna não chama ninguém: ela nunca vai ao WhatsApp. */
+    const vivos = interna ? []
+      : mencionados.value.filter((p) => texto.includes('@' + p.nome))
     await api.post(`/api/conversas/${aberta.value.id}/${caminho}`, {
       texto,
       /* ⚠️ Nota interna não cita: ela nunca foi ao WhatsApp, e o backend
          recusaria a chave. */
       citando_id: interna ? null : (citando.value?.id ?? null),
+      mencionados: vivos.map((p) => p.jid),
     })
     resposta.value = ''
     citando.value = null
+    mencionados.value = []
+    listaArroba.value = []
     // 🚨 Recarrega a conversa em vez de empurrar o balão na mão: o que vale é
     // o que o banco gravou, não o que a tela supõe ter acontecido.
     await Promise.all([abrir(aberta.value.id), carregar({ silencioso: true })])
@@ -798,6 +813,99 @@ async function enviar(interna = false) {
   } finally {
     enviando.value = false
   }
+}
+
+/* ---- chamar alguém com @, só em grupo (27/08) ----------------------------
+   Pedido do usuário: *"interessante e pode ser, tanto no interno quanto no do
+   whatsa"*.
+
+   🚨 SÓ EM GRUPO, e não é escolha de tela: fora dele o WhatsApp IGNORA
+   `mentioned`. Oferecer o `@` numa conversa direta seria prometer o que o
+   outro lado não faz — o backend também não repassa.
+
+   🚨 A LISTA VEM DO EVOLUTION, ao vivo, e é pedida quando alguém digita `@` —
+   nunca por mensagem. É a única fonte que liga o `@lid` do participante a um
+   telefone: desde que o WhatsApp passou a usar LID nos grupos, TODOS os
+   remetentes que gravamos estão nesse formato. */
+const campoResposta = ref(null)
+const mencionados = ref([])
+const listaArroba = ref([])
+const arrobaEscolhido = ref(0)
+const chamaveis = ref([])
+let chamaveisDaConversa = null   // de qual conversa a lista carregada é
+let inicioDaArroba = -1
+
+async function carregarChamaveis() {
+  const id = aberta.value?.id
+  if (!id || !ehGrupo.value) { chamaveis.value = []; return }
+  if (chamaveisDaConversa === id) return
+  try {
+    const r = await api.get(`/api/conversas/${id}/quem-chamar`)
+    chamaveis.value = r.participantes || []
+    chamaveisDaConversa = id
+  } catch {
+    // Não pode derrubar a conversa: sem a lista, escreve-se normalmente.
+    chamaveis.value = []
+  }
+}
+
+async function olharArroba(evento) {
+  if (!ehGrupo.value) { listaArroba.value = []; return }
+  const campo = evento.target
+  const ate = campo.value.slice(0, campo.selectionStart)
+  const at = ate.lastIndexOf('@')
+  // ⚠️ `@` colado em palavra não abre a lista: "email@movisat" não é menção.
+  const antes = at > 0 ? ate[at - 1] : ' '
+  if (at === -1 || !/\s/.test(antes)) { listaArroba.value = []; return }
+  const termo = ate.slice(at + 1)
+  if (/\s{2,}|\n/.test(termo)) { listaArroba.value = []; return }
+
+  await carregarChamaveis()
+  inicioDaArroba = at
+  const busca = termo.trim().toLowerCase()
+  listaArroba.value = chamaveis.value
+    .filter((p) => !mencionados.value.some((m) => m.jid === p.jid))
+    .filter((p) => !busca || (p.nome || '').toLowerCase().includes(busca))
+    .slice(0, 8)
+  arrobaEscolhido.value = 0
+}
+
+/* ⚠️ Só rouba as setas quando a lista está aberta. Sem isto, subir e descer no
+   texto deixaria de funcionar em toda conversa de grupo. */
+function andarNaLista(passo, evento) {
+  if (!listaArroba.value.length) return
+  evento.preventDefault()
+  const n = listaArroba.value.length
+  arrobaEscolhido.value = (arrobaEscolhido.value + passo + n) % n
+}
+
+/* Enter escolhe da lista quando ela está aberta. Fora disso NÃO envia: aqui a
+   mensagem vai para o cliente e não volta, e o envio é `Ctrl+Enter` desde
+   sempre — a fricção se paga. */
+function enterNoCompositor(evento) {
+  if (!listaArroba.value.length) return
+  evento.preventDefault()
+  escolherArroba(listaArroba.value[arrobaEscolhido.value])
+}
+
+function escolherArroba(pessoa) {
+  if (!pessoa) return
+  const campo = campoResposta.value
+  const fim = campo ? campo.selectionStart : resposta.value.length
+  if (inicioDaArroba >= 0) {
+    resposta.value = resposta.value.slice(0, inicioDaArroba)
+      + '@' + pessoa.nome + ' ' + resposta.value.slice(fim)
+  }
+  if (!mencionados.value.some((m) => m.jid === pessoa.jid)) {
+    mencionados.value.push(pessoa)
+  }
+  listaArroba.value = []
+  inicioDaArroba = -1
+  nextTick(() => campo && campo.focus())
+}
+
+function tirarMencionado(jid) {
+  mencionados.value = mencionados.value.filter((m) => m.jid !== jid)
 }
 
 /* ---- envio de arquivo ----------------------------------------------------
@@ -2181,15 +2289,50 @@ function carregarMidiasDaConversa(c) {
             <label class="campo compositor">
               <span class="so-leitor">Mensagem</span>
               <textarea
+                ref="campoResposta"
                 v-model="resposta"
                 class="campo__entrada"
                 rows="3"
+                :placeholder="ehGrupo
+                  ? 'Escreva — @ chama alguém do grupo'
+                  : 'Escreva e escolha abaixo: enviar ao cliente ou guardar como nota'"
                 maxlength="4000"
-                placeholder="Escreva e escolha abaixo: enviar ao cliente ou guardar como nota"
+                @input="olharArroba"
                 @keydown.ctrl.enter.prevent="enviar"
+                @keydown.enter.exact="enterNoCompositor"
+                @keydown.down="andarNaLista(1, $event)"
+                @keydown.up="andarNaLista(-1, $event)"
+                @keydown.esc="listaArroba = []"
                 @paste="colar"
               ></textarea>
+
+              <!-- A lista sobe: o compositor mora no rodapé da conversa. -->
+              <ul v-if="listaArroba.length" class="arroba" role="listbox">
+                <li v-for="(p, i) in listaArroba" :key="p.jid">
+                  <button type="button"
+                          class="arroba__item"
+                          :class="{ 'arroba__item--aqui': i === arrobaEscolhido }"
+                          :aria-selected="i === arrobaEscolhido"
+                          @mousedown.prevent="escolherArroba(p)">
+                    {{ p.nome }}
+                  </button>
+                </li>
+              </ul>
             </label>
+
+            <!-- 🚨 QUEM VAI SER CHAMADO APARECE ANTES DE ENVIAR, e o aviso diz
+                 que isso só vale em grupo — a tela não pode prometer o que o
+                 WhatsApp ignora fora dele. -->
+            <p v-if="mencionados.length" class="linha pequeno fraco chamados">
+              <i class="bi bi-at" aria-hidden="true"></i>
+              <span>chamando no grupo</span>
+              <button v-for="p in mencionados" :key="p.jid"
+                      class="chamados__chip" type="button"
+                      :title="`não chamar ${p.nome}`"
+                      @click="tirarMencionado(p.jid)">
+                {{ p.nome }} <i class="bi bi-x" aria-hidden="true"></i>
+              </button>
+            </p>
 
             <!-- ANEXO nos DOIS modos (decisão do usuário, 12/08). No modo
                  nota o arquivo é guardado na conversa e NÃO sai para o
@@ -2956,6 +3099,60 @@ function carregarMidiasDaConversa(c) {
 .abas__aba:focus-visible { outline: none; box-shadow: var(--foco); }
 
 .anteriores { display: flex; justify-content: center; padding: var(--e-2) 0; }
+
+/* ---- chamar alguém com @, só em grupo (27/08) --------------------------- */
+/* `position: relative` porque a lista do `@` se ancora no compositor. */
+.compositor { position: relative; }
+
+/* A lista SOBE: o compositor mora no rodapé da conversa, e abaixo dele a
+   lista sairia da tela. */
+.arroba {
+  position: absolute;
+  bottom: calc(100% + var(--e-1));
+  left: 0;
+  z-index: var(--z-flutuante);
+  min-width: 220px;
+  max-height: 220px;
+  overflow-y: auto;
+  margin: 0;
+  padding: var(--e-1);
+  list-style: none;
+  background: var(--superficie);
+  border: var(--borda-fina) solid var(--borda);
+  border-radius: var(--r-md);
+  box-shadow: var(--sombra-2);
+}
+.arroba__item {
+  display: block;
+  width: 100%;
+  min-height: var(--altura-toque);
+  padding: 0 var(--e-3);
+  border: 0;
+  border-radius: var(--r-sm);
+  background: none;
+  color: var(--texto);
+  font-family: inherit;
+  font-size: var(--txt-md);
+  text-align: left;
+  cursor: pointer;
+}
+.arroba__item:hover,
+.arroba__item--aqui { background: var(--acento-suave); color: var(--acento-texto); }
+
+.chamados { flex-wrap: wrap; gap: var(--e-1); margin: 0; }
+.chamados__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px var(--e-2);
+  border: var(--borda-fina) solid var(--acento-borda);
+  border-radius: var(--r-full);
+  background: var(--acento-suave);
+  color: var(--acento-texto);
+  font-family: inherit;
+  font-size: var(--txt-sm);
+  cursor: pointer;
+}
 
 /* ---- ações do balão -----------------------------------------------------
    Aparecem no hover: três botões fixos em cada balão transformam o fio numa
