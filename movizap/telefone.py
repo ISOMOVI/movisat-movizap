@@ -57,7 +57,25 @@ _INICIO_FIXO = frozenset("2345")
 MOVEL = "movel"
 FIXO = "fixo"
 INTERNACIONAL = "internacional"
+ESPECIAL = "especial"
 INVALIDO = "invalido"
+
+# 🚨 NÃO-GEOGRÁFICOS: 0800 e família. Eles NÃO têm DDD -- o "80" de
+# `8008871599` caía em "DDD 80 não existe" e o número inteiro era recusado.
+#
+# Medido em 27/08: **146 eventos de 2 números 0800** entrando pelo WhatsApp e
+# não virando conversa nenhuma. Eram fornecedores mandando menu de atendimento
+# -- mensagem de gente, recusada em silêncio, do jeito que o cabeçalho deste
+# módulo avisa que acontece: "nada quebra, nada estoura, nada aparece no log".
+#
+# ⚠️ NÃO HÁ COLISÃO COM DDD: 80, 30, 50 e 90 não são DDDs válidos, então
+# nenhum número que hoje passa muda de destino.
+PREFIXOS_ESPECIAIS = ("800", "300", "500", "900")
+
+# 4003/4004 são a outra família não-geográfica (8 dígitos, sem DDD).
+# ⚠️ NENHUM CASO MEDIDO na base até 27/08 -- entram porque 8 dígitos soltos já
+# eram recusados de qualquer forma, então cobri-los não tira nada de ninguém.
+PREFIXOS_ESPECIAIS_CURTOS = ("4003", "4004", "4020")
 
 
 @dataclass(frozen=True)
@@ -100,6 +118,10 @@ def analisar(bruto) -> Analise:
     # JID do Evolution: `5518998116168@s.whatsapp.net`, às vezes com sufixo de
     # dispositivo `:12`. Chega assim em TODO webhook -- tratar aqui é o que
     # evita repetir `.split("@")` espalhado pelo código.
+    # 🚨 O `@` DIZ QUE ISTO VEIO DO WHATSAPP, e essa informação vale abaixo.
+    # O JID é canônico: o WhatsApp sempre grava o número completo com DDI, sem
+    # ambiguidade. Texto digitado por gente não tem essa garantia.
+    veio_de_jid = "@" in texto
     texto = texto.split("@", 1)[0].split(":", 1)[0]
 
     tinha_mais = texto.lstrip().startswith("+")
@@ -111,7 +133,13 @@ def analisar(bruto) -> Analise:
 
     # Estrangeiro só quando o "+" disse que era: sem ele, "441234567890" é
     # ambíguo e chutar país é pior que recusar.
-    if tinha_mais and not digitos.startswith(DDI_BR):
+    #
+    # 🚨 JID É A EXCEÇÃO, e é exceção com razão, não conveniência. Medido em
+    # 27/08: 24 eventos de 2 números estrangeiros (`447707805722@s.whatsapp.net`,
+    # do Reino Unido, e um da Índia) recusados por não terem um "+" que o
+    # WhatsApp nunca manda. A ambiguidade que a regra protege é a de texto
+    # digitado -- no JID ela não existe.
+    if (tinha_mais or veio_de_jid) and not digitos.startswith(DDI_BR):
         if 8 <= len(digitos) <= 15:
             return Analise("+" + digitos, INTERNACIONAL)
         return Analise(None, INVALIDO, f"internacional com {len(digitos)} dígitos")
@@ -120,6 +148,13 @@ def analisar(bruto) -> Analise:
     # DDD 55 (Santa Maria/RS): "5599876543" tem 10 dígitos e não é tocado.
     if digitos.startswith(DDI_BR) and len(digitos) in (12, 13):
         digitos = digitos[2:]
+
+    # 🚨 NÃO-GEOGRÁFICO ANTES DO DDD. Ele não tem DDD: ler `8008871599` como
+    # "DDD 80 + assinante" é o erro que recusava 146 eventos de fornecedor.
+    if digitos.startswith(PREFIXOS_ESPECIAIS) and len(digitos) in (9, 10):
+        return Analise(f"+{DDI_BR}{digitos}", ESPECIAL)
+    if digitos.startswith(PREFIXOS_ESPECIAIS_CURTOS) and len(digitos) == 8:
+        return Analise(f"+{DDI_BR}{digitos}", ESPECIAL)
 
     if len(digitos) not in (10, 11):
         return Analise(
