@@ -471,12 +471,58 @@ def anexo(mensagem_id: int, indice: int) -> dict:
             "mime": item.get("mime") or "application/octet-stream"}
 
 
+# ⚠️ Teto de páginas da LISTAGEM. Cada página traz até 500 ids por uma
+# chamada; 40 páginas são 20 mil mensagens, muito além de qualquer caixa desta
+# operação. Existe para o dia em que alguém puser `puxar_desde` em 2015.
+TETO_PAGINAS = 40
+
+
+def _listar_tudo(cliente, consulta: str) -> list[dict]:
+    """Todos os ids da consulta, seguindo o `nextPageToken`.
+
+    🚨 SEM ISTO O `puxar_desde` NÃO VALE NADA. O Gmail devolve os mais recentes
+    primeiro e uma página só; parar nela faz o sistema reler eternamente o
+    mesmo topo da caixa, e a data configurada nunca ser alcançada.
+
+    ⚠️ Só ids. O corpo de cada mensagem é buscado depois, e é lá que o teto por
+    execução se aplica -- listar é barato, baixar não.
+    """
+    ids, pagina = [], None
+    for _ in range(TETO_PAGINAS):
+        extra = {"pageToken": pagina} if pagina else {}
+        resposta = _pedir(cliente, "/messages", q=consulta, maxResults=500, **extra)
+        ids += resposta.get("messages") or []
+        pagina = resposta.get("nextPageToken")
+        if not pagina:
+            return ids
+    log.warning("listagem parou no teto de %s paginas (%s ids) -- "
+                "a caixa e maior que o previsto", TETO_PAGINAS, len(ids))
+    return ids
+
+
 def ler(conta_id: int | None = None, limite: int = TETO_POR_EXECUCAO) -> dict:
     """Lê o que ainda não temos. Devolve contadores de FLUXO, não de estoque.
 
     ⚠️ `novas` é o que ENTROU nesta execução. Contador que devolve o total da
     caixa toda vez não responde "o que mudou desde ontem" -- foi o defeito
     corrigido no sync do Harmonit em 06/08.
+
+    🚨 O `puxar_desde` NÃO VALIA NADA ATÉ 27/08, e o defeito era silencioso.
+    A listagem pedia `maxResults=min(limite, 500)` e parava na primeira página:
+    o Gmail devolve os mais RECENTES primeiro, então a cada rodada o cron
+    relia os mesmos 40 e contava o resto como "repetidas". A conta estava
+    configurada para puxar desde 01/01/2026 e nunca passou de 10/08 -- a data
+    era uma promessa que o código não cumpria, sem erro nenhum no log.
+
+    🚨 O `limite` CORTA OS DOWNLOADS, NÃO A LISTAGEM. É a distinção que
+    conserta: listar ids é uma chamada por 500 mensagens e custa quase nada;
+    baixar o corpo é uma chamada POR MENSAGEM e é o que precisa de teto. Antes,
+    o teto caía no lugar errado e escondia o resto da caixa.
+
+    ⚠️ TETO DE PÁGINAS mesmo assim. Se alguém puser `puxar_desde` em 2015, a
+    listagem sozinha viraria dezenas de chamadas antes de qualquer proveito --
+    e o cron roda a cada 2 minutos. Medido em 27/08: 312 mensagens desde
+    01/01/2026 cabem em UMA página.
     """
     onde = "WHERE ativa" + (" AND id = %s" if conta_id else "")
     contas = banco.varios(
@@ -497,17 +543,33 @@ def ler(conta_id: int | None = None, limite: int = TETO_POR_EXECUCAO) -> dict:
             if conta["puxar_desde"]:
                 consulta = f"after:{conta['puxar_desde']:%Y/%m/%d}"
 
-            lista = _pedir(cliente, "/messages", q=consulta,
-                           maxResults=min(limite, 500))
-            for resumo in lista.get("messages") or []:
-                ja = banco.um(
-                    "SELECT id FROM email_mensagem "
-                    " WHERE conta_id = %s AND id_externo = %s",
-                    (conta["id"], resumo["id"]))
-                if ja:
-                    total["repetidas"] += 1
-                    continue
+            resumos = _listar_tudo(cliente, consulta)
 
+            # 🚨 QUAIS FALTAM, ANTES DE BAIXAR QUALQUER UMA. Perguntar ao banco
+            # de uma vez, em vez de uma consulta por mensagem dentro do laço:
+            # com a listagem paginada são centenas de ids, e o `SELECT` por
+            # item viraria centenas de idas ao banco só para descobrir que já
+            # temos tudo.
+            vistos = {linha["id_externo"] for linha in banco.varios(
+                "SELECT id_externo FROM email_mensagem WHERE conta_id = %s",
+                (conta["id"],))}
+            faltam = [r for r in resumos if r["id"] not in vistos]
+            total["repetidas"] += len(resumos) - len(faltam)
+
+            # ⚠️ O TETO CAI AQUI, e não na listagem. Baixar o corpo é uma
+            # chamada POR MENSAGEM; listar ids é uma por 500. Com o teto na
+            # listagem -- como era até 27/08 -- o cron relia eternamente o topo
+            # da caixa e o `puxar_desde` nunca era alcançado.
+            #
+            # ⚠️ DAS MAIS ANTIGAS PARA AS MAIS NOVAS: o Gmail devolve o topo
+            # primeiro, e sem inverter cada rodada baixaria de novo a mesma
+            # ponta recente e nunca chegaria ao fundo.
+            if len(faltam) > limite:
+                log.info("conta %s: %s faltando, baixando %s nesta rodada",
+                         conta["endereco"], len(faltam), limite)
+                faltam = faltam[-limite:]
+
+            for resumo in faltam:
                 m = _pedir(cliente, f"/messages/{resumo['id']}", format="full")
                 carga = m.get("payload") or {}
                 cabecalhos = carga.get("headers") or []
