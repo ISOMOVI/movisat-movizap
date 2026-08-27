@@ -2079,6 +2079,10 @@ def atualizar_classificacao(classificacao_id: int, dados: ClassificacaoEntrada,
 
 class ChatTexto(BaseModel):
     texto: str = Field(min_length=1, max_length=4000)
+    # 🚨 OS IDS VÊM RESOLVIDOS PELO COMPOSITOR, não adivinhados do texto. Quem
+    # sabe quem a pessoa escolheu na lista do `@` é a tela; o backend CONFERE
+    # que cada um é membro da sala e recusa com o nome de quem não está.
+    mencionados: list[int] = Field(default_factory=list)
 
 
 class ChatAbrir(BaseModel):
@@ -2154,8 +2158,8 @@ def chat_criar_grupo(dados: ChatGrupoNovo,
 @app.get("/api/chat/salas/{sala_id}/membros")
 def chat_membros(sala_id: int,
                  usuario: dict = Depends(auth.requer_tela("ATD_6.1"))):
-    _minha_sala(sala_id, usuario)
-    return {"membros": chat.membros(sala_id)}
+    eu = _minha_sala(sala_id, usuario)
+    return {"membros": chat.membros(sala_id, eu)}
 
 
 @app.post("/api/chat/salas/{sala_id}/membros")
@@ -2190,11 +2194,21 @@ def chat_mensagens(sala_id: int,
     return {"sala_id": sala_id, "mensagens": mensagens}
 
 
+@app.get("/api/chat/mencoes")
+def chat_mencoes(usuario: dict = Depends(auth.requer_tela("ATD_6.1"))):
+    """As salas em que me chamaram e eu ainda nao li.
+
+    🚨 CONTA SEPARADA DAS NAO LIDAS, de proposito: 40 mensagens nao lidas num
+    grupo e rotina; UMA em que alguem te chamou pelo nome nao pode esperar.
+    """
+    return chat.mencoes_nao_lidas(_eu_no_chat(usuario))
+
+
 @app.post("/api/chat/salas/{sala_id}/escrever")
 def chat_escrever(sala_id: int, dados: ChatTexto,
                   usuario: dict = Depends(auth.requer_tela("ATD_6.1"))):
     eu = _minha_sala(sala_id, usuario)
-    resultado = chat.escrever(sala_id, eu, dados.texto)
+    resultado = chat.escrever(sala_id, eu, dados.texto, dados.mencionados)
     if not resultado["ok"]:
         raise HTTPException(status_code=409, detail=resultado["motivo"])
     return resultado

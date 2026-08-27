@@ -263,14 +263,130 @@ async function falarCom(atendenteId) {
   }
 }
 
+/* ---- chamar alguém com @ (27/08) -----------------------------------------
+   🚨 QUEM RESOLVE O `@` É QUEM ESCREVE, na hora de escolher na lista — não um
+   regex lendo o texto depois. Regex teria de adivinhar onde o nome termina
+   ("Suporte Erika" tem espaço), casar apelido e desempatar homônimo, e erraria
+   em silêncio nos três casos. A tela manda os IDS; o backend confere que cada
+   um é membro da sala e recusa dizendo o nome de quem não está.
+
+   ⚠️ O TEXTO NÃO GANHA MARCAÇÃO EMBUTIDA. Guardar `@[12:Erika]` tornaria o
+   histórico ilegível fora desta tela — e o texto do chat é lido em log e em
+   busca. O que se guarda é o texto como a pessoa escreveu, e a lista à parte. */
+const campoTexto = ref(null)
+const mencionados = ref([])      // [{id, nome}] já escolhidos
+const listaArroba = ref([])      // o que a lista está oferecendo agora
+const arrobaEscolhido = ref(0)
+let inicioDaArroba = -1          // onde o `@` desta busca começou
+
+/* Só quem está NESTA sala pode ser chamado — a mesma régua do backend, para a
+   tela não oferecer o que a rota vai recusar.
+
+   ⚠️ `sou_eu` VEM DO BACKEND, não de comparar ids aqui. Chamar a si mesmo não
+   quebra nada (o backend já não conta como não lida), mas aparecer na própria
+   lista é ruído. */
+const chamaveis = computed(() =>
+  (membros.value || []).filter((m) => !m.sou_eu)
+    .map((m) => ({ id: m.atendente_id, nome: m.nome })))
+
+function olharArroba(evento) {
+  const campo = evento.target
+  const ate = campo.value.slice(0, campo.selectionStart)
+  const at = ate.lastIndexOf('@')
+  // ⚠️ `@` colado em palavra não abre a lista: "email@movisat" não é menção.
+  const antes = at > 0 ? ate[at - 1] : ' '
+  if (at === -1 || !/\s/.test(antes)) {
+    listaArroba.value = []
+    return
+  }
+  const termo = ate.slice(at + 1)
+  if (/\s{2,}|\n/.test(termo)) { listaArroba.value = []; return }
+  inicioDaArroba = at
+  const busca = termo.trim().toLowerCase()
+  listaArroba.value = chamaveis.value
+    .filter((p) => !mencionados.value.some((m) => m.id === p.id))
+    .filter((p) => !busca || p.nome.toLowerCase().includes(busca))
+    .slice(0, 8)
+  arrobaEscolhido.value = 0
+}
+
+function andarNaLista(passo) {
+  if (!listaArroba.value.length) return
+  const n = listaArroba.value.length
+  arrobaEscolhido.value = (arrobaEscolhido.value + passo + n) % n
+}
+
+/* Enter escolhe da lista quando ela está aberta; senão envia. Sem isto, quem
+   digitasse `@a` e apertasse Enter mandaria a mensagem pela metade. */
+function enterNoCampo() {
+  if (listaArroba.value.length) {
+    escolherArroba(listaArroba.value[arrobaEscolhido.value])
+    return
+  }
+  enviar()
+}
+
+function escolherArroba(pessoa) {
+  if (!pessoa) return
+  const campo = campoTexto.value
+  const fim = campo ? campo.selectionStart : texto.value.length
+  const at = inicioDaArroba
+  if (at >= 0) {
+    texto.value = texto.value.slice(0, at) + '@' + pessoa.nome + ' '
+      + texto.value.slice(fim)
+  }
+  if (!mencionados.value.some((m) => m.id === pessoa.id)) {
+    mencionados.value.push(pessoa)
+  }
+  listaArroba.value = []
+  inicioDaArroba = -1
+  nextTick(() => campo && campo.focus())
+}
+
+function tirarMencionado(id) {
+  mencionados.value = mencionados.value.filter((m) => m.id !== id)
+}
+
+/* Quebra o texto do balão em pedaços, acendendo só os nomes que estão
+   GRAVADOS como menção. */
+function partesDoTexto(m) {
+  const nomes = (m.mencionados || []).map((p) => p.nome)
+    .sort((a, b) => b.length - a.length)   // o mais longo primeiro: "Ana Paula" antes de "Ana"
+  if (!nomes.length) return [{ texto: m.texto }]
+  const partes = []
+  let resto = m.texto
+  let guarda = 0
+  while (resto && guarda++ < 200) {
+    let achou = null
+    for (const nome of nomes) {
+      const i = resto.indexOf('@' + nome)
+      if (i !== -1 && (achou === null || i < achou.i)) achou = { i, nome }
+    }
+    if (!achou) break
+    if (achou.i) partes.push({ texto: resto.slice(0, achou.i) })
+    // ⚠️ `me_chamou` vem do backend. Um nome pode se repetir na frase; o que
+    // decide o destaque forte é ter sido EU o chamado, não o texto.
+    partes.push({ texto: '@' + achou.nome, mencao: true, eu: Boolean(m.me_chamou) })
+    resto = resto.slice(achou.i + achou.nome.length + 1)
+  }
+  if (resto) partes.push({ texto: resto })
+  return partes
+}
+
 async function enviar() {
   const t = texto.value.trim()
   if (!t || enviando.value || !sala.value) return
   enviando.value = true
   erro.value = ''
   try {
-    await api.post(`/api/chat/salas/${sala.value.id}/escrever`, { texto: t })
+    // ⚠️ Só vai quem AINDA está escrito no texto: apagar o "@Fulano" à mão
+    // tem de desfazer a menção, senão a pessoa é chamada sem aparecer nada.
+    const vivos = mencionados.value.filter((p) => t.includes('@' + p.nome))
+    await api.post(`/api/chat/salas/${sala.value.id}/escrever`,
+                   { texto: t, mencionados: vivos.map((p) => p.id) })
     texto.value = ''
+    mencionados.value = []
+    listaArroba.value = []
     // 🚨 Relê em vez de empurrar o balão na mão: o que vale é o que o banco
     // gravou, não o que a tela supõe ter acontecido.
     await abrir(sala.value.id)
@@ -575,28 +691,70 @@ function quando(iso) {
                 <p v-if="!m.minha && !mesmoAutor(m, i)" class="balao__autor pequeno">
                   {{ m.autor }}
                 </p>
-                <p class="balao__texto">{{ m.texto }}</p>
+                <!-- 🚨 O DESTAQUE VEM DE `mencionados`, NÃO DE PROCURAR "@" NO
+                     TEXTO. Quem foi chamado está gravado; caçar arroba no texto
+                     acenderia "@10h" e "email@movisat" como se fossem gente. -->
+                <p class="balao__texto">
+                  <template v-for="(p, k) in partesDoTexto(m)" :key="k">
+                    <mark v-if="p.mencao" class="mencao"
+                          :class="{ 'mencao--eu': p.eu }">{{ p.texto }}</mark>
+                    <template v-else>{{ p.texto }}</template>
+                  </template>
+                </p>
                 <p class="balao__rodape apagado pequeno">{{ hora(m.criada_em) }}</p>
               </div>
             </template>
           </div>
 
           <div class="cartao__corpo pilha">
-            <label class="campo">
+            <!-- `position: relative` porque a lista do `@` se ancora aqui. -->
+            <label class="campo campo--arroba">
               <span class="so-leitor">Mensagem</span>
               <!-- 🚨 ENTER ENVIA, Shift+Enter quebra linha. `Ctrl+Enter` é o
                    que se usa na CAIXA DE ENTRADA, onde a mensagem vai para o
                    cliente e não volta. Aqui é conversa de equipe: a fricção
                    não se paga, e ela aparecia em toda mensagem. -->
               <textarea
+                ref="campoTexto"
                 v-model="texto"
                 class="campo__entrada"
                 rows="2"
                 maxlength="4000"
-                placeholder="Escreva e aperte Enter"
-                @keydown.enter.exact.prevent="enviar"
+                placeholder="Escreva e aperte Enter — @ chama alguém"
+                @input="olharArroba"
+                @keydown.enter.exact.prevent="enterNoCampo"
+                @keydown.down.prevent="andarNaLista(1)"
+                @keydown.up.prevent="andarNaLista(-1)"
+                @keydown.esc="listaArroba = []"
               ></textarea>
+
+              <!-- ⚠️ A LISTA APARECE ACIMA DO CAMPO, não abaixo: abaixo ela
+                   ficaria fora da tela quando o compositor está no rodapé. -->
+              <ul v-if="listaArroba.length" class="arroba" role="listbox">
+                <li v-for="(p, i) in listaArroba" :key="p.id">
+                  <button type="button"
+                          class="arroba__item"
+                          :class="{ 'arroba__item--aqui': i === arrobaEscolhido }"
+                          :aria-selected="i === arrobaEscolhido"
+                          @mousedown.prevent="escolherArroba(p)">
+                    {{ p.nome }}
+                  </button>
+                </li>
+              </ul>
             </label>
+
+            <!-- 🚨 QUEM VAI SER CHAMADO APARECE ANTES DE ENVIAR. Sem isto a
+                 pessoa só descobre que chamou alguém depois de mandar. -->
+            <p v-if="mencionados.length" class="linha pequeno fraco chamados">
+              <i class="bi bi-at" aria-hidden="true"></i>
+              <span>chamando</span>
+              <button v-for="p in mencionados" :key="p.id"
+                      class="chamados__chip" type="button"
+                      :title="`não chamar ${p.nome}`"
+                      @click="tirarMencionado(p.id)">
+                {{ p.nome }} <i class="bi bi-x" aria-hidden="true"></i>
+              </button>
+            </p>
             <div class="linha">
               <!-- Grade própria de emoji: ~4 KB e nenhuma dependência. -->
               <div class="emoji">
@@ -818,6 +976,76 @@ function quando(iso) {
 }
 /* ⚠️ Verde é a cor do WhatsApp nesta casa, e o chat interno NÃO é WhatsApp.
    Usar o acento do painel é o que impede a confusão de "mandei para quem?". */
+/* ---- chamar alguém com @ (27/08) ----------------------------------------
+   ⚠️ Duas intensidades, e a diferença é de significado, não de gosto: a
+   menção a OUTRA pessoa é informação ("chamaram a Erika"); a menção a MIM é
+   chamado ("preciso responder"). Se as duas tivessem o mesmo peso, a segunda
+   se perderia no meio da primeira. */
+.mencao {
+  background: none;
+  color: var(--acento);
+  font-weight: var(--peso-medio);
+  border-radius: var(--r-sm);
+  padding: 0 2px;
+}
+.mencao--eu {
+  background: var(--acento-suave);
+  color: var(--acento-texto);
+  font-weight: var(--peso-forte);
+}
+
+.campo--arroba { position: relative; }
+
+/* A lista do `@` sobe acima do campo: abaixo ela sairia da tela, porque o
+   compositor mora no rodapé. */
+.arroba {
+  position: absolute;
+  bottom: calc(100% + var(--e-1));
+  left: 0;
+  z-index: var(--z-flutuante);
+  min-width: 200px;
+  max-height: 220px;
+  overflow-y: auto;
+  margin: 0;
+  padding: var(--e-1);
+  list-style: none;
+  background: var(--superficie);
+  border: var(--borda-fina) solid var(--borda);
+  border-radius: var(--r-md);
+  box-shadow: var(--sombra-2);
+}
+.arroba__item {
+  display: block;
+  width: 100%;
+  min-height: var(--altura-toque);
+  padding: 0 var(--e-3);
+  border: 0;
+  border-radius: var(--r-sm);
+  background: none;
+  color: var(--texto);
+  font-family: inherit;
+  font-size: var(--txt-md);
+  text-align: left;
+  cursor: pointer;
+}
+.arroba__item:hover,
+.arroba__item--aqui { background: var(--acento-suave); color: var(--acento-texto); }
+
+.chamados { flex-wrap: wrap; gap: var(--e-1); margin: 0; }
+.chamados__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px var(--e-2);
+  border: var(--borda-fina) solid var(--acento-borda);
+  border-radius: var(--r-full);
+  background: var(--acento-suave);
+  color: var(--acento-texto);
+  font-family: inherit;
+  font-size: var(--txt-sm);
+  cursor: pointer;
+}
+
 .balao--minha { align-self: flex-end; background: var(--acento-suave); }
 .balao--dele { align-self: flex-start; }
 .balao__autor { margin: 0 0 2px; color: var(--texto-fraco); font-weight: var(--peso-forte); }

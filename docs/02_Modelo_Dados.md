@@ -945,6 +945,52 @@ citar a reconstroem de `id_externo` + `direcao` + o destino da conversa —
 guardar o trio seria copiar o que já está aqui, contra o princípio 1 deste
 documento.
 
+### `chat_mencao` — quem foi chamado por `@` no chat interno (037)
+
+Pedido do usuário em 27/08: *"interessante e pode ser, tanto no interno quanto
+no do whatsa"*.
+
+| Coluna | Nota |
+|---|---|
+| `mensagem_id` | FK para `chat_mensagem`, **`ON DELETE CASCADE`** — menção sem mensagem não significa nada |
+| `atendente_id` | FK para `atendente`, **`ON DELETE CASCADE`** — pessoa removida não deixa linha órfã |
+| `criada_em` | quando |
+
+**PK `(mensagem_id, atendente_id)`** — chamar a mesma pessoa duas vezes na
+mesma mensagem é uma menção só.
+
+🚨 **TABELA, E NÃO COLUNA COM A LISTA — é a lição da 034→036 aplicada ANTES de
+doer.** A reação nasceu como coluna, com a razão escrita, e a razão caiu quando
+o cliente entrou: numa conversa com várias pessoas, uma coluna guarda a última
+e **apaga as outras em silêncio**. Menção tem a mesma forma: uma mensagem pode
+chamar três pessoas, e um grupo do chat interno tem até cinco.
+
+🚨 **QUEM RESOLVE O `@` É QUEM ESCREVE, na hora de escolher na lista.** O
+compositor manda os IDS; o backend só **confere** que cada um é membro da sala.
+Um regex lendo o texto teria de adivinhar onde o nome termina (*"Suporte
+Erika"* tem espaço no meio), casar apelido e desempatar homônimo — e erraria em
+silêncio nos três casos.
+
+🚨 **CHAMAR QUEM NÃO ESTÁ NA SALA É RECUSA, NÃO REMENDO**, e a recusa diz o
+nome de quem não está. Aceitar e ignorar faria a pessoa achar que avisou alguém
+que nunca vai ver a mensagem — é o "parâmetro aceito e ignorado", que este
+projeto cataloga como o pior defeito. A mensagem inteira é recusada: meia
+gravação seria pior que nenhuma.
+
+⚠️ **O TEXTO NÃO GANHA MARCAÇÃO EMBUTIDA.** Guardar `@[12:Erika]` tornaria o
+histórico ilegível fora da tela, e o texto do chat é lido em log e em busca. O
+destaque no balão vem de `chat_mencao`, nunca de procurar `@` no texto —
+procurar acenderia `suporte@movisat.com.br` como se fosse gente.
+
+⚠️ **Menção não lida usa o MESMO `lido_ate` do resto** (`chat_membro`). Não há
+segundo marcador para dessincronizar. A conta é separada porque 40 mensagens
+não lidas num grupo é rotina, e **uma** em que alguém te chamou pelo nome não
+é.
+
+🔵 **`TETO_MENCOES = 20` é número MEU**, rotulado como meu em `chat.py`: não há
+decisão do usuário sobre isso, e 20 é maior que a equipe inteira (5 hoje).
+**Limite é decisão dele** se um dia apertar.
+
 ### `config.jornada_ativa` — sem migração, e de propósito
 
 O interruptor da jornada é **um valor para o sistema inteiro**, e a tabela

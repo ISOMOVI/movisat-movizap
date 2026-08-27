@@ -19,6 +19,13 @@ log = logging.getLogger(__name__)
 
 TETO_TEXTO = 4000
 
+# 🔵 TETO MEU, ROTULADO COMO MEU. Não há decisão do usuário sobre quantas
+# pessoas se pode chamar numa mensagem; 20 é maior que a equipe inteira (5
+# atendentes hoje), então na prática ele não morde ninguém — existe só para
+# que uma lista vinda do cliente não vire uma inserção sem fim.
+# **Limite é decisão dele:** se um dia isto apertar, o número é dele, não meu.
+TETO_MENCOES = 20
+
 
 def _chave_do_par(a: int, b: int) -> str:
     """'menor:maior' — a chave que impede sala duplicada para o mesmo par.
@@ -112,11 +119,18 @@ def criar_grupo(nome: str, criador: int, membros: list[int]) -> dict:
             "membros": len(validos)}
 
 
-def membros(sala_id: int) -> list[dict]:
+def membros(sala_id: int, eu: int | None = None) -> list[dict]:
+    """Quem está na sala. Com `eu`, marca qual dos membros é quem perguntou.
+
+    ⚠️ MESMO PADRÃO DO `minha` DAS MENSAGENS: quem sabe quem é "eu" nesta
+    requisição é quem a atendeu. A tela comparando ids por conta própria é o
+    tipo de coisa que passa a mentir quando a sessão muda de forma.
+    """
     return banco.varios(
-        """SELECT m.atendente_id, a.nome, m.entrou_em
+        """SELECT m.atendente_id, a.nome, m.entrou_em,
+                  (m.atendente_id = %s) AS sou_eu
              FROM chat_membro m JOIN atendente a ON a.id = m.atendente_id
-            WHERE m.sala_id = %s ORDER BY m.entrou_em, a.nome""", (sala_id,))
+            WHERE m.sala_id = %s ORDER BY m.entrou_em, a.nome""", (eu, sala_id))
 
 
 def adicionar_ao_grupo(sala_id: int, quem_pede: int, novo: int) -> dict:
@@ -258,7 +272,7 @@ def mensagens(sala_id: int, eu: int, limite: int = 500) -> list[dict]:
     `ORDER BY id ASC LIMIT n` devolveria o começo da sala e esconderia o que
     acabou de ser dito.
     """
-    return banco.varios(
+    linhas = banco.varios(
         """SELECT * FROM (
                SELECT c.id, c.texto, c.criada_em, c.atendente_id,
                       a.nome AS autor, (c.atendente_id = %s) AS minha
@@ -267,9 +281,57 @@ def mensagens(sala_id: int, eu: int, limite: int = 500) -> list[dict]:
                 WHERE c.sala_id = %s
                 ORDER BY c.id DESC LIMIT %s
            ) recentes ORDER BY id""", (eu, sala_id, limite))
+    _juntar_mencoes(linhas, eu)
+    return linhas
 
 
-def escrever(sala_id: int, eu: int, texto: str) -> dict:
+def _juntar_mencoes(linhas: list[dict], eu: int) -> None:
+    """Pendura em cada mensagem quem ela chamou.
+
+    ⚠️ UMA CONSULTA PARA A JANELA INTEIRA, não uma por mensagem. São até 500
+    mensagens por sala; consultar de uma em uma seria 500 idas ao banco para
+    desenhar uma tela.
+
+    ⚠️ `me_chamou` vem pronto do backend. A tela não deve descobrir isso
+    comparando ids: quem sabe quem é "eu" nesta requisição é quem a atendeu.
+    """
+    if not linhas:
+        return
+    ids = [linha["id"] for linha in linhas]
+    por_mensagem: dict[int, list[dict]] = {}
+    for m in banco.varios(
+        """SELECT mc.mensagem_id, mc.atendente_id, a.nome
+             FROM chat_mencao mc
+             JOIN atendente a ON a.id = mc.atendente_id
+            WHERE mc.mensagem_id = ANY(%s)
+            ORDER BY a.nome""", (ids,)):
+        por_mensagem.setdefault(m["mensagem_id"], []).append(
+            {"id": m["atendente_id"], "nome": m["nome"]})
+    for linha in linhas:
+        chamados = por_mensagem.get(linha["id"], [])
+        linha["mencionados"] = chamados
+        linha["me_chamou"] = any(c["id"] == eu for c in chamados)
+
+
+def escrever(sala_id: int, eu: int, texto: str,
+             mencionados: list[int] | None = None) -> dict:
+    """Grava a mensagem e, com ela, quem foi chamado por `@`.
+
+    🚨 QUEM RESOLVE O `@` É QUEM ESCREVE. O compositor manda os IDS que a
+    pessoa escolheu na lista; aqui só se CONFERE que cada um é membro da sala.
+    Um regex lendo o texto teria de adivinhar onde o nome termina
+    ("@Suporte Erika" tem espaço no meio), casar apelido e desempatar homônimo
+    -- e erraria em silêncio nos três casos.
+
+    🚨 CHAMAR QUEM NÃO ESTÁ NA SALA É RECUSA, NÃO REMENDO. Aceitar e ignorar
+    faria a pessoa achar que avisou alguém que nunca vai ver a mensagem -- é o
+    "parâmetro aceito e ignorado", que é o pior defeito que este projeto
+    cataloga. A recusa diz o nome de quem não está.
+
+    ⚠️ A MENSAGEM E AS MENÇÕES ENTRAM NA MESMA TRANSAÇÃO. Meia gravação --
+    mensagem sem menção -- seria pior que nenhuma: a pessoa veria a mensagem
+    enviada e ninguém seria chamado.
+    """
     texto = (texto or "").strip()
     if not texto:
         return {"ok": False, "motivo": "Mensagem vazia."}
@@ -279,14 +341,75 @@ def escrever(sala_id: int, eu: int, texto: str) -> dict:
     if not e_membro(sala_id, eu):
         return {"ok": False, "motivo": "Você não está nesta conversa."}
 
-    linha = banco.um(
-        """INSERT INTO chat_mensagem (sala_id, atendente_id, texto)
-           VALUES (%s, %s, %s) RETURNING id, criada_em""",
-        (sala_id, eu, texto))
+    chamados = _conferir_mencionados(sala_id, mencionados)
+    if isinstance(chamados, dict):          # veio recusa, não lista
+        return chamados
+
+    with banco.cursor() as cur:
+        cur.execute(
+            """INSERT INTO chat_mensagem (sala_id, atendente_id, texto)
+               VALUES (%s, %s, %s) RETURNING id, criada_em""",
+            (sala_id, eu, texto))
+        linha = cur.fetchone()
+        for quem in chamados:
+            cur.execute(
+                """INSERT INTO chat_mencao (mensagem_id, atendente_id)
+                   VALUES (%s, %s) ON CONFLICT DO NOTHING""",
+                (linha["id"], quem))
+
     # ⚠️ Quem escreve leu o que escreveu: sem isto a própria mensagem entraria
     # como não lida para o autor no próximo carregamento.
     marcar_lido(sala_id, eu, linha["id"])
-    return {"ok": True, "mensagem_id": linha["id"]}
+    return {"ok": True, "mensagem_id": linha["id"], "mencionados": chamados}
+
+
+def _conferir_mencionados(sala_id: int, mencionados: list[int] | None):
+    """A lista limpa de quem foi chamado, ou a recusa com o motivo."""
+    if not mencionados:
+        return []
+    # Sem repetido e sem ordem do cliente: a chave da tabela é (mensagem, quem).
+    pedidos = sorted({int(m) for m in mencionados})
+    if len(pedidos) > TETO_MENCOES:
+        return {"ok": False,
+                "motivo": f"Dá para chamar no máximo {TETO_MENCOES} pessoas "
+                          f"numa mensagem."}
+    # ⚠️ `membros()` devolve `atendente_id`, NÃO `id` -- a trava pegou isto na
+    # primeira rodada. Ler a chave errada num dict dá KeyError alto e claro;
+    # o mesmo erro num `.get()` daria conjunto vazio e recusaria TODA menção,
+    # em silêncio.
+    da_sala = {m["atendente_id"] for m in membros(sala_id)}
+    fora = [p for p in pedidos if p not in da_sala]
+    if fora:
+        nomes = banco.varios(
+            "SELECT nome FROM atendente WHERE id = ANY(%s) ORDER BY nome", (fora,))
+        quem = ", ".join(n["nome"] for n in nomes) or "alguém"
+        return {"ok": False,
+                "motivo": f"{quem} não está nesta conversa — chame só quem "
+                          f"está aqui, senão a pessoa nunca vê o aviso."}
+    return pedidos
+
+
+def mencoes_nao_lidas(eu: int) -> list[dict]:
+    """As salas em que me chamaram e eu ainda não li, com a contagem.
+
+    🚨 MENÇÃO NÃO LIDA É DIFERENTE DE MENSAGEM NÃO LIDA, e por isso tem conta
+    própria: 40 mensagens não lidas numa sala de grupo é rotina; UMA em que
+    alguém te chamou pelo nome é a que não pode esperar.
+
+    ⚠️ Usa o mesmo `lido_ate` do resto — não há segundo marcador para
+    dessincronizar.
+    """
+    return banco.varios(
+        """SELECT s.id AS sala_id, s.tipo, s.nome, COUNT(*) AS quantas
+             FROM chat_mencao mc
+             JOIN chat_mensagem cm ON cm.id = mc.mensagem_id
+             JOIN chat_membro mb ON mb.sala_id = cm.sala_id
+                                AND mb.atendente_id = mc.atendente_id
+             JOIN chat_sala s ON s.id = cm.sala_id
+            WHERE mc.atendente_id = %s
+              AND cm.id > COALESCE(mb.lido_ate, 0)
+            GROUP BY s.id, s.tipo, s.nome
+            ORDER BY s.id""", (eu,))
 
 
 def marcar_lido(sala_id: int, eu: int, ate_id: int | None = None) -> dict:
