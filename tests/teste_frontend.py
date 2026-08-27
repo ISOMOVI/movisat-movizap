@@ -72,6 +72,43 @@ class TestSpaSomenteComBuild:
         assert r.status_code == 200
         assert "<div id=\"app\">" in r.text
 
+    def test_o_index_manda_o_navegador_perguntar_antes_de_usar(self):
+        """🚨 A TRAVA DE 27/08. O `index.html` saía SEM `Cache-Control`, e sem
+        ele o navegador aplica cache heurístico: guarda e serve do disco **sem
+        revalidar**. Como o index é quem aponta para o bundle com hash, um
+        index velho prende o usuário numa versão antiga inteira -- e a única
+        saída vira `Ctrl+Shift+R`, que não é resposta que se dê a usuário.
+
+        ⚠️ MEDE A RESPOSTA, não o fonte. Um `grep` por "no-cache" no `main.py`
+        passaria com o cabeçalho num comentário; travas que mediram palavra já
+        reprovaram código correto oito vezes neste projeto. Por isso aqui a
+        requisição é feita e o cabeçalho é lido dela.
+
+        ⚠️ Cliente próprio, sem `raise_server_exceptions`, para ler o cabeçalho
+        bruto como o navegador leria.
+        """
+        if not main.FRONTEND.exists():
+            pytest.skip("frontend/dist ainda não construído")
+        r = TestClient(main.app).get("/")
+        assert "no-cache" in r.headers.get("cache-control", ""), (
+            "o index voltou a ser cacheável sem revalidação -- o usuário vai "
+            "ficar preso numa versão antiga e nós vamos achar que é outra coisa")
+
+    def test_o_asset_com_hash_NAO_ganha_no_cache(self, cliente):
+        """⚠️ A outra metade, e ela importa: arquivo de /assets tem hash no
+        nome, então nome novo é arquivo novo. Cache longo neles é o que faz a
+        página abrir rápido -- pôr `no-cache` aqui trocaria um defeito por
+        outro, mais silencioso."""
+        if not main.FRONTEND.exists():
+            pytest.skip("frontend/dist ainda não construído")
+        assets = main.FRONTEND / "assets"
+        js = next((a for a in assets.glob("index-*.js") if a.is_file()), None)
+        if js is None:
+            pytest.skip("build sem bundle nomeado com hash")
+        r = cliente.get(f"/assets/{js.name}")
+        assert r.status_code == 200
+        assert "no-cache" not in r.headers.get("cache-control", "")
+
     def test_caminho_nao_escapa_do_dist(self, cliente):
         if not main.FRONTEND.exists():
             pytest.skip("frontend/dist ainda não construído")

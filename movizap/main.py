@@ -2372,4 +2372,20 @@ if FRONTEND.exists():
         arquivo = (FRONTEND / caminho).resolve()
         if caminho and arquivo.is_file() and arquivo.is_relative_to(raiz):
             return FileResponse(arquivo)
-        return FileResponse(FRONTEND / "index.html")
+        # 🚨 O `index.html` NÃO PODE SER GUARDADO PELO NAVEGADOR. Medido em
+        # 27/08: ele saía com `last-modified` e `etag`, e SEM `Cache-Control`.
+        # Sem esse cabeçalho o navegador aplica cache heurístico -- guarda por
+        # uma fração do tempo desde a última modificação e serve do disco SEM
+        # revalidar. Como o index é quem aponta para o bundle com hash, um
+        # index velho prende o usuário numa versão antiga inteira, e a única
+        # saída vira `Ctrl+Shift+R`.
+        #
+        # ⚠️ `no-cache` NÃO É "não guarde": é "guarde, mas pergunte antes de
+        # usar". O 304 continua acontecendo e a resposta continua barata -- o
+        # que acaba é o navegador decidir sozinho que não precisa perguntar.
+        #
+        # ⚠️ Os ARQUIVOS de /assets não entram aqui de propósito: eles têm hash
+        # no nome, então nome novo é arquivo novo, e cache longo neles é o que
+        # faz a página abrir rápido.
+        return FileResponse(FRONTEND / "index.html",
+                            headers={"Cache-Control": "no-cache"})

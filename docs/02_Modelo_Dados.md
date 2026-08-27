@@ -902,6 +902,44 @@ estar na consulta que a tela pede.**
 esta nota descrevia — cair no ramo de "tipo ainda não tratado" — produziu **161
 mensagens falsas** antes de ser consertado.
 
+🚨 **E O RAMO INTEIRO CAIU EM 27/08.** A reação foi o caso mais caro, não o
+único: qualquer chave fora das conhecidas virava `[<chave> — tipo ainda não
+tratado]` gravado em `mensagem.conteudo`, que é o que aparece no balão e no
+resumo da lista, com a mesma cara de uma fala do cliente. Medido no dia: **84
+linhas falsas em 28 conversas**, de 8 tipos, e **crescendo** — duas entraram
+durante a própria medição, às 09:13 e às 09:59.
+
+Hoje o parser tem três destinos, e nenhum deles é o nome cru da chave:
+
+| Destino | Quem vai | Onde |
+|---|---|---|
+| **descarte** | `pollUpdateMessage` (voto criptografado), `albumMessage` (cabeçalho — as imagens chegam à parte), `placeholderMessage`, `messageHistoryNotice`, e **todo tipo ainda não tratado** | `conversas.DESCARTADOS`, e o motivo vai para `webhook_evento.motivo_ignorado` |
+| **texto legível** | `templateMessage`, `pollCreationMessage*`, `listMessage`, `listResponseMessage` | extratores em `conversas.py` |
+| **aviso** | `secretEncryptedMessage` — chega criptografado e não temos a chave; o atendente precisa saber que veio algo | `conversas.AVISOS` |
+
+⚠️ **O DESCARTE ACONTECE ANTES DE `garantir_conversa`**, no mesmo ponto da
+reação. Depois dela, um voto de enquete abriria conversa a partir de ruído.
+
+⚠️ **NADA SE PERDE.** O `webhook_evento` guarda o payload cru de tudo — foi ele
+que permitiu recuperar 57 mídias, 30 nomes e 32 citações em 10/08. O que sai é
+a **exibição**, e o nome da chave sobrevive no motivo. Contar por
+`motivo_ignorado` custou **0,035 s**; varrer o payload custa **1,10 s por
+chave**.
+
+🚨 **`listMessage` E `listResponseMessage` NÃO ESTAVAM NO LEVANTAMENTO** — nem
+podiam estar, porque nunca chegaram a virar mensagem: eles se perdem antes, num
+defeito separado (ver a nota do 0800 abaixo). Apareceram só quando o parser foi
+exercitado contra os 14.209 eventos reais, por `scripts/exercitar_parser.py`.
+O segundo é **a pessoa respondendo a um menu** (`{"title": "Outros Assuntos"}`):
+descartá-lo teria apagado o que ela escolheu. **Fixture verde não substitui o
+mundo real** — é o quarto jeito, e se pagou na primeira rodada.
+
+⚠️ **PENDENTE, NÃO CORRIGIDO: número 0800 não vira conversa.** Medido em 27/08:
+**1.341 eventos `messages.upsert` com `telefone` nulo**, entre eles todo o menu
+interativo de fornecedor (`558008871599@s.whatsapp.net`, um 0800 de 12 dígitos).
+O `remoteJid` é normal; quem recusa é a extração do telefone. É defeito
+separado, mais antigo, e **não foi tocado nesta rodada**.
+
 🚨 **A chave do WhatsApp (`{remoteJid, fromMe, id}`) NÃO é guardada.** Reagir e
 citar a reconstroem de `id_externo` + `direcao` + o destino da conversa —
 guardar o trio seria copiar o que já está aqui, contra o princípio 1 deste

@@ -153,11 +153,28 @@ class TestTiposDeMensagem:
         assert tipo == esperado
         assert conteudo == texto
 
-    def test_tipo_desconhecido_nao_derruba_e_nao_some(self):
-        """⚠️ O WhatsApp inventa tipo novo. A mensagem não pode sumir por isso."""
+    def test_tipo_desconhecido_nao_derruba_e_vira_descarte(self):
+        """🚨 ESTE TESTE MUDOU DE LADO EM 27/08, por decisão do usuário.
+
+        Ele defendia o contrário: que o tipo desconhecido virasse texto com o
+        nome da chave, para "a mensagem não sumir". A intenção era boa e o
+        resultado, medido, era **84 linhas falsas em 28 conversas** -- o nome
+        cru da chave no balão, com a mesma cara de uma fala do cliente, e
+        crescendo (duas entraram no dia da medição). É o mesmo defeito que a
+        reação teve até 26/08, quando eram 161.
+
+        ⚠️ NADA SUMIU DE VERDADE: o `webhook_evento` guarda o payload cru de
+        tudo, e o nome da chave vai no motivo, que é gravado em
+        `motivo_ignorado`. O que sai é a exibição, não o dado.
+
+        A trava completa está em `tests/teste_tipos_nao_tratados.py`.
+        """
+        motivo = conversas.motivo_de_descarte({"tipoQueAindaNaoExiste": {}})
+        assert motivo and "tipoQueAindaNaoExiste" in motivo
+        # E não derruba: o parser continua respondendo, sem texto falso.
         tipo, conteudo = conversas._tipo_e_texto({"tipoQueAindaNaoExiste": {}})
         assert tipo == "texto"
-        assert "tipoQueAindaNaoExiste" in conteudo
+        assert conteudo is None
 
 
 class TestIdentificacao:

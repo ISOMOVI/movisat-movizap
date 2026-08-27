@@ -57,6 +57,40 @@ TIPOS = [
     ("contactsArrayMessage", "contato"),
 ]
 
+# 🚨 O QUE NÃO É MENSAGEM. Medido em 27/08: 84 linhas falsas em 28 conversas,
+# e CRESCENDO -- duas entraram no próprio dia da medição, às 09:13 e às 09:59.
+#
+# Cada uma destas chaves é ruído de protocolo que o ramo de "tipo desconhecido"
+# transformava em fala do cliente, com a mesma cara de uma mensagem escrita por
+# gente. É o mesmo defeito que a reação teve até 26/08, quando eram 161.
+#
+# ⚠️ NADA SE PERDE. O `webhook_evento` guarda o payload cru de tudo, e foi ele
+# que permitiu recuperar 57 mídias, 30 nomes e 32 citações em 10/08. O que sai
+# é a EXIBIÇÃO, não o dado.
+DESCARTADOS = {
+    # Voto em enquete, criptografado (`encIv`/`encPayload`). Não é mensagem:
+    # é atualização de uma enquete que já existe -- igual à reação.
+    "pollUpdateMessage": "voto em enquete: muda uma enquete, não é mensagem",
+    # Só o cabeçalho de um álbum: `{"expectedImageCount": 4}`. Conferido nas 4
+    # ocorrências -- as imagens chegam como mensagens próprias e JÁ estão no
+    # painel, com arquivo no disco.
+    "albumMessage": "cabeçalho de álbum: as imagens chegam à parte",
+    # O WhatsApp não conseguiu carregar o conteúdo. Payload inteiro: {"type":0}
+    # -- nenhum texto, nenhum motivo legível.
+    "placeholderMessage": "conteúdo não entregue pelo WhatsApp",
+    # Metadados de sincronização de histórico entre aparelhos.
+    "messageHistoryNotice": "aviso de sincronização de histórico",
+}
+
+# Aviso legível no lugar do nome cru da chave. NÃO é descarte: o atendente
+# precisa saber que o cliente mandou algo, mesmo sem poder ler.
+#
+# ⚠️ `secretEncryptedMessage` chega CRIPTOGRAFADO e não temos a chave -- não há
+# caminho para ler o conteúdo, nem hoje nem depois. 34 ocorrências até 27/08.
+AVISOS = {
+    "secretEncryptedMessage": "[mensagem de visualização única]",
+}
+
 # O que o WhatsApp chama de status, no vocabulário do nosso CHECK.
 ENTREGA = {
     "PENDING": "pendente",
@@ -91,11 +125,147 @@ def _quando(data: dict) -> datetime:
         return datetime.now(timezone.utc)
 
 
+def _chaves_uteis(mensagem: dict) -> list[str]:
+    """As chaves do envelope que dizem QUE mensagem é esta.
+
+    `messageContextInfo` acompanha várias mensagens e não é tipo nenhum:
+    olhá-lo como se fosse faz o parser classificar pela companhia.
+    """
+    return [k for k in mensagem if not k.startswith("messageContextInfo")]
+
+
+def motivo_de_descarte(mensagem: dict) -> str | None:
+    """Por que este evento NÃO vira mensagem -- ou `None` se vira.
+
+    🚨 CHAMADA ANTES DE `garantir_conversa`, no mesmo ponto da reação. Depois
+    dela, um voto de enquete criaria CONVERSA a partir de ruído de protocolo.
+
+    🚨 TIPO DESCONHECIDO PASSA A SER DESCARTE, e esta é a mudança de fundo de
+    27/08. O ramo antigo devolvia `[<chave> — tipo ainda não tratado]`, que ia
+    para `mensagem.conteudo` e aparecia no balão e na lista de conversas com a
+    mesma cara de uma fala do cliente. A intenção era não perder informação; o
+    resultado eram 84 linhas falsas em 28 conversas, e o WhatsApp inventa tipo
+    novo o tempo todo -- então isso se repunha sozinho.
+
+    ⚠️ O NOME DA CHAVE NÃO SE PERDE: vai no motivo, que o webhook grava em
+    `webhook_evento.motivo_ignorado`. Contar por lá custou 0,035 s na medição
+    de 27/08, contra 1,10 s POR CHAVE de uma varredura no payload.
+    """
+    if not isinstance(mensagem, dict):
+        return None
+    chaves = _chaves_uteis(mensagem)
+    for chave in chaves:
+        if chave in DESCARTADOS:
+            return f"{chave}: {DESCARTADOS[chave]}"
+    if any(_e_tratado(c) for c in chaves):
+        return None
+    if chaves:
+        log.info("tipo de mensagem não tratado: %s", chaves[0])
+        return f"{chaves[0]}: tipo não tratado, não vira mensagem"
+    return None
+
+
+def _e_tratado(chave: str) -> bool:
+    """Esta chave tem tratamento em `_tipo_e_texto`?
+
+    🚨 UMA LISTA SÓ. A primeira versão desta função repetia a condição em duas
+    linhas diferentes e ESQUECEU o `templateMessage` numa delas -- o template
+    ia para o descarte, e com ele o texto real de entrega e de fornecedor. A
+    trava pegou na primeira rodada, que é o que ela existe para fazer.
+    """
+    return (any(chave == c for c, _ in TIPOS)
+            or chave in ("templateMessage", "listMessage", "listResponseMessage")
+            or _e_enquete(chave)
+            or chave in AVISOS)
+
+
+def _e_enquete(chave: str) -> bool:
+    """`pollCreationMessage`, `...V2`, `...V3`, `...V4` -- o WhatsApp versiona.
+
+    Casar pelo prefixo evita que a próxima versão volte a cair no ramo de tipo
+    não tratado, que é o defeito que esta rodada existe para fechar.
+    """
+    return chave.startswith("pollCreationMessage")
+
+
+def _texto_do_template(valor: dict) -> str | None:
+    """O texto de um template do WhatsApp Business.
+
+    🚨 CARREGA TEXTO REAL, e era o oposto do resto: eu o tinha jogado no mesmo
+    balde de ruído. Conferido nos 8 eventos da base em 27/08 -- TODOS têm
+    `hydratedContentText`, e o conteúdo importa: entrega chegando ("cheguei!
+    Estamos na porta"), Service Desk da Harmonit, PABX Telecom.
+    """
+    h = valor.get("hydratedTemplate") or valor.get("hydratedFourRowTemplate") or {}
+    if not isinstance(h, dict):
+        return None
+    titulo = h.get("hydratedTitleText")
+    corpo = h.get("hydratedContentText")
+    if titulo and corpo:
+        return f"{titulo} — {corpo}"
+    return corpo or titulo or None
+
+
+def _texto_da_enquete(valor: dict) -> str | None:
+    """A pergunta e as opções, que chegam legíveis.
+
+    ⚠️ Só a CRIAÇÃO é legível. O voto (`pollUpdateMessage`) vem criptografado e
+    está em DESCARTADOS -- saber que houve enquete é útil, saber que alguém
+    votou sem poder dizer em quê não é.
+    """
+    nome = (valor.get("name") or "").strip()
+    opcoes = [o.get("optionName") for o in (valor.get("options") or [])
+              if isinstance(o, dict) and o.get("optionName")]
+    if not nome and not opcoes:
+        return None
+    if opcoes:
+        return f"[enquete] {nome}\n" + "\n".join(f"- {o}" for o in opcoes)
+    return f"[enquete] {nome}"
+
+
+def _texto_da_lista(valor: dict) -> str | None:
+    """O menu interativo que o outro lado mandou.
+
+    🚨 ACHADO EXERCITANDO CONTRA OS 14.206 EVENTOS REAIS, não pela fixture: os
+    oito tipos que eu tinha levantado por consulta não incluíam `listMessage`
+    nem `listResponseMessage`, porque nenhum dos dois chegou a virar mensagem
+    -- eles se perdem antes, num defeito separado (número 0800 sem telefone).
+    Descartá-los teria criado um defeito NOVO no dia em que aquele for
+    corrigido: são menus de fornecedor, com texto legível.
+    """
+    partes = []
+    for campo in ("title", "description"):
+        if valor.get(campo):
+            partes.append(str(valor[campo]).strip())
+    opcoes = []
+    for secao in valor.get("sections") or []:
+        if not isinstance(secao, dict):
+            continue
+        for linha in secao.get("rows") or []:
+            if isinstance(linha, dict) and linha.get("title"):
+                opcoes.append(str(linha["title"]).strip())
+    if opcoes:
+        partes.append("\n".join(f"- {o}" for o in opcoes))
+    return "\n".join(partes) if partes else None
+
+
+def _texto_da_escolha(valor: dict) -> str | None:
+    """A opção que a pessoa escolheu no menu.
+
+    ⚠️ ISTO É FALA, não protocolo. `{"title": "Outros Assuntos"}` é a resposta
+    de alguém a um menu -- descartar seria apagar o que a pessoa respondeu.
+    """
+    titulo = (valor.get("title") or "").strip()
+    return f"[escolheu] {titulo}" if titulo else None
+
+
 def _tipo_e_texto(mensagem: dict) -> tuple[str, str | None]:
     """O tipo da mensagem e o texto que dá para mostrar na lista.
 
-    ⚠️ Tipo desconhecido vira 'texto' com o nome da chave, em vez de estourar:
-    o WhatsApp inventa tipo novo e a mensagem não pode sumir por causa disso.
+    ⚠️ O que NÃO é mensagem já saiu em `motivo_de_descarte`, antes daqui. O
+    ramo final continua existindo como rede: se algum caminho novo chegar até
+    aqui sem passar por lá, a mensagem entra SEM texto -- nunca mais com o
+    nome cru da chave, que é o que o atendente vinha lendo.
     """
     if not isinstance(mensagem, dict):
         return "texto", None
@@ -113,10 +283,24 @@ def _tipo_e_texto(mensagem: dict) -> tuple[str, str | None]:
             return tipo, texto
         return tipo, None
 
-    conhecidas = [k for k in mensagem if not k.startswith("messageContextInfo")]
+    for chave in _chaves_uteis(mensagem):
+        valor = mensagem[chave]
+        if chave in AVISOS:
+            return "texto", AVISOS[chave]
+        if not isinstance(valor, dict):
+            continue
+        if chave == "templateMessage":
+            return "texto", _texto_do_template(valor)
+        if _e_enquete(chave):
+            return "texto", _texto_da_enquete(valor)
+        if chave == "listMessage":
+            return "texto", _texto_da_lista(valor)
+        if chave == "listResponseMessage":
+            return "texto", _texto_da_escolha(valor)
+
+    conhecidas = _chaves_uteis(mensagem)
     if conhecidas:
-        log.info("tipo de mensagem desconhecido: %s", conhecidas[0])
-        return "texto", f"[{conhecidas[0]} — tipo ainda não tratado]"
+        log.info("tipo de mensagem chegou ao parser sem descarte: %s", conhecidas[0])
     return "texto", None
 
 
@@ -362,6 +546,13 @@ def _gravar_mensagem(cur, evento: dict, corpo: dict,
     # 161 vezes.
     if isinstance(data.get("message"), dict) and "reactionMessage" in data["message"]:
         return _aplicar_reacao(cur, data, e_grupo, e164)
+
+    # 🚨 PELA MESMA RAZÃO DA REAÇÃO, e no mesmo ponto: o que não é mensagem sai
+    # ANTES de `garantir_conversa`. Depois dela, um voto de enquete ou um aviso
+    # de sincronização abriria conversa nova a partir de ruído de protocolo.
+    descarte = motivo_de_descarte(data.get("message") or {})
+    if descarte:
+        return descarte
 
     conversa_id = garantir_conversa(
         cur, evento["canal_id"],

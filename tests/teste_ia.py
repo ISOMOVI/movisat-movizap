@@ -82,6 +82,23 @@ def limpar():
     banco.executar("DELETE FROM conversa WHERE telefone_e164 LIKE %s", (PREFIXO,))
 
 
+def _apagar_canal_da_suite() -> None:
+    """O canal da suíte sai do banco no fim da rodada.
+
+    🚨 ELE APARECIA NA CFG_1.1. `canais.listar()` devolve os canais TODOS, sem
+    filtrar `ativo` -- então um canal criado por teste virava cartão na tela do
+    usuário, com botão de IA e tudo. Deixar lixo de teste na tela de produção é
+    o mesmo defeito que a mensagem falsa de `reactionMessage`: funciona, e o
+    usuário lê.
+
+    ⚠️ Só apaga o que é da suíte, casado pela `instancia`, e só se nada mais
+    depender dele -- as chaves de `conversa`, `webhook_evento` e `disparo` são
+    ON DELETE NO ACTION, então o banco recusaria em vez de arrastar dado junto.
+    """
+    banco.executar("DELETE FROM canal WHERE instancia = %s AND NOT ativo",
+                   (CANAL_TESTE,))
+
+
 @pytest.fixture(scope="module", autouse=True)
 def pool():
     banco.abrir()
@@ -116,6 +133,9 @@ def pool():
     for r in antes_relacao:
         banco.executar("UPDATE relacao_automacao SET ia_ligada = %s WHERE relacao = %s",
                        (r["ia_ligada"], r["relacao"]))
+    # Depois do `limpar()`: enquanto houver conversa da suíte apontando para
+    # ele, o banco recusa a remoção -- e recusar é o comportamento certo.
+    _apagar_canal_da_suite()
     banco.fechar()
 
 
@@ -657,6 +677,36 @@ def test_o_canal_da_suite_e_invisivel_para_a_varredura():
     assert linha["ativo"] is False, (
         "o canal da suíte ficou ATIVO -- a varredura de produção passa a "
         "enxergar as conversas de teste")
+
+
+def test_o_canal_da_suite_sai_do_banco_no_fim():
+    """🚨 O CANAL DA SUÍTE APARECIA NA TELA DO USUÁRIO (achado em 27/08).
+
+    `canais.listar()` não filtra `ativo`, então `zz teste da IA` virava cartão
+    na CFG_1.1, com botão de IA e tudo. Ficou lá desde 26/08.
+
+    Esta trava mede a REMOÇÃO acontecendo, não a existência da função: cria um
+    canal com a marca da suíte, chama o teardown e relê o estado. Conferir só
+    que `_apagar_canal_da_suite` existe reprovaria nada.
+    """
+    marca = "zz-teste-ia-trava"
+    banco.executar(
+        """INSERT INTO canal (nome, tipo, gateway, instancia, modo, ativo)
+           VALUES ('zz canal da trava', 'atendimento', 'evolution', %s,
+                   'baileys', false)
+           ON CONFLICT DO NOTHING""", (marca,))
+    assert banco.um("SELECT id FROM canal WHERE instancia = %s", (marca,))
+
+    global CANAL_TESTE
+    original, CANAL_TESTE = CANAL_TESTE, marca
+    try:
+        _apagar_canal_da_suite()
+    finally:
+        CANAL_TESTE = original
+
+    assert banco.um("SELECT id FROM canal WHERE instancia = %s", (marca,)) is None, (
+        "o teardown não apagou o canal da suíte -- ele volta a aparecer na "
+        "CFG_1.1 como se fosse canal do usuário")
 
 
 def test_o_pacote_llm_e_o_unico_que_le_a_chave():
