@@ -19,6 +19,7 @@
 import { ref, computed, onMounted } from 'vue'
 
 import { api, ErroDeApi } from '../api/cliente.js'
+import AjudaDaTela from '../componentes/AjudaDaTela.vue'
 
 const cobertura = ref(null)
 const disparos = ref([])
@@ -128,10 +129,7 @@ function quando(iso) {
     <header class="tela__cabecalho">
       <div>
         <h1>Informativos</h1>
-        <p class="fraco pequeno">
-          Disparo pelo canal informativo. Sem resposta de cliente — quem
-          responde cai no contador lá embaixo.
-        </p>
+        <AjudaDaTela>Disparo pelo canal informativo. Sem resposta de cliente — quem responde cai no contador lá embaixo.</AjudaDaTela>
       </div>
     </header>
 

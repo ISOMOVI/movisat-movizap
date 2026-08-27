@@ -15,6 +15,7 @@
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 
 import { api, ErroDeApi } from '../api/cliente.js'
+import AjudaDaTela from '../componentes/AjudaDaTela.vue'
 
 const busca = ref('')
 const pagina = ref(1)
@@ -217,9 +218,7 @@ onUnmounted(() => document.removeEventListener('click', fecharFiltroSeForaDele))
     <header class="tela__cabecalho">
       <div>
         <h1>Contatos</h1>
-        <p class="fraco pequeno">
-          Pessoas, seus telefones em E.164 com o bruto preservado, e seus papéis.
-        </p>
+        <AjudaDaTela>Pessoas, seus telefones em E.164 com o bruto preservado, e seus papéis.</AjudaDaTela>
       </div>
       <span class="chip chip--codigo chip--acento">CAD_1.2</span>
     </header>

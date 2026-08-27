@@ -14,6 +14,7 @@
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 
 import { api, ErroDeApi } from '../api/cliente.js'
+import AjudaDaTela from '../componentes/AjudaDaTela.vue'
 
 const canais = ref([])
 const carregando = ref(true)
@@ -192,10 +193,7 @@ onBeforeUnmount(() => {
     <header class="tela__cabecalho">
       <div>
         <h1>Canais</h1>
-        <p class="fraco pequeno">
-          Conectar e acompanhar os números de WhatsApp. O estado vem do
-          Evolution ao vivo — o banco guarda o histórico.
-        </p>
+        <AjudaDaTela>Conectar e acompanhar os números de WhatsApp. O estado vem do Evolution ao vivo — o banco guarda o histórico.</AjudaDaTela>
       </div>
       <span class="chip chip--codigo chip--acento">CFG_1.1</span>
     </header>

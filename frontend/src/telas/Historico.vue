@@ -17,6 +17,7 @@ import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 
 import { api, ErroDeApi } from '../api/cliente.js'
+import AjudaDaTela from '../componentes/AjudaDaTela.vue'
 
 const router = useRouter()
 const itens = ref([])
@@ -79,10 +80,7 @@ const totalMensagens = computed(
     <header class="tela__cabecalho">
       <div>
         <h1>Histórico</h1>
-        <p class="fraco pequeno">
-          Conversas encerradas. É o que responde "o que já falamos com essa
-          pessoa antes?".
-        </p>
+        <AjudaDaTela>Conversas encerradas. É o que responde "o que já falamos com essa pessoa antes?".</AjudaDaTela>
       </div>
       <div class="linha">
         <span class="chip">{{ itens.length }} conversas</span>

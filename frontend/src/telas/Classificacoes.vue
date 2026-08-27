@@ -14,6 +14,7 @@
 import { ref, onMounted } from 'vue'
 
 import { api, ErroDeApi } from '../api/cliente.js'
+import AjudaDaTela from '../componentes/AjudaDaTela.vue'
 
 const itens = ref([])
 const carregando = ref(true)
@@ -76,10 +77,7 @@ async function salvar() {
     <header class="tela__cabecalho">
       <div>
         <h1>Classificações</h1>
-        <p class="fraco pequeno">
-          O motivo com que o atendente <strong>encerra</strong> a conversa. É o
-          que responde depois "no que gastamos atendimento".
-        </p>
+        <AjudaDaTela>O motivo com que o atendente <strong>encerra</strong> a conversa. É o que responde depois "no que gastamos atendimento".</AjudaDaTela>
       </div>
       <div class="linha">
         <label class="linha pequeno fraco">

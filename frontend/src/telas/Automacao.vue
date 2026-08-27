@@ -24,6 +24,7 @@
 import { ref, onMounted } from 'vue'
 
 import { api, ErroDeApi } from '../api/cliente.js'
+import AjudaDaTela from '../componentes/AjudaDaTela.vue'
 
 const tipos = ref([])
 const iaDisponivel = ref(false)
@@ -128,9 +129,7 @@ onMounted(carregar)
     <header class="tela__cabecalho">
       <div>
         <h1>Automação por tipo</h1>
-        <p class="fraco pequeno">
-          O que roda sozinho quando chega mensagem. Nada aqui nasce ligado.
-        </p>
+        <AjudaDaTela>O que roda sozinho quando chega mensagem. Nada aqui nasce ligado.</AjudaDaTela>
       </div>
       <span class="chip chip--codigo chip--acento">CFG_5.1</span>
     </header>

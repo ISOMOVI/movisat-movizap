@@ -196,6 +196,20 @@
 .campo--erro .campo__ajuda { color: var(--erro); }
 
 /* ── cartão ───────────────────────────────────────────────────────────── */
+/* 🚨 O TÍTULO E O ÍCONE DE AJUDA NA MESMA LINHA (27/08). O bloco do
+   cabeçalho é um `<div>`, então o ícone caía embaixo do `<h1>`. Uma regra
+   aqui vale para as 13 telas -- treze cópias divergiriam na primeira mexida.
+
+   ⚠️ `flex-wrap` porque em tela estreita o título longo tem de poder quebrar
+   sem empurrar o ícone para fora. */
+.tela__cabecalho > div:first-child {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--e-2);
+  min-width: 0;
+}
+
 .cartao {
   background: var(--superficie);
   border: var(--borda-fina) solid var(--borda);

@@ -13,6 +13,7 @@ import { ref, computed, onMounted } from 'vue'
 
 import { api, ErroDeApi } from '../api/cliente.js'
 import { codigosPermitidos } from '../estado/sessao.js'
+import AjudaDaTela from '../componentes/AjudaDaTela.vue'
 
 const registro = ref(null)
 const erro = ref('')
@@ -67,10 +68,7 @@ function estaAtiva(tela) {
     <header class="tela__cabecalho">
       <div>
         <h1>Registro de telas</h1>
-        <p class="fraco pequeno">
-          Fonte única de navegação, permissão e auditoria. O código é imutável e
-          nunca é reaproveitado — reusar faria log antigo mentir.
-        </p>
+        <AjudaDaTela>Fonte única de navegação, permissão e auditoria. O código é imutável e nunca é reaproveitado — reusar faria log antigo mentir.</AjudaDaTela>
       </div>
       <div v-if="registro" class="linha">
         <span class="chip chip--ok">{{ ativas }} ativas</span>

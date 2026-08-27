@@ -279,6 +279,28 @@ async function confirmarEncaminhar() {
 const buscaNaConversa = ref('')
 const achadoAtual = ref(0)
 const achadosNaConversa = ref([])
+
+/* A busca abre por botão (27/08): ela é ação eventual e ocupava uma faixa fixa
+   na altura mais disputada da tela. */
+const buscaAberta = ref(false)
+const campoBuscaConversa = ref(null)
+
+function alternarBusca() {
+  if (buscaAberta.value) { fecharBusca(); return }
+  buscaAberta.value = true
+  // Abrir e ter de clicar no campo seria um clique a mais para nada.
+  nextTick(() => campoBuscaConversa.value && campoBuscaConversa.value.focus())
+}
+
+/* ⚠️ FECHAR LIMPA O TERMO, e isso não é zelo: com o termo guardado, os balões
+   continuariam marcados e o contador sumiria junto com o campo — um filtro
+   ativo sem nada na tela dizendo que existe. */
+function fecharBusca() {
+  buscaAberta.value = false
+  buscaNaConversa.value = ''
+  achadosNaConversa.value = []
+  achadoAtual.value = 0
+}
 const buscandoNaConversa = ref(false)
 /* ⚠️ O servidor devolve no máximo 200 acertos. Termo largo numa conversa
    longa encosta nisso, e encostar calado é a mentira por omissão que o teto
@@ -694,8 +716,9 @@ async function abrir(id) {
     chamaveisDaConversa = null
     // A busca é DESTA conversa: carregá-la em outra mostraria contador e
     // marcações de um termo que ninguém procurou aqui.
-    buscaNaConversa.value = ''
-    achadoAtual.value = 0
+    // ⚠️ E o CAMPO fecha junto (27/08): deixá-lo aberto na conversa nova
+    // devolveria a faixa de altura que o botão existe para não gastar.
+    fecharBusca()
     /* ⚠️ A citação é DESTA conversa. Sem limpar, a barra continuava apontando
        para uma mensagem da conversa anterior: o backend recusa ("só dá para
        citar mensagem desta conversa"), mas a tela mentia até a pessoa
@@ -1795,6 +1818,22 @@ function carregarMidiasDaConversa(c) {
             </div>
 
             <div v-else class="linha linha--quebra">
+              <!-- 🚨 O QUE ABRE A BUSCA (27/08). Fica na fileira das ações da
+                   conversa porque é isso que ela é: uma ação eventual. Antes
+                   era uma faixa fixa comendo altura em toda conversa.
+                   ⚠️ Fica ACESO enquanto a busca está aberta -- botão que
+                   alterna e não mostra em que estado está é adivinhação. -->
+              <button
+                class="botao botao--pequeno botao--icone"
+                :class="buscaAberta ? 'botao--primario' : 'botao--contorno'"
+                type="button"
+                :title="buscaAberta ? 'Fechar a busca' : 'Buscar nesta conversa'"
+                :aria-label="buscaAberta ? 'Fechar a busca' : 'Buscar nesta conversa'"
+                :aria-pressed="buscaAberta"
+                @click="alternarBusca"
+              >
+                <i class="bi bi-search" aria-hidden="true"></i>
+              </button>
               <button
                 class="botao botao--pequeno botao--contorno botao--icone"
                 type="button"
@@ -2033,15 +2072,26 @@ function carregarMidiasDaConversa(c) {
 
           <!-- BUSCAR NA CONVERSA — outra pergunta que a busca da lista:
                lá é "com quem eu falei", aqui é "onde ele disse isso". -->
-          <div class="buscaconversa">
+          <!-- 🚨 A BUSCA SÓ APARECE QUANDO SE PEDE (27/08, pedido dele: *"o
+               campo de busca na conversa, pode abrir de um botão, pois ocupa
+               muito espaço"*). Ela é uma ação eventual ocupando uma faixa fixa
+               na altura mais disputada da tela — e altura, aqui, é conversa
+               visível.
+
+               ⚠️ FECHAR LIMPA O TERMO. Deixar o termo guardado esconderia um
+               filtro ativo: os balões continuariam marcados e o contador
+               sumiria, sem nada dizendo por quê. -->
+          <div v-if="buscaAberta" class="buscaconversa">
             <div class="busca">
               <input
                 v-model="buscaNaConversa"
                 class="campo__entrada"
                 type="search"
                 placeholder="Buscar na conversa"
+                ref="campoBuscaConversa"
                 aria-label="Buscar na conversa"
                 @keyup.enter="irParaAchado(1)"
+                @keydown.esc="fecharBusca"
                 :disabled="!aberta"
               />
               <template v-if="buscaNaConversa.trim()">
@@ -2071,6 +2121,15 @@ function carregarMidiasDaConversa(c) {
                   <i class="bi bi-chevron-down" aria-hidden="true"></i>
                 </button>
               </template>
+              <button
+                class="botao botao--pequeno botao--fantasma botao--icone"
+                type="button"
+                title="Fechar a busca"
+                aria-label="Fechar a busca"
+                @click="fecharBusca"
+              >
+                <i class="bi bi-x-lg" aria-hidden="true"></i>
+              </button>
             </div>
             <!-- ⚠️ O AVISO DE "TRUNCADA" SAIU. Ele existia porque a busca só
                  via o que estava carregado; agora ela roda no servidor e

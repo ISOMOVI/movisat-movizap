@@ -17,6 +17,7 @@
 import { ref, computed, watch, onMounted } from 'vue'
 
 import { api, ErroDeApi } from '../api/cliente.js'
+import AjudaDaTela from '../componentes/AjudaDaTela.vue'
 
 const busca = ref('')
 const pagina = ref(1)
@@ -113,10 +114,7 @@ onMounted(carregar)
     <header class="tela__cabecalho">
       <div>
         <h1>Clientes</h1>
-        <p class="fraco pequeno">
-          Sincronizados do Harmonit a cada 12 h, ou criados aqui.
-          A busca entende nome, documento e telefone.
-        </p>
+        <AjudaDaTela>Sincronizados do Harmonit a cada 12 h, ou criados aqui. A busca entende nome, documento e telefone.</AjudaDaTela>
       </div>
       <span class="chip chip--codigo chip--acento">CAD_1.1</span>
     </header>

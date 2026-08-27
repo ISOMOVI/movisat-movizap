@@ -19,6 +19,7 @@
 import { ref, computed, onMounted } from 'vue'
 
 import { api, ErroDeApi } from '../api/cliente.js'
+import AjudaDaTela from '../componentes/AjudaDaTela.vue'
 
 const dados = ref(null)
 const carregando = ref(true)
@@ -94,10 +95,7 @@ onMounted(carregar)
     <header class="tela__cabecalho">
       <div>
         <h1>Sincronização</h1>
-        <p class="fraco pequeno">
-          Leitura do Harmonit a cada 12 h (05:45 e 17:45) e sob demanda.
-          O MoviZap só lê — cadastro criado aqui nunca sobe para lá.
-        </p>
+        <AjudaDaTela>Leitura do Harmonit a cada 12 h (05:45 e 17:45) e sob demanda. O MoviZap só lê — cadastro criado aqui nunca sobe para lá.</AjudaDaTela>
       </div>
       <span class="chip chip--codigo chip--acento">CFG_3.1</span>
     </header>

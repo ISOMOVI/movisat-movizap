@@ -17,6 +17,7 @@ import { ref, computed, onMounted } from 'vue'
 
 import { api, ErroDeApi } from '../api/cliente.js'
 import { corDaInicial, iniciais } from '../util/avatar.js'
+import AjudaDaTela from '../componentes/AjudaDaTela.vue'
 
 const times = ref([])
 const alertas = ref([])
@@ -109,10 +110,7 @@ async function salvar() {
     <header class="tela__cabecalho">
       <div>
         <h1>Times</h1>
-        <p class="fraco pequeno">
-          Quem recebe transferência. A descrição não é enfeite: é o texto que a
-          IA lê para escolher o destino.
-        </p>
+        <AjudaDaTela>Quem recebe transferência. A descrição não é enfeite: é o texto que a IA lê para escolher o destino.</AjudaDaTela>
       </div>
       <div class="linha">
         <label class="linha pequeno fraco">

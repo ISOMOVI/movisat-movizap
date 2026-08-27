@@ -24,6 +24,7 @@
 import { ref, computed, onMounted } from 'vue'
 
 import { api, ErroDeApi } from '../api/cliente.js'
+import AjudaDaTela from '../componentes/AjudaDaTela.vue'
 
 const estado = ref(null)
 const versoes = ref([])
@@ -162,10 +163,7 @@ async function ensaiar() {
     <header class="tela__cabecalho">
       <div>
         <h1>IA — prompt</h1>
-        <p class="fraco pequeno">
-          O texto que a IA vai ler, versionado. Cada conversa grava qual versão
-          a atendeu.
-        </p>
+        <AjudaDaTela>O texto que a IA vai ler, versionado. Cada conversa grava qual versão a atendeu.</AjudaDaTela>
       </div>
       <span v-if="estado?.versao_ativa" class="chip chip--ok">
         versão {{ estado.versao_ativa.versao }} ativa

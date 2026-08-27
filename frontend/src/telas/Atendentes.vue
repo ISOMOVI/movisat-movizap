@@ -17,6 +17,7 @@
 import { ref, computed, onMounted } from 'vue'
 
 import { api, ErroDeApi } from '../api/cliente.js'
+import AjudaDaTela from '../componentes/AjudaDaTela.vue'
 
 const DIAS = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado']
 const PERFIS = ['owner', 'admin', 'atendimento', 'cadastro']
@@ -223,10 +224,7 @@ async function salvar() {
     <header class="tela__cabecalho">
       <div>
         <h1>Atendentes</h1>
-        <p class="fraco pequeno">
-          Quem atende, em quais times, e em que horário. Conta sem senha existe
-          mas não entra no painel.
-        </p>
+        <AjudaDaTela>Quem atende, em quais times, e em que horário. Conta sem senha existe mas não entra no painel.</AjudaDaTela>
       </div>
       <div class="linha">
         <label class="linha pequeno fraco">

@@ -16,6 +16,7 @@ import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 
 import { api, ErroDeApi } from '../api/cliente.js'
+import AjudaDaTela from '../componentes/AjudaDaTela.vue'
 
 const router = useRouter()
 const grupos = ref([])
@@ -83,10 +84,7 @@ function quem(c) {
     <header class="tela__cabecalho">
       <div>
         <h1>Fila</h1>
-        <p class="fraco pequeno">
-          Conversas sem dono. A caixa de entrada mostra o que é seu; aqui é o
-          que não é de ninguém.
-        </p>
+        <AjudaDaTela>Conversas sem dono. A caixa de entrada mostra o que é seu; aqui é o que não é de ninguém.</AjudaDaTela>
       </div>
       <span class="chip" :class="totalEsperando ? 'chip--aviso' : 'chip--ok'">
         {{ totalEsperando }} esperando

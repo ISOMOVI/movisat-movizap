@@ -88,6 +88,61 @@ manda para `sessao.telas[0].rota`: a primeira tela do registro é a tela de
 entrada de todo login. Por isso ela entra no bloco das CFG, e a `INI_1.1`
 continua sendo a primeira.
 
+## O ícone de cada tela, e o ícone da ajuda
+
+O campo **`icone`** deste registro é o que o menu desenha, e ele é **a fonte
+única**: o `MenuLateral` não escolhe ícone, ele desenha o que vem daqui.
+
+| Módulo | Ícone | Onde |
+|---|---|---|
+| `INI_1.1` Início | `bi-house` | menu |
+| `EML_1.1` E-mail | `bi-envelope` | menu |
+| `ATD_1.1` Caixa de entrada | `bi-chat-dots` | menu |
+| `ATD_1.2` Conversa | `bi-chat-text` | fora do menu (rota com parâmetro) |
+| `ATD_1.3` Fila | `bi-list-ol` | menu |
+| `ATD_5.1` Histórico | `bi-clock-history` | menu |
+| `ATD_6.1` Chat interno | `bi-chat-left-dots` | menu |
+| `ATD_3.1` Informativos | `bi-megaphone` | menu |
+| `CAD_1.1` Clientes | `bi-building` | menu |
+| `CAD_1.2` Contatos | `bi-person-lines-fill` | menu |
+| `CAD_2.1` Atendentes | `bi-people` | menu |
+| `CAD_2.2` Times | `bi-diagram-2` | menu |
+| `CFG_0.1` Configurações | `bi-sliders` | menu |
+| `CFG_1.1` Canais | `bi-whatsapp` | aba |
+| `CFG_2.1` IA — prompt | `bi-robot` | aba |
+| `CFG_3.1` Sincronização | `bi-arrow-repeat` | aba |
+| `CFG_4.1` Classificações | `bi-tags` | aba |
+| `CFG_5.1` Automação por tipo | `bi-robot` | aba |
+| `CFG_9.1` Registro de telas | `bi-list-check` | aba |
+
+### `bi-question-circle` — a ajuda da tela (27/08)
+
+Pedido dele: *"as abas tem textos explicativos do que as telas são, o que
+fazem e o que falta... transforme em balões ícones apenas, se passar mouse
+aparece os textos"*.
+
+**O texto explicativo do cabeçalho virou um ícone** em 13 telas, com o
+componente `componentes/AjudaDaTela.vue`. **O ícone é sempre o mesmo** —
+`bi-question-circle` — e é convenção, não escolha por tela: um símbolo
+diferente em cada lugar obrigaria a reaprender o que ele faz.
+
+🚨 **O TEXTO NÃO SE PERDE, ELE SE RECOLHE.** Continua no fonte, no DOM e
+legível por leitor de tela; some só da vista de quem já sabe o que a tela faz.
+Esconder informação atrás de um ícone que não a devolve seria trocar um
+problema por outro.
+
+⚠️ **ABRE NO HOVER E NO FOCO.** Só no hover, quem usa teclado e quem usa toque
+nunca leriam o texto — é o mesmo defeito que as ações do balão tiveram até
+27/08, e que custou uma auditoria.
+
+⚠️ **`visibility`, não `display: none`.** Com `display:none` o conteúdo sai da
+árvore e alguns leitores de tela deixam de anunciá-lo — e foi exatamente o
+`display:none` que tirou as ações do balão do alcance do teclado.
+
+⚠️ **As telas sem cabeçalho padrão ficaram de fora**, e é correto: Caixa de
+entrada, Chat interno, E-mail, Configurações, Início e as auxiliares não têm o
+parágrafo explicativo que este ícone substitui.
+
 🚨 **TODA CONFIGURAÇÃO É `owner`, E ISSO É DECISÃO, NÃO DESCUIDO.** A tabela
 antiga dizia `admin` em seis dessas linhas. Quem lesse criaria um perfil
 `admin` esperando que ele configurasse Canais ou Sincronização, e levaria 403
