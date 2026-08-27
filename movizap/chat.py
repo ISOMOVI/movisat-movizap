@@ -193,6 +193,43 @@ def sair_do_grupo(sala_id: int, eu: int) -> dict:
     return {"ok": True, "sala_id": sala_id}
 
 
+def esconder(sala_id: int, eu: int) -> dict:
+    """Tira a conversa da MINHA lista. Não apaga nada, e não afeta o outro.
+
+    Pedido dele em 27/08: *"botão de excluir conversa"*, na tela que ele mandou
+    desenhar como a caixa de entrada do WhatsApp.
+
+    🚨 É O QUE "EXCLUIR CONVERSA" FAZ NO WHATSAPP, e é a única versão segura.
+    Apagar a sala levaria junto o histórico da OUTRA pessoa, que não pediu nada
+    e não tem como desfazer -- e conversa interna é prova de combinado: quem
+    disse o quê sobre um atendimento.
+
+    ⚠️ VOLTA SOZINHA na próxima mensagem. Guardar ATÉ QUE MENSAGEM foi
+    escondida, em vez de um booleano, é o que permite isso sem um segundo
+    lugar para saber quando ela reaparece.
+    """
+    if not e_membro(sala_id, eu):
+        return {"ok": False, "motivo": "Você não está nesta conversa."}
+    ultima = banco.um(
+        "SELECT COALESCE(MAX(id), 0) AS id FROM chat_mensagem WHERE sala_id = %s",
+        (sala_id,))
+    banco.executar(
+        "UPDATE chat_membro SET oculta_ate_id = %s "
+        " WHERE sala_id = %s AND atendente_id = %s",
+        (ultima["id"], sala_id, eu))
+    log.info("chat: sala %s escondida para %s ate a mensagem %s",
+             sala_id, eu, ultima["id"])
+    return {"ok": True, "sala_id": sala_id, "ate_id": ultima["id"]}
+
+
+def mostrar(sala_id: int, eu: int) -> dict:
+    """Desfaz o esconder. Abrir a conversa pelo endereço dela já faz isto."""
+    banco.executar(
+        "UPDATE chat_membro SET oculta_ate_id = NULL "
+        " WHERE sala_id = %s AND atendente_id = %s", (sala_id, eu))
+    return {"ok": True, "sala_id": sala_id}
+
+
 def salas(eu: int) -> list[dict]:
     """As salas desta pessoa, com quem é, a última mensagem e o não lido.
 
@@ -236,11 +273,21 @@ def salas(eu: int) -> list[dict]:
           FROM chat_membro m
           JOIN chat_sala s ON s.id = m.sala_id
           LEFT JOIN LATERAL (
-                SELECT texto, criada_em, atendente_id FROM chat_mensagem c
+                SELECT id, texto, criada_em, atendente_id FROM chat_mensagem c
                  WHERE c.sala_id = s.id ORDER BY c.id DESC LIMIT 1
           ) u ON true
           LEFT JOIN atendente ua ON ua.id = u.atendente_id
          WHERE m.atendente_id = %s
+           -- 🚨 A CONVERSA ESCONDIDA SOME DA LISTA, E VOLTA SOZINHA quando
+           -- chega mensagem nova (migração 038). Esconder não pode virar um
+           -- jeito de deixar de receber recado da equipe.
+           --
+           -- ⚠️ SALA VAZIA ESCONDIDA CONTINUA ESCONDIDA: sem o `COALESCE`, uma
+           -- conversa sem nenhuma mensagem teria `u.id` NULL e o `>` daria
+           -- NULL -- que não é verdadeiro, mas também não é o que se quer
+           -- dizer. Com o zero, a comparação é explícita.
+           AND (m.oculta_ate_id IS NULL
+                OR COALESCE(u.id, 0) > m.oculta_ate_id)
          ORDER BY COALESCE(u.criada_em, s.criada_em) DESC
         """,
         # 🚨 QUATRO `%s`, NÃO TRÊS. O `com_estado` acrescentou um placeholder no

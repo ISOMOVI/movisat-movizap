@@ -2204,6 +2204,24 @@ def chat_adicionar(sala_id: int, dados: ChatMembroNovo,
     return resultado
 
 
+@app.post("/api/chat/salas/{sala_id}/esconder")
+def chat_esconder(sala_id: int,
+                  usuario: dict = Depends(auth.requer_tela("ATD_6.1"))):
+    """Tira a conversa da lista de QUEM PEDIU. Nao apaga nada.
+
+    🚨 NAO E "APAGAR PARA TODOS". A outra pessoa continua com a conversa
+    inteira -- conversa interna e prova de combinado, e apagar o historico de
+    terceiro nao teria como ser desfeito.
+
+    ⚠️ Ela volta sozinha quando chegar mensagem nova.
+    """
+    eu = _minha_sala(sala_id, usuario)
+    resultado = chat.esconder(sala_id, eu)
+    if not resultado["ok"]:
+        raise HTTPException(status_code=409, detail=resultado["motivo"])
+    return resultado
+
+
 @app.post("/api/chat/salas/{sala_id}/sair")
 def chat_sair(sala_id: int,
               usuario: dict = Depends(auth.requer_tela("ATD_6.1"))):
@@ -2218,6 +2236,10 @@ def chat_sair(sala_id: int,
 def chat_mensagens(sala_id: int,
                    usuario: dict = Depends(auth.requer_tela("ATD_6.1"))):
     eu = _minha_sala(sala_id, usuario)
+    # ⚠️ ABRIR DESFAZ O ESCONDER (27/08). Quem escondeu e voltou pela busca ou
+    # pelo endereço está dizendo que quer a conversa de volta -- deixá-la
+    # oculta faria ela sumir de novo no próximo carregamento, sem explicação.
+    chat.mostrar(sala_id, eu)
     mensagens = chat.mensagens(sala_id, eu)
     # Abrir a sala é ler: marca até a última que veio nesta resposta, e não
     # "até agora" -- o que chegar durante a leitura continua não lido.

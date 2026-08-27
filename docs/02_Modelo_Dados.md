@@ -945,6 +945,35 @@ citar a reconstroem de `id_externo` + `direcao` + o destino da conversa —
 guardar o trio seria copiar o que já está aqui, contra o princípio 1 deste
 documento.
 
+### `chat_membro.oculta_ate_id` — esconder uma conversa interna (038)
+
+Pedido dele em 27/08: *"Canal interno -> botão de excluir conversa"*.
+
+🚨 **ESCONDE PARA MIM, NÃO APAGA PARA O OUTRO.** É o que "excluir conversa" faz
+no WhatsApp — a referência que ele escolheu para esta tela — e é a única versão
+segura: apagar a sala levaria junto o histórico da OUTRA pessoa, que não pediu
+nada e não tem como desfazer. **Conversa interna é prova de combinado**: quem
+disse o quê sobre um atendimento.
+
+⚠️ **E VOLTA SOZINHA** quando chega mensagem nova, também como no WhatsApp.
+Esconder não pode virar um jeito de deixar de receber recado da equipe — esse
+seria o defeito silencioso: a pessoa some da conversa e ninguém sabe.
+
+🚨 **GUARDA ATÉ QUE MENSAGEM FOI ESCONDIDA, não um booleano.** Com um booleano,
+ou a conversa some para sempre, ou é preciso um segundo lugar para saber quando
+ela volta — e dois lugares para o mesmo estado dessincronizam.
+
+⚠️ **`COALESCE(u.id, 0)` NA COMPARAÇÃO.** Sala escondida sem nenhuma mensagem
+teria `id` NULL, e `NULL > n` não é falso: é NULL, que não é o que se quer
+dizer. Com o zero a comparação é explícita, e há teste para esse caso.
+
+⚠️ **Abrir a conversa desfaz o esconder.** Quem voltou pelo endereço está
+dizendo que quer a conversa de volta; deixá-la oculta faria ela sumir de novo
+no próximo carregamento, sem explicação.
+
+**Nenhuma linha de `chat_mensagem` é tocada** — a conversa reaparece inteira,
+do começo.
+
 ### `chat_mencao` — quem foi chamado por `@` no chat interno (037)
 
 Pedido do usuário em 27/08: *"interessante e pode ser, tanto no interno quanto

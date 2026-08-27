@@ -246,6 +246,31 @@ async function sairDoGrupo() {
   }
 }
 
+/* 🚨 "EXCLUIR CONVERSA" TIRA DA MINHA LISTA, e a confirmação diz as duas
+   coisas que a pessoa precisa saber antes de clicar: o outro continua com
+   tudo, e ela volta se alguém escrever. É o comportamento do WhatsApp, que é
+   a referência que ele escolheu para esta tela.
+
+   ⚠️ Apagar de verdade levaria junto o histórico de quem não pediu nada, e
+   conversa interna é prova de combinado: quem disse o quê sobre um
+   atendimento. */
+async function esconderConversa() {
+  const quem = sala.value?.com || sala.value?.nome || 'esta conversa'
+  const aviso = `Tirar "${quem}" da sua lista?\n\n`
+    + 'A conversa continua inteira para a outra pessoa — isto não apaga nada.\n\n'
+    + 'Ela volta para a sua lista assim que alguém escrever de novo.'
+  if (!confirm(aviso)) return
+  try {
+    await api.post(`/api/chat/salas/${sala.value.id}/esconder`)
+    recado.value = 'Conversa fora da sua lista. Ela volta se alguém escrever.'
+    sala.value = null
+    mensagens.value = []
+    await carregar()
+  } catch (e) {
+    erro.value = e instanceof ErroDeApi ? e.message : 'Não consegui esconder.'
+  }
+}
+
 const recado = ref('')
 
 async function falarCom(atendenteId) {
@@ -447,15 +472,28 @@ function quando(iso) {
 
 <template>
   <div class="tela">
+    <!-- 🚨 A BARRA ALTA (27/08, pedido dele: *"design replicado de caixa de
+         entrada do zap, porém com barra alta evidente para distinção"*).
+
+         O pedido é de DESENHO e a razão é de RISCO: quanto mais esta tela se
+         parecer com a caixa de entrada, mais fácil fica escrever para o
+         colega achando que é o cliente -- ou o contrário. A semelhança é o
+         que ele quer, e a barra é o que a torna segura.
+
+         ⚠️ ELA É A PRIMEIRA COISA DA TELA, atravessa a largura toda e não
+         rola junto: um aviso que sai de vista com a rolagem avisa só quem já
+         sabia. E é a ÚNICA repetição permitida deste recado -- ele já esteve
+         em três lugares ao mesmo tempo, e três avisos iguais viram
+         decoração que o olho pula. -->
+    <p class="barra-interna" role="note">
+      <i class="bi bi-shield-lock-fill" aria-hidden="true"></i>
+      <strong>Conversa interna.</strong>
+      <span>Nada aqui chega ao cliente — para falar com ele, use a Caixa de entrada.</span>
+    </p>
+
     <header class="tela__cabecalho">
       <div>
         <h1>Chat interno</h1>
-        <!-- 🚨 UM AVISO, NÃO TRÊS. "Não chega ao cliente" aparecia no
-             cabeçalho da tela, no chip da conversa e embaixo do botão de
-             enviar. Repetir três vezes na mesma tela não avisa mais: avisa
-             menos, porque vira decoração que o olho pula. Fica o chip, que é
-             o que está à vista NA HORA de escrever. -->
-        <p class="fraco pequeno">Conversa entre atendentes.</p>
       </div>
       <span v-if="naoLidasTotal" class="chip chip--acento">
         {{ naoLidasTotal }} não lida{{ naoLidasTotal > 1 ? 's' : '' }}
@@ -647,6 +685,16 @@ function quando(iso) {
                 <i class="bi bi-box-arrow-left" aria-hidden="true"></i>
               </button>
             </template>
+            <!-- 🚨 "EXCLUIR" AQUI TIRA DA MINHA LISTA, e o rótulo diz isso.
+                 Chamar de "excluir conversa" sem mais nada faria parecer que
+                 apaga para os dois -- e conversa interna é prova de
+                 combinado: quem disse o quê sobre um atendimento. -->
+            <button class="botao botao--pequeno botao--fantasma" type="button"
+                    title="Tirar esta conversa da minha lista"
+                    aria-label="Tirar esta conversa da minha lista"
+                    @click="esconderConversa">
+              <i class="bi bi-trash3" aria-hidden="true"></i>
+            </button>
           </header>
 
           <div v-if="ehGrupo && mostrandoMembros" class="cartao__corpo pilha grupo__novo">
@@ -803,6 +851,38 @@ function quando(iso) {
 </template>
 
 <style scoped>
+/* ---- a barra alta de distinção (27/08) ----------------------------------
+   🚨 O PEDIDO É DE DESENHO E A RAZÃO É DE RISCO. Ele mandou esta tela se
+   parecer com a caixa de entrada do WhatsApp -- e quanto mais parecida, mais
+   fácil escrever para o colega achando que é o cliente. A barra é o que torna
+   a semelhança segura.
+
+   ⚠️ ÂMBAR, NÃO VERMELHO. Vermelho é erro, e não há erro nenhum aqui: é
+   contexto. Vermelho para o que é normal treina a equipe a ignorar vermelho.
+
+   ⚠️ ALTA E LARGA de propósito: ela é a primeira coisa da tela, atravessa a
+   largura toda e não rola junto -- aviso que sai de vista com a rolagem avisa
+   só quem já sabia. */
+.barra-interna {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--e-2);
+  margin: 0 0 var(--e-4);
+  padding: var(--e-3) var(--e-4);
+  background: var(--aviso-suave);
+  border: var(--borda-fina) solid var(--aviso-borda);
+  /* A faixa grossa à esquerda é o que se enxerga pelo canto do olho, antes
+     mesmo de ler. */
+  border-left: 4px solid var(--aviso);
+  border-radius: var(--r-md);
+  color: var(--aviso);
+  font-size: var(--txt-md);
+}
+.barra-interna strong { font-weight: var(--peso-forte); }
+.barra-interna span { color: var(--texto-fraco); }
+.barra-interna .bi { font-size: 16px; }
+
 /* ---- coluna de pessoas e grupos ----------------------------------------- */
 .ci__topo { display: flex; gap: var(--e-2); align-items: center; }
 .ci__topo .busca { flex: 1 1 auto; }
