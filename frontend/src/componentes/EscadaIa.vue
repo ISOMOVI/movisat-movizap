@@ -101,6 +101,7 @@ const degraus = computed(() => [
     trava: '',
     acao: temPrompt.value ? 'Ver e editar' : 'Escrever o prompt',
     aba: 'CFG_2.1',
+    ancora: 'prompt-editor',
   },
   {
     n: 2,
@@ -114,6 +115,7 @@ const degraus = computed(() => [
     trava: motorPronto.value ? '' : (motivoDoMotor.value || 'o motor não está disponível'),
     acao: 'Abrir a sala de ensaio',
     aba: 'CFG_2.1',
+    ancora: 'sala-de-ensaio',
   },
   {
     n: 3,
@@ -138,12 +140,25 @@ const degraus = computed(() => [
   },
 ])
 
+/* 🚨 TROCAR DE ABA NÃO BASTA QUANDO A ABA JÁ É ESTA. Achado conferindo depois
+   de entregar: os passos 1 e 2 apontam para a CFG_2.1, e a escada MORA na
+   CFG_2.1 -- clicar trocava a URL e não acontecia nada na tela. É o defeito
+   que a Automacao.vue já tinha escrito em comentário: "botão que não faz nada
+   é pior que botão ausente, porque alguém confia nele".
+
+   ⚠️ A rolagem espera o próximo quadro: quando a aba MUDA, o alvo ainda não
+   está no DOM no instante do clique. */
 function agir(degrau) {
-  if (degrau.aba) {
-    emit('ir-para', degrau.aba)
+  if (!degrau.aba) {
+    alternarCanal()
     return
   }
-  alternarCanal()
+  emit('ir-para', degrau.aba)
+  if (!degrau.ancora) return
+  requestAnimationFrame(() => {
+    const alvo = document.getElementById(degrau.ancora)
+    if (alvo) alvo.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  })
 }
 
 async function alternarCanal() {

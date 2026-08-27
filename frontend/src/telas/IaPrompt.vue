@@ -213,7 +213,11 @@ async function ensaiar() {
     </p>
 
     <template v-else>
-      <section class="cartao tela__bloco">
+      <!-- ⚠️ A ÂNCORA EXISTE PARA A ESCADA (27/08). O passo 1 dela leva aqui,
+           e a escada mora nesta mesma aba: sem um lugar para rolar até, o
+           botão trocava a URL e nada acontecia na tela — que é o mesmo defeito
+           de "botão que não faz nada" que a escada existe para acabar. -->
+      <section id="prompt-editor" class="cartao tela__bloco">
         <header class="cartao__cabecalho">
           <span>Editor</span>
           <span v-if="vendo" class="apagado pequeno mono">vendo a versão {{ vendo }}</span>
@@ -321,7 +325,7 @@ async function ensaiar() {
          SALA DE ENSAIO — o passo 3 da sequência de ativação do docs/04.
          🚨 Não envia, não grava, não transfere. Mostra o que ela TERIA feito.
          ════════════════════════════════════════════════════════════════════ -->
-    <section v-if="estado?.motor_existe" class="cartao">
+    <section v-if="estado?.motor_existe" id="sala-de-ensaio" class="cartao">
       <header class="cartao__cabecalho">
         <div>
           <strong>Sala de ensaio</strong>

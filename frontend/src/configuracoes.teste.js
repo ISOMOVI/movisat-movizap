@@ -154,6 +154,37 @@ describe('a escada da IA', () => {
     expect(w.findAll('.degrau')[2].text()).toContain('1750')
   })
 
+  it('o passo 1 leva a algum lugar de verdade, não só troca a URL', async () => {
+    // 🚨 ACHADO CONFERINDO DEPOIS DE ENTREGAR. Os passos 1 e 2 apontam para a
+    // CFG_2.1 e a escada MORA na CFG_2.1: sem rolar até uma âncora, clicar
+    // trocava o endereço e nada acontecia na tela. "Botão que não faz nada é
+    // pior que botão ausente, porque alguém confia nele" -- e este teste
+    // existe porque eu quase entreguei exatamente isso.
+    const alvo = document.createElement('div')
+    alvo.id = 'prompt-editor'
+    document.body.appendChild(alvo)
+    alvo.scrollIntoView = vi.fn()
+
+    const w = await montar()
+    await w.findAll('.degrau')[0].find('button').trigger('click')
+    await new Promise((r) => requestAnimationFrame(r))
+
+    expect(alvo.scrollIntoView).toHaveBeenCalled()
+    expect(w.emitted('ir-para')?.[0]).toEqual(['CFG_2.1'])
+    alvo.remove()
+  })
+
+  it('o passo 4 não emite navegação — ele age', async () => {
+    // O passo 4 é o ato. Se ele virasse navegação, ligar a IA passaria a ser
+    // "ir para outra tela", que é justamente o que se desfez aqui.
+    respostas['/api/canais'][0].ia_ligada = true
+    window.confirm = vi.fn(() => false)   // cancela: não queremos a chamada
+    const w = await montar()
+    await w.findAll('.degrau')[3].find('button').trigger('click')
+    expect(w.emitted('ir-para')).toBeUndefined()
+    expect(window.confirm).toHaveBeenCalled()
+  })
+
   it('não oferece IA no canal de informativo', async () => {
     // O informativo é disparo, não conversa, e a rota recusa. A tela não pode
     // oferecer o que o backend nega.
