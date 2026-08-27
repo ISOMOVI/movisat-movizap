@@ -75,7 +75,7 @@ const rotas = [
     path: '/atendimento',
     name: 'ATD_1.1',
     component: CaixaDeEntrada,
-    meta: { codigo: 'ATD_1.1', titulo: 'Caixa de entrada' },
+    meta: { codigo: 'ATD_1.1', titulo: 'Caixa de entrada', cheio: true },
   },
   {
     // antes de /atendimento/:id — senão "fila" vira um id
@@ -106,7 +106,7 @@ const rotas = [
     path: '/atendimento/:id',
     name: 'ATD_1.2',
     component: CaixaDeEntrada,
-    meta: { codigo: 'ATD_1.2', titulo: 'Conversa' },
+    meta: { codigo: 'ATD_1.2', titulo: 'Conversa', cheio: true },
   },
 
   {

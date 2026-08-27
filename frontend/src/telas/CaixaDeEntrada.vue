@@ -1398,30 +1398,15 @@ function carregarMidiasDaConversa(c) {
 </script>
 
 <template>
-  <div class="tela">
-    <header class="tela__cabecalho">
-      <div>
-        <h1>Caixa de entrada</h1>
-        <p class="fraco pequeno">
-          O que chegou pelo WhatsApp. A conversa abre ao lado.
-        </p>
-      </div>
-      <!-- 🚨 DOIS NÚMEROS, NÃO QUATRO. Havia quatro chips do mesmo peso
-           (conversas, sem dono, mensagens, ignorados): "mensagens" é volume e
-           não pede ação, e "ignorados" é detalhe técnico que interessa a mim,
-           não a quem atende. O que decide trabalho é quantas esperam e
-           quantas não têm dono. -->
-      <div v-if="resumo" class="placar">
-        <div class="placar__item">
-          <strong class="placar__numero">{{ resumo.conversas }}</strong>
-          <span class="placar__rotulo">conversas</span>
-        </div>
-        <div class="placar__item" :class="{ 'placar__item--pede': resumo.sem_dono }">
-          <strong class="placar__numero">{{ resumo.sem_dono }}</strong>
-          <span class="placar__rotulo">sem dono</span>
-        </div>
-      </div>
-    </header>
+  <div class="tela tela--conversa">
+    <!-- 🚨 O CABEÇALHO DE PÁGINA SAIU EM 27/08. Ele comia uma faixa da altura
+         para repetir o nome da tela que o menu já diz, e era o que mais
+         afastava a tela do desenho escolhido. O título e os dois números
+         passaram para o topo da coluna da lista, onde ficam ao lado do que
+         contam.
+
+         ⚠️ OS DOIS NÚMEROS FICARAM. Eles são a decisão de 25/08 -- quantas
+         esperam e quantas não têm dono é o que decide trabalho. -->
 
     <p v-if="filaParada" class="aviso aviso--erro" role="alert">
       <i class="bi bi-exclamation-octagon aviso__icone" aria-hidden="true"></i>
@@ -1448,7 +1433,19 @@ function carregarMidiasDaConversa(c) {
     <div class="painel">
       <!-- ---------------------------------------------------------- LISTA -->
       <section class="cartao coluna">
-        <header class="cartao__cabecalho">
+        <header class="cartao__cabecalho lista__topo">
+          <!-- O título e os dois números, que antes ficavam numa faixa acima
+               da tela inteira. Aqui eles ficam ao lado do que contam. -->
+          <div class="lista__titulo">
+            <h1>Caixa de entrada</h1>
+            <div v-if="resumo" class="lista__placar">
+              <span>{{ resumo.conversas }} abertas</span>
+              <span v-if="resumo.sem_dono" class="lista__pede">
+                · {{ resumo.sem_dono }} sem dono
+              </span>
+            </div>
+          </div>
+
           <div class="linha linha--quebra">
             <!-- ⚠️ CONTROLE SEGMENTADO, não três botões soltos. Três botões
                  com cores diferentes leem como três ações; segmentado lê como
@@ -2287,7 +2284,7 @@ function carregarMidiasDaConversa(c) {
             Entre na conversa para responder ou anotar.
           </p>
 
-          <div v-else class="cartao__corpo pilha">
+          <div v-else class="cartao__corpo pilha rodape-conversa">
             <!-- 🚨 NÃO EXISTE MAIS SELETOR DE MODO. Havia um par
                  "Para o cliente | Nota interna" que só trocava um estado
                  invisível: clicar no lado que já estava ativo não fazia nada,
@@ -2838,17 +2835,76 @@ function carregarMidiasDaConversa(c) {
 }
 .tela__cabecalho p { max-width: var(--largura-texto); margin-top: var(--e-1); }
 
+/* ============================================================================
+   A TELA É UM APP DE CONVERSA, NÃO UMA PÁGINA COM CARTÕES (27/08).
+   ----------------------------------------------------------------------------
+   🚨 Foi o que ele apontou comparando com o mockup que escolheu: *"não ficou
+   igual ao modelo, só mudou o fundo, pensei que as dimensões e etc ficariam
+   igual"*. Ele estava certo -- eu tinha trocado a pele do balão e deixado a
+   estrutura como estava.
+
+   O que muda: as duas colunas COLAM (sem `gap`), ocupam a ALTURA TODA, e
+   deixam de ser cartões flutuando com raio e sombra. O respiro da página é
+   anulado pelo `meta.cheio` da rota, no App.
+
+   ⚠️ SÓ ESTA TELA. As outras continuam sendo páginas com cartões, e o
+   `.painel` daqui é `scoped`. ============================================= */
 .painel {
   display: grid;
-  grid-template-columns: minmax(280px, 360px) 1fr;
-  gap: var(--e-4);
-  align-items: start;
+  grid-template-columns: 348px 1fr;
+  height: 100%;
+  min-height: 0;
+  gap: 0;
+  align-items: stretch;
 }
-@media (max-width: 860px) {
-  .painel { grid-template-columns: 1fr; }
+@media (max-width: 1100px) { .painel { grid-template-columns: 300px 1fr; } }
+@media (max-width: 860px)  { .painel { grid-template-columns: 1fr; } }
+
+/* As colunas perdem a casca de cartão: sem raio, sem sombra, divididas por
+   uma linha de 1px -- é o que faz a tela parecer contínua. */
+.painel > .cartao {
+  border-radius: 0;
+  border: 0;
+  box-shadow: none;
+  padding: 0;
+  min-height: 0;
+}
+.painel > .cartao + .cartao { border-left: var(--borda-fina) solid var(--borda); }
+
+.coluna {
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--superficie);
 }
 
-.coluna { overflow: hidden; }
+/* ---- o topo da coluna da lista (27/08) --------------------------------- */
+.lista__topo {
+  flex: none;
+  display: block;
+  padding: var(--e-4) var(--e-4) var(--e-3);
+  border-bottom: var(--borda-fina) solid var(--borda);
+}
+.lista__titulo { margin-bottom: var(--e-3); }
+.lista__titulo h1 {
+  margin: 0;
+  font-size: var(--txt-lg);
+  font-weight: var(--peso-forte);
+  letter-spacing: -.01em;
+}
+/* ⚠️ Os dois números viraram uma linha de apoio, não dois cartões: eles
+   informam, e o que decide a atenção é a lista abaixo. */
+.lista__placar {
+  margin-top: 2px;
+  font-size: var(--txt-sm);
+  color: var(--texto-apagado);
+}
+.lista__pede { color: var(--aviso); font-weight: var(--peso-medio); }
+
+/* A busca e as abas ganham ar próprio, agora que o cabeçalho não é uma faixa
+   da página inteira. */
+.lista__topo .busca { margin-top: var(--e-3); }
 
 /* 🚨 A COLUNA DA CONVERSA VIRA UMA PILHA COM ALTURA, e o fio ocupa o que
    sobra. Apontado por ele em 26/08: o fio tinha `max-height: 52vh` fixo, então
@@ -2859,13 +2915,25 @@ function carregarMidiasDaConversa(c) {
    curto, sem um vão cinza embaixo. O `calc` desconta o cabeçalho da tela e as
    margens; o `min` impede que num monitor muito alto o fio fique maior do que
    se lê de uma vez. */
+/* ⚠️ O `max-height` em `vh` SAIU. Ele existia porque a tela era uma página que
+   rolava; agora a coluna ocupa exatamente a altura disponível e quem rola é o
+   fio, por dentro. Altura em `vh` era chute sobre o monitor de quem usa. */
 .coluna--larga {
   display: flex;
   flex-direction: column;
-  max-height: min(calc(100vh - 9rem), 60rem);
+  min-height: 0;
+  background: var(--fundo);
 }
 
-.conversas { list-style: none; margin: 0; padding: 0; max-height: 60vh; overflow-y: auto; }
+/* Pelo mesmo motivo, a lista rola inteira em vez de parar em 60vh. */
+.conversas {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
 
 /* O "Assumir" fica ao lado do botão da conversa, não dentro dele — o item é
    quem vira a linha, e a borda de topo passou para cá porque agora são dois
@@ -3037,12 +3105,15 @@ function carregarMidiasDaConversa(c) {
      diferença de cada lado, e o campo aparecia mais estreito que as mensagens.
      Apontado por ele em 26/08. Alinhar é usar o mesmo token, não somar um
      ajuste -- valor escolhido a olho volta a desalinhar na próxima mudança. */
-  padding: var(--e-3) var(--e-4);
+  /* ⚠️ MARGEM LATERAL MAIOR QUE A VERTICAL (27/08, do mockup escolhido). O
+     balão tem no máximo 66% da largura; sem margem generosa nas laterais ele
+     encosta na borda e a conversa perde o ar que o desenho tem. */
+  padding: var(--e-4) var(--e-7);
   /* Ocupa o que sobra da coluna em vez de um `vh` fixo. `min-height: 0` é o
      que permite o filho de um flex ENCOLHER e rolar; sem ele o fio empurra o
      compositor para fora da tela em conversa longa. */
   flex: 1 1 auto;
-  min-height: 12rem;
+  min-height: 0;
   overflow-y: auto;
   /* Balão já quebra palavra; barra horizontal aqui só apareceria por acidente
      de conteúdo largo, e rolar a conversa de lado não serve para nada. */
@@ -3193,6 +3264,15 @@ function carregarMidiasDaConversa(c) {
 
 /* ---- chamar alguém com @, só em grupo (27/08) --------------------------- */
 /* `position: relative` porque a lista do `@` se ancora no compositor. */
+/* 🚨 A FAIXA CINZA ATRÁS DO COMPOSITOR. É ela que faz o campo branco virar
+   uma ilha; sem o contraste, o compositor se dissolvia no fim do fio. */
+.rodape-conversa {
+  flex: none;
+  background: var(--superficie-2);
+  border-top: var(--borda-fina) solid var(--borda);
+  padding: var(--e-3) var(--e-4) var(--e-4);
+}
+
 /* ---- o compositor (27/08) -----------------------------------------------
    🚨 O CAMPO É UMA ILHA BRANCA SOBRE FUNDO CINZA, e isso é a coisa que mais
    separa "campo de formulário" de "lugar de escrever mensagem". O fio tem
@@ -3201,7 +3281,10 @@ function carregarMidiasDaConversa(c) {
   position: relative;
   background: var(--superficie);
   border: var(--borda-fina) solid var(--borda);
-  border-radius: var(--r-lg);
+  /* 🚨 14px, não 8: no desenho escolhido o campo é uma ILHA arredondada sobre
+     a faixa cinza, e é o raio que faz ela parecer lugar de escrever mensagem
+     em vez de campo de formulário. */
+  border-radius: 14px;
   transition: border-color var(--tempo) var(--curva),
               box-shadow var(--tempo) var(--curva);
 }
