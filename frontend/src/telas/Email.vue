@@ -190,17 +190,77 @@ async function vincular(clienteId) {
   }
 }
 
-/* ---- assinatura ---------------------------------------------------------- */
+/* ---- assinatura ----------------------------------------------------------
+   🚨 A IMAGEM VOLTOU PARA A TELA EM 27/08. Ele perguntou onde ela tinha ido
+   parar; o backend estava inteiro desde a migração 017 -- a rota de subir, a
+   de tirar, a pasta por atendente e o `enviar._assinatura()` que embute o
+   arquivo por CID. **Faltava só o controle aqui**, e sem ele o recurso existia
+   e ninguém podia usar.
+
+   ⚠️ A IMAGEM NÃO SUBSTITUI O HTML: o e-mail sai com os dois. O HTML é o texto
+   (nome, cargo, telefone); a imagem é o logo. */
 const assinatura = ref('')
 const editandoAssinatura = ref(false)
+const temImagem = ref(false)
+const imagemNome = ref('')
 
 async function carregarAssinatura() {
-  try { assinatura.value = (await api.get('/api/eu/assinatura')).html || '' } catch {}
+  try {
+    const r = await api.get('/api/eu/assinatura')
+    assinatura.value = r.html || ''
+    temImagem.value = Boolean(r.tem_imagem)
+    imagemNome.value = r.imagem_nome || ''
+  } catch {}
 }
 async function salvarAssinatura() {
   await api.put('/api/eu/assinatura', { html: assinatura.value })
   editandoAssinatura.value = false
   recado.value = 'Assinatura salva.'
+}
+
+/* ⚠️ NÃO passa pelo `api.post`, que serializa JSON. Arquivo vai por `FormData`,
+   e aí o navegador monta o `Content-Type` com o boundary sozinho -- definir o
+   cabeçalho na mão quebra o upload em silêncio, com o servidor recebendo corpo
+   vazio. Mesma armadilha do anexo da conversa. */
+async function subirImagem(evento) {
+  const arquivo = evento.target.files && evento.target.files[0]
+  evento.target.value = ''            // deixa reenviar o mesmo arquivo
+  if (!arquivo) return
+  erro.value = ''
+  const corpo = new FormData()
+  corpo.append('arquivo', arquivo)
+  try {
+    /* Mesmo caminho do anexo, logo acima: `fetch` direto para o navegador
+       montar o `boundary`. */
+    const r = await fetch('/api/eu/assinatura/imagem', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${localStorage.getItem('movizap.token')}` },
+      body: corpo,
+    })
+    if (!r.ok) {
+      /* O backend recusa com motivo (não é imagem, passa de 2 MB, conta sem
+         linha em `atendente`) -- mostrar "não consegui" perderia o porquê. */
+      const detalhe = await r.json().catch(() => ({}))
+      throw new ErroDeApi(detalhe.detail || 'O servidor recusou a imagem.', r.status, '')
+    }
+    /* 🚨 RELÊ EM VEZ DE CONFIAR NO 200. O backend confere o disco antes de
+       dizer que a imagem existe -- é ele quem sabe se ela vale. */
+    await carregarAssinatura()
+    recado.value = 'Imagem da assinatura salva.'
+  } catch (e) {
+    erro.value = e instanceof ErroDeApi ? e.message : 'Não consegui subir a imagem.'
+  }
+}
+
+async function tirarImagem() {
+  if (!confirm('Tirar a imagem da assinatura?\n\nO texto continua como está.')) return
+  try {
+    await api.del('/api/eu/assinatura/imagem')
+    await carregarAssinatura()
+    recado.value = 'Imagem removida.'
+  } catch (e) {
+    erro.value = e instanceof ErroDeApi ? e.message : 'Não consegui tirar a imagem.'
+  }
 }
 
 function alternarMenu() {
@@ -256,8 +316,20 @@ const NOMES = {
 }
 
 /* Lixo, rascunho e as CATEGORIAS internas do Gmail não aparecem: são
-   classificação automática dele, não organização de quem atende. */
-const ESCONDIDOS = ['SPAM', 'TRASH', 'CHAT', 'DRAFT']
+   classificação automática dele, não organização de quem atende.
+
+   🚨 AS ESTRELAS COLORIDAS TAMBÉM SAEM (27/08). O Gmail tem 12 marcadores de
+   estrela — `YELLOW_STAR`, `RED_STAR`, `BLUE_INFO`… — e todos significam a
+   MESMA lista que o `STARRED` já mostra como "Com estrela". Ele viu o
+   `YELLOW_STAR` cru na tela e pediu o nome legível; mas dois itens chamados
+   "Com estrela" seriam pior que um id feio. Fica o `STARRED`, que é o que o
+   Gmail chama de "Com estrela" na barra lateral dele. */
+const ESTRELAS_DO_GMAIL = [
+  'YELLOW_STAR', 'ORANGE_STAR', 'RED_STAR', 'PURPLE_STAR', 'BLUE_STAR',
+  'GREEN_STAR', 'YELLOW_BANG', 'ORANGE_GUILLEMET', 'RED_BANG',
+  'PURPLE_QUESTION', 'BLUE_INFO', 'GREEN_CHECK',
+]
+const ESCONDIDOS = ['SPAM', 'TRASH', 'CHAT', 'DRAFT', ...ESTRELAS_DO_GMAIL]
 
 function rotulo(m) {
   return NOMES[m.id_externo] || m.nome
@@ -359,6 +431,23 @@ async function alternarEstrela(m) {
   m.estrela = !antes
   try {
     await api.post(`/api/email/mensagens/${m.id}/estrela?ligada=${!antes}`)
+
+    /* 🚨 DENTRO DE "COM ESTRELA", TIRAR A ESTRELA TIRA DA LISTA (27/08).
+       Ele viu e apontou: *"tirar estrela não removeu ele da lista"*. A lista
+       é o marcador aberto; uma mensagem sem estrela dentro de "Com estrela"
+       é uma mensagem que não pertence mais àquela lista, e deixá-la ali é a
+       tela contradizendo o próprio título.
+
+       ⚠️ SÓ NESTA LISTA. Na caixa de entrada, tirar a estrela não muda nada
+       sobre estar na caixa -- remover ali faria a mensagem sumir por um
+       motivo que não tem nada a ver com o lugar onde ela está. */
+    if (marcadorAtual.value === 'STARRED' && !m.estrela) {
+      mensagens.value = mensagens.value.filter((x) => x.id !== m.id)
+      marcadas.value = marcadas.value.filter((id) => id !== m.id)
+      // A que estava aberta saiu junto: mostrá-la sem estar na lista deixaria
+      // a leitura apontando para algo que a coluna já não tem.
+      if (aberta.value && aberta.value.id === m.id) aberta.value = null
+    }
   } catch (e) {
     m.estrela = antes
     erro.value = e instanceof ErroDeApi ? e.message : 'Não consegui mexer na estrela.'
@@ -651,6 +740,40 @@ onUnmounted(() => document.removeEventListener('keydown', atalho))
       <textarea v-model="assinatura" class="campo__entrada email__area" rows="6"
                 placeholder="<div>Seu nome<br>Movisat</div>"></textarea>
       <div v-if="assinatura" class="email__previa" v-html="assinatura"></div>
+
+      <!-- 🚨 A IMAGEM VOLTOU PARA A TELA (27/08). Ele perguntou: *"assinatura
+           por upload de imagem oculto? onde foi parar"*. O backend estava
+           inteiro — a rota, a pasta, e o `enviar._assinatura()` que embute a
+           imagem por CID no e-mail. **Faltava só o controle aqui.**
+
+           ⚠️ A IMAGEM NÃO SUBSTITUI O HTML: o e-mail sai com os dois, e é por
+           isso que os dois ficam no mesmo painel. O HTML é o texto (nome,
+           cargo, telefone); a imagem é o logo. -->
+      <div class="email__assinatura-imagem">
+        <p class="campo__rotulo">Imagem (logo)</p>
+        <!-- ⚠️ MOSTRA O NOME, NÃO A IMAGEM. Não existe rota que devolva o
+             arquivo, e inventar uma só para a prévia seria escopo que ninguém
+             pediu. O nome + "ativa" responde o que a pessoa precisa saber:
+             tem imagem, e qual é. -->
+        <div v-if="temImagem" class="linha">
+          <span class="chip chip--ok">
+            <i class="bi bi-image" aria-hidden="true"></i> {{ imagemNome }}
+          </span>
+          <button class="botao botao--pequeno botao--fantasma" type="button"
+                  @click="tirarImagem">
+            <i class="bi bi-x-circle" aria-hidden="true"></i> Tirar
+          </button>
+        </div>
+        <p v-else class="apagado pequeno">Nenhuma imagem — o e-mail sai só com o texto.</p>
+        <label class="botao botao--pequeno botao--contorno">
+          <i class="bi bi-upload" aria-hidden="true"></i>
+          {{ temImagem ? 'Trocar imagem' : 'Enviar imagem' }}
+          <input type="file" accept="image/png,image/jpeg" hidden
+                 @change="subirImagem" />
+        </label>
+        <span class="apagado pequeno">PNG ou JPG, até 2 MB. Assinatura é logo, não banner.</span>
+      </div>
+
       <div class="linha">
         <button class="botao botao--pequeno botao--acento" type="button" @click="salvarAssinatura">
           Salvar

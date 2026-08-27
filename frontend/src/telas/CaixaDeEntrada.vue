@@ -2002,6 +2002,39 @@ function carregarMidiasDaConversa(c) {
             <template v-else>
               <p class="chip chip--aviso">Não está no cadastro</p>
 
+              <!-- 🚨 O TIPO APARECE MESMO SEM CADASTRO (27/08). Ele apontou
+                   que a lista "não aparece na Ficha do contato" -- e não
+                   aparecia mesmo: o Tipo é coluna de CONTATO, e **63% das
+                   conversas abertas não têm contato** (234 de 374, medido).
+
+                   Só que a pessoa TEM um tipo: a automação e a IA já a tratam
+                   como `sem_cadastro`, e esse é o tipo que decide se elas
+                   respondem. Esconder isso deixava a ficha muda justamente no
+                   caso mais comum.
+
+                   ⚠️ É A REGRA QUE VOCÊ APROVOU NA ESCADA DA IA: nada some;
+                   o que não dá para mudar aparece dizendo o que falta para
+                   destravar. Trocar exige vincular, porque é no contato que o
+                   tipo mora -- criar contato a partir daqui é decisão sua, e
+                   não a tomei.
+
+                   🚨 "SEM CADASTRO" NÃO ESTÁ EM `RELACOES` DE PROPÓSITO, e
+                   não é esquecimento: `contato.relacao` tem 8 valores no CHECK
+                   do banco, e este não é um deles. Ele é chave da
+                   `relacao_automacao` -- a linha que decide o que fazer com
+                   quem NÃO tem contato. Pôr no seletor faria a tela oferecer
+                   um valor que o banco recusa. -->
+              <dl class="gaveta__dados">
+                <dt>Tipo</dt>
+                <dd>
+                  <span class="chip">Sem cadastro</span>
+                  <span class="apagado pequeno gaveta__tipo-ajuda">
+                    É este o tipo que a automação e a IA usam para decidir se
+                    respondem. Para trocar, vincule a pessoa ao cadastro abaixo.
+                  </span>
+                </dd>
+              </dl>
+
               <!-- 🚨 SELO AMARELO: informação sem afirmação. Diz que a pessoa
                    aparece no Bitrix, sem dizer que ela é cliente. -->
               <div v-if="aberta.bitrix" class="gaveta__bitrix">
