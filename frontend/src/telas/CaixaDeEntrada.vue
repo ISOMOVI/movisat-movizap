@@ -2825,6 +2825,48 @@ function carregarMidiasDaConversa(c) {
 }
 .tela { max-width: 1280px; }
 
+/* ============================================================================
+   OS CINCO DEFEITOS QUE A AUDITORIA DE 27/08 ACHOU
+   ----------------------------------------------------------------------------
+   Ele viu antes de mim: *"visualmente já vejo erros de scroll, alinhamento e
+   etc"*. Eu tinha rodado suíte e build -- e nenhum dos dois vê layout. É a
+   regra que este projeto já tinha escrita: placar verde não prova que a tela
+   abre.
+
+   1. 🚨 A ALTURA NÃO CHEGAVA. `.painel` pedia `height: 100%` e o pai `.tela`
+      não tinha altura nenhuma -- em CSS, `height: 100%` sobre pai `auto`
+      resolve para `auto`. A tela inteira voltava a crescer com o conteúdo, e
+      daí o scroll errado: rolava a PÁGINA em vez de rolar o fio.
+   2. `max-width: 1280px` deixava uma faixa vazia em monitor largo, num
+      desenho que ocupa a tela toda.
+   3. `.cartao__cabecalho` mantinha o raio dos cantos de cima, agora que o
+      cartão perdeu o dele -- 12px de curva contra uma borda reta.
+   4. e mantinha o fundo cinza, num desenho em que a barra do topo é branca.
+   5. os avisos ficavam entre a tela e o painel, sem nenhum respiro lateral:
+      colavam na borda da janela.
+   ========================================================================== */
+.tela--conversa {
+  max-width: none;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* Os avisos são raros e ficam ACIMA das colunas. Sem margem própria eles
+   colariam na borda, agora que a página não tem mais padding. */
+.tela--conversa > .aviso {
+  flex: none;
+  margin: var(--e-3) var(--e-4) 0;
+}
+
+/* A barra do topo de cada coluna deixa de ser "cabeçalho de cartão": sem raio,
+   fundo branco, e a linha de baixo é quem separa. */
+.tela--conversa .cartao__cabecalho {
+  border-radius: 0;
+  background: var(--superficie);
+}
+
 .tela__cabecalho {
   display: flex;
   align-items: flex-start;
@@ -2852,7 +2894,10 @@ function carregarMidiasDaConversa(c) {
 .painel {
   display: grid;
   grid-template-columns: 348px 1fr;
-  height: 100%;
+  /* ⚠️ `flex: 1 1 auto` + `min-height: 0`, NÃO `height: 100%`. O pai é um
+     flex-column, e é ele quem distribui a altura; `height: 100%` num filho de
+     flex briga com a distribuição e foi metade do defeito de scroll. */
+  flex: 1 1 auto;
   min-height: 0;
   gap: 0;
   align-items: stretch;
@@ -2902,9 +2947,11 @@ function carregarMidiasDaConversa(c) {
 }
 .lista__pede { color: var(--aviso); font-weight: var(--peso-medio); }
 
-/* A busca e as abas ganham ar próprio, agora que o cabeçalho não é uma faixa
-   da página inteira. */
-.lista__topo .busca { margin-top: var(--e-3); }
+/* ⚠️ A BUSCA NÃO ESTÁ DENTRO DO TOPO -- ela é o `.cartao__corpo` seguinte, e
+   uma regra `.lista__topo .busca` não pegaria nada. A auditoria pegou; o
+   ajuste vai onde ela de fato mora, e o padding de baixo é menor porque a
+   lista começa logo abaixo. */
+.coluna > .cartao__corpo { padding: var(--e-3) var(--e-4); }
 
 /* 🚨 A COLUNA DA CONVERSA VIRA UMA PILHA COM ALTURA, e o fio ocupa o que
    sobra. Apontado por ele em 26/08: o fio tinha `max-height: 52vh` fixo, então
@@ -2925,13 +2972,17 @@ function carregarMidiasDaConversa(c) {
   background: var(--fundo);
 }
 
+/* A mesma regra da outra coluna: ninguém cresce, exceto a lista. Aqui os
+   filhos são o topo, a busca, e então a lista (ou "carregando", ou o vazio). */
+.coluna > * { flex: none; }
+.coluna > .conversas,
+.coluna > .vazio { flex: 1 1 auto; min-height: 0; }
+
 /* Pelo mesmo motivo, a lista rola inteira em vez de parar em 60vh. */
 .conversas {
   list-style: none;
   margin: 0;
   padding: 0;
-  flex: 1 1 auto;
-  min-height: 0;
   overflow-y: auto;
 }
 
@@ -3266,11 +3317,40 @@ function carregarMidiasDaConversa(c) {
 /* `position: relative` porque a lista do `@` se ancora no compositor. */
 /* 🚨 A FAIXA CINZA ATRÁS DO COMPOSITOR. É ela que faz o campo branco virar
    uma ilha; sem o contraste, o compositor se dissolvia no fim do fio. */
-.rodape-conversa {
-  flex: none;
+/* 🚨 QUEM CRESCE É SÓ O FIO. A coluna da conversa tem NOVE filhos diretos --
+   barra do topo, acompanham, ações, aviso de ficha, gaveta, busca, fio e as
+   três formas do rodapé. Num flex-column sem regra, vários deles crescem ou
+   encolhem juntos, e foi isso que jogou a rolagem para o lugar errado.
+
+   A regra é uma só e vale para todos: ninguém cresce, exceto o fio. */
+.coluna--larga > * { flex: none; }
+.coluna--larga > .baloes { flex: 1 1 auto; min-height: 0; }
+/* Sem conversa escolhida, o vazio ocupa a coluna em vez de virar uma tira. */
+.coluna--larga > .vazio {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+/* ⚠️ A GAVETA ROLA POR DENTRO. Ela é a ficha do cliente e pode ser mais alta
+   que a tela; sem teto próprio, empurrava o fio e o compositor para fora. */
+.coluna--larga > .gaveta { max-height: 42vh; overflow-y: auto; }
+
+/* ⚠️ O `padding` SUBSTITUI o do `.cartao__corpo`, não soma com ele -- a
+   auditoria pegou os dois empilhados, e o compositor ficava afundado.
+
+   A faixa cinza vale para as TRÊS formas do rodapé (compositor, conversa
+   resolvida, sem permissão): a barra de baixo não pode mudar de cor conforme
+   o estado da conversa. */
+.rodape-conversa,
+.coluna--larga > .cartao__corpo.pilha,
+.coluna--larga > p.cartao__corpo {
   background: var(--superficie-2);
   border-top: var(--borda-fina) solid var(--borda);
   padding: var(--e-3) var(--e-4) var(--e-4);
+  margin: 0;
 }
 
 /* ---- o compositor (27/08) -----------------------------------------------
