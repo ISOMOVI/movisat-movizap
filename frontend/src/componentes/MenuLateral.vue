@@ -30,6 +30,15 @@ const grupos = computed(() => {
     // rota com parâmetro (/atendimento/{id}) não é item de menu: só se chega
     // nela a partir de outra tela.
     if (tela.rota.includes('{')) continue
+    // 🚨 TELA QUE É ABA DE OUTRA NÃO É ITEM DE MENU (27/08). As seis telas de
+    // configuração continuam existindo, com rota e permissão próprias -- elas
+    // só deixaram de ocupar seis linhas do menu, que é o que fazia o usuário
+    // ter de adivinhar em qual delas estava cada interruptor.
+    //
+    // ⚠️ APRESENTAÇÃO, NÃO PERMISSÃO. Elas continuam vindo em `sessao.telas`,
+    // e têm de continuar: é essa lista que a guarda de rota usa para saber o
+    // que este usuário pode abrir.
+    if (tela.aba_de) continue
     const modulo = tela.codigo.split('_')[0]
     if (!porModulo.has(modulo)) porModulo.set(modulo, [])
     porModulo.get(modulo).push(tela)

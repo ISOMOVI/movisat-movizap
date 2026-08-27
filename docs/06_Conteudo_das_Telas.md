@@ -348,6 +348,69 @@ escolhe para onde mandar. Time sem descrição = IA chutando.
 
 ---
 
+## CFG_0.1 — Configurações
+
+**A casca com abas.** Criada em 27/08, a pedido do usuário: *"precisamos ter
+uma aba para as configurações e os acionadores dos interruptores devem ficar
+lá"*.
+
+As seis telas `CFG_*` viraram abas dela — `IA`, `Canais`, `Automação`,
+`Classificações`, `Sincronização`, `Telas` — e o grupo "Configuração" do menu,
+que tinha seis linhas, passou a ter uma.
+
+🚨 **NENHUMA DAS SEIS FOI REESCRITA.** Cada uma continua no seu arquivo, com
+seu código, sua rota e sua permissão. As sete rotas montam a mesma casca, que
+lê `meta.codigo` e abre na aba certa — é isso que faz **link antigo, favorito
+e histórico do navegador continuarem funcionando**.
+
+### A escada da IA — o motivo de tudo isto
+
+Em 26/08 o usuário disse: *"não tem botão nenhum ali, nem por canal, nem por
+prompt e nem por tipo"*. Os três botões existiam, **em três telas diferentes**,
+e o journal mostrou que ele estava com o bundle certo — não era cache. O que
+havia era um padrão:
+
+| Onde | O que acontecia |
+|---|---|
+| `CFG_1.1` | "Ligar IA" era o **quarto botão de contorno** de uma fileira cinza |
+| `CFG_5.1` | botão sempre `:disabled`, sem dizer o que o destravaria |
+| `CFG_2.1` | a sala de ensaio **sumia inteira** quando faltava prompt — a tela escondia o caminho que levava ao prompt |
+
+🚨 **A REGRA NOVA, E VALE PARA TODO DEGRAU: nada some.** Degrau travado fica
+cinza, **com o motivo escrito** e o link para o degrau que o destrava. Botão
+que desaparece não ensina nada; botão cinza que diz "precisa de prompt
+publicado" ensina.
+
+Os quatro passos, na ordem de uso:
+
+| # | Degrau | Trava quando |
+|---|---|---|
+| 1 | **Prompt publicado** | nunca — é ele que destrava o resto |
+| 2 | **Ensaio** | não há prompt publicado (o motivo vem do motor, não da tela) |
+| 3 | **Tipos de contato** | o motor não está disponível. Mostra quantas pessoas os tipos ligados alcançam |
+| 4 | **Canal de atendimento** | falta prompt, ou nenhum tipo ligado. **Desligar nunca trava** |
+
+⚠️ **O passo 3 e o passo 4 são travas separadas de propósito.** Ligar um sem o
+outro não põe a IA para responder ninguém, e a tela diz isso.
+
+⚠️ **"Ligar IA" SAIU DA `CFG_1.1`.** O ato deliberado do `docs/04` continua
+sendo um ato — a confirmação diz o que vai acontecer com o cliente do outro
+lado, e o que **não** vai (a IA não responde nada que já esteja na caixa). Ele
+só mudou de lugar. O chip **"IA no ar"** ficou em Canais: é estado, não
+interruptor.
+
+⚠️ **`aba_de` É APRESENTAÇÃO, NÃO PERMISSÃO.** As telas-aba continuam vindo em
+`sessao.telas`, porque é essa lista que a guarda de rota usa. Quem não desenha
+item de menu para elas é o `MenuLateral`.
+
+🚨 **As provas montam o componente de verdade** (`src/configuracoes.teste.js`,
+10 verificações). Três placares verdes deste projeto já não viram tela
+quebrada: 677 com o painel derrubado, 1.322 com a trava só no comentário, 1.568
+com o menu lateral morto. Teste que lê `.vue` como texto entraria na mesma
+lista.
+
+---
+
 ## CFG_1.1 — Canais
 
 Sim: é onde o QR aparece e onde se vê o que está conectado.

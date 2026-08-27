@@ -129,36 +129,14 @@ async function desconectar(canal) {
   }
 }
 
-/* 🚨 LIGAR A IA É UM ATO, E A TELA TRATA COMO ATO. A confirmação diz o que vai
-   acontecer com o cliente do outro lado, não "tem certeza?" — e diz também o
-   que NÃO vai: ela não responde nada que tenha chegado antes deste clique.
-   Decisão do usuário em 06/08: "ninguém liga por acidente". */
-async function alternarIa(canal) {
-  const ligando = !canal.ia_ligada
-  const pergunta = ligando
-    ? `Ligar a IA em "${canal.nome}"?\n\n`
-      + 'A partir de agora ela responde sozinha a quem escrever — nos tipos de '
-      + 'contato que estiverem ligados na CFG_5.1.\n\n'
-      + 'Ela NÃO responde nada que já esteja na caixa: só o que chegar depois '
-      + 'deste momento.'
-    : `Desligar a IA em "${canal.nome}"?\n\n`
-      + 'As conversas que ela estava atendendo ficam onde estão, esperando gente.'
-  if (!window.confirm(pergunta)) return
-  ocupado.value = true
-  try {
-    await api.put(`/api/canais/${canal.id}/ia`, { ligada: ligando })
-    aviso.value = ligando
-      ? 'IA ligada. Ela atende o que chegar a partir de agora.'
-      : 'IA desligada.'
-    /* Relê em vez de confiar no 200: o que vale é o que o banco gravou. */
-    await carregar(true)
-  } catch (e) {
-    aviso.value = e instanceof ErroDeApi ? e.message : 'Falha ao mudar a IA.'
-    await carregar(true)
-  } finally {
-    ocupado.value = false
-  }
-}
+/* ⚠️ `alternarIa` SAIU DAQUI EM 27/08, junto com o botão. Ela vive agora em
+   `componentes/EscadaIa.vue`, no passo 4 -- com a mesma regra que tinha aqui:
+   ligar é um ato, a confirmação diz o que vai acontecer com o cliente do outro
+   lado, e diz também o que NÃO vai (a IA não responde nada que já esteja na
+   caixa). Decisão do usuário em 06/08: "ninguém liga por acidente".
+
+   O CHIP "IA no ar" FICOU. Ele não é interruptor, é estado -- e saber que a IA
+   está respondendo neste canal é a informação mais consequente desta tela. */
 
 const historico = ref({ canalId: null, linhas: [] })
 
@@ -304,17 +282,16 @@ onBeforeUnmount(() => {
               {{ historico.canalId === canal.id ? 'Ocultar' : 'Histórico' }}
             </button>
 
-            <!-- 🚨 O ATO DELIBERADO (docs/04, passo 4 da sequência de
-                 ativação). Só no canal de atendimento: o informativo é
-                 disparo, e a rota recusa — a tela nem oferece. -->
-            <button v-if="canal.tipo === 'atendimento'"
-                    class="botao"
-                    :class="canal.ia_ligada ? 'botao--perigo' : 'botao--contorno'"
-                    type="button" :disabled="ocupado"
-                    @click="alternarIa(canal)">
-              <i class="bi bi-robot" aria-hidden="true"></i>
-              {{ canal.ia_ligada ? 'Desligar IA' : 'Ligar IA' }}
-            </button>
+            <!-- 🚨 O "LIGAR IA" SAIU DAQUI EM 27/08, e a razão é o defeito que
+                 ele causou: era o QUARTO botão de contorno de uma fileira
+                 cinza (Conectar, Desconectar, Histórico, Ligar IA, Atualizar),
+                 e o usuário procurou o interruptor da IA nesta tela e não o
+                 achou -- com o bundle certo carregado, medido no journal.
+
+                 O ato deliberado do `docs/04` continua existindo e continua
+                 sendo um ato: agora ele é o passo 4 da escada, na aba IA da
+                 CFG_0.1, junto dos outros três interruptores. Esta tela voltou
+                 a ser o que ela é: conexão. -->
 
             <span class="espaco"></span>
 

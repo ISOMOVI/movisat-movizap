@@ -58,6 +58,7 @@ MOD_a.b[.c]
 | `CAD_1.2` | Contatos | `/cadastro/contatos` | `cadastro` | 1 |
 | `CAD_2.1` | Atendentes | `/cadastro/atendentes` | `owner` | 1 |
 | `CAD_2.2` | Times | `/cadastro/times` | `owner` | 1 |
+| `CFG_0.1` | Configurações | `/config` | `owner` | 1 |
 | `CFG_1.1` | Canais | `/config/canais` | `owner` | 1 |
 | `CFG_2.1` | IA — prompt | `/config/ia/prompt` | `owner` | 1 |
 | `CFG_3.1` | Sincronização | `/config/sync` | `owner` | 1 |
@@ -66,6 +67,26 @@ MOD_a.b[.c]
 | `CFG_9.1` | Registro de telas | `/config/telas` | `owner` | 1 |
 | `CFG_2.2` | IA — analytics | `/config/ia/analytics` | `owner` | 2 |
 | `REL_1.1` | Relatórios | `/relatorios` | `owner` | 3 |
+
+🚨 **AS SEIS TELAS `CFG_*` SÃO ABAS DA `CFG_0.1` DESDE 27/08** (decisão do
+usuário). Elas continuam **existindo** — código, rota e permissão próprios, e
+link antigo continua abrindo. O que mudou é que deixaram de ser item de menu:
+o registro marca `"aba_de": "CFG_0.1"` e o `MenuLateral` pula quem tem esse
+campo, do mesmo jeito que já pulava rota com parâmetro.
+
+⚠️ **`aba_de` É APRESENTAÇÃO, NÃO PERMISSÃO.** As telas-aba continuam sendo
+devolvidas por `do_usuario()`, e têm de continuar: a guarda de rota do frontend
+usa `sessao.telas` para saber o que este usuário pode abrir. Tirá-las de lá
+barraria `/config/canais` para o próprio owner.
+
+🚨 **`do_usuario()` PRECISOU DE UMA LINHA.** Ela monta a resposta à mão, com
+quatro campos; um campo novo no registro não chegava ao frontend sozinho —
+falha calada, menu igual, suíte verde. Achado validando antes de escrever.
+
+⚠️ **A POSIÇÃO DA `CFG_0.1` NA LISTA NÃO É ESTÉTICA.** A rota `/` do frontend
+manda para `sessao.telas[0].rota`: a primeira tela do registro é a tela de
+entrada de todo login. Por isso ela entra no bloco das CFG, e a `INI_1.1`
+continua sendo a primeira.
 
 🚨 **TODA CONFIGURAÇÃO É `owner`, E ISSO É DECISÃO, NÃO DESCUIDO.** A tabela
 antiga dizia `admin` em seis dessas linhas. Quem lesse criaria um perfil

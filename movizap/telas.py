@@ -120,6 +120,35 @@ TELAS = [
         "fase": 1,
     },
     # ---- CFG: configuração ----
+    #
+    # 🚨 AS SEIS TELAS DE CONFIGURAÇÃO VIRARAM ABAS DE UMA SÓ (27/08, decisão
+    # do usuário). O campo `aba_de` é o que faz isso: a tela CONTINUA existindo
+    # com código, rota e permissão próprios -- ela só deixa de ser item de
+    # menu. Link antigo não quebra, a permissão continua valendo tela a tela e
+    # o `teste_router.py` continua comparando registro contra roteador.
+    #
+    # 🚨 O `aba_de` PRECISA SAIR EM `do_usuario()` TAMBÉM. Descoberto validando
+    # antes de escrever: aquela função monta a resposta à mão, com quatro
+    # campos, e um campo novo aqui simplesmente não chegaria ao frontend --
+    # falha calada, com o menu igual e a suíte verde.
+    #
+    # 🚨 A POSIÇÃO IMPORTA E NÃO É ESTÉTICA. A rota `/` do frontend manda para
+    # `sessao.telas[0].rota`: a primeira tela do registro é a tela de entrada
+    # de todo login. Por isso a CFG_0.1 entra AQUI, no bloco das CFG, e não no
+    # topo -- a INI_1.1 continua sendo a primeira, como o comentário dela diz.
+    #
+    # 🚨 CÓDIGO NOVO, NUNCA REAPROVEITADO. `CFG_0.1` estava livre e não está em
+    # CODIGOS_APOSENTADOS (que tem só `ATD_4.1`) -- conferido antes de
+    # escrever. Reaproveitar código faz o log antigo mentir.
+    {
+        "codigo": "CFG_0.1",
+        "titulo": "Configurações",
+        "rota": "/config",
+        "icone": "bi-sliders",
+        "descricao": "As configurações do painel, em abas. O interruptor da IA mora aqui.",
+        "permissao": "owner",
+        "fase": 1,
+    },
     {
         "codigo": "CFG_1.1",
         "titulo": "Canais",
@@ -128,6 +157,7 @@ TELAS = [
         "descricao": "Conectar e acompanhar os números de WhatsApp.",
         "permissao": "owner",
         "fase": 1,
+        "aba_de": "CFG_0.1",
     },
     {
         "codigo": "CFG_2.1",
@@ -137,6 +167,7 @@ TELAS = [
         "descricao": "Versões do prompt e o que a IA pode fazer.",
         "permissao": "owner",
         "fase": 1,
+        "aba_de": "CFG_0.1",
     },
     {
         "codigo": "CFG_3.1",
@@ -146,6 +177,7 @@ TELAS = [
         "descricao": "Leitura do Harmonit: a cada 12h e sob demanda.",
         "permissao": "owner",
         "fase": 1,
+        "aba_de": "CFG_0.1",
     },
     {
         "codigo": "CFG_4.1",
@@ -155,6 +187,7 @@ TELAS = [
         "descricao": "Motivos de fechamento de conversa.",
         "permissao": "owner",
         "fase": 1,
+        "aba_de": "CFG_0.1",
     },
     # 🚨 CÓDIGO NOVO, NUNCA REAPROVEITADO. `CFG_5.1` estava livre e não está
     # em CODIGOS_APOSENTADOS -- conferido antes de escrever. Reaproveitar
@@ -167,6 +200,7 @@ TELAS = [
         "descricao": "O que roda sozinho quando chega mensagem, por tipo de contato.",
         "permissao": "owner",
         "fase": 1,
+        "aba_de": "CFG_0.1",
     },
     {
         "codigo": "CFG_9.1",
@@ -176,6 +210,7 @@ TELAS = [
         "descricao": "Este registro, para conferência e auditoria.",
         "permissao": "owner",
         "fase": 1,
+        "aba_de": "CFG_0.1",
     },
     {
         # 🚨 SUBIU PARA FASE 1 EM 07/08. Decisão do usuário: "o informativo é o
@@ -295,13 +330,26 @@ def pode_acessar(usuario: dict, codigo: str) -> bool:
 
 
 def do_usuario(usuario: dict) -> list[dict]:
-    """As telas que ESTE usuário vê no menu. Owner vê tudo que está ativo."""
+    """As telas que ESTE usuário vê. Owner vê tudo que está ativo.
+
+    🚨 ESTA FUNÇÃO MONTA A RESPOSTA À MÃO, e é por isso que o `aba_de` precisa
+    estar listado aqui. Sem esta linha ele fica no registro e nunca chega ao
+    frontend: o menu continuaria mostrando as seis telas de configuração, a
+    suíte continuaria verde, e ninguém descobriria. Achado validando antes de
+    escrever, em 27/08.
+
+    ⚠️ ELA CONTINUA DEVOLVENDO AS TELAS-ABA. Tem de continuar: a guarda de rota
+    do frontend usa `sessao.telas` para saber o que este usuário pode abrir --
+    tirá-las daqui barraria `/config/canais`. Quem não desenha item de menu
+    para elas é o `MenuLateral`, e a decisão é de APRESENTAÇÃO, não permissão.
+    """
     return [
         {
             "codigo": t["codigo"],
             "titulo": t["titulo"],
             "rota": t["rota"],
             "icone": t["icone"],
+            "aba_de": t.get("aba_de"),
         }
         for t in ativas()
         if pode_acessar(usuario, t["codigo"])

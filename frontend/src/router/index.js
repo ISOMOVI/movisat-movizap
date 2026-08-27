@@ -41,6 +41,10 @@ import Classificacoes from '../telas/Classificacoes.vue'
 import IaPrompt from '../telas/IaPrompt.vue'
 import Sincronizacao from '../telas/Sincronizacao.vue'
 import RegistroDeTelas from '../telas/RegistroDeTelas.vue'
+// A casca das abas. As seis telas acima continuam existindo e são montadas
+// POR ELA -- os imports ficam porque o `teste_router.py` lê este arquivo e
+// porque tirá-los não ganharia nada.
+import Configuracoes from '../telas/Configuracoes.vue'
 import SemPermissao from '../telas/SemPermissao.vue'
 import NaoEncontrada from '../telas/NaoEncontrada.vue'
 
@@ -143,40 +147,57 @@ const rotas = [
   },
 
   // ---- CFG: configuração ----
+  //
+  // 🚨 AS SEIS VIRARAM ABAS DA CFG_0.1 EM 27/08, e todas as sete rotas montam
+  // o MESMO componente: a casca lê `meta.codigo` e abre na aba certa. É isso
+  // que faz link antigo, favorito e histórico do navegador continuarem
+  // funcionando -- e é isso que mantém `meta.codigo` significando a mesma
+  // coisa que sempre significou, para a guarda e para a barra de status.
+  //
+  // 🚨 ROTA LITERAL ANTES DA COM PARÂMETRO continua valendo, e aqui a ordem
+  // também importa por outro motivo: `/config` é prefixo de `/config/canais`.
+  // Com `path` exato (sem `:qualquer`), o vue-router não confunde -- mas a
+  // ordem escrita é a que se lê, então a genérica fica em cima.
+  {
+    path: '/config',
+    name: 'CFG_0.1',
+    component: Configuracoes,
+    meta: { codigo: 'CFG_0.1', titulo: 'Configurações' },
+  },
   {
     path: '/config/canais',
     name: 'CFG_1.1',
-    component: Canais,
+    component: Configuracoes,
     meta: { codigo: 'CFG_1.1', titulo: 'Canais' },
   },
   {
     path: '/config/ia/prompt',
     name: 'CFG_2.1',
-    component: IaPrompt,
+    component: Configuracoes,
     meta: { codigo: 'CFG_2.1', titulo: 'IA — prompt' },
   },
   {
     path: '/config/sync',
     name: 'CFG_3.1',
-    component: Sincronizacao,
+    component: Configuracoes,
     meta: { codigo: 'CFG_3.1', titulo: 'Sincronização' },
   },
   {
     path: '/config/classificacoes',
     name: 'CFG_4.1',
-    component: Classificacoes,
+    component: Configuracoes,
     meta: { codigo: 'CFG_4.1', titulo: 'Classificações' },
   },
   {
     path: '/config/automacao',
     name: 'CFG_5.1',
-    component: Automacao,
+    component: Configuracoes,
     meta: { codigo: 'CFG_5.1', titulo: 'Automação por tipo' },
   },
   {
     path: '/config/telas',
     name: 'CFG_9.1',
-    component: RegistroDeTelas,
+    component: Configuracoes,
     meta: { codigo: 'CFG_9.1', titulo: 'Registro de telas' },
   },
 
