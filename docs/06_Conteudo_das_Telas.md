@@ -348,6 +348,103 @@ escolhe para onde mandar. Time sem descrição = IA chutando.
 
 ---
 
+## O que mudou em 27/08 — a rodada dos ajustes
+
+Todos vieram de frases dele, e a frase fica junto do item: é o que separa
+demanda de invenção minha quando alguém ler isto daqui a três meses.
+
+### `ATD_1.1` / `ATD_1.2` — Caixa de entrada
+
+**O desenho da conversa** passou a ser o da opção *"Familiar"*, escolhida por
+ele entre cinco mockups vistos lado a lado. A razão é de uso, não de gosto:
+quem atende passa o dia no WhatsApp, e uma tela parecida com o que a pessoa já
+sabe usar custa quase nada de treinamento. Papel com textura, balão branco na
+entrada e verde na saída com bico, nota interna centrada e sem bico, hora à
+direita, e **o tique no lugar da palavra** — `enviada / entregue / lida` é
+vocabulário do CHECK do banco; ✓ e ✓✓ se leem sem pensar. `pendente` e
+`falhou` continuam por extenso, que são os dois casos em que é preciso parar
+e ler.
+
+🚨 **O escopo foi dito duas vezes por ele: só o interior desta tela.** Menu
+lateral, paleta da casa e as outras telas não mudaram — o padrão visual dos
+quatro painéis (05/08) continua de pé.
+
+🚨 **O balão tinha escapado do sistema**, e é a peça mais vista do painel:
+usava `var(--raio, 12px)` — token que **nunca existiu**, então caía no valor
+de emergência, em silêncio — e três `rgba()` escritos à mão. Agora tudo é
+token (`--conversa-*`), e `teste_estilo_conversa.py` impede a volta.
+
+**A busca da conversa abre por botão** — *"pode abrir de um botão, pois ocupa
+muito espaço"*. Era uma faixa fixa na altura mais disputada da tela, e altura
+ali é conversa visível. ⚠️ **Fechar limpa o termo**: com ele guardado, os
+balões continuariam marcados e o contador sumiria junto com o campo — um
+filtro ativo sem nada dizendo que existe.
+
+**A ficha mostra o tipo mesmo sem cadastro** — *"lista para selecionar o tipo
+ainda não aparece na Ficha do contato"*. Medido: `relacao` é coluna de
+CONTATO, e **63% das conversas abertas não têm contato** (234 de 374). A ficha
+ficava muda no caso mais comum. Agora mostra "Sem cadastro", que é o tipo que
+a automação e a IA de fato usam, e diz que trocar exige vincular.
+🚨 **"Sem cadastro" não entra no seletor**: `contato.relacao` tem 8 valores no
+CHECK e este não é um deles — ele é chave da `relacao_automacao`. Oferecê-lo
+faria a tela propor um valor que o banco recusa.
+
+**Menção `@` em grupo** — ver `docs/02`. Só em grupo: fora dele o WhatsApp
+ignora `mentioned`.
+
+### `ATD_6.1` — Chat interno
+
+**A barra alta de distinção** — *"design replicado de caixa de entrada do zap,
+porém com barra alta evidente para distinção"*. O pedido é de desenho e a
+razão é de **risco**: quanto mais esta tela se parecer com a caixa de entrada,
+mais fácil escrever para o colega achando que é o cliente. Primeira coisa da
+tela, largura toda, não rola junto, faixa grossa à esquerda.
+⚠️ **Âmbar, não vermelho**: vermelho é erro, e aqui não há erro, há contexto.
+Vermelho para o que é normal treina a equipe a ignorar vermelho.
+⚠️ E o aviso **saiu do cabeçalho**: ele já esteve em três lugares ao mesmo
+tempo, e três avisos iguais viram decoração que o olho pula.
+
+**Excluir conversa** esconde para mim e não apaga para o outro — ver `docs/02`,
+migração 038.
+
+### `EML_1.1` — E-mail
+
+**As 12 estrelas coloridas do Gmail somem da lista** — *"o tip 'YELLOW_STAR'
+ajustar para 'Com estrela' como no gmail"*. A saída não foi traduzir:
+`YELLOW_STAR`, `RED_STAR`, `BLUE_INFO` e as outras nove apontam para a **mesma
+lista** que o `STARRED` já mostra como "Com estrela". Dois itens com o mesmo
+nome seriam pior que um id feio.
+
+**Tirar a estrela sai da lista** — *"tirar estrela não removeu ele da lista"*.
+⚠️ **Só dentro de "Com estrela"**: na caixa de entrada, tirar a estrela não
+muda nada sobre estar na caixa, e remover ali faria a mensagem sumir por um
+motivo que não tem a ver com o lugar onde ela está.
+
+**A assinatura por imagem voltou à tela** — *"assinatura por upload de imagem
+oculto? onde foi parar"*. 🚨 **O backend estava inteiro desde a migração 017**:
+rota de subir, de tirar, pasta por atendente, e o envio já embutia por CID.
+Faltava só o controle na tela — o recurso existia e ninguém podia usar.
+⚠️ Mostra o **nome** do arquivo, não a imagem: não há rota que devolva o
+arquivo, e criar uma só para a prévia seria escopo que ninguém pediu.
+
+**A leitura pagina, e o `puxar_desde` passou a valer** — *"pagine o gmail, o
+puxar_desde tem que valer"*. 🚨 A listagem parava na primeira página e o Gmail
+devolve os mais recentes primeiro: o cron relia os mesmos 40 a cada 2 minutos
+e contava o resto como "repetidas", **com log de sucesso**. Faltavam 111
+mensagens. A correção é a distinção entre **listar** (uma chamada por 500 ids)
+e **baixar** (uma chamada por mensagem): o teto por execução foi para os
+downloads, onde ele precisa estar.
+⚠️ **Um número meu que a medição derrubou:** afirmei que o sistema "nunca
+alcançou janeiro" olhando `recebido_em` — que é `now()`, a data em que o
+painel importou. A data do e-mail é `enviado_em`, ia de 02/01 desde sempre, e
+a lista já ordenava por ela.
+
+### As 13 telas com cabeçalho — o ícone de ajuda
+
+Ver `docs/03_Registro_Telas.md`, seção do `bi-question-circle`.
+
+---
+
 ## CFG_0.1 — Configurações
 
 **A casca com abas.** Criada em 27/08, a pedido do usuário: *"precisamos ter
