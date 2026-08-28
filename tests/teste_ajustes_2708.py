@@ -128,20 +128,49 @@ class TestD7TipoSemCadastro:
     """
 
     def test_a_ficha_sem_cadastro_mostra_o_tipo(self):
-        fonte = CAIXA.read_text(encoding="utf-8")
-        # o bloco do `v-else` (sem vínculo) precisa falar de Tipo
-        i = fonte.index("SEM vínculo: o caso comum")
+        """A demanda de 27/08: o Tipo aparece mesmo sem cadastro.
+
+        🚨 A ANCORA MUDOU EM 28/08, E A DEMANDA FICOU MAIS FORTE. Ela apontava
+        para o comentario "SEM vinculo: o caso comum", que virou "SEM EMPRESA"
+        quando o tipo deixou de exigir empresa vinculada. Ancorar em COMENTARIO
+        e frageis: o comentario e meu, e eu o reescrevo. Agora aponta para o
+        que a TELA mostra.
+
+        ⚠️ E o que era um chip morto ("Sem cadastro", estado sem saida) virou
+        um `<select>` que CRIA o contato -- entao o teste passou a exigir a
+        escolha, nao so a exibicao.
+        """
+        fonte = _sem_comentario(CAIXA)
+        i = fonte.index("Não está no cadastro")
         trecho = fonte[i:i + 2600]
         assert "<dt>Tipo</dt>" in trecho, (
             "a ficha continua muda justamente no caso mais comum")
-        assert "Sem cadastro" in trecho
+        assert "trocarTipo" in trecho, (
+            "sem cadastro o tipo virou escolha, nao mais um chip morto")
 
     def test_e_diz_o_que_falta_para_trocar(self):
         """⚠️ A regra que ele aprovou na escada da IA: o que não dá para mudar
-        aparece dizendo o que falta para destravar."""
-        fonte = CAIXA.read_text(encoding="utf-8")
-        i = fonte.index("SEM vínculo: o caso comum")
-        assert "vincule" in fonte[i:i + 2600].lower()
+        aparece dizendo o que falta para destravar.
+
+        🚨 A AFIRMAÇÃO MUDOU EM 28/08, E O MOTIVO IMPORTA. Ela procurava a
+        palavra "vincule", de uma frase explicativa que ele mandou tirar
+        (*"muito textinho"*). A REGRA continua de pé -- o bloco oferece um
+        BOTÃO escrito "Vincular a uma empresa" --, e botão destrava melhor que
+        parágrafo. O que envelheceu foi medir a frase em vez do caminho.
+
+        ⚠️ Lê sem comentário de propósito: os comentários que eu escrevi ali
+        falam de vincular, e fariam este teste passar pelo motivo errado. Por
+        isso a âncora também deixou de ser um comentário (`SEM vínculo: o caso
+        comum`, que o próprio filtro apagava) e passou a ser o que a tela
+        MOSTRA no bloco.
+        """
+        fonte = _sem_comentario(CAIXA)
+        i = fonte.index("Não está no cadastro")
+        trecho = fonte[i:i + 2600]
+        assert "<button" in trecho, "o bloco sem cadastro não oferece ação"
+        assert "Vincular a uma empresa" in trecho, (
+            "sumiu o caminho para destravar o tipo -- a regra da escada da IA "
+            "é que o travado diga o que falta, e aqui quem diz é o botão")
 
     def test_sem_cadastro_NAO_entra_no_seletor(self):
         """🚨 `contato.relacao` tem 8 valores no CHECK do banco, e este não é

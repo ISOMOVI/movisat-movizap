@@ -90,14 +90,6 @@ async function salvar() {
       </div>
     </header>
 
-    <p class="aviso aviso--info">
-      <i class="bi bi-info-circle aviso__icone" aria-hidden="true"></i>
-      <span>
-        Não confundir com a <strong>etiqueta de papel</strong> do contato
-        (CAD_1.2): aquela descreve a pessoa e dura para sempre; esta descreve
-        uma conversa e vale só para ela.
-      </span>
-    </p>
 
     <p v-if="erro && !editando" class="aviso aviso--erro" role="alert">
       <i class="bi bi-exclamation-octagon aviso__icone" aria-hidden="true"></i>
@@ -191,8 +183,7 @@ async function salvar() {
     </section>
 
     <p class="apagado pequeno">
-      A última classificação ativa não pode ser desativada: classificar é
-      obrigatório para fechar conversa, e sem nenhuma ninguém encerraria nada.
+      A última ativa não pode ser desativada.
     </p>
   </div>
 </template>

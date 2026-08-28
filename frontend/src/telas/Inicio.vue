@@ -302,7 +302,7 @@ onUnmounted(() => clearInterval(relogio))
           <dd>{{ config.transferivel ? 'sim' : 'não' }}</dd>
         </dl>
         <p class="apagado pequeno">
-          Quem muda isto é o owner. Se algo aqui estiver errado, é com ele.
+          
         </p>
       </section>
 

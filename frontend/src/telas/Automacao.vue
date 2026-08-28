@@ -140,8 +140,6 @@ onMounted(carregar)
       <i class="bi bi-robot aviso__icone" aria-hidden="true"></i>
       <span>
         <strong>IA indisponível.</strong> {{ iaMotivo }}
-        O interruptor aparece travado de propósito — botão que não faz nada é
-        pior que botão nenhum, porque alguém confia nele.
       </span>
     </p>
 
@@ -153,9 +151,7 @@ onMounted(carregar)
       <span>
         <strong>O motor está pronto ({{ iaModelo }}), mas nenhum canal está
         com a IA ligada.</strong>
-        Ligar um tipo aqui é só o <em>filtro</em>: quem coloca a IA para
-        responder é o interruptor do canal, na CFG_1.1 — e ela só atende o
-        que chegar <strong>depois</strong> desse momento.
+        Quem liga é o interruptor do canal, na CFG_1.1.
       </span>
     </p>
 
@@ -251,12 +247,6 @@ onMounted(carregar)
       </div>
     </section>
 
-    <p class="apagado pequeno">
-      A mensagem sai uma vez por conversa: a marca fica gravada na própria
-      conversa, então reentrega de webhook não faz o cliente receber duas vezes.
-      A IA usa a mesma ideia, com a própria marca — ela nunca responde duas
-      vezes à mesma pergunta, e nunca responde ao que chegou antes de ser ligada.
-    </p>
   </div>
 </template>
 

@@ -139,8 +139,7 @@ function estaAtiva(tela) {
             </div>
           </div>
           <p class="apagado pequeno">
-            Conta nova nasce sem nenhuma permissão: falha fechado. O owner enxerga
-            tudo independentemente do que estiver gravado.
+            Conta nova nasce sem permissão. O owner enxerga tudo.
           </p>
         </div>
       </section>

@@ -102,6 +102,22 @@ async function testar() {
   }
 }
 
+/* O freio do disparo. Relê do servidor em vez de remendar o estado na tela:
+   quem manda no estado é o banco, e a pausa pode perder a corrida com o lote
+   que já estava saindo. */
+async function pausar() {
+  ocupado.value = true
+  try {
+    await api.post(`/api/informativos/${aberto.value.id}/pausar`)
+    await abrir(aberto.value.id)
+    recado.value = 'Disparo pausado. O que já saiu não volta.'
+  } catch (e) {
+    erro.value = e instanceof ErroDeApi ? e.message : 'Não consegui pausar.'
+  } finally {
+    ocupado.value = false
+  }
+}
+
 async function enviarLote() {
   ocupado.value = true
   erro.value = ''
@@ -136,9 +152,8 @@ function quando(iso) {
     <p class="aviso aviso--atencao">
       <i class="bi bi-exclamation-triangle aviso__icone" aria-hidden="true"></i>
       <span>
-        <strong>O canal é irreversível.</strong> Mensagem enviada não volta.
-        O disparo nasce como rascunho e só sai quando você mandar — e vale
-        enviar 1 e conferir antes de soltar o resto.
+        <strong>Mensagem enviada não volta.</strong> O disparo nasce como
+        rascunho e só sai quando você mandar.
       </span>
     </p>
 
@@ -189,9 +204,7 @@ function quando(iso) {
           <i class="bi bi-info-circle aviso__icone" aria-hidden="true"></i>
           <span>
             🚨 <strong>{{ foraPorCadastro }} clientes ({{ pct(foraPorCadastro) }}%)
-            ficam de fora por cadastro incompleto</strong>, não por recusarem
-            WhatsApp. Corrigir o telefone no Harmonit aumenta o alcance mais que
-            qualquer coisa que eu faça aqui.
+            ficam de fora por cadastro incompleto</strong>. Corrigir o telefone no Harmonit aumenta o alcance.
           </span>
         </p>
       </div>
@@ -260,11 +273,24 @@ function quando(iso) {
             <span v-if="ocupado" class="girando"></span>
             Enviar próximos 20
           </button>
+          <!-- 🚨 O FREIO (28/08). A rota existia desde sempre com ZERO
+               chamadores: um disparo em andamento não tinha como parar pela
+               tela. Só vale enquanto `enviando` -- e quando não vale, fica
+               cinza DIZENDO por quê, em vez de sumir. -->
+          <button
+            class="botao botao--contorno"
+            type="button"
+            :disabled="ocupado || aberto.estado !== 'enviando'"
+            :title="aberto.estado === 'enviando'
+              ? 'Interrompe o disparo; o que já saiu não volta'
+              : `Só dá para pausar um disparo em andamento — este está ${aberto.estado}`"
+            @click="pausar"
+          >
+            <i class="bi bi-pause-circle" aria-hidden="true"></i> Pausar
+          </button>
         </div>
         <p class="apagado pequeno">
-          A confirmação de que chegou é o <strong>estado de entrega</strong> que
-          volta pelo webhook — não o retorno do envio, que sai sempre como
-          "pendente".
+          A confirmação de entrega volta pelo webhook, não no envio.
         </p>
       </div>
     </section>
@@ -302,9 +328,7 @@ function quando(iso) {
       </header>
       <div class="cartao__corpo">
         <p class="fraco pequeno">
-          O informativo é só de envio — estas mensagens <strong>não viram
-          conversa</strong>. Aparecem aqui para não ficarem invisíveis: gente
-          responde boleto.
+          Estas mensagens <strong>não viram conversa</strong>.
         </p>
         <div v-if="respostas.ultimas.length" class="tabela--rolavel">
           <table class="tabela">

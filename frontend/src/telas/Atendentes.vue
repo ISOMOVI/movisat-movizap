@@ -254,8 +254,7 @@ async function salvar() {
       <i class="bi bi-key aviso__icone" aria-hidden="true"></i>
       <span>
         <strong>{{ semSenha }} conta(s) sem senha.</strong>
-        Vieram do Chatwoot e ainda não entram no painel — isso é o falha-fechado
-        funcionando, não defeito. Defina a senha ao editar cada uma.
+        Defina a senha ao editar cada uma.
       </span>
     </p>
 
@@ -327,8 +326,7 @@ async function salvar() {
           <legend class="campo__rotulo">Jornada</legend>
           <p class="campo__ajuda">
             A pausa do almoço é o <strong>intervalo entre duas faixas do mesmo
-            dia</strong>: 08:00–12:00 e 13:00–18:00. Sem jornada, a fila conta
-            a pessoa como fora do expediente sempre.
+            dia</strong>: 08:00–12:00 e 13:00–18:00.
           </p>
           <div v-for="(nome, dia) in DIAS" :key="dia" class="dia">
             <span class="dia__nome">{{ nome }}</span>
@@ -469,10 +467,7 @@ async function salvar() {
       <div class="modal__caixa" role="dialog" aria-modal="true" aria-label="Desligar">
         <p class="modal__titulo">Desligar {{ desligando.nome }}?</p>
         <p class="modal__texto">
-          A conta <strong>sai do painel</strong> (a senha é revogada e a entrada
-          pelo Google também), sai dos times, e
-          <strong>as conversas dela voltam para a fila</strong> — hoje elas
-          ficariam presas com um dono que nunca mais entra.
+          A conta <strong>sai do painel</strong>, sai dos times, e as <strong>conversas dela voltam para a fila</strong>.
         </p>
         <p class="modal__texto pequeno">
           O histórico continua com o nome dela: nada é apagado.
@@ -487,14 +482,11 @@ async function salvar() {
     </div>
 
     <p v-if="!jornadaAtiva" class="apagado pequeno">
-      A jornada está <strong>desligada</strong>: dá para montar a escala de
-      todo mundo sem que ela afete a fila. Ligar é o botão no topo.
+      A jornada está <strong>desligada</strong>. Ligar é o botão no topo.
     </p>
 
     <p class="apagado pequeno">
-      Atendente não é apagado, é desativado — <code>conversa</code> e
-      <code>transferencia</code> apontam para ele. E ninguém consegue desativar
-      a própria conta.
+      Atendente não é apagado, é desativado. Ninguém desativa a própria conta.
     </p>
   </div>
 </template>

@@ -183,8 +183,7 @@ async function ensaiar() {
         <template v-else>
           O motor está indisponível: {{ estado.motor?.motivo }}
         </template>
-        Escrever e publicar aqui <strong>não faz a IA responder para
-        ninguém</strong> — o interruptor é por canal, na CFG_1.1.
+        Publicar aqui <strong>não põe a IA no ar</strong> — o interruptor é por canal, na CFG_1.1.
       </span>
     </p>
     <p v-else-if="canaisComIa.length" class="aviso aviso--atencao" role="status">
@@ -231,9 +230,7 @@ async function ensaiar() {
               spellcheck="false"
             ></textarea>
             <span class="campo__ajuda">
-              {{ conteudo.length }} caracteres. A linha das descrições dos times
-              é preenchida sozinha na hora do uso — não copie os times para
-              dentro do texto, senão eles congelam aqui e passam a mentir.
+              {{ conteudo.length }} caracteres. As descrições dos times entram sozinhas — não copie para dentro do texto.
             </span>
           </label>
 
@@ -330,8 +327,7 @@ async function ensaiar() {
           <p class="apagado pequeno">
             Roda a IA de verdade contra uma conversa de verdade —
             <strong>sem enviar nada para o cliente</strong>, sem gravar e sem
-            transferir. É aqui que o primeiro erro dela acontece em particular,
-            em vez de em público.
+            transferir. 
           </p>
         </div>
         <span class="chip chip--acento">{{ estado.motor?.modelo }}</span>
@@ -397,8 +393,7 @@ async function ensaiar() {
 
     <p class="apagado pequeno">
       Nenhuma versão é sobrescrita ou apagada: gravar sempre cria a próxima, e
-      voltar atrás é republicar a antiga. É isso que torna respondível
-      "o que ela estava lendo naquele dia?".
+      voltar atrás é republicar a antiga.
     </p>
   </div>
 </template>

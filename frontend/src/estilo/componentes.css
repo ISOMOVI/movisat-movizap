@@ -55,9 +55,11 @@
 .botao--perigo:hover:not(:disabled) { background: var(--erro-suave); }
 
 /* Falta alguma coisa aqui, e resolver isso é o trabalho — não é erro nem
-   perigo. Nasceu em 25/08 para o "Sem ficha — vincular" da ATD_1.2, onde 64%
-   das conversas não têm cadastro: o estado mais comum precisa convidar a
-   resolver, sem gritar como `--perigo`. */
+   perigo. Nasceu em 25/08 para o botão da ficha sem cadastro na ATD_1.2, onde
+   61% das conversas não têm cadastro (231 de 381, medido em 28/08): o estado
+   mais comum precisa convidar a resolver, sem gritar como `--perigo`.
+   ⚠️ O RÓTULO mudou em 28/08 ("Sem ficha" -> "Ficha · vincular"); esta
+   classe, que é quem diz o ESTADO, continua a mesma. */
 .botao--faltando {
   background: transparent;
   border-color: var(--aviso-borda);
@@ -190,6 +192,36 @@
 .campo__entrada:hover:not(:disabled) { border-color: var(--borda-forte); }
 .campo__entrada:focus-visible { border-color: var(--acento); box-shadow: var(--foco); }
 .campo__entrada:disabled { background: var(--superficie-2); color: var(--texto-apagado); }
+
+/* ── seletor compacto ─────────────────────────────────────────────────────
+   🚨 UMA CLASSE, DUAS TELAS. O tipo do contato (`contato.relacao`) aparece na
+   ficha da conversa (ATD_1.2) e na ficha do contato (CAD_1.2). Pedido dele em
+   28/08: *"pode ser um botão menor e mais aderente ao design"*. Definir isto
+   dentro de uma das duas telas faria o MESMO campo ter duas caras no mesmo
+   sistema -- que é o contrário de aderente, e foi o erro da minha primeira
+   proposta (chip+popover só na conversa).
+
+   🚨 O QUE **NÃO** ENCOLHE, E POR QUÊ. `font-size` continua em 16px e a
+   altura em 44px: abaixo de 16px o iOS dá zoom sozinho ao focar, e 44px é o
+   alvo de toque mínimo. É a regra do padrão dos quatro painéis (05/08), e ela
+   ganha do "menor". O que encolhe é a LARGURA e o peso visual -- o campo
+   deixa de ocupar a linha inteira e passa a ler como etiqueta, não como
+   formulário.
+
+   ⚠️ Continua sendo um `<select>` nativo: teclado, leitor de tela e a roda do
+   iOS vêm de graça, e nenhum popover meu reproduz isso sem dívida. */
+.campo__entrada--compacto {
+  display: inline-block;
+  width: auto;
+  max-width: 100%;
+  padding: 4px var(--e-3);
+  padding-right: var(--e-5);
+  border-radius: var(--r-full);
+  background: var(--superficie-2);
+  font-weight: var(--peso-medio);
+  color: var(--texto-fraco);
+}
+.campo__entrada--compacto:focus-visible { color: var(--texto); }
 
 .campo__ajuda { margin-top: var(--e-1); font-size: var(--txt-sm); color: var(--texto-apagado); }
 .campo--erro .campo__entrada { border-color: var(--erro); }

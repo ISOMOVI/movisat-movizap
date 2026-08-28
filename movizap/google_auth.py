@@ -43,9 +43,11 @@ AUTORIZAR = "https://accounts.google.com/o/oauth2/v2/auth"
 TROCAR = "https://oauth2.googleapis.com/token"
 VALIDADE_STATE = 600          # 10 min: tempo de fazer login, não mais
 
-# 🚨 SÓ LEITURA, por decisão do usuário em 10/08. Responder e enviar pedem
-# `gmail.send`, que é outro pedido de consentimento -- e só faz sentido quando
-# a tela existir e ele vir o que ela faz.
+# 🚨 LER E ENVIAR (corrigido em 28/08). O comentário aqui dizia "SÓ LEITURA,
+# por decisão do usuário em 10/08" e continuou dizendo isso DEPOIS de o
+# `gmail.send` entrar na lista logo abaixo -- comentário que descreve o
+# contrário do código é pior que comentário nenhum, porque quem lê confia.
+# A decisão de 10/08 era esperar a tela existir; a tela existe e responde.
 ESCOPO_CAIXA = " ".join([
     # ler a caixa
     "https://www.googleapis.com/auth/gmail.modify",

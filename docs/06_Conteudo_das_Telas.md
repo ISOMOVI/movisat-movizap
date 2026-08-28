@@ -831,8 +831,16 @@ texto das mensagens inclusive notas — nada disso muda.
 ### Ver ficha
 
 Botão de contorno com o nome dentro (*"Ficha · Pastelaria Velasco"*) ou, sem
-cadastro, *"Sem ficha — vincular"* em âmbar. Com 64% das conversas sem
-cadastro, o segundo é o estado mais comum e é o convite para resolver.
+cadastro, *"Ficha · vincular"* em âmbar. Medido em 28/08: **231 das 381
+conversas (61%) não têm cadastro**, então esse é o estado mais comum e é o
+convite para resolver.
+
+🚨 **O RÓTULO MUDOU EM 28/08, E POR UM DEFEITO MEU.** Ele estava escrito
+*"Sem ficha — vincular"* desde 25/08 (`48bdfd4`), e ele disse: *"não vejo
+mais a ficha nas conversas"*. A ficha estava lá o tempo todo — o botão é que
+anunciava uma AUSÊNCIA em 61% das conversas, no lugar de anunciar uma porta.
+A palavra "Ficha" agora abre os três casos; **o que distingue é o contorno
+âmbar e o ícone, não a palavra**. Cor diz estado, palavra diz que coisa é.
 
 ---
 
@@ -1491,3 +1499,589 @@ quem usa.**
 ficha de pessoa com muitas empresas empurraria o fio e o compositor para fora
 do cartão — e `.coluna { overflow: hidden }` cortaria **em silêncio**, sem
 barra para rolar.
+
+---
+
+# ✅ Validado em 2026-08-28 — a ficha, o modal de vínculo e os rótulos
+
+> 🚨 **AS TRÊS COISAS DESTA RODADA SÃO O MESMO DEFEITO**, e nenhuma delas era
+> função quebrada: em todas, o mecanismo respondia e a **palavra que levava
+> até ele** tinha sumido da tela. Ele achou as três usando; eu não achei
+> nenhuma com suíte verde e build limpo.
+>
+> ⚠️ **A trava nova:** antes de mexer em rótulo de botão que já existe, rodar
+> `git log -S"<o texto atual>"`. Se a palavra já esteve na tela e saiu, é
+> **regressão** e se trata como regressão — não como ajuste de desenho.
+
+## ATD_1.2 — vincular empresa virou modal
+
+Pedido dele: *"ao selecionar algumas empresas pelo campo de busca, na ficha,
+para vínculo, não está exibindo claramente, verifique o uso de uma caixa
+modal, acaba sendo uma saída para não ficar espremendo as coisas"*.
+
+```
+Objetivo:     escolher a empresa sem disputar altura com o resto da ficha
+Hoje:         modal próprio (`painelAcao === 'vincular'`), 560px, com os
+              candidatos por telefone antes da busca e a lista dos achados
+              em largura cheia
+Por quê:      a gaveta tem teto de 42vh e carregava, ACIMA da lista, o nome,
+              o telefone, o botão de empresas, o Tipo, o selo do Bitrix, um
+              parágrafo e o campo de busca -- os 10 resultados caíam em ~180px
+              numa janela de 900px, com uma SEGUNDA barra de rolagem
+Reavaliar se: o modal atrapalhar quem quer ler a conversa enquanto procura a
+              empresa. Aí o certo é gaveta lateral, não modal
+```
+
+⚠️ **A gaveta ficou com o que é ESTADO** (quem é, que tipo é, o que o Bitrix
+acha) **e o modal com o que é ESCOLHA.** Era a mistura dos dois no mesmo teto
+que espremia.
+
+| O quê | Confirmado |
+|---|---|
+| O teto de 10 da rota | **aparece na tela**: *"Mostrando as 10 primeiras"* |
+| Empresa sem CNPJ | a linha diz **"sem CNPJ"**, não fica em branco |
+| Fechar o modal | limpa o termo e os achados, como os outros painéis |
+| O modal fecha | **no sucesso, não no clique** — falha precisa de lugar para aparecer |
+
+🚨 **`limparPaineis()` passou a limpar o termo do vínculo.** Sem isso, quem
+procura "Velasco", desiste e abre o vínculo de OUTRA conversa encontraria a
+lista anterior já montada — e um clique ali vincularia a empresa certa ao
+telefone errado.
+
+## ATD_6.1 — "Criar grupo" voltou a ter texto
+
+Ele perguntou: *"o botão de + não tem opção para criar o grupo"* e, depois,
+*"não tínhamos uma demanda de criar o grupo que havia sido entregue?"*.
+
+**Tínhamos.** A demanda é dele (*"podemos criar grupos com os temas"*, 25/08) e
+a função foi entregue em **12/08** (`e6eaef8`), com o texto "Criar grupo" na
+tela. Em **25/08** (`dbb0600`), refazendo o chat interno, **eu** troquei o
+botão por um quadrado de 30px só com o ícone `bi-people`, deixando a palavra
+apenas no `title`.
+
+```
+Objetivo:     a função entregue continuar achável
+Hoje:         botão com ícone E texto, e `.ci__topo` com `flex-wrap` para o
+              par busca+botão não se espremer na coluna estreita
+Por quê:      regressão minha numa demanda dele já entregue -- a função nunca
+              parou de funcionar e ficou inalcançável por três semanas
+Reavaliar se: nada. É restituição, não escolha de desenho
+```
+
+⚠️ **`title` não é rótulo.** O balão do navegador demora cerca de um segundo e
+**não existe em toque** — quem não passa o mouse nunca descobre o que o
+quadrado faz.
+
+## ATD_1.2 / EML_1.1 — a régua dos rótulos
+
+**O ícone fica sozinho quando as duas coisas valem: é convenção do gênero e
+mora colado ao campo que serve. Ganha palavra o que age sobre a conversa.**
+
+O teste da régua era a própria barra de ações: **cinco botões só de ícone e um
+com texto** — e o único legível era "Concluir atendimento", o que encerra.
+
+🚨 **O par perigoso:** *devolver à fila* e *sair da conversa* eram **duas setas
+apontando para a esquerda, lado a lado** (`arrow-return-left` e
+`box-arrow-left`), fazendo coisas diferentes — uma larga a conversa para a
+fila, a outra tira você dela.
+
+| Ganharam palavra | Continuam só ícone |
+|---|---|
+| Transferir · Convidar · Devolver à fila · Sair · Arquivar (EML) · Criar grupo (ATD_6.1) | lupa · funil · clipe · microfone · emoji · X · anterior/próxima ocorrência · `+` nova mensagem · envelope de não-lida |
+
+⚠️ **O `+` passa na régua e ainda assim confundiu.** "Nova mensagem" e "novo
+grupo" são a mesma intenção para quem vem do WhatsApp, e no painel moram em
+telas diferentes. Isso **não se conserta com texto no botão** — depende de
+decidir se criar grupo do WhatsApp entra no escopo. **`evolution.py` só LÊ
+grupo** (`participantes_do_grupo`, `nome_do_grupo`); criar não existe.
+
+## EML_1.1 — a tela deixou de mentir sobre si
+
+O cabeçalho dizia *"Por enquanto dá para ler e consultar. Responder pela tela
+vem em breve"* — e a tela tem **Responder** (`Email.vue`), **Encaminhar**,
+atalho `r` e a rota `/api/email/enviar` no ar. O `gmail.send` já estava em
+`google_auth.ESCOPO_CAIXA`; o comentário de lá também dizia "SÓ LEITURA".
+
+```
+Objetivo:     a tela não anunciar capacidade que já tem, nem prometer o que
+              já entregou
+Hoje:         ícone de ajuda dizendo o que ela faz de verdade; os dois
+              comentários obsoletos corrigidos no fonte
+Por quê:      o texto era verdade quando foi escrito e nunca fez parte da
+              entrega seguinte voltar e matá-lo
+Reavaliar se: nunca. Texto que descreve capacidade existente é defeito
+```
+
+⚠️ **A trava:** entrega de função nova inclui **varrer o que a tela diz sobre
+si mesma**. Tela que anuncia "vem em breve" ou recebe o recurso, ou perde a
+frase — as duas coisas convivendo é a tela mentindo.
+
+## Como isto se testa
+
+`frontend/src/ficha_e_rotulos.teste.js`, **12 verificações**, monta as três
+telas de verdade.
+
+🚨 **ELE AFIRMA TEXTO VISÍVEL, NUNCA `aria-label` NEM `title`.** Foi
+exatamente a confusão entre os dois que deixou o "Criar grupo" inachável: o
+`aria-label` estava lá, perfeito, e a tela não dizia nada. `wrapper.text()` só
+devolve o que está escrito — é a única afirmação que responde *"dá para
+achar?"*.
+
+⚠️ **Não substitui abrir a tela.** Isto prova que a palavra está no DOM; que
+ela **cabe**, e onde, só o uso diz. Por isso esta seção fecha em *entregue*,
+e vira **Validado** quando ele abrir.
+
+---
+
+## O tipo do contato: um campo, uma cara (28/08)
+
+Pedido dele: *"o tipo… pode ser um botão menor e mais aderente ao design"*.
+
+```
+Objetivo:     o tipo ler como etiqueta, não como formulário, e ser o MESMO
+              controle nas duas telas onde ele aparece
+Hoje:         `<select class="campo__entrada campo__entrada--compacto">` na
+              ficha da conversa (ATD_1.2) e na ficha do contato (CAD_1.2),
+              com a classe definida UMA vez em `componentes.css`
+Por quê:      pedido dele. E a primeira proposta minha (chip + popover só na
+              conversa) foi recusada na validação: o mesmo campo passaria a
+              ter duas aparências no mesmo sistema
+Reavaliar se: a lista de 8 tipos crescer a ponto de o `<select>` nativo
+              atrapalhar. Aí a saída é popover NAS DUAS, nunca em uma
+```
+
+🚨 **O QUE NÃO ENCOLHEU, E POR QUÊ.** `font-size` continua **16px** e a altura
+**44px**: abaixo de 16px o iOS dá zoom sozinho ao focar, e 44px é o alvo de
+toque mínimo — regra do padrão dos quatro painéis (05/08), que ganha do
+"menor". O que encolheu foi a **largura e o peso**: o campo deixou de ocupar a
+linha inteira, ganhou raio de chip e fundo `--superficie-2`.
+
+⚠️ **Continua sendo `<select>` nativo.** Teclado, leitor de tela e a roda do
+iOS vêm de graça; popover próprio reproduz isso com dívida.
+
+⚠️ **Os dois tetos por tela saíram** (`.gaveta__tipo`, 12rem, e `.cad__relacao`,
+14rem). Quem dimensiona é a classe compartilhada — teto por tela devolveria a
+divergência que esta mudança existe para fechar.
+
+### Como isto se defende
+
+`ficha_e_rotulos.teste.js` afirma que **as duas telas usam a mesma classe**. É
+afirmação sobre a fonte de propósito: ela não defende o render de hoje, defende
+a **próxima edição** — foi por edição isolada numa tela só que o "Criar grupo"
+e o rótulo da ficha se perderam.
+
+### A pergunta dele que derrubou a proposta anterior
+
+*"ficou aderente? recursos relacionados se mantêm? tem o melhor caminho?"* —
+as três respostas mudaram o trabalho, e eu não as tinha feito antes de propor:
+
+1. **Aderente: não.** O tipo já era `<select>` em `<dl>` nas duas telas; eu ia
+   quebrar a consistência que existia, invocando o padrão `.filtro` — que é de
+   escolha MÚLTIPLA sobre lista, e o tipo é valor ÚNICO de um registro. Peguei
+   o padrão pela aparência, não pela função.
+2. **Recursos relacionados: não todos** — ver a seção do E.1, ainda aberto.
+3. **Melhor caminho: separar.** O controle menor não depende de decisão dele,
+   não cria registro e não mexe em automação. Criar contato pela conversa
+   carrega tudo isso e continua esperando.
+
+---
+
+## Migração 039 e o backup que não existia (28/08)
+
+Ele perguntou: *"na aba 'minhas', porque continuam conversas lá que eu
+encerrei?"* — e mandou auditar antes de corrigir: *"antes de rodar a migração
+039, audite e valide backup"*. A auditoria achou coisa maior que a migração.
+
+### 🚨 O backup do banco do MoviZap NÃO EXISTIA
+
+O cron salvava o banco do hub-fotos (03:00) e o do MoviChat (03:30). O
+`backup_projetos.sh` (02:00) empacota o **diretório** `movizap_painel` —
+código, docs, migrações — e **não toca no banco**. Busca por qualquer `.sql`,
+`.dump` ou `.pgdump` do MoviZap em `/home/claude`, `/var/backups`, `/opt` e
+`/srv`: **zero arquivos**. São 192 MB, 37 tabelas, o histórico de atendimento
+inteiro. Código se reconstrói do git; isto não.
+
+Agora: `scripts/backup_db.py`, no cron às **02:40**, retenção de 14 dias.
+
+- 🚨 **A senha sai do `.env` dentro do processo** e vai para um `.pgpass` 0600
+  apagado no `finally`, inclusive quando o dump falha. Nunca em `argv` — os
+  dois scripts antigos usam `PGPASSWORD=<valor> pg_dump`, e `argv` o `auditd`
+  grava. É a regra que o `aplicar_migracao.py` já tinha escrito aqui.
+- ⚠️ **O arquivo só vira definitivo depois de ABRIR** e de conter as 7 tabelas
+  essenciais. Backup que não abre é pior que backup nenhum: dá confiança.
+
+### O defeito que a própria verificação pegou
+
+Na primeira execução o `pg_dump` gravou **SQL cru dentro do `.gz`**: passar um
+`gzip.GzipFile` como `stdout=` do subprocess não comprime — o subprocess usa o
+`fileno()`, que é o do arquivo de baixo. O `pg_dump` devolveu **0**, satisfeito,
+e o arquivo ficou com nome de comprimido e conteúdo de texto. Quem pegou foi a
+conferência, não o código de retorno. Hoje o dump vai por um cano e a
+compressão é feita em Python.
+
+### O backup foi VALIDADO, não declarado
+
+1. `gzip -t` íntegro; **28 MB, 37 tabelas, 107.775 linhas**.
+2. As 3 linhas-alvo estão no dump com o `atendente_id` de antes — prova de que
+   ele carrega o que o rollback precisaria.
+3. **Restauração de verdade**, em banco separado (`movizap_restore_teste`), com
+   `ON_ERROR_STOP=1`: **zero erros**.
+4. Contagem tabela a tabela contra o vivo. `conversa`, `contato`, `cliente`,
+   `atendente`, `conversa_participante`, `email_mensagem`: iguais. `mensagem` e
+   `webhook_evento` divergiam — e a divergência foi **provada** como tráfego
+   posterior: o restaurado termina exatamente no evento **45876 (10:00:47)**, e
+   toda linha a mais no vivo tem carimbo depois disso.
+5. Banco de teste removido.
+
+⚠️ **Restauração exige `vps-root`:** o papel `movizap` tem `rolcreatedb = false`.
+Foi autorizado por ele para esta operação, e só para ela.
+
+### A migração
+
+```
+Objetivo:     conversa concluída não ficar na lista de ninguém
+Hoje:         as 3 concluídas do painel inteiro estavam com dono preso -- 100%
+              delas --, e uma com participante sem `saiu_em`
+Por quê:      a regra está certa desde a 029 (25/08 10:27); as três foram
+              concluídas ANTES dela, a última por 1h40. A 029 mudou o
+              comportamento e não corrigiu as linhas que já existiam
+Reavaliar se: nada. É correção de dado, e não se repete
+```
+
+🚨 **A ORDEM É A REGRA.** `resolvida_por` era NULL nas três, e `atendente_id`
+era o ÚNICO lugar onde o autor do fechamento existia — por isso a cópia e a
+limpeza vão na MESMA instrução. E `saiu_em` recebe a data da **conclusão**, não
+`now()`: datar com hoje faria o histórico dizer que a pessoa ficou dentro da
+conversa por 11 dias.
+
+**Conferido relendo o estado:** 0 resolvidas com dono · 0 participantes presos ·
+`resolvida_por` preenchido nas três (2157 Erika, 12778 e 12826 Iago) ·
+`conversas.listar(atendente_id=121)` devolve **0** · 82 testes de conversa,
+conclusão, fila, participantes e caixa por atendente passando.
+
+⚠️ **A 039 quase não rodou.** O `aplicar_migracao.py` recusa arquivo que não
+registra a própria versão em `schema_migracao`, e a minha primeira versão não
+registrava. Achado na auditoria de backup, não em teste.
+
+⚠️ **O dump avulso foi apagado após o êxito, por decisão dele.** Fica o
+`backups/db/desfazer_039.sql` — rollback de uma linha, com os valores lidos
+imediatamente antes de aplicar — e a rotina diária a partir de hoje.
+
+---
+
+# ✅ Validado em 2026-08-28 — os textos educativos saíram das telas
+
+Pedido dele, com a régua dentro do próprio pedido: *"as mensagens que ficam
+aparecendo ainda estão pelo sistema todo, e já pedi ocultação dela… ocupam
+espaços úteis… já entendeu o padrão? elas ajudaram nas etapas de lógica, mas
+agora em teste 'sujam' a tela"*.
+
+```
+Objetivo:     a tela dizer o que É e o que vai ACONTECER, não por que ela foi
+              desenhada assim
+Hoje:         143 textos fixos de 6+ palavras no painel, e o que sobrou é
+              rótulo, estado vazio, dica de campo e o conteúdo DENTRO do ícone
+              de ajuda -- que é o texto já recolhido
+Por quê:      pedido dele. O texto de projeto serviu enquanto a lógica estava
+              sendo construída; em uso ele come a altura que é do trabalho
+Reavaliar se: alguém de fora do time começar a errar o uso de uma tela por
+              falta do texto. Aí a resposta é o ícone de ajuda, não a faixa
+```
+
+## A régua, e ela veio de um exemplo dele
+
+> *"376 conversa(s) sem triagem. Quem atribui o time é a triagem, e a IA está
+> desligada — então hoje a triagem é manual: abra, leia e transfira para o time
+> certo. Quando a IA entrar, ela faz isso e estas caem nos times sozinhas."*
+
+O número é **fato** e fica. Tudo depois dele é **aula** e sai.
+**Corta-se a frase no fato.**
+
+| Fica | Sai |
+|---|---|
+| número ao vivo | por que o sistema é assim |
+| consequência no momento de agir | o que aconteceria se não fosse |
+| o que fazer a seguir | história e data de decisão |
+| limite de campo | código de tela e jargão de porão |
+
+## 🚨 Duas telas estavam MENTINDO, e é a mesma falha
+
+| Tela | O que dizia | A verdade |
+|---|---|---|
+| **E-mail** | *"Por enquanto dá para ler e consultar. Responder pela tela vem em breve."* | tem Responder, Encaminhar, atalho `r` e `/api/email/enviar` no ar |
+| **Histórico** | *"classificar é obrigatório justamente para este histórico servir de analytics"* | deixou de ser obrigatório em **11/08** |
+
+Os dois textos eram verdade quando foram escritos, e **nenhuma entrega seguinte
+voltou para matá-los**. É o `M12`: função nova inclui varrer o que a tela diz
+sobre si mesma. Agora com duas ocorrências provadas, não uma.
+
+## 🚨 A varredura falhou QUATRO vezes por medir a forma da marcação
+
+1. **27/08** — varri por `<h1>` + `<p class="apagado pequeno">` e entreguei
+   **13 de 15** telas. Ficaram de fora exatamente as duas de prioridade: o
+   E-mail (o `<h1>` de lá tem `class`) e a Caixa de entrada (o texto estava
+   dentro do campo de busca).
+2. **28/08, manhã** — corrigi as duas que ele citou e deixei a **idêntica** no
+   Histórico (`campo__ajuda` sob campo de busca). Exemplo não é escopo.
+3. **28/08, tarde** — varri por classe CSS (`apagado|pequeno|fraco|
+   campo__ajuda|aviso`) e passei quatro lotes assim.
+4. **Ele achou o que isso escondia:** *"A ficha do cliente entra aqui na
+   ATD_2.1, consultando o FPSL"* — um `<p>` **sem classe nenhuma**, no estado
+   vazio da coluna da conversa, que é a primeira coisa que se vê ao abrir a
+   tela. Promessa de roadmap com código de tela dentro.
+
+⚠️ **A varredura definitiva não olha classe:** lê TODO nó de texto de TODO
+template, tira interpolação e atributo, e sobra o que a pessoa lê.
+`scripts/` não guarda esse script porque ele é de auditoria, não de rotina —
+mas o método fica escrito aqui: **varre-se o que está na tela, nunca o seletor
+que eu supus que ele usa.**
+
+## O que saiu, por tela
+
+| Tela | O que saiu |
+|---|---|
+| **Caixa de entrada** | a promessa da ATD_2.1 · a lição da fila parada · encaminhar · convidar · concluir · a data "11/08" da classificação · o "vale-tudo" do comentário · o código ATD_5.1 · a checagem no WhatsApp · a explicação do tipo · a faixa de aviso de "não identificado", que aparecia em **61% das conversas** dizendo o que o botão da ficha já diz |
+| **Fila** | cortada no número; e o rodapé sobre atomicidade do "Assumir" |
+| **E-mail** | o cabeçalho falso · assinatura · imagem · compositor · vincular remetente · o vazio da caixa |
+| **Histórico** | a faixa da busca (para o ícone) · o vazio que mentia |
+| **Atendentes** | o Chatwoot e o "falha-fechado funcionando" · o porquê do desligamento · "conversa e transferencia apontam para ele" |
+| **Informativos** | "não por recusarem WhatsApp" · o mecanismo do estado de entrega · "gente responde boleto" |
+| **Contatos** | o parágrafo do bruto × E.164 · o "não para gerar demanda" dos papéis |
+| **IaPrompt** | "o primeiro erro dela em particular" · o congelamento dos times · "o que ela estava lendo naquele dia?" |
+| **Sincronização** | "insistir num servidor caído só piora" · o "que seria mentira" · metade da legenda |
+| **Automação** | "botão que não faz nada é pior que botão nenhum" · o parágrafo da idempotência |
+| **Times · Classificações · Canais · Registro · Sem permissão · Não encontrada** | as justificativas de desenho, mantendo a instrução |
+
+## ⚠️ Corte não pode atravessar abertura de tag
+
+Três cortes levaram junto um `<strong>` ou um `<span class="pequeno">` de
+abertura e deixaram o fechamento órfão — `Contatos`, `Informativos` e
+`Sincronização` ficaram com marcação inválida.
+
+🚨 **A suíte passou com 75 verdes.** Nenhum teste monta essas três telas. Quem
+pegou foi o `npm run build`. É o `M9` por outro lado: placar verde não vê nem
+layout nem markup de tela que ninguém monta. **Build entra na conferência de
+toda mexida em template, mesmo quando só se apaga texto.**
+
+⚠️ **E o heredoc por `ssh` comeu o travessão**, de novo — terceira vez no mesmo
+dia. O MIOLO já manda ir por arquivo + `scp`; passei a fazer assim no meio do
+trabalho, e devia ter começado assim.
+
+---
+
+## O tipo não depende mais de empresa vinculada — E.1 (28/08)
+
+Pedido dele: *"o tipo: 'cliente, teste, tecnico, etc' não precisa depender de
+empresa vinculada para ter o campo"*.
+
+⚠️ **Ele disse EMPRESA, não contato.** O tipo mora em `contato.relacao`, então
+o que faltava não era o campo: era o **registro**.
+
+```
+Objetivo:     marcar o que a pessoa é sem precisar achar a empresa dela
+Hoje:         escolher o tipo numa conversa sem cadastro CRIA o contato --
+                sem empresa (`cliente_id IS NULL`), `origem='movizap'`,
+                telefone com `origem_campo='atendimento'`, e nascendo já com
+                o tipo escolhido. Rota `PUT /api/conversas/{id}/tipo`
+Por quê:      pedido dele, e é o S9 respondido: 61% das conversas não têm
+                cadastro, e sem linha em `contato` não havia onde gravar
+Reavaliar se: começarem a nascer contatos duplicados do mesmo telefone quando
+                o Harmonit trouxer a pessoa depois. A saída é fundir, não
+                impedir de criar
+```
+
+### O que a validação provou ANTES de eu escrever
+
+| Pergunta | Resposta medida |
+|---|---|
+| Pode existir contato sem empresa? | **sim** — `contato.cliente_id` é anulável |
+| O painel pode criar? | **sim** — `origem` já aceita `'movizap'` no CHECK |
+| O sync destruiria? | **não** — toda escrita filtra `origem='harmonit'`, inclusive `_inativar_sumidos` e o DELETE de telefone |
+| O telefone conflita? | **não** — o índice único é `(contato_id, e164)` |
+| 🚨 Alguém já exercitou? | **não. 0 dos 1.756 contatos existiam sem empresa** |
+
+O último é o que mudou a postura: o schema permitia e **a vida nunca produziu
+um**. Tratado como caminho novo, não como caminho existente.
+
+### 🚨 Os quatro consertos que a validação achou
+
+Sem eles a função "funcionaria" e estragaria o resto da ficha:
+
+1. **Os candidatos sumiriam.** `conversa()` só calculava `candidatos` com
+   `contato_id IS NULL`. Marcar o tipo cria o contato — e a pessoa perderia a
+   lista que leva à empresa certa, **como castigo por ter classificado**. O
+   critério passou a ser **sem empresa**, não sem contato.
+2. **O selo do Bitrix sumiria junto**, pela mesma linha. Ele serve para ACHAR
+   a empresa: vale enquanto ela não existe.
+3. **A gaveta continuaria dizendo "Sem cadastro".** O template chaveia em
+   `empresa.cliente`, e contato sem empresa devolve `cliente: None`. Ganhou o
+   **terceiro estado**: *cadastro sem empresa*.
+4. **O contato nasceria com o default.** `relacao` tem default
+   `sem_identificacao` (migração 031) — criar e depois atualizar deixaria uma
+   janela em que o contato existe dizendo o que ninguém disse.
+
+### Decisões que ele deixou comigo, declaradas
+
+- **Nome do contato:** apelido do WhatsApp; o telefone quando não houver.
+  `nome` é `NOT NULL`.
+- **`sem_identificacao` fora da lista de escolha:** é o valor de nascimento,
+  não uma marcação. Continua em `RELACOES` porque é valor válido do banco.
+
+### ⚠️ A automação troca de linha NA HORA, e a tela avisa
+
+Sem contato, `automacao.chave_do_contato()` devolve `sem_cadastro`; com
+contato, devolve a `relacao`. Boas-vindas e `ia_ligada` daquela pessoa passam a
+seguir outra regra no instante da marcação. A resposta traz
+`automacao_antes`/`automacao_depois`, e a tela escreve: *"Cadastro criado e
+marcado como X. A automação por tipo passa a valer para esta pessoa."*
+
+### 🚨 A permissão é ATD_1.2, não CAD_1.2
+
+O perfil `atendimento` não tem CAD_1.2 desde 10/08. Exigir a do cadastro
+esconderia o seletor justamente de quem está falando com a pessoa — que é quem
+sabe o que ela é. Mesma razão da `buscar-empresa`.
+
+### O que o banco me ensinou no caminho
+
+🚨 **`ck_conversa_identidade`:** grupo tem `grupo_jid` e **não tem telefone**
+(`tipo='grupo' AND grupo_jid IS NOT NULL AND telefone_e164 IS NULL`). Eu tinha
+escrito o teste supondo que grupo era só um `tipo` diferente, e o banco
+recusou. A regra estava no schema o tempo todo.
+
+⚠️ **Um teste de 27/08 ancorava num COMENTÁRIO meu** (`"SEM vínculo: o caso
+comum"`), que esta mudança reescreveu. Âncora em comentário é frágil: o
+comentário é meu, e eu o reescrevo. Passou a apontar para o que a tela mostra,
+e a afirmação ficou mais forte — exige a **escolha**, não só a exibição.
+
+### Como se defende
+
+`tests/teste_tipo_sem_empresa.py`, **11 verificações**, sendo **3 dedicadas aos
+quatro consertos** — as que provam que a ficha não se estraga ao classificar.
+
+---
+
+# ✅ Validado em 2026-08-28 — os cinco que ele aprovou da minha lista
+
+Ele mandou: *"3,5,6,7,13 pode validar e fazer, depois vemos os demais"* — cinco
+das dezoito sugestões, todas minhas, nenhuma pedida por ele antes.
+
+⚠️ **Esta seção nasceu de uma auditoria dele, não do meu ciclo.** Eu entreguei
+os cinco, subi, e ele me chamou para o FPSL. Não voltei para fechar a etapa 4 —
+foi ele quem perguntou *"veja se tudo foi documentado"*. É o
+`feedback_documentar_antes_de_seguir` furado, e o furo tem a mesma forma de
+sempre: o trabalho parece pronto porque está no ar.
+
+## 3 — O freio do informativo (ATD_3.1)
+
+```
+Objetivo:     um disparo em andamento poder ser parado pela tela
+Hoje:         botão "Pausar" ao lado de "Enviar próximos 20"
+Por quê:      `POST /api/informativos/{id}/pausar` existia com ZERO
+              chamadores. Envio em massa sem freio na tela
+Reavaliar se: nada. É a rota que já existia ganhando porta
+```
+
+⚠️ **Só vale enquanto `enviando`** — é a condição do próprio backend. E quando
+não vale, o botão **fica cinza dizendo por quê**, em vez de sumir: *"Só dá para
+pausar um disparo em andamento — este está rascunho"*.
+
+## 5 — Conectar a caixa de e-mail (EML_1.1)
+
+🚨 **EU IA APAGAR ESTA ROTA.** Tinha proposto remover `/api/email/autorizar`
+como duplicata de `/api/auth/google/inicio`. **Errado, e a validação pegou:**
+
+| Rota | O que é | Escopo |
+|---|---|---|
+| `/api/auth/google/inicio` | **login** | `openid email profile` |
+| `/api/email/autorizar` | **consentimento para LER a caixa** | `gmail.modify` + `gmail.send` + calendar |
+
+Não são duplicatas. O que faltava era **o botão**: a única caixa da base
+(`iago@movisat.com.br`, 10/08) foi conectada na mão, e a tela dizia *"peça ao
+administrador"* — que também não tinha botão.
+
+```
+Objetivo:     o owner conectar a própria caixa pela tela
+Hoje:         botão "Conectar minha caixa" no vazio da EML_1.1
+Por quê:      a rota existia com zero chamadores desde sempre
+Reavaliar se: mais de uma pessoa precisar conectar caixa. Hoje é CFG_1.1
+```
+
+⚠️ **Só aparece para quem tem CFG_1.1**, que é a permissão que a rota exige —
+mostrar para os outros seria oferecer um 403. E navega na **mesma aba**: o
+Google devolve para o nosso callback, e aba nova deixaria a original mostrando
+"nenhuma caixa" para sempre.
+
+## 6 — Motivo nos botões cinzas
+
+A regra que ele aprovou na escada da IA — *nada some; o travado diz o que
+falta* — estava aplicada nos degraus da IA e em lugar nenhum mais.
+
+🚨 **NÃO SÃO OS 17 BOTÕES DESABILITADOS, SÃO NOVE.** Oito ficam cinza enquanto
+a ação está **em voo** (`mexendo`, `enviando`, `ocupado`, `vinculando`,
+`conectando`, `carregandoAnteriores`): mostram o girando e duram um instante.
+Texto neles devolveria o ruído que a rodada dos textos educativos tirou no
+mesmo dia.
+
+Ganharam motivo os nove em que o cinza é **uma pergunta sem resposta**:
+
+| Onde | O que passou a dizer |
+|---|---|
+| compositor (enviar e nota) | *Escreva algo ou anexe um arquivo* |
+| encaminhar | *Marque ao menos uma conversa de destino* |
+| nova mensagem | *Informe o número, com DDD* / *Escreva a mensagem* |
+| convidar | *Marque quem você quer chamar* |
+| transferir | *Escolha o time de destino* |
+| concluir | *Esta classificação exige um comentário dizendo o que foi* |
+| e-mail: responder e encaminhar | *Abra uma mensagem primeiro* |
+
+## 7 — Atalhos na Caixa de entrada
+
+O E-mail tinha **6 teclas** e as ensinava; a Caixa de entrada tinha **zero**. A
+tela mais usada era a com menos ferramenta.
+
+```
+Objetivo:     quem atende o dia inteiro não precisar do mouse para andar
+Hoje:         j / k passam de conversa · / vai para a busca · a assume ·
+              c abre o concluir
+Por quê:      pedido dele ("3,5,6,7,13 pode validar e fazer"). As teclas
+              espelham as do E-mail onde a ação é a mesma, e `/` é
+              convenção (Gmail, Slack, GitHub)
+Reavaliar se: ele quiser outras teclas — atalho é regra de uso, e a
+              escolha continua sendo dele
+```
+
+🚨 **NUNCA DENTRO DE CAMPO DE TEXTO** — mesma guarda do E-mail. Sem ela,
+escrever "javali" para o cliente pularia de conversa no meio da palavra.
+`Ctrl`/`Cmd`/`Alt` também saem: são atalhos do navegador.
+
+⚠️ **Nenhuma tecla destrói.** `c` abre o modal de concluir, não conclui — a
+confirmação continua sendo o que decide. E as teclas são **ensinadas** no ícone
+de ajuda: atalho que ninguém descobre é o mesmo que não existir.
+
+## 13 — `gerar_env.py` foi para `scripts/`
+
+Ninguém o chamava — nem código, nem cron, nem doc.
+
+🚨 **MOVER NÃO ERA TRIVIAL.** Ele resolve caminho por `Path(__file__).parent`,
+que era a raiz do repositório. Com um `.parent` só, ele passaria a gravar o
+`.env` **dentro de `scripts/`** — sem erro, sem aviso, e o painel continuaria
+lendo o `.env` antigo. Corrigido para `.parent.parent`.
+
+⚠️ **Arquivo que resolve caminho por `__file__` nunca é só mover: é mover e
+conferir a âncora.**
+
+## Como isto se defende
+
+`frontend/src/ficha_e_rotulos.teste.js` cresceu para cobrir o 3, o 6 e o 7 —
+**80 verificações JS** no total.
+
+🚨 **E o duplo do teste tinha um defeito que reprovava código bom.** Ele casava
+rota por prefixo na ordem de inserção, então `/api/informativos` engolia
+`/api/informativos/9` e devolvia a LISTA no lugar do disparo: a tela montava
+com `aberto` errado e o teste acusava botão desabilitado que na tela real está
+ativo. Agora **a chave mais longa vence**. Duplo que mente sobre a rota é pior
+que duplo nenhum.
+
+⚠️ E o primeiro teste do informativo que eu escrevi era `expect(... || true)` —
+teste de mentira. Trocado por um que monta a tela com o disparo em `enviando` e
+em `rascunho`, e afirma os dois estados do botão.

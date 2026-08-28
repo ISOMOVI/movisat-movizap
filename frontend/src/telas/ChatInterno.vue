@@ -520,14 +520,25 @@ function quando(iso) {
               placeholder="Buscar pessoa ou grupo…"
             />
           </label>
+          <!-- 🚨 O TEXTO VOLTOU (28/08). Ele perguntou *"o botão de + não tem
+               opção para criar o grupo"* e depois *"não tínhamos uma demanda
+               de criar o grupo que havia sido entregue?"* -- tínhamos: a
+               demanda é dele (*"podemos criar grupos com os temas"*, 25/08) e
+               a função foi entregue em 12/08, com o texto "Criar grupo" na
+               tela. Em 25/08, refazendo o chat, EU tirei a palavra e deixei
+               só o ícone: a função continuou inteira e ficou inachável.
+
+               ⚠️ `title` não é rótulo. O balão do navegador demora cerca de
+               um segundo e não existe em toque -- quem não passa o mouse
+               nunca descobre o que o quadrado faz. -->
           <button
-            class="botao botao--pequeno botao--contorno botao--icone"
+            class="botao botao--pequeno botao--contorno"
             type="button"
-            title="Criar grupo"
-            aria-label="Criar grupo"
+            title="Criar um grupo do chat interno"
             @click="criandoGrupo = !criandoGrupo"
           >
             <i class="bi bi-people" aria-hidden="true"></i>
+            Criar grupo
           </button>
         </div>
 
@@ -884,8 +895,11 @@ function quando(iso) {
 .barra-interna .bi { font-size: 16px; }
 
 /* ---- coluna de pessoas e grupos ----------------------------------------- */
-.ci__topo { display: flex; gap: var(--e-2); align-items: center; }
-.ci__topo .busca { flex: 1 1 auto; }
+/* ⚠️ `flex-wrap` desde 28/08: o botão de criar grupo voltou a ter texto, e
+   sem quebra ele espremia a busca até o placeholder sumir na coluna estreita.
+   Quebrar é o certo -- os dois continuam inteiros, um em cada linha. */
+.ci__topo { display: flex; gap: var(--e-2); align-items: center; flex-wrap: wrap; }
+.ci__topo .busca { flex: 1 1 12rem; }
 .ci__lista { overflow-y: auto; min-height: 0; }
 
 .ci__secao {

@@ -163,8 +163,7 @@ async function salvar() {
             placeholder="Ex.: Boleto, fatura, segunda via, negociação de débito."
           ></textarea>
           <span class="campo__ajuda">
-            É por aqui que a IA decide mandar a conversa para cá. Sem descrição,
-            ela chuta.
+            A IA usa isto para escolher o time.
           </span>
         </label>
 
@@ -175,8 +174,7 @@ async function salvar() {
             <option v-for="t in outrosTimes" :key="t.id" :value="t.id">{{ t.nome }}</option>
           </select>
           <span class="campo__ajuda">
-            Para onde a conversa vai quando este time não atende. Ciclo entre
-            times é recusado no servidor.
+            Para onde a conversa vai quando este time não atende.
           </span>
         </label>
 
@@ -291,11 +289,6 @@ async function salvar() {
       </article>
     </section>
 
-    <p class="apagado pequeno">
-      Time não é apagado, é desativado: <code>conversa</code> e
-      <code>transferencia</code> apontam para ele, e sumir com a linha faria o
-      histórico mentir sobre o que aconteceu.
-    </p>
   </div>
 </template>
 

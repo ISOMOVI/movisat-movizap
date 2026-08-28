@@ -80,7 +80,10 @@ const totalMensagens = computed(
     <header class="tela__cabecalho">
       <div>
         <h1>Histórico</h1>
-        <AjudaDaTela>Conversas encerradas. É o que responde "o que já falamos com essa pessoa antes?".</AjudaDaTela>
+        <AjudaDaTela>
+          Conversas encerradas. É o que responde "o que já falamos com essa
+          pessoa antes?". A busca acha o telefone em qualquer grafia.
+        </AjudaDaTela>
       </div>
       <div class="linha">
         <span class="chip">{{ itens.length }} conversas</span>
@@ -99,7 +102,12 @@ const totalMensagens = computed(
             placeholder="nome, cliente ou telefone"
             @keyup.enter="carregar"
           />
-          <span class="campo__ajuda">Telefone em qualquer grafia acha a mesma conversa.</span>
+          <!-- 🚨 A FAIXA SAIU DAQUI EM 28/08, NA AUDITORIA. Ele disse que os
+               textos fixos estavam *"pelo sistema todo"* e citou dois
+               exemplos com "etc"; eu entreguei os dois exemplos e deixei
+               ESTE -- mesma construção (`campo__ajuda` sob um campo de
+               busca), mesmo lugar, outra tela. É o M11 furado uma rodada
+               depois de eu escrevê-lo: exemplo não é escopo. -->
         </label>
 
         <label class="campo">
@@ -128,11 +136,7 @@ const totalMensagens = computed(
     <div v-else-if="!itens.length" class="vazio">
       <i class="bi bi-clock-history vazio__icone" aria-hidden="true"></i>
       <p class="vazio__titulo">Nenhuma conversa encerrada</p>
-      <p>
-        Conversa só entra aqui depois de encerrada com classificação — e
-        classificar é obrigatório justamente para este histórico servir de
-        analytics depois.
-      </p>
+      <p>Conversa entra aqui quando o atendimento é concluído.</p>
     </div>
 
     <section v-else class="cartao tela__bloco">

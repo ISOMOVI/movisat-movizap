@@ -121,8 +121,22 @@ Pedido dele: *"as abas tem textos explicativos do que as telas são, o que
 fazem e o que falta... transforme em balões ícones apenas, se passar mouse
 aparece os textos"*.
 
-**O texto explicativo do cabeçalho virou um ícone** em 13 telas, com o
-componente `componentes/AjudaDaTela.vue`. **O ícone é sempre o mesmo** —
+**O texto explicativo do cabeçalho virou um ícone** em **15 telas**, com o
+componente `componentes/AjudaDaTela.vue`.
+
+🚨 **ERAM 15 E EU ENTREGUEI 13 (corrigido em 28/08).** A varredura de 27/08
+procurou a FORMA da marcação — `<h1>Título</h1>` seguido de
+`<p class="apagado pequeno">` — e não o alcance do pedido. Ficaram de fora
+exatamente as duas telas de prioridade: o **E-mail**, cujo `<h1>` tem
+`class="tela__titulo"` e por isso não casou com o padrão, e a **Caixa de
+entrada**, cujo texto não estava no cabeçalho e sim dentro do campo de busca
+(`campo__ajuda`). Ele cobrou: *"notei que as mensagens que ficam aparecendo
+ainda estão pelo sistema todo, e já pedi ocultação dela"*.
+
+⚠️ **A TRAVA QUE ISSO DEIXA:** demanda de varredura ("em todas as telas",
+"pelo sistema") começa por uma **lista nominal de telas**, escrita antes de
+mexer em código e conferida uma a uma — nunca por padrão de marcação. E as
+telas de prioridade entram primeiro, não por último. **O ícone é sempre o mesmo** —
 `bi-question-circle` — e é convenção, não escolha por tela: um símbolo
 diferente em cada lugar obrigaria a reaprender o que ele faz.
 

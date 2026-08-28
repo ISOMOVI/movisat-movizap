@@ -11,13 +11,18 @@
    no cadastro. 442 deles não têm WhatsApp alcançável: é aqui que se fala com
    quem o WhatsApp não alcança.
 
-   ⚠️ EM CONSTRUÇÃO, e a tela diz isso. Hoje ela LÊ; responder e encaminhar
-   exigem o escopo `gmail.send`, que é outro consentimento.
+   ⚠️ ELA LÊ E RESPONDE (atualizado em 28/08). O `gmail.send` já está em
+   `google_auth.ESCOPO_CAIXA`, e a tela tem Responder, Encaminhar e o atalho
+   `r`. Este comentário dizia "em construção... responder exige o escopo
+   gmail.send" muito depois de o escopo ter entrado -- e a tela repetia isso
+   para o usuário, em texto fixo no cabeçalho.
    ============================================================================ */
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 
 import { api, pedirBlob, ErroDeApi } from '../api/cliente.js'
 import { corDaInicial as corDe, iniciais as iniciaisDe } from '../util/avatar.js'
+import AjudaDaTela from '../componentes/AjudaDaTela.vue'
+import { codigosPermitidos } from '../estado/sessao.js'
 
 const marcadores = ref([])
 const mensagens = ref([])
@@ -630,6 +635,22 @@ function quando(iso) {
     : d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })
 }
 
+const podeConectarCaixa = computed(() => codigosPermitidos.value.has('CFG_1.1'))
+const conectando = ref(false)
+
+/* ⚠️ Navega na MESMA aba, de propósito: o Google devolve para o nosso callback,
+   e uma aba nova deixaria a original mostrando "nenhuma caixa" para sempre. */
+async function conectarCaixa() {
+  conectando.value = true
+  try {
+    const r = await api.get('/api/email/autorizar')
+    window.location.href = r.url
+  } catch (e) {
+    conectando.value = false
+    erro.value = e instanceof ErroDeApi ? e.message : 'Não consegui abrir o Google.'
+  }
+}
+
 onMounted(async () => {
   document.addEventListener('keydown', atalho)
   await carregarCaixas()
@@ -646,9 +667,21 @@ onUnmounted(() => document.removeEventListener('keydown', atalho))
     <header class="tela__cabecalho">
       <div>
         <h1 class="tela__titulo">E-mail</h1>
-        <p class="apagado pequeno">
-          Por enquanto dá para ler e consultar. Responder pela tela vem em breve.
-        </p>
+        <!-- 🚨 A FRASE QUE ESTAVA AQUI ERA FALSA, não só comprida (28/08).
+             Ela dizia "Por enquanto dá para ler e consultar. Responder pela
+             tela vem em breve" -- e esta tela tem Responder, Encaminhar,
+             atalho `r` e a rota /api/email/enviar no ar. O texto era verdade
+             quando foi escrito e ninguém voltou para matá-lo quando o
+             responder ficou pronto.
+
+             ⚠️ A TRAVA QUE ISSO DEIXA: entrega de função nova inclui varrer o
+             que a tela diz sobre si mesma. Tela que anuncia "vem em breve"
+             ou recebe o recurso, ou perde a frase -- nunca as duas coisas
+             convivendo, porque aí a tela mente sobre a própria capacidade. -->
+        <AjudaDaTela>
+          As caixas conectadas, com o cliente já vinculado na linha. Dá para
+          ler, responder, encaminhar e arquivar sem sair daqui.
+        </AjudaDaTela>
       </div>
       <div class="linha">
         <input v-model="busca" class="campo__entrada" type="search"
@@ -665,10 +698,17 @@ onUnmounted(() => document.removeEventListener('keydown', atalho))
     <div v-if="!caixas.length" class="vazio">
       <i class="bi bi-envelope-x vazio__icone" aria-hidden="true"></i>
       <p class="vazio__titulo">Nenhuma caixa conectada à sua conta</p>
-      <p>
-        A caixa de e-mail pertence a quem a conecta — por isso você não vê a de
-        outra pessoa. Peça ao administrador para conectar a sua.
-      </p>
+      <p>Peça ao administrador para conectar a sua caixa.</p>
+      <!-- 🚨 O BOTÃO QUE FALTAVA (28/08). A rota existia com zero chamadores,
+           e a única caixa da base foi conectada na mão. Só aparece para quem
+           tem CFG_1.1, que é a permissão que a rota exige: mostrar para os
+           outros seria oferecer um 403. -->
+      <button v-if="podeConectarCaixa" class="botao botao--primario"
+              type="button" :disabled="conectando" @click="conectarCaixa">
+        <span v-if="conectando" class="girando"></span>
+        <i v-else class="bi bi-google" aria-hidden="true"></i>
+        Conectar minha caixa
+      </button>
     </div>
 
     <p v-if="erro" class="aviso aviso--erro">{{ erro }}</p>
@@ -714,11 +754,15 @@ onUnmounted(() => document.removeEventListener('keydown', atalho))
         </button>
         <span class="email__separador" aria-hidden="true"></span>
         <button class="botao botao--pequeno botao--fantasma" type="button"
-                :disabled="!aberta" @click="responder(false)">
+                :disabled="!aberta"
+                :title="aberta ? 'Responder (r)' : 'Abra uma mensagem primeiro'"
+                @click="responder(false)">
           <i class="bi bi-reply" aria-hidden="true"></i> Responder
         </button>
         <button class="botao botao--pequeno botao--fantasma" type="button"
-                :disabled="!aberta" @click="responder(true)">
+                :disabled="!aberta"
+                :title="aberta ? 'Encaminhar' : 'Abra uma mensagem primeiro'"
+                @click="responder(true)">
           <i class="bi bi-arrow-right" aria-hidden="true"></i> Encaminhar
         </button>
         <span class="email__separador" aria-hidden="true"></span>
@@ -733,10 +777,9 @@ onUnmounted(() => document.removeEventListener('keydown', atalho))
     <!-- assinatura: HTML colado da que a pessoa já usa -->
     <section v-if="editandoAssinatura" class="cartao email__painel">
       <h2 class="inicio__titulo">Sua assinatura</h2>
-      <p class="apagado pequeno">
-        Cole aqui o HTML da assinatura que você já usa. ⚠️ A configurada no
-        Gmail <strong>não</strong> se aplica ao que sai por esta tela.
-      </p>
+      <!-- ⚠️ O que sobra é a única parte acionável: a do Gmail não vale aqui.
+           "Cole o HTML da que você já usa" o campo vazio já pede. -->
+      <p class="apagado pequeno">A assinatura do Gmail não vale nesta tela.</p>
       <textarea v-model="assinatura" class="campo__entrada email__area" rows="6"
                 placeholder="<div>Seu nome<br>Movisat</div>"></textarea>
       <div v-if="assinatura" class="email__previa" v-html="assinatura"></div>
@@ -771,7 +814,7 @@ onUnmounted(() => document.removeEventListener('keydown', atalho))
           <input type="file" accept="image/png,image/jpeg" hidden
                  @change="subirImagem" />
         </label>
-        <span class="apagado pequeno">PNG ou JPG, até 2 MB. Assinatura é logo, não banner.</span>
+        <span class="apagado pequeno">PNG ou JPG, até 2 MB.</span>
       </div>
 
       <div class="linha">
@@ -852,10 +895,9 @@ onUnmounted(() => document.removeEventListener('keydown', atalho))
         <div ref="editor" class="email__editor" contenteditable="true"
              v-html="rascunho.corpo.replace(/\n/g, '<br>')"></div>
       </div>
-      <p class="apagado pequeno">
-        Sai de <strong>{{ marcadorAtual ? '' : '' }}sua caixa</strong>, com a sua
-        assinatura. Um destinatário por vez.
-      </p>
+      <!-- ⚠️ "Um destinatário por vez" é limite e fica; o resto o compositor
+           já mostra no campo "De:". -->
+      <p class="apagado pequeno">Um destinatário por vez.</p>
       <div class="linha linha--quebra email__anexos">
         <label class="botao botao--pequeno botao--contorno">
           <i class="bi bi-paperclip" aria-hidden="true"></i>
@@ -1025,10 +1067,15 @@ onUnmounted(() => document.removeEventListener('keydown', atalho))
                         @click="marcarNaoLida(aberta)">
                   <i class="bi bi-envelope" aria-hidden="true"></i>
                 </button>
-                <button class="botao botao--pequeno botao--fantasma botao--icone"
-                        type="button" title="Arquivar (e)" aria-label="Arquivar"
+                <!-- Arquivar tira a mensagem da vista: ação sobre o registro,
+                     e pela régua de 28/08 ela tem palavra. O envelope de
+                     "não lida" fica só ícone -- é convenção de caixa de
+                     correio e o atalho `u` está no ícone de ajuda. -->
+                <button class="botao botao--pequeno botao--fantasma"
+                        type="button" title="Arquivar (e)"
                         @click="arquivarAberta">
                   <i class="bi bi-archive" aria-hidden="true"></i>
+                  Arquivar
                 </button>
               </div>
             </div>
@@ -1051,11 +1098,9 @@ onUnmounted(() => document.removeEventListener('keydown', atalho))
           </div>
 
           <div v-if="!aberta.cliente_nome" class="email__vincular">
-            <p class="apagado pequeno">
-              Este remetente ainda não está ligado a nenhum cliente.
-              Vincule e <strong>todas</strong> as mensagens dele passam a ser
-              identificadas.
-            </p>
+            <!-- O campo de busca logo abaixo já diz o que fazer; a frase só
+                 repetia o estado que o bloco inteiro anuncia. -->
+            <p class="apagado pequeno">Remetente sem cliente vinculado.</p>
             <input v-model="buscaEmpresa" class="campo__entrada" type="search"
                    placeholder="Buscar empresa por nome ou CNPJ"
                    @input="procurarEmpresa" />

@@ -473,9 +473,13 @@ onUnmounted(() => document.removeEventListener('click', fecharFiltroSeForaDele))
           <div>
             <dt>Relação</dt>
             <dd>
+              <!-- ⚠️ `--compacto` é a MESMA classe que a ficha da conversa
+                   usa (28/08). O tipo é um campo só; ter duas aparências para
+                   ele em duas telas era a divergência que a proposta original
+                   ia criar. -->
               <select
                 :value="selecionado.relacao"
-                class="campo__entrada cad__relacao"
+                class="campo__entrada campo__entrada--compacto"
                 :disabled="salvandoRelacao"
                 @change="salvarRelacao($event.target.value)"
               >
@@ -486,8 +490,7 @@ onUnmounted(() => document.removeEventListener('click', fecharFiltroSeForaDele))
               <span v-if="salvandoRelacao" class="apagado pequeno"> gravando…</span>
               <span v-else-if="relacaoSalva" class="chip chip--ok">gravado</span>
               <span class="campo__ajuda">
-                O que a pessoa é para a Movisat. O sync do Harmonit
-                <strong>não</strong> desfaz o que for marcado aqui.
+                O sync do Harmonit não desfaz o que for marcado aqui.
               </span>
             </dd>
           </div>
@@ -543,13 +546,7 @@ onUnmounted(() => document.removeEventListener('click', fecharFiltroSeForaDele))
           <p class="aviso aviso--info cad__nota">
             <i class="bi bi-info-circle aviso__icone" aria-hidden="true"></i>
             <span>
-              <strong>Como veio</strong> é o que o Harmonit gravou, palavra por
-              palavra. O E.164 ao lado é derivado dele.
-              <br /><span class="pequeno">
-                Guardar os dois não é redundância: quando o número tem 8
-                dígitos, o nono é acrescentado por regra — correta, mas ainda
-                assim uma dedução. O bruto é o que prova que ninguém inventou.
-              </span>
+              <strong>Como veio</strong> é o que o Harmonit gravou; o E.164 é derivado dele.
             </span>
           </p>
 
@@ -559,8 +556,7 @@ onUnmounted(() => document.removeEventListener('click', fecharFiltroSeForaDele))
               <strong>Não verificado</strong> é diferente de <strong>não tem
               WhatsApp</strong>.
               <br /><span class="pequeno">
-                Quem verifica é o Evolution, e ele precisa de um canal
-                conectado. Enquanto o chip não parear, toda a base fica assim.
+                Quem verifica é o Evolution, e ele precisa de um canal conectado.
               </span>
             </span>
           </p>
@@ -587,9 +583,7 @@ onUnmounted(() => document.removeEventListener('click', fecharFiltroSeForaDele))
             <span>
               Os papéis são <strong>gravados e não acionam nada</strong> na Fase 1.
               <br /><span class="pequeno">
-                Existem para o cadastro nascer completo — não para gerar
-                demanda. Marcar “Central 24 h” aqui não avisa ninguém, e é
-                melhor dizer isso do que deixar alguém esperando.
+                
               </span>
             </span>
           </p>
@@ -678,7 +672,9 @@ onUnmounted(() => document.removeEventListener('click', fecharFiltroSeForaDele))
   margin: 0;
 }
 
-.cad__relacao { max-width: 14rem; }
+/* ⚠️ O teto de largura saiu: `--compacto` já dimensiona pelo conteúdo, e um
+   `max-width` por cima faria a mesma classe render diferente nas duas telas. */
+
 .cad__marca { width: 2.2rem; text-align: center; }
 
 .cad__linhabusca { display: flex; align-items: center; gap: var(--e-2); }

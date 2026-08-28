@@ -1030,11 +1030,22 @@ def conversa(conversa_id: int) -> dict | None:
     # ⚠️ Só quando NÃO há vínculo: com cliente identificado, mostrar o que o
     # Bitrix acha seria ruído -- e poderia contradizer o cadastro na cara do
     # atendente.
-    linha["bitrix"] = (None if linha.get("contato_id")
+    # ⚠️ Pelo mesmo motivo dos candidatos: o selo do Bitrix serve para ACHAR a
+    # empresa, então ele vale enquanto não há empresa -- não enquanto não há
+    # contato. Com empresa vinculada ele sai, que era a regra original.
+    linha["bitrix"] = (None if (linha["empresa"] and linha["empresa"].get("cliente"))
                        else bitrix.observacao(telefone_e164=linha["telefone_e164"]))
     # 🚨 Quem NÃO foi identificado precisa dizer por quê: "não é cliente" e
     # "o número responde por 8 cadastros" pedem ações diferentes de quem atende.
-    if not linha["contato_id"]:
+    #
+    # 🚨 O CRITÉRIO É "SEM EMPRESA", NÃO "SEM CONTATO" (28/08). Desde que o
+    # tipo pode ser marcado sem vincular empresa, marcar o tipo CRIA um contato
+    # -- e com o critério antigo (`contato_id IS NULL`) os candidatos sumiriam
+    # no instante em que a pessoa marcasse "cliente". Ela perderia justamente o
+    # atalho que leva à empresa certa, como castigo por ter classificado.
+    # Achado na validação, antes de escrever a tela.
+    sem_empresa = not (linha["empresa"] and linha["empresa"].get("cliente"))
+    if sem_empresa:
         candidatos = cadastro.por_telefone(linha["telefone_e164"])
         linha["candidatos"] = [{"id": c["id"], "nome": c["nome"]} for c in candidatos]
     else:
@@ -1153,6 +1164,81 @@ def vincular(conversa_id: int, cliente_id: int | None = None,
 
     log.info("conversa %s vinculada ao contato %s", conversa_id, alvo)
     return {"ok": True, "contato_id": alvo}
+
+
+def definir_tipo(conversa_id: int, relacao: str) -> dict:
+    """Marca o que a pessoa é, de dentro da conversa, COM OU SEM empresa.
+
+    🚨 PEDIDO DELE EM 28/08: *"o tipo… não precisa depender de empresa vinculada
+    para ter o campo"*. Ele disse EMPRESA, não contato -- e o tipo mora em
+    `contato.relacao`. Então o que faltava não era o campo: era o registro.
+
+    ⚠️ SEM CONTATO, ESTE GESTO CRIA UM. `contato.cliente_id` é anulável no
+    schema e `origem` já aceita 'movizap', mas medido em 28/08: **0 dos 1.756
+    contatos existem sem empresa**. O caminho existe e nunca rodou -- por isso
+    ele nasce aqui pela mesma porta que o `vincular()` já usa, e não por uma
+    segunda invenção.
+
+    🚨 NASCE COM O TIPO ESCOLHIDO, NUNCA COM O DEFAULT. `relacao` tem default
+    `sem_identificacao` desde a migração 031 -- que é como o contato nasce, e
+    não uma marcação de ninguém. Criar e depois atualizar deixaria uma janela
+    em que o contato existe dizendo o que ninguém disse.
+
+    ⚠️ O SYNC NÃO DESFAZ. Toda escrita do `sync.py` filtra `origem='harmonit'`
+    (conferido em 28/08, incluindo `_inativar_sumidos` e o DELETE de telefone),
+    então contato nascido aqui é intocável pela madrugada.
+
+    🚨 MUDA A AUTOMAÇÃO NA HORA, e quem chama precisa poder dizer isso: sem
+    contato, `automacao.chave_do_contato()` devolve `sem_cadastro`; com contato, devolve a
+    `relacao`. A resposta traz `automacao_antes`/`automacao_depois` para a tela
+    avisar em vez de deixar a pessoa descobrir pelo comportamento.
+    """
+    if relacao not in cadastro.RELACOES:
+        return {"ok": False,
+                "motivo": f"Tipo inválido. Vale um de: {', '.join(cadastro.RELACOES)}."}
+
+    linha = banco.um(
+        "SELECT id, contato_id, telefone_e164, nome_whatsapp, tipo "
+        "FROM conversa WHERE id = %s", (conversa_id,))
+    if not linha:
+        return {"ok": False, "motivo": "Conversa não encontrada."}
+    # ⚠️ Grupo não tem tipo: são várias pessoas, e `contato` é UMA.
+    if linha.get("tipo") == "grupo":
+        return {"ok": False, "motivo": "Grupo não tem tipo de contato."}
+
+    if linha["contato_id"]:
+        resultado = cadastro.definir_relacao(linha["contato_id"], relacao)
+        if resultado.get("ok"):
+            resultado["criou_contato"] = False
+            resultado["automacao_antes"] = automacao.chave_do_contato(linha["contato_id"])
+            resultado["automacao_depois"] = relacao
+        return resultado
+
+    nome = linha.get("nome_whatsapp") or linha["telefone_e164"]
+    with banco.cursor() as cur:
+        cur.execute(
+            """INSERT INTO contato (cliente_id, nome, relacao, origem, ativo)
+               VALUES (NULL, %s, %s, 'movizap', true) RETURNING id""",
+            (nome, relacao))
+        contato_id = cur.fetchone()["id"]
+        # Mesma gravação do `vincular()`: o telefone passa a existir no
+        # cadastro, marcado para sempre como vindo do atendimento.
+        cur.execute(
+            """INSERT INTO contato_telefone
+                   (contato_id, e164, bruto, origem_campo, tem_whatsapp,
+                    verificado_em, principal)
+               VALUES (%s, %s, %s, 'atendimento', true, now(), true)
+               ON CONFLICT DO NOTHING""",
+            (contato_id, linha["telefone_e164"], linha["telefone_e164"]))
+        cur.execute(
+            "UPDATE conversa SET contato_id = %s, atualizada_em = now() "
+            "WHERE id = %s", (contato_id, conversa_id))
+
+    log.info("conversa %s: tipo %s, contato %s criado no atendimento",
+             conversa_id, relacao, contato_id)
+    return {"ok": True, "id": contato_id, "nome": nome, "relacao": relacao,
+            "criou_contato": True,
+            "automacao_antes": "sem_cadastro", "automacao_depois": relacao}
 
 
 def desvincular(conversa_id: int) -> dict:

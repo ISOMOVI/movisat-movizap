@@ -1378,6 +1378,26 @@ def vincular_conversa(conversa_id: int, corpo: Vinculo,
     return resultado
 
 
+class TipoDaConversa(BaseModel):
+    relacao: str
+
+
+@app.put("/api/conversas/{conversa_id}/tipo")
+def definir_tipo_da_conversa(conversa_id: int, dados: TipoDaConversa,
+                             usuario: dict = Depends(auth.requer_tela("ATD_1.2"))):
+    """O tipo da pessoa, marcado de dentro da conversa e SEM exigir empresa.
+
+    🚨 A PERMISSÃO É A DA CONVERSA (ATD_1.2), não a do cadastro (CAD_1.2). O
+    perfil `atendimento` não tem CAD_1.2 desde 10/08 -- exigir a do cadastro
+    faria a rota devolver 403 justamente para quem está falando com a pessoa,
+    que é quem sabe o que ela é. Mesma razão da `buscar-empresa`.
+    """
+    r = conversas.definir_tipo(conversa_id, dados.relacao)
+    if not r.get("ok"):
+        raise HTTPException(status_code=400, detail=r.get("motivo"))
+    return r
+
+
 @app.post("/api/conversas/{conversa_id}/desvincular")
 def desvincular_conversa(conversa_id: int,
                          usuario: dict = Depends(auth.requer_tela("ATD_1.2"))):

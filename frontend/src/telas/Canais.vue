@@ -215,7 +215,7 @@ onBeforeUnmount(() => {
     <div v-else-if="!canais.length" class="vazio">
       <i class="bi bi-whatsapp vazio__icone" aria-hidden="true"></i>
       <p class="vazio__titulo">Nenhum canal cadastrado</p>
-      <p>O canal nasce por migração, não pela tela.</p>
+      <p>Quem cadastra canal é o administrador.</p>
     </div>
 
     <template v-else>
@@ -243,10 +243,6 @@ onBeforeUnmount(() => {
             <i class="bi bi-plug aviso__icone" aria-hidden="true"></i>
             <span>
               {{ canal.erro }}
-              <br /><span class="pequeno">
-                Enquanto o Evolution não responder, não há QR a mostrar — e
-                dizer "desconectado" aqui seria mentira.
-              </span>
             </span>
           </p>
 

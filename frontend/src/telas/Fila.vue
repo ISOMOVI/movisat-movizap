@@ -93,11 +93,13 @@ function quem(c) {
 
     <p v-if="semTriagem && semTriagem.esperando" class="aviso aviso--atencao" role="status">
       <i class="bi bi-signpost-split aviso__icone" aria-hidden="true"></i>
+      <!-- 🚨 CORTADO NO FATO (28/08). O número é estado e fica; o resto —
+           quem atribui o time, que a IA está desligada, o que muda quando ela
+           entrar — era aula sobre o desenho. Foi o exemplo com que ele
+           nomeou o padrão: *"elas ajudaram nas etapas de lógica, mas agora em
+           teste sujam a tela"*. -->
       <span>
         <strong>{{ semTriagem.esperando }} conversa(s) sem triagem.</strong>
-        Quem atribui o time é a triagem, e a IA está desligada — então hoje a
-        triagem é manual: abra, leia e transfira para o time certo. Quando a IA
-        entrar, ela faz isso e estas caem nos times sozinhas.
       </span>
     </p>
 
@@ -177,11 +179,9 @@ function quem(c) {
       </section>
     </template>
 
-    <p class="apagado pequeno">
-      Assumir é atômico: se duas pessoas clicarem ao mesmo tempo, uma ganha e a
-      outra é avisada de quem ficou. Sem isso, dois atendentes responderiam o
-      mesmo cliente e ele veria a bagunça.
-    </p>
+    <!-- ⚠️ O rodapé explicava a garantia de concorrência do "Assumir". É
+         verdade, é importante, e não é da tela: quem assume não decide nada
+         com essa informação. Vive no `docs/06`, ATD_1.3. -->
   </div>
 </template>
 

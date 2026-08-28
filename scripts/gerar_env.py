@@ -12,7 +12,12 @@ from pathlib import Path
 
 from passlib.context import CryptContext
 
-RAIZ = Path(__file__).resolve().parent
+# 🚨 `.parent.parent` DESDE 28/08. O arquivo saiu da raiz do repositório para
+# `scripts/`, e com um `.parent` só ele passaria a gravar o `.env` DENTRO de
+# `scripts/` -- sem erro, sem aviso, e o painel continuaria lendo o `.env`
+# antigo da raiz. Mover arquivo que resolve caminho por `__file__` nunca é só
+# mover: é mover e conferir a âncora.
+RAIZ = Path(__file__).resolve().parent.parent
 ENV = RAIZ / ".env"
 
 if len(sys.argv) < 2:

@@ -24,6 +24,7 @@ import { api, pedirBlob, ErroDeApi } from '../api/cliente.js'
 import { codigosPermitidos } from '../estado/sessao.js'
 import { marcar, partir } from '../util/destaque.js'
 import { corDaInicial, iniciais } from '../util/avatar.js'
+import AjudaDaTela from '../componentes/AjudaDaTela.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -40,7 +41,8 @@ const busca = ref('')
 /* Enquanto a IA não existe, transferir é a TRIAGEM feita por gente. */
 const times = ref([])
 const classificacoes = ref([])
-const painelAcao = ref('')        // '' | 'transferir' | 'encerrar'
+// '' | 'transferir' | 'convidar' | 'encerrar' | 'vincular'
+const painelAcao = ref('')
 const timeEscolhido = ref('')
 const motivo = ref('')
 const classificacaoEscolhida = ref('')
@@ -214,20 +216,57 @@ const RELACOES = [
   ['teste', 'Teste'], ['sem_identificacao', 'Sem identificação'],
 ]
 const NOME_RELACAO = Object.fromEntries(RELACOES)
+
+/* ⚠️ `sem_identificacao` fica de fora da ESCOLHA (28/08): ele é o valor de
+   nascimento do contato (migração 031), não uma marcação de ninguém. Continua
+   em `RELACOES` porque é valor válido do banco e precisa ter nome legível. */
+const RELACOES_ESCOLHIVEIS = RELACOES.filter(([v]) => v !== 'sem_identificacao')
+
 const podeTrocarTipo = computed(() => codigosPermitidos.value.has('CAD_1.2'))
+
+/* 🚨 MARCAR O TIPO DE DENTRO DA CONVERSA É ATD_1.2, NÃO CAD_1.2. O perfil
+   `atendimento` não tem CAD_1.2 desde 10/08 -- exigir a permissão do cadastro
+   esconderia o seletor justamente de quem está falando com a pessoa. A rota
+   nova checa ATD_1.2, e a tela segue a rota. */
+const podeMarcarTipo = computed(() => codigosPermitidos.value.has('ATD_1.2'))
 const tipoSalvo = ref(false)
+
+/* 🚨 O TIPO NÃO DEPENDE MAIS DE EMPRESA VINCULADA (28/08). Pedido dele:
+   *"o tipo… não precisa depender de empresa vinculada para ter o campo"*.
+
+   Antes esta função desistia sem `empresa.contato`, e a ficha só mostrava o
+   chip "Sem cadastro" -- em 61% das conversas. O tipo mora em `contato`, então
+   escolher CRIA o contato (sem empresa, `origem='movizap'`), pela rota
+   `PUT /api/conversas/{id}/tipo`.
+
+   ⚠️ RELÊ DO SERVIDOR EM VEZ DE REMENDAR A TELA. Criar contato muda `empresa`,
+   `candidatos`, `bitrix` e o rótulo do botão da ficha de uma vez -- remendar
+   quatro campos à mão é onde a tela começa a divergir do banco. Mesma decisão
+   do `vincularA`. */
+const tipoSemCadastro = ref('')
 
 async function trocarTipo(nova) {
   const contato = aberta.value?.empresa?.contato
-  if (!contato || nova === contato.relacao) return
+  if (!nova || (contato && nova === contato.relacao)) return
   tipoSalvo.value = false
-  const antes = contato.relacao
-  contato.relacao = nova
+  const antes = contato ? contato.relacao : null
+  if (contato) contato.relacao = nova
   try {
-    await api.put(`/api/contatos/${contato.id}/relacao`, { relacao: nova })
+    const r = await api.put(`/api/conversas/${aberta.value.id}/tipo`,
+                            { relacao: nova })
     tipoSalvo.value = true
+    /* 🚨 A AUTOMAÇÃO MUDA NA HORA, e a tela avisa em vez de deixar descobrir
+       pelo comportamento: sem cadastro a pessoa seguia a linha `sem_cadastro`
+       da CFG_5.1; com o tipo marcado ela passa a seguir a do tipo. */
+    if (r.criou_contato) {
+      recado.value = `Cadastro criado e marcado como ${NOME_RELACAO[nova] || nova}. `
+        + 'A automação por tipo passa a valer para esta pessoa.'
+      tipoSemCadastro.value = ''
+      await abrir(aberta.value.id)
+      await carregar({ silencioso: true })
+    }
   } catch (e) {
-    contato.relacao = antes
+    if (contato) contato.relacao = antes
     erro.value = e instanceof ErroDeApi ? e.message : 'Não consegui marcar o tipo.'
   }
 }
@@ -446,6 +485,12 @@ function limparPaineis() {
   motivo.value = ''
   classificacaoEscolhida.value = ''
   comentario.value = ''
+  /* ⚠️ O termo do vínculo entra aqui pela mesma razão dos outros (28/08):
+     quem procura "Velasco", desiste e abre o vínculo de OUTRA conversa
+     encontraria a lista da anterior já montada -- e um clique ali vincularia
+     a empresa certa ao telefone errado. */
+  buscaCliente.value = ''
+  achadosCliente.value = []
 }
 
 function perguntar(titulo, texto, rotulo, acao, perigo = false) {
@@ -1104,7 +1149,50 @@ async function encerrar() {
   }
 }
 
+/* 🚨 ATALHOS (28/08). O E-mail tinha 6 teclas e as ensinava no ícone de
+   ajuda; esta tela, que é a mais usada, tinha ZERO.
+
+   ⚠️ NUNCA DENTRO DE CAMPO DE TEXTO — mesma guarda do E-mail. Sem ela,
+   escrever "javali" para o cliente pularia de conversa no meio da palavra.
+   `Ctrl`/`Cmd`/`Alt` também saem: são atalhos do navegador.
+
+   ⚠️ Nenhuma tecla DESTRÓI. `c` abre o modal de concluir, não conclui — a
+   confirmação continua sendo o que decide. */
+function atalho(evento) {
+  const alvo = evento.target
+  const digitando = alvo?.isContentEditable
+    || ['INPUT', 'TEXTAREA', 'SELECT'].includes(alvo?.tagName)
+  if (digitando || evento.ctrlKey || evento.metaKey || evento.altKey) return
+  if (painelAcao.value || confirmacao.value || novaAberta.value) return
+
+  if (evento.key === '/') {
+    evento.preventDefault()
+    document.querySelector('.campo--busca input')?.focus()
+    return
+  }
+  if (evento.key === 'j' || evento.key === 'k') {
+    evento.preventDefault()
+    const ordem = lista.value
+    const atual = ordem.findIndex((c) => aberta.value && c.id === aberta.value.id)
+    const passo = evento.key === 'j' ? 1 : -1
+    const proximo = ordem[Math.min(Math.max(atual + passo, 0), ordem.length - 1)]
+    if (proximo && (!aberta.value || proximo.id !== aberta.value.id)) abrir(proximo.id)
+    return
+  }
+  if (!aberta.value) return
+  if (evento.key === 'a' && (!aberta.value.atendente_id
+      || aberta.value.estado === 'resolvida')) {
+    evento.preventDefault()
+    pedirParaAssumir()
+  }
+  if (evento.key === 'c' && aberta.value.estado !== 'resolvida') {
+    evento.preventDefault()
+    abrirPainel('encerrar')
+  }
+}
+
 onMounted(async () => {
+  document.addEventListener('keydown', atalho)
   document.addEventListener('click', fecharFiltroSeForaDele)
   /* 🚨 O FILTRO VEM DA URL QUANDO A TELA INICIAL MANDA. Os cartões da INI_1.1
      apontam para `/atendimento?minhas=1` e `?sem_dono=1`: sem ler a query, o
@@ -1147,6 +1235,7 @@ onMounted(async () => {
 
 onUnmounted(() => {
   clearInterval(timer)
+  document.removeEventListener('keydown', atalho)
   document.removeEventListener('click', fecharFiltroSeForaDele)
   /* 🚨 O MICROFONE TEM DE SER SOLTO AO SAIR (achado na auditoria de 25/08).
      Eu tratei disso no `onstop` do gravador e esqueci a saída pela porta:
@@ -1378,7 +1467,12 @@ async function procurarCliente() {
 async function vincularA(clienteId) {
   vinculando.value = true
   try {
+    /* 🚨 O MODAL FECHA NO SUCESSO, NÃO NO CLIQUE (28/08). Fechar antes da
+       resposta deixaria a falha sem lugar para aparecer: o `erro` do catch
+       renderiza na tela de trás, e quem clicou já teria perdido a lista de
+       onde escolher de novo. */
     await api.post(`/api/conversas/${aberta.value.id}/vincular`, { cliente_id: clienteId })
+    painelAcao.value = ''
     // Relê do servidor em vez de remendar a tela: o vínculo pode ter criado
     // contato novo, e o que vale é o que o banco diz.
     await abrir(aberta.value.id)
@@ -1435,8 +1529,7 @@ function carregarMidiasDaConversa(c) {
       <i class="bi bi-exclamation-octagon aviso__icone" aria-hidden="true"></i>
       <span>
         <strong>{{ resumo.eventos_pendentes }} eventos esperando processamento.</strong>
-        A fila pode ter parado — mensagem chegando e não virando conversa parece
-        "nenhuma mensagem nova", que é o pior jeito de falhar.
+        A fila pode ter parado.
       </span>
     </p>
     <p v-else-if="resumo && resumo.eventos_com_erro" class="aviso aviso--atencao" role="status">
@@ -1461,6 +1554,18 @@ function carregarMidiasDaConversa(c) {
                da tela inteira. Aqui eles ficam ao lado do que contam. -->
           <div class="lista__titulo">
             <h1>Caixa de entrada</h1>
+            <AjudaDaTela titulo="O que esta tela faz e o que a busca alcança">
+              As conversas do WhatsApp, suas e da fila. A busca procura no nome
+              do WhatsApp, no cadastro, no telefone (pedaço serve:
+              <code>6168</code>) e no texto das mensagens, inclusive das notas
+              internas.
+              <br /><br />
+              <strong>Atalhos:</strong>
+              <code>j</code> e <code>k</code> passam de conversa ·
+              <code>/</code> vai para a busca ·
+              <code>a</code> assume ·
+              <code>c</code> abre o concluir.
+            </AjudaDaTela>
             <div v-if="resumo" class="lista__placar">
               <span>{{ resumo.conversas }} abertas</span>
               <span v-if="resumo.sem_dono" class="lista__pede">
@@ -1575,11 +1680,18 @@ function carregarMidiasDaConversa(c) {
               {{ TIPOS.filter((t) => tiposMarcados.includes(t.valor))
                       .map((t) => t.rotulo).join(' · ') }}
             </span>
-            <span class="campo__ajuda">
-              Procura no nome do WhatsApp, no cadastro, no telefone
-              (<strong>pedaço serve</strong>: <code>6168</code>) e no texto das
-              mensagens, inclusive das notas internas.
-            </span>
+            <!-- 🚨 A EXPLICAÇÃO DA BUSCA SUBIU PARA O ÍCONE DE AJUDA (28/08).
+                 Ela era uma faixa fixa embaixo do campo, na coluna de 348px:
+                 três linhas de altura permanente numa coluna cujo produto é
+                 quantas conversas cabem à vista.
+
+                 🚨 ERA A METADE QUE FALTOU DE 27/08. O pedido dele -- *"as
+                 abas tem textos explicativos... transforme em balões ícones
+                 apenas"* -- alcançava 15 telas; eu varri por FORMA DE
+                 MARCAÇÃO (`<h1>` + `<p class="apagado pequeno">`) e entreguei
+                 13. Esta ficou de fora porque o texto não estava no cabeçalho,
+                 e o do E-mail porque o `<h1>` de lá tem `class`. Medir a forma
+                 do código em vez do alcance do pedido é o M7 outra vez. -->
             <!-- ⚠️ Só depois de 3 s. Antes disso, o normal é responder em
                  milissegundos e piscar seria pior que ficar quieto. -->
             <span v-if="buscaDemorada" class="linha pequeno fraco">
@@ -1703,7 +1815,6 @@ function carregarMidiasDaConversa(c) {
         <div v-if="!aberta" class="vazio">
           <i class="bi bi-chat-text vazio__icone" aria-hidden="true"></i>
           <p class="vazio__titulo">Escolha uma conversa</p>
-          <p>A ficha do cliente entra aqui na ATD_2.1, consultando o FPSL.</p>
         </div>
 
         <template v-else>
@@ -1718,11 +1829,12 @@ function carregarMidiasDaConversa(c) {
                    de quem, exatamente? -->
               <!-- 🚨 O BOTÃO DIZ DE QUEM É A FICHA, e muda de cara quando não
                    há ficha. Era um botão fantasma com "Ver ficha", do mesmo
-                   peso de tudo na barra. Medido em 25/08: 211 das 332
-                   conversas (64%) não têm cadastro -- então "Sem ficha" é o
-                   estado mais COMUM, e é o convite para resolver, não um
-                   detalhe. Por isso ele é contorno âmbar quando falta, e
-                   contorno normal com o nome dentro quando existe. -->
+                   peso de tudo na barra. Medido em 28/08: 231 das 381
+                   conversas (61%) não têm cadastro -- então a falta de
+                   cadastro é o estado mais COMUM, e é o convite para
+                   resolver, não um detalhe. Por isso ele é contorno âmbar
+                   quando falta, e contorno normal com o nome dentro quando
+                   existe. -->
               <button
                 v-if="!ehGrupo"
                 class="botao botao--pequeno"
@@ -1734,6 +1846,17 @@ function carregarMidiasDaConversa(c) {
                 <i class="bi" :class="aberta.contato_id
                      ? 'bi-person-lines-fill' : 'bi-person-exclamation'"
                    aria-hidden="true"></i>
+                <!-- 🚨 A PALAVRA "FICHA" ABRE TODOS OS CASOS (28/08). Pedido
+                     dele: *"não vejo mais a ficha nas conversas"* -- e a ficha
+                     estava lá o tempo todo. O rótulo "Sem ficha — vincular",
+                     que eu escrevi em 25/08 (48bdfd4), lê como AUSÊNCIA e não
+                     como porta, e ele cai em 231 das 381 conversas (61%,
+                     medido em 28/08): o estado mais comum da tela anunciava
+                     que a função não existia.
+
+                     ⚠️ O que distingue os dois casos continua sendo o CONTORNO
+                     âmbar e o ícone, não a palavra. Cor diz estado; a palavra
+                     diz que coisa é. -->
                 <template v-if="gaveta">Fechar ficha</template>
                 <template v-else-if="aberta.empresa && aberta.empresa.cliente">
                   Ficha · {{ aberta.empresa.cliente.nome }}
@@ -1741,7 +1864,7 @@ function carregarMidiasDaConversa(c) {
                 <template v-else-if="aberta.contato_nome">
                   Ficha · {{ aberta.contato_nome }}
                 </template>
-                <template v-else>Sem ficha — vincular</template>
+                <template v-else>Ficha · vincular</template>
               </button>
               <p class="apagado pequeno mono">
                 {{ aberta.telefone_e164 }}
@@ -1834,43 +1957,59 @@ function carregarMidiasDaConversa(c) {
               >
                 <i class="bi bi-search" aria-hidden="true"></i>
               </button>
+              <!-- 🚨 AÇÃO SOBRE A CONVERSA TEM PALAVRA (28/08). Esta fileira
+                   tinha CINCO botões só de ícone e UM com texto -- e o único
+                   legível era "Concluir atendimento", o que encerra. Tudo que
+                   é rotina e reversível era adivinhação.
+
+                   🚨 O PAR PERIGOSO ERA ESTE: "devolver à fila" e "sair da
+                   conversa" são duas setas apontando para a ESQUERDA, lado a
+                   lado (`arrow-return-left` e `box-arrow-left`), e fazem
+                   coisas diferentes -- uma larga a conversa para a fila, a
+                   outra tira você dela. Só o balão do navegador distinguia as
+                   duas, e ele não existe em toque.
+
+                   ⚠️ A RÉGUA, para as telas seguintes: fica só ícone o que é
+                   convenção do gênero E mora colado ao campo que serve (lupa,
+                   funil, clipe, microfone, emoji, X). Ganha palavra o que age
+                   sobre a conversa. O texto longo continua no `title`. -->
               <button
-                class="botao botao--pequeno botao--contorno botao--icone"
+                class="botao botao--pequeno botao--contorno"
                 type="button"
                 title="Transferir para outro time"
-                aria-label="Transferir para outro time"
                 @click="abrirPainel('transferir')"
               >
                 <i class="bi bi-arrow-left-right" aria-hidden="true"></i>
+                Transferir
               </button>
               <button
-                class="botao botao--pequeno botao--contorno botao--icone"
+                class="botao botao--pequeno botao--contorno"
                 type="button"
                 title="Convidar atendentes para esta conversa"
-                aria-label="Convidar atendentes para esta conversa"
                 @click="abrirPainel('convidar')"
               >
                 <i class="bi bi-person-plus" aria-hidden="true"></i>
+                Convidar
               </button>
               <button
                 v-if="aberta.atendente_id"
-                class="botao botao--pequeno botao--contorno botao--icone"
+                class="botao botao--pequeno botao--contorno"
                 type="button"
-                title="Devolver à fila — a conversa fica sem dono"
-                aria-label="Devolver à fila"
+                title="A conversa fica sem dono e volta para a fila"
                 @click="pedirParaDevolver"
               >
                 <i class="bi bi-arrow-return-left" aria-hidden="true"></i>
+                Devolver à fila
               </button>
               <button
-                class="botao botao--pequeno botao--contorno botao--icone"
+                class="botao botao--pequeno botao--contorno"
                 type="button"
                 :disabled="mexendo"
-                title="Sair da conversa — ela some da sua lista"
-                aria-label="Sair da conversa"
+                title="A conversa some da sua lista"
                 @click="pedirParaSair"
               >
                 <i class="bi bi-box-arrow-left" aria-hidden="true"></i>
+                Sair
               </button>
               <span class="espaco"></span>
               <button
@@ -1884,20 +2023,16 @@ function carregarMidiasDaConversa(c) {
             </div>
           </div>
 
-          <p v-if="!aberta.contato_id && !ehGrupo" class="aviso aviso--atencao">
-            <i class="bi bi-person-exclamation aviso__icone" aria-hidden="true"></i>
-            <span v-if="aberta.candidatos.length">
-              <strong>Número compartilhado:</strong> responde por
-              {{ aberta.candidatos.length }} cadastros
-              ({{ aberta.candidatos.map((c) => c.nome).join(', ') }}).
-              Não vinculei a nenhum — chutar produziria ficha errada.
-            </span>
-            <span v-else>
-              <strong>Não identificado:</strong> este número não está no cadastro
-              do Harmonit. Pode não ser cliente, ou o telefone dele estar
-              desatualizado lá.
-            </span>
-          </p>
+          <!-- 🚨 A FAIXA DE AVISO SAIU (28/08). Ela aparecia em 61% das
+               conversas — faixa larga, quatro linhas, dizendo o que o botão
+               da ficha logo acima já diz em âmbar e por escrito: não há
+               cadastro. Dois lugares para o mesmo estado, e o segundo era o
+               que gastava altura.
+
+               ⚠️ O ÚNICO FATO QUE ELA CARREGAVA E O BOTÃO NÃO — o número
+               responder por vários cadastros — ficou na gaveta, em uma linha.
+               Ele cortou o padrão inteiro: *"elas ajudaram nas etapas de
+               lógica, mas agora em teste sujam a tela"*. -->
 
           <!-- ================= GAVETA DO CONTATO ================= -->
           <aside v-if="gaveta && !ehGrupo" class="gaveta">
@@ -1932,10 +2067,18 @@ function carregarMidiasDaConversa(c) {
                 </li>
               </ul>
               <p v-if="empresas.length > 1" class="apagado pequeno">
-                {{ empresas.length }} empresas do mesmo responsável. A conversa
-                fica na pessoa; a empresa se escolhe quando o assunto exigir.
+                {{ empresas.length }} empresas do mesmo responsável.
               </p>
             </div>
+
+            <!-- 🚨 TRÊS ESTADOS, NÃO DOIS (28/08). Havia "com empresa" e "sem
+                 nada". Desde que o tipo pode ser marcado sem vincular empresa,
+                 existe o do meio -- cadastro sem empresa -- e sem este ramo a
+                 gaveta continuaria dizendo "Sem cadastro" logo depois de a
+                 pessoa ter criado um. A tela negaria o que ela acabou de
+                 fazer. Achado na validação, antes de escrever. -->
+            <p v-if="aberta.empresa && aberta.empresa.contato && !aberta.empresa.cliente"
+               class="chip chip--aviso">Cadastro sem empresa</p>
 
             <!-- COM vínculo: os dados da empresa -->
             <template v-if="aberta.empresa && aberta.empresa.cliente">
@@ -1973,10 +2116,12 @@ function carregarMidiasDaConversa(c) {
                      é quem sabe o que ela é. -->
                 <dt>Tipo</dt>
                 <dd>
+                  <!-- ⚠️ Mesma classe da ficha do contato (CAD_1.2): o tipo é
+                       um campo só e tem de ter uma cara só. -->
                   <select
                     v-if="podeTrocarTipo"
                     :value="aberta.empresa.contato.relacao"
-                    class="campo__entrada gaveta__tipo"
+                    class="campo__entrada campo__entrada--compacto"
                     @change="trocarTipo($event.target.value)"
                   >
                     <option v-for="[valor, rotulo] in RELACOES" :key="valor" :value="valor">
@@ -1988,9 +2133,6 @@ function carregarMidiasDaConversa(c) {
                        || aberta.empresa.contato.relacao }}
                   </span>
                   <span v-if="tipoSalvo" class="chip chip--ok">gravado</span>
-                  <span class="apagado pequeno gaveta__tipo-ajuda">
-                    Decide se a automação por tipo e a IA atendem esta pessoa.
-                  </span>
                 </dd>
               </dl>
               <button class="botao botao--pequeno botao--fantasma" type="button" @click="desvincular">
@@ -1998,9 +2140,11 @@ function carregarMidiasDaConversa(c) {
               </button>
             </template>
 
-            <!-- SEM vínculo: o caso comum. Buscar e vincular. -->
+            <!-- SEM EMPRESA: o caso comum. Marcar o tipo e/ou vincular. -->
             <template v-else>
-              <p class="chip chip--aviso">Não está no cadastro</p>
+              <p v-if="!aberta.contato_id" class="chip chip--aviso">
+                Não está no cadastro
+              </p>
 
               <!-- 🚨 O TIPO APARECE MESMO SEM CADASTRO (27/08). Ele apontou
                    que a lista "não aparece na Ficha do contato" -- e não
@@ -2024,14 +2168,28 @@ function carregarMidiasDaConversa(c) {
                    `relacao_automacao` -- a linha que decide o que fazer com
                    quem NÃO tem contato. Pôr no seletor faria a tela oferecer
                    um valor que o banco recusa. -->
+              <!-- 🚨 O SELETOR APARECE SEM CADASTRO (28/08), e escolher CRIA
+                   o contato. Antes aqui havia um chip morto dizendo "Sem
+                   cadastro" -- estado, sem saída. O tipo mora em `contato`, e
+                   o que faltava não era o campo: era o registro.
+
+                   ⚠️ `sem_identificacao` NÃO entra na lista: é o valor com que
+                   o contato NASCE (migração 031), não uma escolha. Oferecê-lo
+                   seria convidar a marcar "não sei" de propósito. -->
               <dl class="gaveta__dados">
                 <dt>Tipo</dt>
                 <dd>
-                  <span class="chip">Sem cadastro</span>
-                  <span class="apagado pequeno gaveta__tipo-ajuda">
-                    É este o tipo que a automação e a IA usam para decidir se
-                    respondem. Para trocar, vincule a pessoa ao cadastro abaixo.
-                  </span>
+                  <select
+                    v-if="podeMarcarTipo"
+                    v-model="tipoSemCadastro"
+                    class="campo__entrada campo__entrada--compacto"
+                    @change="trocarTipo(tipoSemCadastro)"
+                  >
+                    <option value="">sem cadastro</option>
+                    <option v-for="[valor, rotulo] in RELACOES_ESCOLHIVEIS"
+                            :key="valor" :value="valor">{{ rotulo }}</option>
+                  </select>
+                  <span v-else class="chip">Sem cadastro</span>
                 </dd>
               </dl>
 
@@ -2047,58 +2205,38 @@ function carregarMidiasDaConversa(c) {
                   <span v-if="aberta.bitrix.tipo" class="chip">{{ aberta.bitrix.tipo }}</span>
                   <span v-if="aberta.bitrix.cargo" class="apagado">{{ aberta.bitrix.cargo }}</span>
                 </span>
-                <span class="apagado pequeno">
-                  Sistema antigo — <strong>não é vínculo</strong>. Confirme abaixo
-                  se for a mesma empresa.
-                </span>
+                <span class="apagado pequeno">Sistema antigo — não é vínculo.</span>
               </div>
-              <p class="apagado pequeno">
-                Procure a empresa e vincule este número. O telefone entra no
-                cadastro marcado como vindo do atendimento.
-              </p>
+              <!-- 🚨 A ESCOLHA DA EMPRESA SAIU DAQUI E VIROU MODAL (28/08).
+                   Pedido dele: *"ao selecionar algumas empresas pelo campo de
+                   busca, na ficha, para vínculo, não está exibindo claramente,
+                   verifique o uso de uma caixa modal, acaba sendo uma saída
+                   para não ficar espremendo as coisas"*.
 
-              <!-- Candidatos que o próprio sistema já achou pelo telefone -->
-              <div v-if="aberta.candidatos && aberta.candidatos.length" class="gaveta__bloco">
-                <p class="pequeno fraco">Este número responde por mais de um cadastro:</p>
-                <button
-                  v-for="c in aberta.candidatos"
-                  :key="c.id"
-                  class="botao botao--pequeno botao--contorno gaveta__achado"
-                  type="button"
-                  :disabled="vinculando"
-                  @click="vincularA(c.cliente_id || c.id)"
-                >
-                  {{ c.nome }}
-                </button>
-              </div>
+                   Ele estava certo, e dá para medir: a gaveta tem teto de
+                   `42vh` e já carregava, ACIMA da lista, o nome, o telefone,
+                   o botão de empresas, o Tipo, o selo do Bitrix, um parágrafo,
+                   o bloco de candidatos e o campo de busca. Os 10 resultados
+                   que o backend devolve (teto da rota) caíam no que sobrasse
+                   -- perto de 180px numa janela de 900px, com uma SEGUNDA
+                   barra de rolagem dentro da primeira.
 
-              <label class="campo">
-                <span class="campo__rotulo">Buscar empresa</span>
-                <input
-                  v-model="buscaCliente"
-                  class="campo__entrada"
-                  type="search"
-                  placeholder="nome, CNPJ ou CPF"
-                  @input="procurarCliente"
-                />
-              </label>
-
-              <p v-if="buscando" class="apagado pequeno">procurando…</p>
-              <ul v-else-if="achadosCliente.length" class="gaveta__lista">
-                <li v-for="c in achadosCliente" :key="c.id">
-                  <button
-                    class="botao botao--pequeno botao--contorno gaveta__achado"
-                    type="button"
-                    :disabled="vinculando"
-                    @click="vincularA(c.id)"
-                  >
-                    <span>{{ c.nome }}</span>
-                    <span class="apagado pequeno mono">{{ documentoLegivel(c.documento) }}</span>
-                  </button>
-                </li>
-              </ul>
-              <p v-else-if="buscaCliente.length >= 2" class="apagado pequeno">
-                Nenhuma empresa com esse termo.
+                   ⚠️ A gaveta fica com o que é ESTADO (quem é, que tipo é, o
+                   que o Bitrix acha); o modal fica com o que é ESCOLHA. Era a
+                   mistura dos dois no mesmo teto que espremia. -->
+              <button
+                class="botao botao--pequeno botao--primario"
+                type="button"
+                @click="abrirPainel('vincular')"
+              >
+                <i class="bi bi-link-45deg" aria-hidden="true"></i>
+                Vincular a uma empresa
+              </button>
+              <!-- O único fato que a faixa de aviso carregava e o botão da
+                   ficha não carrega. Uma linha, sem a lição. -->
+              <p v-if="aberta.candidatos && aberta.candidatos.length"
+                 class="apagado pequeno">
+                Responde por {{ aberta.candidatos.length }} cadastros.
               </p>
             </template>
           </aside>
@@ -2356,7 +2494,7 @@ function carregarMidiasDaConversa(c) {
             <p class="aviso aviso--ok">
               <i class="bi bi-check-circle aviso__icone" aria-hidden="true"></i>
               <span>
-                Atendimento concluído. A conversa está no Histórico (ATD_5.1) e sem dono.
+                Atendimento concluído. A conversa está no Histórico e sem dono.
                 <strong>Para voltar a responder, reabra.</strong>
               </span>
             </p>
@@ -2498,6 +2636,7 @@ function carregarMidiasDaConversa(c) {
                 class="botao botao--primario"
                 type="button"
                 :disabled="ocupado || !temAlgoParaEnviar"
+                :title="temAlgoParaEnviar ? '' : 'Escreva algo ou anexe um arquivo'"
                 @click="arquivo ? enviarArquivo(false) : enviar(false)"
               >
                 <span v-if="ocupado" class="girando"></span>
@@ -2509,6 +2648,7 @@ function carregarMidiasDaConversa(c) {
                 class="botao botao--nota"
                 type="button"
                 :disabled="ocupado || !temAlgoParaEnviar"
+                :title="temAlgoParaEnviar ? '' : 'Escreva algo ou anexe um arquivo'"
                 @click="arquivo ? enviarArquivo(true) : enviar(true)"
               >
                 <i class="bi bi-sticky" aria-hidden="true"></i>
@@ -2520,7 +2660,7 @@ function carregarMidiasDaConversa(c) {
                   O texto acima vai junto com o arquivo.
                 </template>
                 <template v-else>
-                  Ctrl+Enter envia ao cliente. Arquivo até {{ TETO_ARQUIVO_MB }} MB.
+                  Ctrl+Enter envia. Até {{ TETO_ARQUIVO_MB }} MB.
                 </template>
               </span>
             </div>
@@ -2553,8 +2693,8 @@ function carregarMidiasDaConversa(c) {
                a dúvida de quem lembra que antes só ia o texto — e avisa do
                teto ANTES do clique, não depois da falha. -->
           <template v-if="encaminhando.midia_id">
-            <br />O <strong>arquivo vai junto</strong>, com a legenda. Acima de
-            25 MB o WhatsApp recusa, e cada destino diz o que houve.
+            <br />O <strong>arquivo vai junto</strong>. Acima de 25 MB o
+            WhatsApp recusa.
           </template>
         </p>
 
@@ -2578,6 +2718,7 @@ function carregarMidiasDaConversa(c) {
                   @click="encaminhando = null">Cancelar</button>
           <button class="botao botao--primario" type="button"
                   :disabled="!destinosEscolhidos.length"
+                  :title="destinosEscolhidos.length ? '' : 'Marque ao menos uma conversa de destino'"
                   @click="confirmarEncaminhar">
             Encaminhar
           </button>
@@ -2591,8 +2732,7 @@ function carregarMidiasDaConversa(c) {
       <div class="modal__caixa" role="dialog" aria-modal="true" aria-label="Nova mensagem">
         <p class="modal__titulo">Nova mensagem</p>
         <p class="modal__texto pequeno">
-          Para um número que ainda não escreveu. Confiro no WhatsApp se ele
-          existe <strong>antes</strong> de enviar.
+          Para um número que ainda não escreveu.
         </p>
 
         <label class="campo">
@@ -2637,6 +2777,8 @@ function carregarMidiasDaConversa(c) {
             class="botao botao--primario"
             type="button"
             :disabled="enviandoNova || !novoNumero.trim() || !novoTexto.trim()"
+            :title="!novoNumero.trim() ? 'Informe o número, com DDD'
+              : !novoTexto.trim() ? 'Escreva a mensagem' : ''"
             @click="enviarNova"
           >
             <span v-if="enviandoNova" class="girando"></span>
@@ -2652,8 +2794,7 @@ function carregarMidiasDaConversa(c) {
       <div class="modal__caixa" role="dialog" aria-modal="true" aria-label="Convidar atendentes">
         <p class="modal__titulo">Convidar para esta conversa</p>
         <p class="modal__texto pequeno">
-          Marque quantos precisar. Quem for chamado passa a ver esta conversa na
-          lista dele e responde normalmente.
+          Quem for chamado passa a ver esta conversa e responde por ela.
           <strong>Quem responde pela conversa continua sendo
           {{ aberta.atendente_nome || 'ninguém — está na fila' }}.</strong>
         </p>
@@ -2674,6 +2815,7 @@ function carregarMidiasDaConversa(c) {
             class="botao botao--primario"
             type="button"
             :disabled="!convidados.length || mexendo"
+            :title="convidados.length ? '' : 'Marque quem você quer chamar'"
             @click="convidar"
           >
             <span v-if="mexendo" class="girando"></span>
@@ -2683,14 +2825,98 @@ function carregarMidiasDaConversa(c) {
       </div>
     </div>
 
+    <!-- VINCULAR A UMA EMPRESA — a escolha que morava espremida na gaveta -->
+    <div v-if="painelAcao === 'vincular' && aberta" class="modal" @click.self="fecharPainel">
+      <div class="modal__caixa modal__caixa--larga" role="dialog" aria-modal="true"
+           aria-label="Vincular a uma empresa">
+        <p class="modal__titulo">Vincular a uma empresa</p>
+        <!-- ⚠️ SÓ O FATO: de quem é o número. A explicação de que o telefone
+             entra no cadastro como vindo do atendimento era aula, e ele
+             cortou (28/08): *"muito textinho no modal"*. -->
+        <p class="modal__texto pequeno">
+          <strong class="mono">{{ aberta.telefone_e164 }}</strong>
+          <span v-if="aberta.nome_whatsapp"> · {{ aberta.nome_whatsapp }}</span>
+        </p>
+
+        <!-- Candidatos que o próprio sistema já achou pelo telefone. Ficam
+             ANTES da busca: quando existem, quase sempre a resposta está
+             entre eles, e digitar seria trabalho à toa. -->
+        <div v-if="aberta.candidatos && aberta.candidatos.length" class="vincular__bloco">
+          <p class="campo__rotulo">Este número já responde por</p>
+          <div class="modal__opcoes">
+            <button
+              v-for="c in aberta.candidatos"
+              :key="c.id"
+              class="vincular__item"
+              type="button"
+              :disabled="vinculando"
+              @click="vincularA(c.cliente_id || c.id)"
+            >
+              <span>{{ c.nome }}</span>
+            </button>
+          </div>
+        </div>
+
+        <label class="campo">
+          <span class="campo__rotulo">Buscar empresa</span>
+          <input
+            v-model="buscaCliente"
+            class="campo__entrada"
+            type="search"
+            placeholder="nome, CNPJ ou CPF"
+            @input="procurarCliente"
+          />
+        </label>
+
+        <p v-if="buscando" class="linha apagado pequeno">
+          <span class="girando"></span> procurando…
+        </p>
+        <!-- ⚠️ O TETO DA ROTA APARECE NA TELA. `/api/conversas/buscar-empresa`
+             devolve no máximo 10, e teto que ninguém vê não é limite: é dado
+             sumindo. É a mesma regra dos 200 acertos da busca na conversa. -->
+        <template v-else-if="achadosCliente.length">
+          <div class="modal__opcoes">
+            <button
+              v-for="c in achadosCliente"
+              :key="c.id"
+              class="vincular__item"
+              type="button"
+              :disabled="vinculando"
+              @click="vincularA(c.id)"
+            >
+              <span class="vincular__nome">{{ c.nome }}</span>
+              <span class="apagado pequeno mono">
+                {{ documentoLegivel(c.documento) || 'sem CNPJ' }}
+              </span>
+            </button>
+          </div>
+          <p v-if="achadosCliente.length >= 10" class="apagado pequeno">
+            Mostrando as 10 primeiras. Refine o termo se a sua não estiver aqui.
+          </p>
+        </template>
+        <p v-else-if="buscaCliente.trim().length >= 2" class="apagado pequeno">
+          Nenhuma empresa com esse termo.
+        </p>
+        <!-- ⚠️ O estado de "ainda não dá para buscar" não precisa de frase: o
+             campo vazio já diz. A explicação de POR QUE são 2 letras era aula
+             sobre a regra, não instrução de uso. -->
+
+        <div class="modal__acoes">
+          <button class="botao botao--contorno" type="button" @click="fecharPainel">
+            Cancelar
+          </button>
+        </div>
+      </div>
+    </div>
+
     <!-- TRANSFERIR -->
     <div v-if="painelAcao === 'transferir' && aberta" class="modal" @click.self="fecharPainel">
       <div class="modal__caixa" role="dialog" aria-modal="true" aria-label="Transferir conversa">
         <p class="modal__titulo">Transferir para outro time</p>
+        <!-- ⚠️ A consequência fica (transferir tira o dono, e isso não se
+             desfaz); a aula sobre triagem e IA saiu. -->
         <p class="modal__texto pequeno">
-          🚨 Enquanto a IA está desligada, <strong>isto é a triagem</strong>:
-          você lê e decide o destino. Transferir para time tira o dono — a
-          conversa volta a ser responsabilidade coletiva.
+          Transferir tira o dono: a conversa volta a ser do time.
         </p>
         <label class="campo">
           <span class="campo__rotulo">Time</span>
@@ -2715,7 +2941,10 @@ function carregarMidiasDaConversa(c) {
           <button class="botao botao--contorno" type="button" @click="fecharPainel">
             Cancelar
           </button>
-          <button class="botao botao--primario" type="button" :disabled="!timeEscolhido" @click="transferir">
+          <button class="botao botao--primario" type="button"
+                  :disabled="!timeEscolhido"
+                  :title="timeEscolhido ? '' : 'Escolha o time de destino'"
+                  @click="transferir">
             Transferir
           </button>
         </div>
@@ -2730,10 +2959,8 @@ function carregarMidiasDaConversa(c) {
         <p class="modal__titulo">Concluir este atendimento?</p>
         <p class="modal__texto">
           A conversa passa para o Histórico e <strong>volta para "sem
-          dono"</strong> — concluir é o fim do atendimento, não a posse do
-          assunto. O cliente <strong>não</strong> é avisado. Se ele escrever de
-          novo, uma conversa nova é aberta — e você pode reabrir esta a
-          qualquer momento.
+          dono"</strong>. O cliente <strong>não</strong> é avisado, e você
+          pode reabrir esta a qualquer momento.
         </p>
         <!-- ⚠️ Concluir vale mesmo com gente dentro: concluir é conclusão.
              Quem quer só se retirar usa "Sair da conversa", que é outra ação
@@ -2752,15 +2979,13 @@ function carregarMidiasDaConversa(c) {
               <option v-for="c in classificacoes" :key="c.id" :value="c.id">{{ c.nome }}</option>
             </select>
             <span class="campo__ajuda">
-              Deixou de ser obrigatória em 11/08. Concluir sem classificar é o
-              caminho normal.
+              Concluir sem classificar é o caminho normal.
             </span>
           </label>
           <label v-if="exigeComentario" class="campo">
             <span class="campo__rotulo">Comentário — obrigatório nesta</span>
             <textarea v-model="comentario" class="campo__entrada" rows="2" maxlength="2000"></textarea>
             <span class="campo__ajuda">
-              Sem isto, "Outro" vira o vale-tudo onde metade das conversas acaba.
             </span>
           </label>
         </details>
@@ -2773,6 +2998,8 @@ function carregarMidiasDaConversa(c) {
             class="botao botao--primario"
             type="button"
             :disabled="exigeComentario && !comentario.trim()"
+            :title="exigeComentario && !comentario.trim()
+              ? 'Esta classificação exige um comentário dizendo o que foi' : ''"
             @click="encerrar"
           >
             Concluir atendimento
@@ -2877,8 +3104,45 @@ function carregarMidiasDaConversa(c) {
 }
 /* O seletor de tipo na ficha: largura de conteúdo, não de formulário. Um
    `<select>` de 100% ao lado de "Empresa" e "CNPJ" desequilibra a lista. */
-.gaveta__tipo { max-width: 12rem; display: inline-block; }
-.gaveta__tipo-ajuda { display: block; margin-top: var(--e-1); }
+/* ⚠️ O teto de 12rem saiu junto com o de 14rem da CAD_1.2: quem dimensiona
+   agora é `--compacto`, e teto por tela devolveria a divergência. */
+
+/* `.gaveta__tipo-ajuda` saiu: as duas frases que ela formatava eram as
+   explicações do tipo que ele mandou tirar em 28/08. Regra sem elemento é
+   peso morto que a próxima pessoa tenta entender. */
+
+
+/* ---- modal de vínculo (28/08) --------------------------------------------
+   🚨 MAIS LARGO QUE OS OUTROS, DE PROPÓSITO. `.modal__caixa` é 420px, que
+   serve para escolher entre nomes de atendente; razão social com CNPJ ao lado
+   quebra em duas linhas nessa largura e a lista vira parede. */
+.modal__caixa--larga { max-width: 560px; }
+
+.vincular__bloco { margin-bottom: var(--e-4); }
+
+/* A linha da empresa: nome à esquerda, documento à direita, e o alvo de
+   clique ocupando a linha inteira -- não só o texto. */
+.vincular__item {
+  width: 100%;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--e-3);
+  padding: var(--e-2) var(--e-3);
+  border: 0;
+  border-radius: var(--r-sm);
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.vincular__item:hover:not(:disabled) { background: var(--superficie-2); }
+.vincular__item:focus-visible { outline: none; box-shadow: var(--foco); }
+.vincular__item:disabled { opacity: .55; cursor: default; }
+/* ⚠️ `min-width: 0` no nome: sem ele, razão social longa empurra o documento
+   para fora da caixa em vez de quebrar. */
+.vincular__nome { min-width: 0; }
 
 .gaveta__achado {
   width: 100%;
@@ -3023,7 +3287,19 @@ function carregarMidiasDaConversa(c) {
   padding: var(--e-4) var(--e-4) var(--e-3);
   border-bottom: var(--borda-fina) solid var(--borda);
 }
-.lista__titulo { margin-bottom: var(--e-3); }
+/* ⚠️ O ÍCONE DE AJUDA AO LADO DO TÍTULO (28/08). A regra global que faz isso
+   nas outras 13 telas mira `.tela__cabecalho > div:first-child`, e este
+   cabeçalho é `.cartao__cabecalho` -- não é a mesma casa. Sem esta regra o
+   ícone cai embaixo do `<h1>`, que foi exatamente o defeito que a regra
+   global nasceu para consertar. */
+.lista__titulo {
+  margin-bottom: var(--e-3);
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--e-2);
+  min-width: 0;
+}
 .lista__titulo h1 {
   margin: 0;
   font-size: var(--txt-lg);
@@ -3033,6 +3309,8 @@ function carregarMidiasDaConversa(c) {
 /* ⚠️ Os dois números viraram uma linha de apoio, não dois cartões: eles
    informam, e o que decide a atenção é a lista abaixo. */
 .lista__placar {
+  /* Linha inteira: o placar é apoio do título, não vizinho dele. */
+  flex-basis: 100%;
   margin-top: 2px;
   font-size: var(--txt-sm);
   color: var(--texto-apagado);

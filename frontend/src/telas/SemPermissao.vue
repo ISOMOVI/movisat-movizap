@@ -21,7 +21,7 @@ const codigo = computed(() => rota.query.codigo || '—')
         A tela <span class="mono">{{ codigo }}</span> não está liberada para a sua conta.
       </p>
       <p class="apagado pequeno tela__nota">
-        Quem libera é o registro do backend. Peça o acesso citando o código.
+        Peça o acesso citando o código.
       </p>
       <RouterLink class="botao botao--contorno tela__voltar" to="/">
         <i class="bi bi-arrow-left" aria-hidden="true"></i> Voltar

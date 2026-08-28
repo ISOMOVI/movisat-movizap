@@ -133,11 +133,8 @@ onMounted(carregar)
           <p v-if="baseVelha" class="aviso aviso--atencao">
             <i class="bi bi-clock-history aviso__icone" aria-hidden="true"></i>
             <span>
-              A última leitura passou de 24 h, e o cron roda a cada 12.
-              <br /><span class="pequeno">
-                Os números abaixo continuam sendo mostrados, mas descrevem o
-                Harmonit de ontem — não o de agora.
-              </span>
+              A última leitura passou de 24 h. Os números abaixo descrevem o
+              Harmonit de ontem.
             </span>
           </p>
 
@@ -172,9 +169,7 @@ onMounted(carregar)
               <strong>{{ numero(totais.com_whatsapp) }}</strong> foram.
               <br /><span class="pequeno">
                 Quem verifica é o Evolution, e ele precisa de um canal
-                conectado. Até o chip parear, o campo fica em branco — que
-                significa <em>não verificado</em>, e é diferente de
-                <em>não tem WhatsApp</em>.
+                conectado.
               </span>
             </span>
           </p>
@@ -201,15 +196,12 @@ onMounted(carregar)
               {{ harmonit.segundos_restantes }} s, depois de
               {{ harmonit.falhas_seguidas }} falhas seguidas de autenticação.
               <br /><span class="pequeno">
-                Último erro: {{ harmonit.ultimo_erro || '—' }}. Insistir num
-                servidor caído só piora — por isso o sistema recua sozinho.
+                Último erro: {{ harmonit.ultimo_erro || '—' }}. 
               </span>
             </span>
           </p>
           <p v-else class="fraco pequeno">
-            Nenhuma falha de autenticação acumulada. Se o Harmonit cair, esta
-            tela passa a dizer <em>fora do ar</em> em vez de mostrar
-            <em>0 clientes</em> — que seria mentira.
+            Nenhuma falha de autenticação acumulada.
           </p>
 
           <button
@@ -306,13 +298,7 @@ onMounted(carregar)
 
           <p class="fraco pequeno sync__legenda">
             <strong>Vazios</strong> são campos de telefone em branco no
-            Harmonit — 1.857 dos 3.150 numa base saudável. Contar isso como
-            falha é o que faz um painel acusar 76 % de erro num sistema que
-            está bem. <strong>Erros</strong> são telefones preenchidos que não
-            deu para normalizar, como DDD 00.
-            <br />
-            <strong>Inativados</strong> conta quem <em>passou</em> a inativo
-            nesta execução — não quantos estão inativos.
+            Harmonit — 1.857 dos 3.150 numa base saudável. <strong>Erros</strong> são telefones que não deu para normalizar. <strong>Inativados</strong> conta quem passou a inativo nesta execução.
           </p>
         </div>
       </section>
