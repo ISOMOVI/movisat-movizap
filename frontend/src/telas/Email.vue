@@ -564,28 +564,54 @@ async function arquivarAberta() {
 
    ⚠️ NUNCA DENTRO DE CAMPO DE TEXTO. Sem esta guarda, escrever "responder"
    num e-mail dispararia `r`, `e`, `s`... e a pessoa perderia o que digitou. */
+
+/* 🚨 OS ATALHOS SÓ EXISTEM SE A PESSOA OS LIGOU (28/08). Ele pediu a tela de
+   Configurações com o interruptor DESLIGADO -- e desligado é o padrão do
+   banco, não uma opção que eu escolhi aqui.
+
+   ⚠️ Começa FALSO e só vira verdadeiro quando `/api/eu/atalhos` responder:
+   entre montar a tela e a resposta chegar, nenhuma tecla age. Se a chamada
+   falhar, continua falso -- o lado seguro é o teclado inerte. */
+const atalhosLigados = ref(false)
+const atalhosTeclas = ref({})
+
+function tecla(acao) {
+  return atalhosTeclas.value[acao]
+}
+
+async function carregarAtalhos() {
+  try {
+    const r = await api.get('/api/eu/atalhos')
+    atalhosTeclas.value = r.teclas || {}
+    atalhosLigados.value = Boolean(r.ligados)
+  } catch {
+    atalhosLigados.value = false
+  }
+}
+
 function atalho(evento) {
   const alvo = evento.target
   const digitando = alvo?.isContentEditable
     || ['INPUT', 'TEXTAREA', 'SELECT'].includes(alvo?.tagName)
+  if (!atalhosLigados.value) return
   if (digitando || evento.ctrlKey || evento.metaKey || evento.altKey) return
   if (escrevendo.value) return
 
   const ordem = mensagens.value
   const atual = ordem.findIndex((m) => aberta.value && m.id === aberta.value.id)
 
-  if (evento.key === 'j' || evento.key === 'k') {
+  if (evento.key === tecla('email_proxima') || evento.key === tecla('email_anterior')) {
     evento.preventDefault()
-    const passo = evento.key === 'j' ? 1 : -1
+    const passo = evento.key === tecla('email_proxima') ? 1 : -1
     const proximo = ordem[Math.min(Math.max(atual + passo, 0), ordem.length - 1)]
     if (proximo) abrir(proximo.id)
     return
   }
   if (!aberta.value) return
-  if (evento.key === 'r') { evento.preventDefault(); responder(false) }
-  if (evento.key === 'e') { evento.preventDefault(); arquivarAberta() }
-  if (evento.key === 'u') { evento.preventDefault(); marcarNaoLida(aberta.value) }
-  if (evento.key === 's') {
+  if (evento.key === tecla('email_responder')) { evento.preventDefault(); responder(false) }
+  if (evento.key === tecla('email_arquivar')) { evento.preventDefault(); arquivarAberta() }
+  if (evento.key === tecla('email_nao_lida')) { evento.preventDefault(); marcarNaoLida(aberta.value) }
+  if (evento.key === tecla('email_estrela')) {
     evento.preventDefault()
     const naLista = mensagens.value.find((m) => m.id === aberta.value.id)
     if (naLista) alternarEstrela(naLista)
@@ -653,6 +679,7 @@ async function conectarCaixa() {
 
 onMounted(async () => {
   document.addEventListener('keydown', atalho)
+  carregarAtalhos()
   await carregarCaixas()
   await carregarMarcadores()
   await carregar()

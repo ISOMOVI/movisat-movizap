@@ -35,6 +35,7 @@ from . import inicio as tela_inicial
 from . import informativos
 from . import midia
 from . import operacao
+from . import preferencia
 from . import prompt as prompt_ia
 from . import ratelimit
 from . import sync as sync_harmonit
@@ -2054,6 +2055,58 @@ class JornadaAtiva(BaseModel):
     ligada: bool
 
 
+class AtalhosLigados(BaseModel):
+    ligados: bool
+
+
+class AtalhosTeclas(BaseModel):
+    teclas: dict
+
+
+@app.get("/api/eu/atalhos")
+def meus_atalhos(usuario: dict = Depends(auth.requer_tela("CFG_6.1"))):
+    """Os atalhos DESTA pessoa: se estão ligados, a tecla de cada ação, e o
+    catálogo.
+
+    🚨 O CATÁLOGO SAI DAQUI, NUNCA ESCRITO NA TELA. Duplicá-lo no navegador
+    criaria duas verdades, e a que o operador vê seria a errada.
+
+    ⚠️ A permissão é a da PRÓPRIA TELA (CFG_6.1, `atendimento`): não existe
+    `requer_sessao` neste projeto -- permissão sempre passa por código de tela,
+    e isso é o que faz `teste_router` conseguir comparar registro com roteador.
+    Quem não tem atendente vinculado recebe o catálogo desligado, em vez de
+    estourar numa preferência pessoal.
+    """
+    return preferencia.dos_atalhos(_atendente_do_usuario(usuario))
+
+
+@app.put("/api/eu/atalhos/ligados")
+def ligar_meus_atalhos(dados: AtalhosLigados,
+                       usuario: dict = Depends(auth.requer_tela("CFG_6.1"))):
+    atendente_id = _atendente_do_usuario(usuario)
+    if not atendente_id:
+        raise HTTPException(
+            status_code=400,
+            detail="A sua conta não está ligada a um atendente, então não há "
+                   "onde guardar a preferência.")
+    return preferencia.ligar_atalhos(atendente_id, dados.ligados)
+
+
+@app.put("/api/eu/atalhos/teclas")
+def definir_minhas_teclas(dados: AtalhosTeclas,
+                          usuario: dict = Depends(auth.requer_tela("CFG_6.1"))):
+    atendente_id = _atendente_do_usuario(usuario)
+    if not atendente_id:
+        raise HTTPException(
+            status_code=400,
+            detail="A sua conta não está ligada a um atendente, então não há "
+                   "onde guardar a preferência.")
+    r = preferencia.definir_teclas(atendente_id, dados.teclas)
+    if not r.get("ok"):
+        raise HTTPException(status_code=400, detail=r.get("motivo"))
+    return r
+
+
 @app.get("/api/config/jornada")
 def ver_jornada_ativa(usuario: dict = Depends(auth.requer_tela("CAD_2.1"))):
     """⚠️ A jornada nasce DESLIGADA: monta-se a escala com calma, e só quando
@@ -2063,7 +2116,14 @@ def ver_jornada_ativa(usuario: dict = Depends(auth.requer_tela("CAD_2.1"))):
 
 @app.put("/api/config/jornada")
 def definir_jornada_ativa(dados: JornadaAtiva,
-                          usuario: dict = Depends(auth.requer_tela("CAD_2.1"))):
+                          usuario: dict = Depends(auth.requer_tela("CFG_7.1"))):
+    """🚨 LIGAR É DA CFG_7.1, LER CONTINUA SENDO DA CAD_2.1 (28/08).
+
+    O interruptor mudou de casa: acionava em Atendentes, que é tela de
+    cadastro, e é interruptor do SISTEMA -- muda como a fila distribui. A
+    permissão diz isso agora: quem lê o estado é quem monta escala; quem liga é
+    quem configura o painel.
+    """
     return operacao.definir_jornada_ativa(dados.ligada)
 
 

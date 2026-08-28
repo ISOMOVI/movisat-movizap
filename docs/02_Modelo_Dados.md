@@ -1111,3 +1111,43 @@ mensagem do cliente ficaria marcada como dele. Tem teste que prende isso.
 ⚠️ **A tela lê `reacoes` agrupado por emoji**, com `n` e `nosso`, por
 subconsulta e não por `JOIN`: com `LEFT JOIN` a mesma mensagem viria repetida
 uma vez por reação, e o `LIMIT` de 60 passaria a contar reação como mensagem.
+
+### `preferencia_atendente` — o gosto de cada pessoa (040)
+
+Pedido dele em 28/08: *"crie nas configurações tela de atalhos e interruptor
+desligado para eles e permita edição por lá também"*.
+
+```sql
+preferencia_atendente (
+    atendente_id  BIGINT REFERENCES atendente(id) ON DELETE CASCADE,
+    chave         TEXT,
+    valor         TEXT,
+    atualizado_em TIMESTAMPTZ DEFAULT now(),
+    PRIMARY KEY (atendente_id, chave)
+)
+```
+
+🚨 **POR QUE NÃO NA `config`.** A `config` é do **sistema** — repasse por
+inatividade, horário de atendimento, avaliação ligada. Atalho de teclado é a
+**mão de quem usa**, e ele já tinha fixado isso em 27/08: *"quais teclas é
+decisão sua — atalho é regra de uso"*. Guardar em `config` faria a tecla de uma
+pessoa mudar a de todas, com nove em teste ao mesmo tempo.
+
+🚨 **SEM LINHA = PADRÃO DO CÓDIGO, e o padrão dos atalhos é DESLIGADO.** Ele
+pediu o interruptor desligado, e a ausência tem de significar isso: se
+significasse "ligado", quem nunca abriu a tela teria o teclado agindo — que é
+exatamente o risco que o pedido veio fechar.
+
+⚠️ **GENÉRICA DE PROPÓSITO** (`chave`/`valor`), e não uma coluna `atalhos` no
+`atendente`. Hoje guarda `atalhos_ligados` (bool como texto) e `atalhos_teclas`
+(JSON). A próxima preferência — tema, densidade, ordenação padrão — entra sem
+migração. Coluna por preferência faz a tabela crescer de lado a cada gosto novo.
+
+⚠️ **`ON DELETE CASCADE` aqui é seguro**, ao contrário do resto do painel:
+preferência não é histórico. Atendente não é apagado (é desativado), mas se um
+dia sumisse, o gosto dele não faz falta a ninguém — diferente de `conversa` e
+`transferencia`, que apontam para ele e fariam o histórico mentir.
+
+⚠️ **O JSON de teclas é lido com desconfiança:** só ação conhecida sobrescreve
+o padrão, e JSON ilegível cai no padrão sem estourar. Versão antiga pode ter
+gravado ação que não existe mais, e ela não pode virar atalho fantasma.

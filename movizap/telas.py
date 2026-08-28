@@ -203,6 +203,41 @@ TELAS = [
         "aba_de": "CFG_0.1",
     },
     {
+        # 🚨 OS INTERRUPTORES DO SISTEMA MORAM AQUI (28/08). Ele mandou
+        # conferir se todos tinham chegado à aba de Configurações, e dois não
+        # tinham: `jornada_ativa` acionava em ATENDENTES, tela de cadastro, e
+        # `avaliacao_ativa` não tinha acionador em tela nenhuma.
+        #
+        # ⚠️ `owner`: interruptor que muda o painel inteiro não é de quem
+        # atende.
+        "codigo": "CFG_7.1",
+        "titulo": "Geral",
+        "rota": "/config/geral",
+        "icone": "bi-sliders",
+        "descricao": "Os interruptores que valem para o painel inteiro.",
+        "permissao": "owner",
+        "fase": 1,
+        "aba_de": "CFG_0.1",
+    },
+    {
+        # 🚨 NASCE DE UMA PERGUNTA DELE QUE DERRUBOU UM RECURSO MEU: *"quem
+        # pediu esses atalhos? ou eles já são nativos do WhatsApp?"*. Ninguém
+        # pediu -- `j`/`k` vêm do Gmail --, e um deles (`a`) assumia conversa
+        # sem perguntar. A resposta dele foi esta tela: *"crie nas
+        # configurações tela de atalhos e interruptor desligado para eles e
+        # permita edição por lá também"*.
+        #
+        # ⚠️ `atendimento` e não `owner`: cada pessoa edita o PRÓPRIO teclado.
+        "codigo": "CFG_6.1",
+        "titulo": "Atalhos de teclado",
+        "rota": "/config/atalhos",
+        "icone": "bi-keyboard",
+        "descricao": "As teclas de cada tela. Nascem desligadas.",
+        "permissao": "atendimento",
+        "fase": 1,
+        "aba_de": "CFG_0.1",
+    },
+    {
         "codigo": "CFG_9.1",
         "titulo": "Registro de telas",
         "rota": "/config/telas",

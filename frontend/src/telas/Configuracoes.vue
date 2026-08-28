@@ -27,6 +27,8 @@ import { useRoute, useRouter } from 'vue-router'
 import { sessao } from '../estado/sessao.js'
 import EscadaIa from '../componentes/EscadaIa.vue'
 
+import Atalhos from './Atalhos.vue'
+import Geral from './Geral.vue'
 import Canais from './Canais.vue'
 import IaPrompt from './IaPrompt.vue'
 import Sincronizacao from './Sincronizacao.vue'
@@ -40,23 +42,30 @@ const router = useRouter()
 /* A ordem é a ordem de uso, não a ordem do código: a IA primeiro, porque é o
    que está sendo montado agora e é onde moram os interruptores. */
 const COMPONENTE = {
+  'CFG_7.1': Geral,
   'CFG_2.1': IaPrompt,
   'CFG_1.1': Canais,
   'CFG_5.1': Automacao,
   'CFG_4.1': Classificacoes,
   'CFG_3.1': Sincronizacao,
+  'CFG_6.1': Atalhos,
   'CFG_9.1': RegistroDeTelas,
 }
-const ORDEM = ['CFG_2.1', 'CFG_1.1', 'CFG_5.1', 'CFG_4.1', 'CFG_3.1', 'CFG_9.1']
+// Atalhos fica ANTES de Telas: e preferencia de quem usa, nao registro do
+// sistema -- e quem procura ajuste pessoal nao vai olhar no fim da fila.
+// Geral vem PRIMEIRO: e o que vale para o painel inteiro.
+const ORDEM = ['CFG_7.1', 'CFG_2.1', 'CFG_1.1', 'CFG_5.1', 'CFG_4.1', 'CFG_3.1', 'CFG_6.1', 'CFG_9.1']
 
 /* Título curto para a aba. O do registro é bom para o menu e comprido para uma
    barra de abas ("IA — prompt" vira só "IA", porque a escada mora aqui). */
 const ROTULO = {
+  'CFG_7.1': 'Geral',
   'CFG_2.1': 'IA',
   'CFG_1.1': 'Canais',
   'CFG_5.1': 'Automação',
   'CFG_4.1': 'Classificações',
   'CFG_3.1': 'Sincronização',
+  'CFG_6.1': 'Atalhos',
   'CFG_9.1': 'Telas',
 }
 

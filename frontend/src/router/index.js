@@ -195,6 +195,20 @@ const rotas = [
     meta: { codigo: 'CFG_5.1', titulo: 'Automação por tipo' },
   },
   {
+    // ⚠️ Dentro de Configurações por `aba_de` no registro do backend: a
+    // rota existe, e é a casca que a monta como aba.
+    path: '/config/geral',
+    name: 'CFG_7.1',
+    component: () => import('../telas/Geral.vue'),
+    meta: { codigo: 'CFG_7.1', titulo: 'Geral' },
+  },
+  {
+    path: '/config/atalhos',
+    name: 'CFG_6.1',
+    component: () => import('../telas/Atalhos.vue'),
+    meta: { codigo: 'CFG_6.1', titulo: 'Atalhos de teclado' },
+  },
+  {
     path: '/config/telas',
     name: 'CFG_9.1',
     component: Configuracoes,

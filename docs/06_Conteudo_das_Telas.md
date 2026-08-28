@@ -2085,3 +2085,180 @@ que duplo nenhum.
 ⚠️ E o primeiro teste do informativo que eu escrevi era `expect(... || true)` —
 teste de mentira. Trocado por um que monta a tela com o disparo em `enviando` e
 em `rascunho`, e afirma os dois estados do botão.
+
+---
+
+## CFG_6.1 — Atalhos de teclado (28/08)
+
+Pedido dele: *"crie nas configurações tela de atalhos e interruptor desligado
+para eles e permita edição por lá também"*.
+
+🚨 **A TELA NASCEU DE UMA PERGUNTA QUE DERRUBOU UM RECURSO MEU.** Ele
+perguntou: *"quem pediu esses atalhos? ou eles já são nativos do WhatsApp?"* —
+e a resposta honesta era **ninguém pediu, e não são**:
+
+- `j` / `k` vêm do **Gmail** (e antes dele, do `vi`). Está escrito no meu
+  próprio commit da tela de e-mail: *"os mesmos do Gmail"*.
+- Eu os levei para a **Caixa de entrada**, que é a tela que ele escolheu entre
+  cinco mockups **para parecer o WhatsApp**, com a razão registrada: *"quem
+  atende passa o dia no WhatsApp"*.
+- O meu argumento para propor era *"o E-mail tem 5 atalhos e a Caixa de entrada
+  tem zero"* — que compara a tela com **outra tela minha**, não com o que a
+  pessoa já sabe usar. Simetria interna, não usabilidade.
+- E o `a` **assumia a conversa sem perguntar**, com 380 conversas sem dono e
+  nove pessoas testando ao mesmo tempo.
+
+```
+Objetivo:     atalho existir sem virar surpresa para quem não o pediu
+Hoje:         CFG_6.1 lista os 11 atalhos das duas telas, com interruptor
+              por pessoa, DESLIGADO de nascença, e troca de tecla por captura
+Por quê:      pedido dele, depois de a pergunta dele mostrar que o recurso
+              era meu e que um dos atalhos agia sem confirmar
+Reavaliar se: ele quiser as teclas do WhatsApp em vez das do Gmail na Caixa
+              de entrada. Aí muda o PADRÃO, e a tela continua igual
+```
+
+### 🚨 Desligado é a ausência, não uma opção
+
+Sem linha em `preferencia_atendente` = **desligado**. Quem nunca abriu esta
+tela não tem atalho nenhum. Se ausência significasse "ligado", quem não sabe
+que existem teria o teclado agindo — que é justamente o risco que o pedido veio
+fechar.
+
+⚠️ E no navegador `atalhosLigados` **começa falso** e só vira verdadeiro quando
+`/api/eu/atalhos` responde: entre montar a tela e a resposta chegar, nenhuma
+tecla age. Se a chamada falhar, continua falso — o lado seguro é o teclado
+inerte.
+
+### Por pessoa, não no `config`
+
+A tabela `config` é do **sistema** (repasse por inatividade, horário, avaliação).
+Atalho é a **mão de quem usa** — e ele já tinha fixado isso em 27/08: *"quais
+teclas é decisão sua — atalho é regra de uso"*. Guardar em `config` faria a
+tecla de uma pessoa mudar a de todas, com nove em teste.
+
+Migração **040**: `preferencia_atendente (atendente_id, chave, valor)`, genérica
+de propósito — a próxima preferência entra sem migração.
+
+### O catálogo vem do backend
+
+A tela **não sabe** quais atalhos existem: desenha o que `/api/eu/atalhos`
+devolver. Escrever a lista no navegador criaria duas verdades, e a que o
+operador vê seria a errada — a mesma família do defeito de 17/08, em que a
+sidebar lia um contrato de JSON que o servidor tinha deixado de cumprir.
+
+⚠️ O catálogo marca `perigo` no que **muda estado sem perguntar** (`a` assumir,
+`e` arquivar), e a tela **avisa antes de a pessoa ligar**, em vez de ela
+descobrir apertando.
+
+### Trocar tecla é capturar, não digitar
+
+Clicar na tecla arma a captura e a **próxima tecla apertada** vira o atalho.
+Campo de texto aceitaria "Enter" escrito por extenso, espaço, duas letras — e o
+backend recusaria depois. Capturar é o gesto real.
+
+🚨 **Duas ações com a mesma tecla na mesma tela é recusa**, com a frase dizendo
+quais são. Sem isso, `j` para "próxima" e para "assumir" faria a pessoa assumir
+conversa tentando andar na lista, sem ter como saber por quê.
+
+### As 11 ações
+
+| Tela | Ação | Padrão | Age sem perguntar? |
+|---|---|---|---|
+| Caixa de entrada | próxima conversa | `j` | não |
+| Caixa de entrada | conversa anterior | `k` | não |
+| Caixa de entrada | ir para a busca | `/` | não |
+| Caixa de entrada | **assumir a conversa** | `a` | 🔴 **sim** |
+| Caixa de entrada | abrir o concluir | `c` | não — abre a janela |
+| E-mail | próxima / anterior | `j` `k` | não |
+| E-mail | responder | `r` | não |
+| E-mail | **arquivar** | `e` | 🔴 **sim** |
+| E-mail | marcar não lida | `u` | reversível |
+| E-mail | estrela | `s` | reversível |
+
+⚠️ **Fora deste catálogo continuam as teclas presas a campo**, que não passam
+pelo interruptor porque não são atalho de tela: `Ctrl+Enter` envia no
+compositor da conversa, `Enter` envia no chat interno, `Esc` fecha a busca e a
+lista do `@`, `↑`/`↓` andam na lista do `@`.
+
+🚨 **E fica registrada uma incoerência que o teste de usuário vai encontrar:**
+na Caixa de entrada `Enter` quebra linha e `Ctrl+Enter` envia; no Chat interno
+`Enter` **envia**. É decisão registrada — *"lá a mensagem vai para o cliente e
+não volta"* — mas a mesma pessoa escreve nas duas e a mesma tecla faz coisas
+opostas.
+
+---
+
+## CFG_7.1 — Geral: os interruptores do sistema (28/08)
+
+Pedido dele em 27/08: *"os acionadores dos interruptores devem ficar lá"*. Em
+28/08 ele mandou conferir: *"aproveite para verificar se todos os interruptores
+aparecem em suas respectivas telas nas configurações"*.
+
+**Auditei os nove. Sete estavam certos. Dois não.**
+
+| Interruptor | Onde acionava | Estava em `/config`? |
+|---|---|---|
+| IA por canal · canal ativo | CFG_1.1 | ✅ |
+| Boas-vindas e IA por tipo | CFG_5.1 | ✅ |
+| Classificação ativa · exige comentário | CFG_4.1 | ✅ |
+| Atalhos de teclado | CFG_6.1 | ✅ |
+| 🔴 **`jornada_ativa`** | **Atendentes (CAD_2.1)** | **não** |
+| 🔴 **`avaliacao_ativa`** | **lugar nenhum** | **não existia** |
+
+### 🔴 A jornada acionava numa tela de cadastro
+
+`config.jornada_ativa` muda **como a fila distribui** — é interruptor do
+sistema. O botão vivia em Atendentes, que é tela de cadastro. Escondido onde
+ninguém procura configuração: o mesmo padrão que motivou a escada da IA em
+27/08.
+
+```
+Objetivo:     interruptor do sistema ter um lugar só, e ser esse lugar
+Hoje:         o botão está na aba Geral; Atendentes mostra o ESTADO em um
+              chip que leva para lá
+Por quê:      pedido dele de 27/08, conferido em 28/08 -- e a conferência
+              achou que dois não tinham chegado
+Reavaliar se: aparecer interruptor de sistema que faça mais sentido junto
+              do que ele afeta. A jornada não é o caso: ela afeta a fila,
+              não o cadastro da pessoa
+```
+
+🚨 **A LEITURA CONTINUA EM ATENDENTES, SÓ A CHAVE MUDOU DE LUGAR.** Aquela tela
+precisa do estado para marcar quem está fora do horário na lista. O que saiu de
+lá foi o **botão**. Interruptor tem um lugar só; estado se lê onde faz falta.
+
+⚠️ **E a permissão passou a dizer isso:** `GET /api/config/jornada` continua
+`CAD_2.1` (quem monta escala lê), e `PUT` passou a exigir **`CFG_7.1`** (quem
+configura o painel liga). A regra não vive mais só no desenho da tela.
+
+⚠️ A função `alternarJornadaAtiva` saiu do `Atendentes.vue` junto com o botão —
+função sem chamador é peso morto que a próxima pessoa tenta entender.
+
+### 🔴 `avaliacao_ativa` não tinha acionador em tela nenhuma
+
+A chave existe no banco desde o começo, com descrição — *"Pedir nota de 1 a 5 ao
+encerrar a conversa"* — e **nenhuma das 20 telas a mencionava**. Um interruptor
+invisível.
+
+Ela aparece agora na aba Geral, **travada, com o motivo escrito**: a avaliação
+ainda não existe no atendimento, então ligar não faria nada.
+
+🚨 **É a regra que ele aprovou na escada da IA**: nada some, e o que não dá para
+usar aparece dizendo o que falta. Ligar um interruptor cujo comportamento não
+existe seria pior que escondê-lo — e escondê-lo foi o que estava acontecendo.
+
+⚠️ Bate com o MIOLO: *"Classificar e avaliação de atendimento ⏸️ 31/08"*. **A
+chave nasceu antes da funcionalidade**, e agora isso está à vista em vez de
+enterrado no banco.
+
+### O que NÃO foi movido, e por quê
+
+`atendente.ativo`, `time.ativo` e `contato.ativo` aparecem fora de `/config` e
+**não são interruptores do sistema**: são o estado de um registro, e pertencem
+à tela onde o registro vive. Desativar um atendente é ato de cadastro, não
+configuração — movê-los faria você sair da ficha da pessoa para desativá-la.
+
+⚠️ **Eu deveria ter feito esta varredura em 27/08**, quando entreguei a aba de
+Configurações. Entreguei seis telas e não conferi se todo interruptor tinha
+chegado nela. Foi ele quem perguntou, um dia depois.

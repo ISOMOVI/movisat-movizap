@@ -46,18 +46,6 @@ async function carregarJornadaAtiva() {
   } catch { jornadaAtiva.value = false }
 }
 
-async function alternarJornadaAtiva() {
-  try {
-    const r = await api.put('/api/config/jornada', { ligada: !jornadaAtiva.value })
-    jornadaAtiva.value = r.jornada_ativa
-    recado.value = jornadaAtiva.value
-      ? 'Jornada ligada: a fila passa a avisar quem está fora do horário.'
-      : 'Jornada desligada: a escala continua gravada e não afeta a fila.'
-  } catch (e) {
-    erro.value = e instanceof ErroDeApi ? e.message : 'Não consegui mudar.'
-  }
-}
-
 /* ---- desligar ------------------------------------------------------------
    🚨 NÃO EXISTE APAGAR. `conversa`, `transferencia` e `mensagem` apontam para
    o atendente: apagar faria o histórico mentir sobre quem atendeu. O que
@@ -231,19 +219,27 @@ async function salvar() {
           <input v-model="incluirInativos" type="checkbox" @change="carregar" />
           mostrar inativos
         </label>
-        <button
-          class="botao botao--pequeno"
-          :class="jornadaAtiva ? 'botao--contorno' : 'botao--fantasma'"
-          type="button"
+        <!-- 🚨 O INTERRUPTOR SAIU DAQUI EM 28/08, o ESTADO ficou. Ele mandou
+             conferir se todo interruptor tinha chegado à aba de Configurações
+             (pedido de 27/08: *"os acionadores dos interruptores devem ficar
+             lá"*), e este não tinha: a jornada muda como a FILA distribui --
+             é interruptor do sistema, e acionava numa tela de cadastro.
+
+             ⚠️ A leitura continua porque esta tela precisa dela: é o que marca
+             quem está fora do horário na lista, logo abaixo. Interruptor tem um
+             lugar só; estado se lê onde faz falta. -->
+        <RouterLink
+          class="chip"
+          :class="jornadaAtiva ? 'chip--ok' : ''"
+          to="/config/geral"
           :title="jornadaAtiva
-            ? 'A fila avisa quem está fora do horário'
-            : 'A escala fica gravada e não afeta a fila'"
-          @click="alternarJornadaAtiva"
+            ? 'A fila avisa quem está fora do horário — mudar em Configurações › Geral'
+            : 'A escala fica gravada e não afeta a fila — ligar em Configurações › Geral'"
         >
           <i class="bi" :class="jornadaAtiva ? 'bi-toggle-on' : 'bi-toggle-off'"
              aria-hidden="true"></i>
           Jornada {{ jornadaAtiva ? 'ligada' : 'desligada' }}
-        </button>
+        </RouterLink>
         <button class="botao botao--primario" type="button" @click="abrirNovo">
           <i class="bi bi-person-plus" aria-hidden="true"></i> Novo atendente
         </button>

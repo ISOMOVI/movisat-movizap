@@ -64,6 +64,8 @@ MOD_a.b[.c]
 | `CFG_3.1` | Sincronização | `/config/sync` | `owner` | 1 |
 | `CFG_4.1` | Classificações | `/config/classificacoes` | `owner` | 1 |
 | `CFG_5.1` | Automação por tipo | `/config/automacao` | `owner` | 1 |
+| `CFG_6.1` | Atalhos de teclado | `/config/atalhos` | `atendimento` | 1 |
+| `CFG_7.1` | Geral | `/config/geral` | `owner` | 1 |
 | `CFG_9.1` | Registro de telas | `/config/telas` | `owner` | 1 |
 | `CFG_2.2` | IA — analytics | `/config/ia/analytics` | `owner` | 2 |
 | `REL_1.1` | Relatórios | `/relatorios` | `owner` | 3 |
@@ -113,6 +115,8 @@ O campo **`icone`** deste registro é o que o menu desenha, e ele é **a fonte
 | `CFG_3.1` Sincronização | `bi-arrow-repeat` | aba |
 | `CFG_4.1` Classificações | `bi-tags` | aba |
 | `CFG_5.1` Automação por tipo | `bi-robot` | aba |
+| `CFG_6.1` Atalhos de teclado | `bi-keyboard` | aba |
+| `CFG_7.1` Geral | `bi-sliders` | aba |
 | `CFG_9.1` Registro de telas | `bi-list-check` | aba |
 
 ### `bi-question-circle` — a ajuda da tela (27/08)
