@@ -2293,3 +2293,199 @@ da tela e a pessoa perderia o lugar de onde clicou.
 ⚠️ **A permissão das duas rotas mudou junto** (`CFG_1.1` → `CFG_8.1`): elas
 pediam a permissão da tela de Canais porque não havia tela própria. Conferido
 antes de trocar — nenhum outro ponto do frontend as chama.
+
+---
+
+# A rodada de 15/09 — achabilidade, erros e o que os quatro pediram
+
+Igual às de 27 e 28/08: separando o que é frase dele (🔵), o que é dos
+usuários passada por ele (🟢) e o que eu deliberei (🟡). `CFG_8.1`, acima,
+já é parte desta rodada e tem seção própria.
+
+## Achabilidade — o mecanismo já respondia, faltava chegar até ele
+
+**Tique de entrega/leitura** (🟢 Claudia: *"poderia ter uma forma de sabermos
+que as mensagens foram enviadas e lidas"*). A tela já sabia desenhar ✓✓ azul
+quando `m.entrega === 'lida'` — quem nunca chegava era o dado. O Evolution
+manda o status num formato achatado (`data.keyId`) diferente do que a
+mensagem original usa (`data.key.id`), e a extração só conhecia o segundo.
+**100% dos 31.573 eventos de status já recebidos** caíam fora, sempre.
+Corrigido lendo os dois formatos direto do payload cru, sem tocar na
+dedução de reentrega. Medido depois: 420 mensagens "lida" no primeiro dia,
+contra zero em toda a história antes disso.
+
+**Modal de transferir vazio** (🟢 Claudia: *"cadê os atendentes?"*).
+`GET /api/times` exigia `CAD_2.2` — tela de cadastro, permissão só de owner.
+Nenhum atendente comum via a lista; o `catch` da tela engolia o 403 em
+silêncio (o próprio comentário do código já dizia isso: *"sem estes a tela
+ainda mostra conversa; só as ações ficam sem opção"*). Passou a exigir
+`ATD_1.1`, que todo perfil de atendimento tem — criar e editar time
+continuam só do owner.
+
+**Transferir para uma pessoa.** `conversas.transferir()` aceita
+`para_atendente_id` **desde a primeira versão rastreável do projeto** — e a
+tela nunca teve o seletor, só o de time. Achado ao investigar o item acima
+mais a fundo, a pedido dele. O modal agora tem os dois campos, mutuamente
+exclusivos, com a consequência de cada um escrita (time larga na fila,
+pessoa já entrega com dono — é o que a própria função sempre disse na
+docstring).
+
+**Resposta do cliente só aparecia na lista** (🟢 Rodrigo). O polling de 8s
+só chamava `carregar()` (a lista), nunca a conversa aberta. Nova função
+`atualizarMensagens()` também refresca a conversa em uso, sem resetar
+citação, busca, gaveta ou menção — que é o que `abrir()` faria se fosse
+reaproveitada para isto.
+
+🚨 **Essa correção nasceu com um bug, achado no mesmo dia**: a mídia de
+mensagem nova não carregava sozinha (caía em "Baixar") porque
+`atualizarMensagens()` não chamava `carregarMidiasDaConversa()`. Corrigido
+antes de qualquer usuário reportar — achado perguntando "o que acontece
+DEPOIS do que acabei de consertar", o mesmo método do `M` do
+`Proximos_Passos`.
+
+**Nome de quem enviou** (🟢 Erika: *"não aparece mesmo no carimbo interno o
+usuário que enviou"*). `atendente_nome` já vinha em cada mensagem
+(`conversas.mensagens()` faz o JOIN desde sempre); só notas internas
+desenhavam o autor. Ajuste de template, zero mudança de backend.
+
+**Contato compartilhado sem número** (🟢 Erika). O parser lia
+`displayName` do vCard e descartava o `vcard` inteiro. Extrai agora o
+`TEL` de dentro dele. ⚠️ Só vale para mensagens **novas**: o vCard não é
+gravado em nenhuma coluna, só existe no payload cru do webhook, que expira
+em 30 dias.
+
+**Localização sem conteúdo** (🟡 achado ao consertar o item acima, mesmo
+padrão). `locationMessage` trazia `degreesLatitude`/`degreesLongitude` e o
+parser não olhava. Agora extrai a coordenada e a tela desenha um link
+"Ver no mapa". **10 das 14 localizações já recebidas foram recuperadas**
+reprocessando o payload ainda vivo; as outras 4 já tinham perdido o payload
+no expurgo de 30 dias.
+
+## Erros
+
+**Nome do contato ao vincular** (🟢 Claudia: *"verificar se ao vincular na
+ficha, o nome do contato está puxando certinho"*). Eu tinha respondido
+"conferido, está certo" **lendo o código**. Medindo o dado: dos 23 contatos
+criados pelo atendimento, **5 tinham nome sujo** — três eram só o emoji
+`🙏🏼`, um tinha emoji colado ao nome com espaço duplo. O apelido do
+WhatsApp entra cru como nome do cadastro. `_nome_para_cadastro()` agora
+tira emoji, modificador de tom de pele e juntor invisível antes de gravar;
+se sobrar só símbolo, usa o telefone. Um campo "Nome da pessoa" no modal
+de vincular deixa quem atende escrever o nome certo na hora. **Os 5
+registros sujos foram corrigidos**, autorizado por ele.
+
+**Auth do Google não conectava a caixa de e-mail.** Não era o login — era
+`/config/canais`, conectar a caixa. A migração 030 (25/08) trocou o
+`UNIQUE` de `email_conta` de `endereco` sozinho para
+`(atendente_id, endereco)`, e o `INSERT` de `conectar_caixa()` nunca foi
+atualizado: todo `ON CONFLICT (endereco)` quebrava com
+`InvalidColumnReference`. Corrigido threading o `atendente_id` pelo
+`state` assinado do OAuth — único jeito de saber quem clicou, já que o
+callback do Google não carrega sessão.
+
+**Trava de identidade faltando ao criar contato pelo tipo.**
+`conversas.definir_tipo()` criava contato novo sem checar se o telefone já
+existia em outro cadastro — a mesma checagem que `vincular()` e o parser
+do webhook sempre fizeram. Achado ao vivo: o número de teste dele
+(`+5518998116168`) virou um contato órfão sem empresa nesse caminho, antes
+de ele mesmo vincular corretamente à Velasco pela ficha. Agora
+`definir_tipo()` chama `cadastro.por_telefone()` antes do `INSERT`; se
+achar candidato, recusa e pede para vincular por lá. O contato órfão
+(`91040`) foi apagado, e os 3 testes que documentavam a regra antiga
+("este número nunca tem dono") foram reescritos para a realidade atual —
+ele vinculou de propósito, e o número tem dono desde 15/09.
+
+## Journals — para não depender de print na hora
+
+**Erro de botão** (🔵: *"proponha um journal para logs de erros de botões,
+simples"*, pelo caso da Aline com "Reabrir e assumir"). 17 ações da
+Caixa de Entrada agora reportam para `/api/erros/frontend` dentro do
+próprio `catch`, sem travar a tela se o próprio reporte falhar. Grava em
+`logs/movizap_erros_botao.log`: quem, ação, conversa, URL, navegador,
+mensagem. Fica de fora o polling silencioso, de propósito — logar cada
+falha de fundo encheria o arquivo sem servir para nada.
+
+Na mesma investigação: achei que `convidar()` era a única das quatro
+funções que usam a trava `mexendo` sem `try/finally` em volta do corpo
+inteiro — uma exceção fora do laço travava `mexendo` em `true` para
+sempre, e o modal de confirmação (o mesmo do "Reabrir e assumir") para de
+responder enquanto isso. Corrigido. **Não é a causa confirmada** do caso
+da Aline, só a única fresta real achada lendo o código inteiro.
+
+**Vínculos** (🔵, ao ver as fichas duplicadas do `+5583987916210`: *"acho
+legal termos o log de vínculos, para saber quem vincula o que"*). Grava em
+`logs/movizap_vinculos.log`: VINCULOU, DESVINCULOU (lendo o vínculo ANTES
+de desfazer, senão o log não diria de quem era) e CRIOU FICHA.
+
+## Features
+
+**Menu lateral recolhível** (🟢 Rodrigo, com a especificação exata: botão
+sanduíche, hover expande sem fixar, só o botão fixa). O modo compacto já
+existia como `@media` de tela estreita; virou também uma classe
+acionável por escolha, independente da largura da tela. Estado salvo por
+navegador (`localStorage`), não por preferência do banco — é conveniência
+de UI, não regra de uso.
+
+**Selo de mensagem nova e de menção** (🟢 Erika + 🟡 S10/S11 antigos,
+confirmados por ela). `/api/chat/nao-lidas` já existia ("o selo do menu"
+na própria docstring) sem chamador; `/api/chat/mencoes` também. Um selo só
+no menu, que muda de cor quando há menção — dois badges brigariam por
+18px.
+
+**Enter para enviar** (🟢 Erika). Preferência por pessoa
+(`preferencia_atendente`, mesma tabela dos atalhos), nasce desligada.
+Ligada: Enter envia, Shift+Enter quebra linha. Desligada: comportamento de
+sempre (Ctrl+Enter envia).
+
+**Quadro de tipos de mensagem não tratados** (🟡 S4). 🚨 **Ele já tinha
+autorizado isto em agosto e eu deixei cair** — a auditoria de 15/09 achou
+que a tela nunca foi escrita. Nova seção na `CFG_3.1` (Sincronização, que
+já é a tela de diagnóstico) mostrando o que o parser descartou e por quê,
+lendo `webhook_evento.motivo_ignorado` (0,035s a consulta, contra 1,10s por
+chave varrendo o payload cru). Hoje: 227 eventos do canal informativo, zero
+tipo desconhecido.
+
+**Tela sobrevive ao banco piscar** (🟡 S3). O `apt upgrade` dele reinicia
+o Postgres por ~12s; o pool já reconectava sozinho, mas toda tela aberta
+cuspia erro cru de driver na janela. Handler novo devolve 503 com um motivo
+legível; o cliente HTTP tenta de novo **uma vez, só em GET** — repetir POST
+reenviaria mensagem para o cliente, que é pior que o erro na tela.
+
+**O delay de ~7s** (🟡 S16). Sem mexer em nenhum teto: o laço que processa
+a fila do webhook dormia os 5s inteiros mesmo com evento esperando. Agora
+o webhook "cutuca" um `asyncio.Event` ao gravar, e o laço acorda na hora.
+Medido com evento real: **0,01s contra a média de 2,65s** (pior caso 4,99s)
+que valia antes.
+
+**Criar grupo do WhatsApp** (🟡 S15). `evolution.py` só lia grupo. Rota
+nova (`POST /api/grupos`) confere o WhatsApp de cada número antes de
+tentar — o Evolution recusa o lote inteiro por causa de um número ruim.
+⚠️ **Não testado com grupo real**: criar grupo com pessoas de verdade não
+se desfaz.
+
+**Foto de perfil** (🟢 Erika). Tabela nova `foto_perfil`, por telefone (não
+por contato — 61% das conversas não têm cadastro). 🚨 **O arquivo fica em
+disco, nunca a URL**: medido no payload real, a URL do WhatsApp expira
+(`oe=` no fim). Uma consulta ao Evolution por número por dia; `sem_foto`
+distingue "perguntei e não tem" de "nunca perguntei". Provado com a foto
+real dele, baixada e em disco.
+
+**Não lidas nas conversas do WhatsApp** (🟢 Erika: *"como no bitrix e
+whatsapp"*). Tabela nova `conversa_leitura`, espelhando o
+`chat_membro.lido_ate` que o chat interno já usa — por pessoa, porque a
+mesma conversa está lida para quem acabou de atender e não lida para quem
+vai pegar o plantão. 🚨 **Marco zero aplicado na entrega**: sem isso, toda
+conversa antiga apareceria com centenas de "não lidas" no primeiro dia —
+medido antes de ligar, uma conversa de agosto já atendida mostrava 536.
+O passado entrou como lido (4.500 marcadores); a contagem vale dali para a
+frente. Reversível com um `DELETE`.
+
+## O que este erro de escopo me ensinou, de novo
+
+Fui direto duas vezes nesta rodada e as duas vezes o dado provou o
+contrário do que eu tinha lido no código: "transferir para pessoa não
+existe" (existia desde sempre, um `grep` cortado na primeira linha da
+assinatura) e "o nome do contato está certo" (5 de 17 estavam sujos,
+lidos no código em vez de medidos no banco). As duas vezes a correção veio
+de enumerar TUDO — todos os `INSERT INTO contato`, todos os nomes reais —
+em vez de confiar numa amostra ou numa leitura rápida.
