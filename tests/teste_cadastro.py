@@ -190,26 +190,40 @@ class TestDetalhe:
         r = cadastro.listar_clientes(busca="WQ0P6GLD000108")
         return r["itens"][0]["id"]
 
-    def test_cliente_traz_contatos_com_telefones(self):
-        """⚠️ A Velasco tem só o FIXO desde 06/08.
+    def _contato_pastelaria_velasco(self, c):
+        return next(ct for ct in c["contatos"] if ct["nome"] == "Pastelaria Velasco")
 
-        O celular dela (+5518998116168) é compartilhado com o cadastro de
-        "IAGO SANTOS DO O SOUZA" -- nomes distintos, então o número foi para
-        revisão e **ninguém** o recebeu. Ver docs/08_Identidade.md.
+    def test_cliente_traz_contatos_com_telefones(self):
+        """⚠️ O contato "Pastelaria Velasco" tem só o FIXO desde 06/08.
+
+        🚨 Achava por `contatos[0]` até 15/09 -- quebrou no dia em que o
+        próprio usuário vinculou o número que usa pra testar no WhatsApp
+        (+5518998116168) a este mesmo cliente, e o contato novo passou a vir
+        primeiro na lista. Busca pelo NOME agora, resiliente a qualquer
+        contato que entre depois dele.
         """
         c = cadastro.cliente(self._velasco())
         assert c["nome"] == "Velasco Leite Pastelaria ME"
-        assert c["contatos"], "cliente sem contato"
-        telefones = c["contatos"][0]["telefones"]
+        velasco = self._contato_pastelaria_velasco(c)
+        telefones = velasco["telefones"]
         assert {t["e164"] for t in telefones} == {"+556837148157"}
 
-    def test_o_celular_compartilhado_nao_foi_para_ninguem(self):
-        """🚨 A regra de 06/08 em cima do dado real, não de fixture."""
-        assert cadastro.por_telefone("+5518998116168") == []
+    def test_o_celular_de_teste_tem_dono_desde_15_09(self):
+        """🚨 A regra de 06/08 mudou NA PRÁTICA em 15/09, por decisão do
+        usuário: ele vinculou de propósito o próprio número de teste
+        (+5518998116168) ao cliente de teste oficial (Pastelaria Velasco).
+        Antes disso o número ficava sem dono, em revisão (histórico em
+        docs/08_Identidade.md) -- isto documenta o estado ATUAL, não mais o
+        antigo.
+        """
+        candidatos = cadastro.por_telefone("+5518998116168")
+        assert len(candidatos) == 1
+        assert candidatos[0]["cliente_nome"] == "Velasco Leite Pastelaria ME"
 
     def test_o_principal_vem_primeiro(self):
         c = cadastro.cliente(self._velasco())
-        assert c["contatos"][0]["telefones"][0]["principal"] is True
+        velasco = self._contato_pastelaria_velasco(c)
+        assert velasco["telefones"][0]["principal"] is True
 
     def test_o_bruto_esta_junto_do_e164(self):
         """O bruto é o que prova que o e164 não foi inventado."""

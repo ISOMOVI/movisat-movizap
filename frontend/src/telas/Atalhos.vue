@@ -58,6 +58,7 @@ async function carregar() {
   try {
     const r = await api.get('/api/eu/atalhos')
     ligados.value = r.ligados
+    enterEnvia.value = Boolean(r.enviar_com_enter)
     teclas.value = { ...r.teclas }
     catalogo.value = r.catalogo || []
     erro.value = ''
@@ -65,6 +66,29 @@ async function carregar() {
     erro.value = e instanceof ErroDeApi ? e.message : 'Não consegui ler os atalhos.'
   } finally {
     carregando.value = false
+  }
+}
+
+/* 🟢 Erika (15/09): Enter enviar a mensagem. Fica AQUI, e não em tela nova,
+   porque é a mesma pergunta das outras teclas -- e é independente do
+   interruptor geral: quem não quer atalho nenhum pode querer só este. */
+const enterEnvia = ref(false)
+
+async function alternarEnter() {
+  salvando.value = true
+  recado.value = ''
+  const antes = enterEnvia.value
+  try {
+    const r = await api.put('/api/eu/enviar-com-enter', { ligado: !antes })
+    enterEnvia.value = Boolean(r.enviar_com_enter)
+    recado.value = enterEnvia.value
+      ? 'Enter passa a enviar. Shift+Enter quebra linha.'
+      : 'Enter volta a quebrar linha. Ctrl+Enter envia.'
+  } catch (e) {
+    enterEnvia.value = antes
+    erro.value = e instanceof ErroDeApi ? e.message : 'Não consegui salvar.'
+  } finally {
+    salvando.value = false
   }
 }
 
@@ -160,6 +184,19 @@ onMounted(carregar)
         </p>
         <!-- ⚠️ O AVISO VEM ANTES DE LIGAR, não depois de a pessoa descobrir
              apertando. O backend marca quais ações mudam estado sem perguntar. -->
+        <!-- 🟢 Interruptor próprio, fora do geral de propósito: quem não quer
+             atalho nenhum pode querer só este (Erika, 15/09). -->
+        <label class="interruptor">
+          <input type="checkbox" :checked="enterEnvia" :disabled="salvando"
+                 @change="alternarEnter" />
+          <span><strong>Enter envia a mensagem</strong></span>
+        </label>
+        <p class="apagado pequeno">
+          Desligado: <strong>Ctrl+Enter</strong> envia e Enter quebra linha.
+          Ligado: <strong>Enter</strong> envia e <strong>Shift+Enter</strong>
+          quebra linha. Vale só para você.
+        </p>
+
         <p v-if="!ligados && perigosos" class="aviso aviso--atencao">
           <i class="bi bi-exclamation-triangle aviso__icone" aria-hidden="true"></i>
           <span>

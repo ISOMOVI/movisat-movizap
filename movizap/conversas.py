@@ -24,6 +24,8 @@ aconteceu de verdade — foi digitada no celular —, não porque o painel mando
 import asyncio
 import base64
 import logging
+import re
+import unicodedata
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -35,6 +37,24 @@ log = logging.getLogger("movizap.conversas")
 # 5s: a caixa de entrada precisa parecer "ao vivo" sem que ninguém dependa de
 # apertar F5. O custo é um SELECT em índice quando não há nada pendente.
 INTERVALO_SEG = 5
+
+# 🟡 S16, 15/09. O webhook levanta isto ao gravar um evento; o laço acorda na
+# hora em vez de esperar o resto dos 5 s.
+#
+# 🚨 A ROTA DO WEBHOOK É `async def`, então `set()` é chamado DE DENTRO do
+# event loop -- seguro. Se um dia ela virar `def` (threadpool), isto passa a
+# precisar de `loop.call_soon_threadsafe`, e a falha seria silenciosa: o laço
+# simplesmente voltaria a esperar os 5 s.
+_cutucar = asyncio.Event()
+
+
+def cutucar() -> None:
+    """Avisa o laço que chegou evento novo. Nunca estoura: se o processador
+    ainda não subiu, o próximo tique pega o mesmo trabalho."""
+    try:
+        _cutucar.set()
+    except RuntimeError:          # sem event loop (script de linha de comando)
+        pass
 
 # Eventos que este módulo sabe interpretar. O resto é marcado como processado
 # sem virar nada: `connection.update` e `qrcode.updated` são assunto do vigia,
@@ -259,6 +279,91 @@ def _texto_da_escolha(valor: dict) -> str | None:
     return f"[escolheu] {titulo}" if titulo else None
 
 
+def _texto_do_local(valor: dict) -> str | None:
+    """Coordenada (e nome do lugar, quando o WhatsApp manda).
+
+    🚨 Medido em 15/09 no payload real: vem `degreesLatitude`/`degreesLongitude`
+    e, em geral, NADA MAIS -- `name`/`address` só aparecem quando a pessoa
+    escolhe um lugar nomeado em vez de soltar o pino. Antes disto o balão
+    mostrava só o ícone de mapa e a palavra "localizacao": o dado chegava
+    inteiro e era jogado fora na exibição, igual ao vCard antes de 15/09.
+
+    ⚠️ A COORDENADA VEM PRIMEIRO e separada por ' · ': é dela que a tela monta
+    o link do mapa, e o formato tem de ser estável para isso.
+    """
+    lat = valor.get("degreesLatitude")
+    lon = valor.get("degreesLongitude")
+    if lat is None or lon is None:
+        return None
+    coords = f"{float(lat):.6f},{float(lon):.6f}"
+    nome = (valor.get("name") or valor.get("address") or "").strip()
+    return f"{coords} · {nome}" if nome else coords
+
+
+# Categorias Unicode que saem do nome: emoji (So), modificador de tom de pele
+# (Sk) e juntor invisível (Cf). Símbolo de matemática/moeda FICA -- tirar o
+# "+" estragaria nome que é telefone escrito à mão.
+_CATEGORIAS_FORA_DO_NOME = {"So", "Sk", "Cf"}
+
+
+def _nome_para_cadastro(nome_whatsapp: str | None, telefone: str) -> str:
+    """O nome com que o contato NASCE, a partir do apelido do WhatsApp.
+
+    🚨 ANTES DISTO O APELIDO ENTRAVA CRU, e o cadastro herdava o que a pessoa
+    usa de nome no WhatsApp. Medido em 15/09, a pedido da Claudia ("verificar
+    se ao vincular o nome está puxando certinho"): dos 23 contatos criados
+    pelo atendimento, **três se chamavam `🙏🏼`** -- só o emoji --, um tinha
+    emoji colado no nome com espaço duplo, e um ficou com o próprio telefone.
+    Ler o código dizia que estava certo; o DADO dizia que não.
+
+    ⚠️ SOBRAR SÓ SÍMBOLO É O MESMO QUE NÃO TER NOME: aí vale o telefone, que
+    ao menos identifica. Melhor telefone do que uma ficha chamada "🙏🏼".
+    """
+    bruto = (nome_whatsapp or "").strip()
+    limpo = "".join(
+        ch for ch in bruto
+        if unicodedata.category(ch) not in _CATEGORIAS_FORA_DO_NOME
+        and ch != "️"          # seletor de variação, o que faz virar emoji
+    )
+    limpo = " ".join(limpo.split())  # espaço duplo vira simples
+    return limpo if any(ch.isalnum() for ch in limpo) else telefone
+
+
+def _telefone_do_vcard(vcard: str) -> str | None:
+    """A primeira linha `TEL` do vCard, sem o resto do protocolo em volta.
+
+    Formato real (medido em 15/09): `TEL;type=CELL;type=VOICE;waid=...:+55
+    11 94716-3809`. O que interessa vem depois do ÚLTIMO `:` da linha.
+    """
+    if not vcard:
+        return None
+    m = re.search(r"^TEL[^:\n]*:(.+)$", vcard, re.MULTILINE)
+    return m.group(1).strip() if m else None
+
+
+def _texto_do_contato(valor: dict) -> str | None:
+    """Nome + telefone de quem foi compartilhado.
+
+    🚨 ACHADO PELO RELATO DA ERIKA (15/09): o parser já lia `displayName` e
+    descartava o `vcard` inteiro -- o número nunca chegava a aparecer.
+    🚨 SÓ FUNCIONA ENQUANTO O `webhook_evento` AINDA TEM O PAYLOAD. O vCard
+    não é gravado em nenhum outro lugar: mensagem de contato mais velha que a
+    retenção de 30 dias (expurgo de 31/08) já perdeu o número pra sempre, só
+    sobra o nome que ficou gravado aqui.
+    """
+    nome = (valor.get("displayName") or "").strip() or "Contato"
+    # `contactMessage` é UM contato (o próprio `valor` tem o `vcard`);
+    # `contactsArrayMessage` é VÁRIOS, em `contacts`.
+    itens = valor.get("contacts") if isinstance(valor.get("contacts"), list) else [valor]
+    telefones = []
+    for item in itens:
+        if isinstance(item, dict):
+            tel_extraido = _telefone_do_vcard(item.get("vcard") or "")
+            if tel_extraido:
+                telefones.append(tel_extraido)
+    return f"{nome} — {', '.join(telefones)}" if telefones else nome
+
+
 def _tipo_e_texto(mensagem: dict) -> tuple[str, str | None]:
     """O tipo da mensagem e o texto que dá para mostrar na lista.
 
@@ -276,6 +381,10 @@ def _tipo_e_texto(mensagem: dict) -> tuple[str, str | None]:
         valor = mensagem[chave]
         if chave == "conversation":
             return tipo, valor if isinstance(valor, str) else None
+        if chave in ("contactMessage", "contactsArrayMessage") and isinstance(valor, dict):
+            return tipo, _texto_do_contato(valor)
+        if chave == "locationMessage" and isinstance(valor, dict):
+            return tipo, _texto_do_local(valor)
         if isinstance(valor, dict):
             # legenda da imagem/vídeo, texto do extendedText, nome do arquivo
             texto = (valor.get("text") or valor.get("caption")
@@ -629,23 +738,37 @@ def _gravar_mensagem(cur, evento: dict, corpo: dict,
 
 
 def _atualizar_entrega(cur, evento: dict, corpo: dict) -> str:
-    """`messages.update` normalmente só diz que mudou o status de entrega."""
+    """`messages.update` normalmente só diz que mudou o status de entrega.
+
+    🚨 NÃO USAR `evento["id_externo"]` AQUI -- a coluna fica sempre NULL para
+    este evento, de propósito: o Evolution manda o id em `data.keyId` (chave
+    solta), não em `data.key.id` (formato do upsert), e preenchê-la na
+    ingestão colidiria com a trava de reentrega `ux_webhook_externo
+    (instancia, id_externo)`, que a mensagem original já ocupa -- o update
+    inteiro seria descartado em silêncio antes de chegar aqui, e um segundo
+    update da mesma mensagem colidiria com o primeiro.
+    🚨 Medido em 15/09: por isso 31.573 eventos de entrega/leitura chegaram e
+    NENHUM tique de leitura foi gravado -- a tela já sabe desenhar ✓✓ azul
+    (`m.entrega === 'lida'`), só nunca recebeu o dado.
+    O id da mensagem-alvo vem direto do payload cru deste evento.
+    """
     from . import informativos
 
     bruto = str(_cavar(corpo, "data", "status") or "").upper()
     estado = ENTREGA.get(bruto)
-    if not estado or not evento["id_externo"]:
+    id_msg = _cavar(corpo, "data", "keyId") or _cavar(corpo, "data", "key", "id")
+    if not estado or not id_msg:
         return f"update sem status utilizável ({bruto or 'vazio'})"
 
     # 🚨 O mesmo status serve ao informativo. É AQUI que "a confirmação é o
     # estado de entrega, não o retorno do POST" acontece: o envio devolve
     # PENDING, e quem diz que chegou é este DELIVERY_ACK -- que pode vir
     # minutos depois, se o aparelho estiver desligado.
-    if informativos.registrar_entrega(evento["id_externo"], bruto):
+    if informativos.registrar_entrega(id_msg, bruto):
         return f"entrega de informativo -> {estado}"
     cur.execute(
         "UPDATE mensagem SET entrega = %s WHERE id_externo = %s",
-        (estado, evento["id_externo"]))
+        (estado, id_msg))
     return f"entrega -> {estado} ({cur.rowcount} mensagem)"
 
 
@@ -743,7 +866,8 @@ async def rodar(parar: asyncio.Event) -> None:
     `async def` ele rodaria a corrotina na thread sem ninguém aguardá-la, e o
     único sinal seria um RuntimeWarning invisível em produção.
     """
-    log.info("processador de conversas ativo (a cada %ds)", INTERVALO_SEG)
+    log.info("processador de conversas ativo (a cada %ds, ou quando cutucado)",
+             INTERVALO_SEG)
     while not parar.is_set():
         try:
             await asyncio.to_thread(processar_pendentes)
@@ -751,10 +875,25 @@ async def rodar(parar: asyncio.Event) -> None:
             # Parar em silêncio seria pior que não existir: as mensagens
             # continuariam chegando e nada apareceria na tela.
             log.exception("processamento falhou -- segue tentando")
-        try:
-            await asyncio.wait_for(parar.wait(), timeout=INTERVALO_SEG)
-        except asyncio.TimeoutError:
-            pass
+        # 🟡 S16, 15/09: em vez de dormir os 5 s cheios, acorda no que vier
+        # primeiro -- o tempo, o pedido de parada, OU um evento novo chegando
+        # pelo webhook.
+        #
+        # 🚨 ISTO NÃO MUDA NENHUM TETO. O intervalo continua 5 s e a carga
+        # CAI, não sobe: antes o laço acordava a cada 5 s mesmo sem nada para
+        # fazer; agora ele acorda porque HÁ trabalho. Dos ~7 s medidos em
+        # 28/08 (0,80 s do WhatsApp + até 5 s aqui + até 8 s na tela), esta
+        # perna do meio passa a ser quase zero na maioria dos casos.
+        _cutucar.clear()
+        tarefas = [asyncio.create_task(parar.wait()),
+                   asyncio.create_task(_cutucar.wait())]
+        _, pendentes = await asyncio.wait(
+            tarefas, timeout=INTERVALO_SEG,
+            return_when=asyncio.FIRST_COMPLETED)
+        # ⚠️ Cancelar o que sobrou: sem isto cada volta deixa uma tarefa viva
+        # esperando um evento que nunca vem, e elas se acumulam pelo dia.
+        for t in pendentes:
+            t.cancel()
     log.info("processador de conversas encerrado")
 
 
@@ -946,10 +1085,14 @@ def listar(estado: str | None = None, atendente_id: int | None = None,
     ordem = ("c.ultima_atividade_em DESC" if busca.strip()
              else "(c.estado = 'resolvida'), c.ultima_atividade_em DESC")
 
-    # 🚨 ORDEM POSICIONAL: os dois %s do SELECT são os PRIMEIROS da query, então
+    # 🚨 ORDEM POSICIONAL: os %s do SELECT são os PRIMEIROS da query, então
     # entram na frente de tudo que o WHERE já empilhou. Errar isso não dá erro
     # de sintaxe -- dá resultado errado, que é pior.
-    params = [atendente_id, atendente_id] + params
+    #
+    # ⚠️ PASSARAM DE DOIS PARA QUATRO em 15/09, com a contagem de não lidas:
+    # dois do `acompanho` e dois do `nao_lidas`, nessa ordem, que é a ordem em
+    # que aparecem no texto do SELECT.
+    params = [atendente_id, atendente_id, atendente_id, atendente_id] + params
     params.append(limite)
     linhas = banco.varios(
         f"""
@@ -973,7 +1116,24 @@ def listar(estado: str | None = None, atendente_id: int | None = None,
                c.nome_whatsapp,
                u.tipo     AS ultimo_tipo,
                (SELECT COUNT(*) FROM mensagem m2
-                 WHERE m2.conversa_id = c.id AND m2.direcao = 'entrada') AS qtd_entrada
+                 WHERE m2.conversa_id = c.id AND m2.direcao = 'entrada') AS qtd_entrada,
+               -- 🟢 Erika (15/09): quantas mensagens do CLIENTE esta pessoa
+               -- ainda não viu. Espelha o `chat_membro.lido_ate` do chat
+               -- interno, que já responde a mesma pergunta do outro lado.
+               --
+               -- 🚨 SÓ `direcao = 'entrada'`: o que nós mesmos mandamos nunca
+               -- é "não lido". E sem linha em `conversa_leitura` o COALESCE
+               -- vale 0, ou seja, tudo por ler -- que é o certo para a
+               -- conversa que ninguém desta equipe abriu ainda.
+               CASE WHEN %s::bigint IS NULL THEN 0 ELSE (
+                    SELECT COUNT(*) FROM mensagem m3
+                     WHERE m3.conversa_id = c.id
+                       AND m3.direcao = 'entrada'
+                       AND m3.id > COALESCE(
+                             (SELECT lr.lido_ate FROM conversa_leitura lr
+                               WHERE lr.conversa_id = c.id
+                                 AND lr.atendente_id = %s::bigint), 0)
+               ) END AS nao_lidas
           FROM conversa c
           LEFT JOIN contato ct ON ct.id = c.contato_id
           LEFT JOIN cliente cl ON cl.id = ct.cliente_id
@@ -1101,8 +1261,35 @@ def _empresa_da_conversa(conversa: dict) -> dict | None:
     return empresa
 
 
+def marcar_lida(conversa_id: int, atendente_id: int | None) -> int:
+    """Esta pessoa leu esta conversa até a última mensagem. 🟢 Erika, 15/09.
+
+    🚨 ATÉ A ÚLTIMA QUE EXISTE AGORA, não "tudo". Se uma mensagem chegar entre
+    a leitura e a gravação, ela fica como não lida -- que é o certo: a pessoa
+    não a viu.
+
+    ⚠️ Silenciosa quando não há atendente vinculado: ler conversa não exige
+    vínculo (a régua de LER é a tela, não o vínculo), e estourar aqui
+    quebraria a abertura da conversa por causa de um contador.
+    """
+    if not atendente_id:
+        return 0
+    linha = banco.um(
+        "SELECT COALESCE(max(id), 0) AS ultima FROM mensagem "
+        "WHERE conversa_id = %s", (conversa_id,))
+    ultima = (linha or {}).get("ultima", 0)
+    banco.executar(
+        """INSERT INTO conversa_leitura (conversa_id, atendente_id, lido_ate)
+           VALUES (%s, %s, %s)
+           ON CONFLICT (conversa_id, atendente_id) DO UPDATE
+              SET lido_ate = GREATEST(conversa_leitura.lido_ate, EXCLUDED.lido_ate),
+                  atualizado_em = now()""",
+        (conversa_id, atendente_id, ultima))
+    return ultima
+
+
 def vincular(conversa_id: int, cliente_id: int | None = None,
-             contato_id: int | None = None) -> dict:
+             contato_id: int | None = None, nome: str | None = None) -> dict:
     """Liga esta conversa a um cadastro, à mão, de dentro do atendimento.
 
     🚨 É AQUI QUE O CADASTRO SE CONSERTA PELO USO. Medido em 07/08: 483 dos 944
@@ -1127,6 +1314,7 @@ def vincular(conversa_id: int, cliente_id: int | None = None,
             return {"ok": False, "motivo": "Conversa não encontrada."}
 
         alvo = contato_id
+        criou_contato = False
         if alvo is None:
             if cliente_id is None:
                 return {"ok": False, "motivo": "Informe o cliente ou o contato."}
@@ -1137,12 +1325,18 @@ def vincular(conversa_id: int, cliente_id: int | None = None,
             if len(existentes) == 1:
                 alvo = existentes[0]["id"]
             else:
-                nome = conversa_linha.get("nome_whatsapp") or conversa_linha["telefone_e164"]
+                # 🚨 O NOME DIGITADO GANHA DO APELIDO DO WHATSAPP. Quem está
+                # falando com a pessoa sabe o nome dela; o apelido é chute --
+                # e às vezes é só um emoji (ver `_nome_para_cadastro`).
+                nome_novo = (nome or "").strip() or _nome_para_cadastro(
+                    conversa_linha.get("nome_whatsapp"),
+                    conversa_linha["telefone_e164"])
                 cur.execute(
                     """INSERT INTO contato (cliente_id, nome, origem, ativo)
                        VALUES (%s, %s, 'movizap', true) RETURNING id""",
-                    (cliente_id, nome))
+                    (cliente_id, nome_novo))
                 alvo = cur.fetchone()["id"]
+                criou_contato = True
 
         cur.execute("SELECT id, cliente_id FROM contato WHERE id = %s", (alvo,))
         if not cur.fetchone():
@@ -1163,7 +1357,23 @@ def vincular(conversa_id: int, cliente_id: int | None = None,
             (alvo, conversa_id))
 
     log.info("conversa %s vinculada ao contato %s", conversa_id, alvo)
-    return {"ok": True, "contato_id": alvo}
+    # 🔵 15/09: o retorno passou a dizer O QUE foi vinculado, não só que deu
+    # certo -- é isso que alimenta o journal de vínculos ("quem vincula o
+    # quê"). Antes, quem chamasse a rota não tinha como registrar nada além
+    # de um id solto.
+    ficha = banco.um(
+        """SELECT c.nome, c.cliente_id, cl.nome AS cliente_nome
+             FROM contato c LEFT JOIN cliente cl ON cl.id = c.cliente_id
+            WHERE c.id = %s""", (alvo,))
+    return {
+        "ok": True,
+        "contato_id": alvo,
+        "criou_contato": criou_contato,
+        "telefone": conversa_linha["telefone_e164"],
+        "contato_nome": (ficha or {}).get("nome"),
+        "cliente_id": (ficha or {}).get("cliente_id"),
+        "cliente_nome": (ficha or {}).get("cliente_nome"),
+    }
 
 
 def definir_tipo(conversa_id: int, relacao: str) -> dict:
@@ -1214,7 +1424,25 @@ def definir_tipo(conversa_id: int, relacao: str) -> dict:
             resultado["automacao_depois"] = relacao
         return resultado
 
-    nome = linha.get("nome_whatsapp") or linha["telefone_e164"]
+    # 🚨 TRAVA DE IDENTIDADE (06/08), a que faltava aqui -- achada em 15/09
+    # depois do número de teste (+5518998116168, ambíguo entre duas
+    # identidades) ter virado contato exatamente por este caminho.
+    # `vincular()` e o parser do webhook sempre checam `por_telefone` antes
+    # de decidir dono; este `INSERT` nunca checou nada -- criava contato novo
+    # cego, mesmo quando o telefone já respondia por outro cadastro.
+    candidatos = cadastro.por_telefone(linha["telefone_e164"])
+    if candidatos:
+        return {
+            "ok": False,
+            "motivo": ("Este telefone já existe em outro cadastro. Vincule "
+                       "a um dos candidatos em vez de marcar o tipo aqui."),
+            "candidatos": [
+                {"id": c["id"], "nome": c["nome"], "cliente_nome": c.get("cliente_nome")}
+                for c in candidatos
+            ],
+        }
+
+    nome = _nome_para_cadastro(linha.get("nome_whatsapp"), linha["telefone_e164"])
     with banco.cursor() as cur:
         cur.execute(
             """INSERT INTO contato (cliente_id, nome, relacao, origem, ativo)
@@ -1248,13 +1476,29 @@ def desvincular(conversa_id: int) -> dict:
     corrigir; apagar telefone é perder informação que alguém digitou. Quem quer
     tirar o número do cadastro faz isso no cadastro, olhando para ele.
     """
+    # 🔵 15/09: LÊ O VÍNCULO ANTES DE DESFAZER. Sem isto o journal registraria
+    # "fulano desvinculou a conversa 123" sem dizer DE QUEM ela era -- e a
+    # pergunta que se faz depois é sempre essa.
+    antes = banco.um(
+        """SELECT c.contato_id, ct.nome AS contato_nome, cl.nome AS cliente_nome,
+                  c.telefone_e164
+             FROM conversa c
+             LEFT JOIN contato ct ON ct.id = c.contato_id
+             LEFT JOIN cliente cl ON cl.id = ct.cliente_id
+            WHERE c.id = %s""", (conversa_id,))
     with banco.cursor() as cur:
         cur.execute(
             "UPDATE conversa SET contato_id = NULL, atualizada_em = now() "
             "WHERE id = %s RETURNING id", (conversa_id,))
         if not cur.fetchone():
             return {"ok": False, "motivo": "Conversa não encontrada."}
-    return {"ok": True}
+    return {
+        "ok": True,
+        "contato_id": (antes or {}).get("contato_id"),
+        "contato_nome": (antes or {}).get("contato_nome"),
+        "cliente_nome": (antes or {}).get("cliente_nome"),
+        "telefone": (antes or {}).get("telefone_e164"),
+    }
 
 
 # 🚨 NÃO EXISTE MAIS TETO DE CONVERSA. Havia `TETO_MENSAGENS_NA_TELA = 1000`,

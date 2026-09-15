@@ -2262,3 +2262,34 @@ configuração — movê-los faria você sair da ficha da pessoa para desativá-
 ⚠️ **Eu deveria ter feito esta varredura em 27/08**, quando entreguei a aba de
 Configurações. Entreguei seis telas e não conferi se todo interruptor tinha
 chegado nela. Foi ele quem perguntou, um dia depois.
+
+
+---
+
+## `CFG_8.1` — Eventos do WhatsApp (15/09)
+
+🟡 **Sugestão minha (S13), aprovada por ele em 15/09** junto com o resto da
+lista do que faltava.
+
+A rota `/api/webhook/eventos` existia **desde o começo do projeto** e só era
+alcançável por `curl`. Foi ela que achou, em 27/08, o `listMessage` e o
+`listResponseMessage` que **nenhuma consulta tinha visto** — e um deles era
+uma pessoa respondendo a um menu, que o painel tratava como ruído.
+
+🚨 **O valor da tela é ver o que ninguém sabe procurar.** Consulta SQL responde
+pergunta que já se sabe fazer; esta tela mostra o que está chegando, e é assim
+que formato novo aparece antes de virar defeito calado.
+
+**O que ela mostra:** os 50 eventos mais recentes com hora, tipo, telefone e
+estado (processado, esperando, erro). Clicar em um abre o **corpo cru**.
+
+⚠️ **O payload só é buscado ao abrir UM evento**, nunca na lista: ele carrega o
+`base64` de mídia e tem milhares de linhas. Por isso também rola dentro da
+própria caixa, com teto de altura — sem isso ele empurraria a tabela para fora
+da tela e a pessoa perderia o lugar de onde clicou.
+
+**Permissão:** `owner`. É tela de diagnóstico do sistema, não de atendimento.
+
+⚠️ **A permissão das duas rotas mudou junto** (`CFG_1.1` → `CFG_8.1`): elas
+pediam a permissão da tela de Canais porque não havia tela própria. Conferido
+antes de trocar — nenhum outro ponto do frontend as chama.

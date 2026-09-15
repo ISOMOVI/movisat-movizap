@@ -25,6 +25,15 @@ log = logging.getLogger(__name__)
 CHAVE_LIGADOS = "atalhos_ligados"
 CHAVE_TECLAS = "atalhos_teclas"
 
+# 🟢 Pedido da Erika (15/09): *"permitir enviar a mensagem pela tecla Enter e
+# não apenas no botão azul"*, e a sugestão dela mesma de que isso fosse
+# configurável por pessoa -- que é exatamente o desenho que a CFG_6.1 já usa.
+#
+# 🚨 NASCE DESLIGADA, como os atalhos. Enter é a tecla mais apertada por
+# engano que existe, e aqui ela MANDA A MENSAGEM PARA O CLIENTE -- não volta.
+# Quem quiser, liga; ninguém recebe o comportamento novo sem pedir.
+CHAVE_ENTER_ENVIA = "enviar_com_enter"
+
 # 🚨 O CATÁLOGO VIVE NO BACKEND, e a tela o consome. Duplicá-lo no navegador
 # criaria duas verdades, e a que o operador vê seria a errada -- é a mesma
 # família do defeito de 17/08, em que a sidebar lia um contrato de JSON que o
@@ -113,7 +122,24 @@ def dos_atalhos(atendente_id: int | None) -> dict:
         "ligados": ligados,
         "teclas": teclas,
         "catalogo": ATALHOS,
+        # Viaja junto porque mora na mesma tela e é a mesma pergunta ("o que o
+        # teclado faz pra mim"): uma chamada a menos por carregamento de tela.
+        "enviar_com_enter": enviar_com_enter(atendente_id),
     }
+
+
+def enviar_com_enter(atendente_id: int | None) -> bool:
+    """Se Enter manda a mensagem para esta pessoa. Sem linha = desligado."""
+    if not atendente_id:
+        return False
+    return _ler(atendente_id, CHAVE_ENTER_ENVIA) == "true"
+
+
+def definir_enviar_com_enter(atendente_id: int, ligado: bool) -> dict:
+    _gravar(atendente_id, CHAVE_ENTER_ENVIA, "true" if ligado else "false")
+    log.info("enviar-com-enter %s para o atendente %s",
+             "LIGADO" if ligado else "desligado", atendente_id)
+    return dos_atalhos(atendente_id)
 
 
 def ligar_atalhos(atendente_id: int, ligados: bool) -> dict:

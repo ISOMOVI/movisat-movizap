@@ -238,6 +238,20 @@ TELAS = [
         "aba_de": "CFG_0.1",
     },
     {
+        # 🟡 S13, 15/09: a rota `/api/webhook/eventos` existia desde o começo
+        # e só era alcançável por `curl`. Foi ela que achou, em 27/08, o
+        # `listMessage` e o `listResponseMessage` que nenhuma consulta tinha
+        # visto -- um deles era uma pessoa respondendo a um menu.
+        "codigo": "CFG_8.1",
+        "titulo": "Eventos do WhatsApp",
+        "rota": "/config/eventos",
+        "icone": "bi-broadcast",
+        "descricao": "O que o WhatsApp mandou, cru. Para ver formato novo.",
+        "permissao": "owner",
+        "fase": 1,
+        "aba_de": "CFG_0.1",
+    },
+    {
         "codigo": "CFG_9.1",
         "titulo": "Registro de telas",
         "rota": "/config/telas",

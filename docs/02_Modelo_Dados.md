@@ -1151,3 +1151,81 @@ dia sumisse, o gosto dele não faz falta a ninguém — diferente de `conversa` 
 ⚠️ **O JSON de teclas é lido com desconfiança:** só ação conhecida sobrescreve
 o padrão, e JSON ilegível cai no padrão sem estourar. Versão antiga pode ter
 gravado ação que não existe mais, e ela não pode virar atalho fantasma.
+
+
+### `foto_perfil` — a foto do WhatsApp, por telefone (041)
+
+🟢 Pedido da Erika em 15/09: *"permitir exibir as fotos de perfil de cada
+contato"*.
+
+```sql
+foto_perfil (
+    e164        TEXT PRIMARY KEY,
+    arquivo     TEXT,
+    sem_foto    BOOLEAN NOT NULL DEFAULT false,
+    buscada_em  TIMESTAMPTZ NOT NULL DEFAULT now()
+)
+```
+
+🚨 **POR TELEFONE, NÃO POR CONTATO.** A foto é de quem está no WhatsApp, e
+**61% das conversas não têm cadastro** (medido em 28/08) — pendurar no
+`contato` deixaria justamente a maioria sem foto. O telefone é o que sempre
+existe.
+
+🚨 **O ARQUIVO FICA EM DISCO; A URL NÃO SERVE.** Medido em 15/09 no payload
+real: a URL que o WhatsApp devolve traz `oe=` no fim — ela **expira**.
+Guardar o link daria uma foto que funciona hoje e vira quadrado quebrado
+semana que vem, sem nada no log dizendo por quê. É a mesma decisão que já vale
+para a mídia das mensagens.
+
+⚠️ **`sem_foto` distingue "perguntei e não tem" de "nunca perguntei"** (que é
+a ausência da linha). Sem esse campo, todo número sem foto viraria uma
+pergunta repetida ao Evolution para sempre.
+
+⚠️ **`buscada_em` segura a renovação em uma vez por dia por número.** Quem
+troca de foto não troca de hora em hora, e cada consulta é uma ida à rede.
+
+⚠️ **Nunca no caminho da mensagem.** A busca roda quando a TELA pede, ao abrir
+uma conversa — nunca ao gravar mensagem, que é onde este projeto mais paga
+caro por lentidão.
+
+
+### `conversa_leitura` — até onde cada pessoa leu (042)
+
+🟢 Pedido da Erika em 15/09: *"aparecer a bolinha de quantidade de novas
+mensagens como no bitrix e whatsapp"*.
+
+```sql
+conversa_leitura (
+    conversa_id   BIGINT REFERENCES conversa(id)  ON DELETE CASCADE,
+    atendente_id  BIGINT REFERENCES atendente(id) ON DELETE CASCADE,
+    lido_ate      BIGINT NOT NULL DEFAULT 0,
+    atualizado_em TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (conversa_id, atendente_id)
+)
+```
+
+🚨 **ISTO NÃO EXISTIA PARA O WHATSAPP.** O chat **interno** tem
+`chat_membro.lido_ate` desde sempre, e é dele que sai o selo do menu; a
+conversa de cliente não tinha nada equivalente — **nenhuma coluna, em nenhuma
+tabela**, dizia o que alguém já tinha lido. Esta tabela copia o modelo que já
+funciona ao lado, em vez de inventar um segundo jeito de responder à mesma
+pergunta.
+
+🚨 **POR PESSOA, e é o ponto.** A mesma conversa está lida para quem acabou de
+atender e não lida para quem vai pegar o plantão. Uma marca única na
+`conversa` diria que está lida para todos assim que UM abrisse.
+
+⚠️ **Conta só `direcao = 'entrada'`**: o que nós mesmos mandamos nunca é
+"não lido".
+
+⚠️ **Abrir a conversa é o que marca** — o mesmo gesto do WhatsApp. A marcação
+vai até a última mensagem que existe NAQUELE instante: se outra chegar entre a
+leitura e a gravação, ela fica por ler, que é o certo.
+
+🚨 **MARCO ZERO EM 15/09.** A tabela nasceu vazia e ausência de linha significa
+"tudo por ler" — o que é certo para conversa nova e absurdo para a base
+inteira: medido antes de ligar, a Erika via **536 não lidas** numa conversa de
+agosto que ela já tinha atendido. O passado entrou como lido (4.500 linhas,
+9 atendentes × as conversas existentes) e a contagem vale daqui para a frente.
+Reverter é `DELETE FROM conversa_leitura`; nenhuma mensagem é tocada.

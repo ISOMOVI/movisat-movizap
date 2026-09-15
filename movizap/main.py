@@ -10,6 +10,9 @@ import secrets
 import time
 from contextlib import asynccontextmanager
 
+import psycopg
+import psycopg_pool
+
 from fastapi import (Depends, FastAPI, File, Form, HTTPException, Request,
                      UploadFile, status)
 from fastapi.responses import (FileResponse, JSONResponse, RedirectResponse,
@@ -25,6 +28,8 @@ from . import canais as registro_canais
 from . import chat
 from . import conversas
 from . import evolution
+from . import foto
+from . import telefone
 from . import agenda as agenda_google
 from . import enviar as enviar_email
 from . import gmail
@@ -49,6 +54,28 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
 )
 log = logging.getLogger("movizap")
+
+# 🔵 Pedido dele em 15/09, pelo caso da Aline: um journal simples de erro de
+# BOTÃO -- ação que a pessoa clicou e falhou -- pra eu conseguir ler depois,
+# sem precisar dela tirar print na hora. Handler próprio porque o resto do
+# app só loga pro journal (stdout); aqui interessa ficar num arquivo à parte,
+# que já cai na rotação existente (`/home/claude/logs/movizap_*.log`).
+_arquivo_erros_botao = logging.FileHandler("/home/claude/logs/movizap_erros_botao.log")
+_arquivo_erros_botao.setFormatter(logging.Formatter("%(asctime)s %(message)s"))
+log_erros_botao = logging.getLogger("movizap.erros_botao")
+log_erros_botao.addHandler(_arquivo_erros_botao)
+log_erros_botao.setLevel(logging.INFO)
+
+# 🔵 Pedido dele em 15/09, ao ver três fichas duplicadas do mesmo telefone:
+# *"acho legal termos o log de vínculos, para saber quem vincula o que"*.
+# Vínculo é a decisão mais consequente que quem atende toma no cadastro -- é
+# ela que diz de quem é um número --, e até hoje não deixava rastro de AUTOR:
+# o `log.info` do módulo dizia a conversa e o contato, nunca a pessoa.
+_arquivo_vinculos = logging.FileHandler("/home/claude/logs/movizap_vinculos.log")
+_arquivo_vinculos.setFormatter(logging.Formatter("%(asctime)s %(message)s"))
+log_vinculos = logging.getLogger("movizap.vinculos")
+log_vinculos.addHandler(_arquivo_vinculos)
+log_vinculos.setLevel(logging.INFO)
 
 
 class MascararSegredoDoCaminho(logging.Filter):
@@ -240,6 +267,34 @@ def eu(usuario: dict = Depends(auth.get_usuario)):
     }
 
 
+class ErroDeBotao(BaseModel):
+    # Tetos generosos, mas tetos: isto vem do navegador, não é confiável.
+    acao: str = Field(min_length=1, max_length=64)
+    mensagem: str = Field(min_length=1, max_length=500)
+    url: str = Field(default="", max_length=200)
+    conversa_id: int | None = None
+
+
+@app.post("/api/erros/frontend")
+def erro_de_botao(dados: ErroDeBotao, request: Request,
+                  usuario: dict = Depends(auth.get_usuario)):
+    """Journal simples de erro de BOTÃO -- pedido dele em 15/09, pelo caso da
+    Aline: sem isto, a única prova de uma ação que falhou era a pessoa tirar
+    print na hora. Não muda a tela nem o que `erro.value` já mostra -- só
+    manda uma cópia pro journal, pra eu conseguir olhar depois.
+
+    🚨 NUNCA DERRUBA A AÇÃO QUE FALHOU. Esta rota é chamada de dentro do
+    `catch` de quem já falhou; se ELA também falhar (rede caiu, por exemplo),
+    o "dispara e esquece" do frontend é o que evita um erro em cima do erro.
+    """
+    log_erros_botao.info(
+        "acao=%s atendente=%s(%s) conversa=%s url=%s ua=%s :: %s",
+        dados.acao, usuario["nome"], usuario["id"], dados.conversa_id,
+        dados.url, request.headers.get("user-agent", "?"), dados.mensagem,
+    )
+    return {"ok": True}
+
+
 # ---------------------------------------------------------------- telas
 
 @app.get("/api/telas")
@@ -413,7 +468,12 @@ async def receber_webhook(segredo: str, request: Request):
     try:
         # `def` normal numa thread: o banco é bloqueante, e a regra do
         # `asyncio.to_thread` com `async def` já custou caro neste projeto.
-        return await asyncio.to_thread(registro_webhook.registrar, corpo)
+        resultado = await asyncio.to_thread(registro_webhook.registrar, corpo)
+        # 🟡 S16, 15/09: acorda o processador em vez de deixá-lo dormir o
+        # resto dos 5 s. Aqui estamos DENTRO do event loop (`async def`), que
+        # é o que torna o `set()` seguro -- ver o comentário em `conversas`.
+        conversas.cutucar()
+        return resultado
     except Exception as e:
         log.exception("req=%s webhook falhou ao gravar", request.state.req_id)
         return {"ok": False, "erro": type(e).__name__}
@@ -421,15 +481,22 @@ async def receber_webhook(segredo: str, request: Request):
 
 @app.get("/api/webhook/eventos")
 def eventos_do_webhook(limite: int = 20,
-                       usuario: dict = Depends(auth.requer_tela("CFG_1.1"))):
-    """Os últimos eventos, para conferir o formato real depois do pareamento."""
+                       usuario: dict = Depends(auth.requer_tela("CFG_8.1"))):
+    """Os últimos eventos, para conferir o formato real depois do pareamento.
+
+    ⚠️ A permissão passou de CFG_1.1 para CFG_8.1 em 15/09, quando a tela que
+    consome isto passou a existir (S13). Antes ela pedia a permissão da tela
+    de Canais porque não havia tela própria -- e permissão emprestada é o que
+    faz uma rota parar de responder no dia em que os perfis mudam. Conferido
+    antes de trocar: nenhum outro ponto do frontend chama estas duas rotas.
+    """
     return {"resumo": registro_webhook.resumo(),
             "eventos": registro_webhook.ultimos(limite)}
 
 
 @app.get("/api/webhook/eventos/{evento_id}")
 def payload_do_webhook(evento_id: int,
-                       usuario: dict = Depends(auth.requer_tela("CFG_1.1"))):
+                       usuario: dict = Depends(auth.requer_tela("CFG_8.1"))):
     """O corpo cru de um evento. É o que se lê depois da primeira mensagem
     real, para saber se o formato bate com o que os parsers supõem."""
     achado = registro_webhook.payload(evento_id)
@@ -1151,7 +1218,7 @@ def email_autorizar(usuario: dict = Depends(auth.requer_tela("CFG_1.1"))):
     """Pede consentimento para LER a caixa. Só o owner, e só de propósito."""
     if not google_auth.configurado():
         raise HTTPException(status_code=503, detail="Google não configurado.")
-    return {"url": google_auth.url_da_caixa()}
+    return {"url": google_auth.url_da_caixa(usuario["id"])}
 
 
 @app.get("/api/auth/google/callback")
@@ -1273,6 +1340,92 @@ def iniciar_conversa(dados: ConversaNova,
     return r
 
 
+class GrupoNovo(BaseModel):
+    nome: str = Field(min_length=1, max_length=100)
+    # 🚨 Teto de 50: o WhatsApp aceita mais, mas um erro de colagem que vire
+    # um grupo de 900 pessoas não se desfaz -- e o painel não tem como
+    # "descriar" grupo.
+    numeros: list[str] = Field(min_length=1, max_length=50)
+    descricao: str | None = Field(default=None, max_length=500)
+
+
+@app.post("/api/grupos")
+def criar_grupo(dados: GrupoNovo,
+                usuario: dict = Depends(auth.requer_tela("ATD_1.2"))):
+    """🟡 S15, 15/09: criar grupo do WhatsApp pelo painel.
+
+    🚨 O GRUPO NASCE COM O NOSSO NÚMERO COMO DONO -- quem cria é a instância.
+    Isso é do WhatsApp, não escolha nossa, e a tela diz isso antes do clique.
+
+    ⚠️ Confere o WhatsApp de cada número ANTES: o Evolution recusa o lote
+    inteiro por causa de um número ruim, e a pessoa ficaria sem saber qual
+    era. Melhor dizer "estes três não têm WhatsApp" do que "falhou".
+    """
+    canal = banco.um("SELECT id, instancia FROM canal "
+                     "WHERE tipo = 'atendimento' AND ativo ORDER BY id LIMIT 1")
+    if not canal:
+        raise HTTPException(status_code=503,
+                            detail="Nenhum canal de atendimento ativo.")
+
+    limpos = []
+    for bruto in dados.numeros:
+        analise = telefone.analisar(bruto)
+        if not analise:
+            raise HTTPException(status_code=400,
+                                detail=f"Número inválido: {bruto}")
+        limpos.append(analise.e164)
+
+    try:
+        tem = evolution.numeros_com_whatsapp(canal["instancia"], limpos)
+    except evolution.ErroEvolution as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    sem = [n for n in limpos if tem.get(n) is False]
+    if sem:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Sem WhatsApp: {', '.join(sem)}. O WhatsApp recusa o "
+                   f"grupo inteiro por causa deles.")
+
+    try:
+        r = evolution.criar_grupo(canal["instancia"], dados.nome, limpos,
+                                  dados.descricao)
+    except evolution.ErroEvolution as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+    log.info("grupo '%s' criado por %s(%s) com %d participante(s): %s",
+             dados.nome, usuario["nome"], usuario["id"], len(limpos),
+             r.get("jid"))
+    return r
+
+
+@app.get("/api/conversas/{conversa_id}/foto")
+def foto_do_contato(conversa_id: int,
+                    usuario: dict = Depends(auth.requer_tela("ATD_1.2"))):
+    """🟢 Erika (15/09): a foto de perfil de quem está na conversa.
+
+    🚨 404 QUANDO NÃO HÁ FOTO, e a tela desenha a inicial como sempre fez. Não
+    é erro: metade das pessoas não tem foto ou a esconde na privacidade.
+
+    ⚠️ POR CONVERSA E NÃO POR TELEFONE NA URL: número na URL entra no log de
+    acesso e no histórico do navegador. O id da conversa não diz nada a quem
+    olhar de fora.
+    """
+    linha = banco.um(
+        """SELECT c.telefone_e164, c.tipo, ca.instancia
+             FROM conversa c JOIN canal ca ON ca.id = c.canal_id
+            WHERE c.id = %s""", (conversa_id,))
+    if not linha:
+        raise HTTPException(status_code=404, detail="Conversa não encontrada.")
+    # Grupo não tem "foto de perfil de contato": são várias pessoas.
+    if linha["tipo"] == "grupo" or not linha["telefone_e164"]:
+        raise HTTPException(status_code=404, detail="Sem foto.")
+
+    caminho = foto.garantir(linha["telefone_e164"], linha["instancia"])
+    if not caminho:
+        raise HTTPException(status_code=404, detail="Sem foto.")
+    return FileResponse(caminho, media_type="image/jpeg")
+
+
 @app.get("/api/midia/{midia_id}")
 def baixar_midia(midia_id: int,
                  usuario: dict = Depends(auth.requer_tela("ATD_1.2"))):
@@ -1313,6 +1466,11 @@ def ver_conversa(conversa_id: int,
     achada = conversas.conversa(conversa_id)
     if not achada:
         raise HTTPException(status_code=404, detail="Conversa não encontrada.")
+    # 🟢 Erika (15/09): abrir a conversa é o que a marca como lida -- é o
+    # mesmo gesto do WhatsApp. Fica AQUI e não numa rota própria porque a
+    # tela já chama esta a cada abertura, e uma rota a mais seria um segundo
+    # caminho para o mesmo fato.
+    conversas.marcar_lida(conversa_id, _atendente_do_usuario(usuario))
     return achada
 
 
@@ -1363,6 +1521,10 @@ def buscar_na_conversa(conversa_id: int, termo: str = "",
 class Vinculo(BaseModel):
     cliente_id: int | None = None
     contato_id: int | None = None
+    # 🔵 15/09, pedido da Claudia: o nome do contato vinha cru do apelido do
+    # WhatsApp e às vezes era só um emoji. Quem atende pode digitar o nome
+    # certo na hora de vincular; vazio mantém o comportamento de derivar.
+    nome: str | None = Field(default=None, max_length=120)
 
 
 @app.post("/api/conversas/{conversa_id}/vincular")
@@ -1373,9 +1535,17 @@ def vincular_conversa(conversa_id: int, corpo: Vinculo,
     Fica em ATD_1.2 e não em CAD_1.2 de propósito: quem descobre de quem é o
     número é quem está atendendo, na hora da conversa.
     """
-    resultado = conversas.vincular(conversa_id, corpo.cliente_id, corpo.contato_id)
+    resultado = conversas.vincular(conversa_id, corpo.cliente_id, corpo.contato_id,
+                                   nome=corpo.nome)
     if not resultado.get("ok"):
         raise HTTPException(status_code=400, detail=resultado.get("motivo"))
+    log_vinculos.info(
+        "VINCULOU %s(%s) conversa=%s telefone=%s -> contato=%s(%s) empresa=%s%s",
+        usuario["nome"], usuario["id"], conversa_id, resultado.get("telefone"),
+        resultado.get("contato_nome"), resultado.get("contato_id"),
+        resultado.get("cliente_nome") or "—",
+        " [FICHA NOVA]" if resultado.get("criou_contato") else "",
+    )
     return resultado
 
 
@@ -1396,6 +1566,16 @@ def definir_tipo_da_conversa(conversa_id: int, dados: TipoDaConversa,
     r = conversas.definir_tipo(conversa_id, dados.relacao)
     if not r.get("ok"):
         raise HTTPException(status_code=400, detail=r.get("motivo"))
+    # ⚠️ Escolha minha, declarada: marcar o tipo CRIA ficha quando não há
+    # contato, e ficha nascendo pelo atendimento é a mesma pergunta do
+    # journal de vínculos ("quem criou isto?"). Sem esta linha, as fichas que
+    # nascem por aqui continuariam sem autor -- que foi exatamente o caso das
+    # três duplicadas de 11 e 14/09.
+    if r.get("criou_contato"):
+        log_vinculos.info(
+            "CRIOU FICHA %s(%s) conversa=%s tipo=%s -> contato=%s(%s)",
+            usuario["nome"], usuario["id"], conversa_id, dados.relacao,
+            r.get("nome"), r.get("id"))
     return r
 
 
@@ -1405,6 +1585,15 @@ def desvincular_conversa(conversa_id: int,
     resultado = conversas.desvincular(conversa_id)
     if not resultado.get("ok"):
         raise HTTPException(status_code=404, detail=resultado.get("motivo"))
+    # ⚠️ DESVINCULAR ENTRA NO MESMO JOURNAL. Quem desfez um vínculo é a outra
+    # metade de "quem vincula o quê" -- sem ela, a ficha some do número e o
+    # log não tem como explicar.
+    log_vinculos.info(
+        "DESVINCULOU %s(%s) conversa=%s telefone=%s -> era contato=%s(%s) empresa=%s",
+        usuario["nome"], usuario["id"], conversa_id, resultado.get("telefone"),
+        resultado.get("contato_nome") or "—", resultado.get("contato_id"),
+        resultado.get("cliente_nome") or "—",
+    )
     return resultado
 
 
@@ -1719,6 +1908,22 @@ def ver_participantes(conversa_id: int,
             for a in banco.varios(
                 "SELECT id, nome FROM atendente WHERE ativo ORDER BY nome")
             if a["id"] not in dentro],
+        # 🚨 QUEM PODE RECEBER A CONVERSA, e por que é uma lista SEPARADA de
+        # `convidaveis`: convidar exclui quem já está dentro, mas transferir
+        # PARA um participante é legítimo -- ele já acompanha, virar dono é o
+        # passo natural. O critério é o MESMO que a rota vai exigir
+        # (`atendente.transferivel`), pra tela não oferecer o que a API nega.
+        #
+        # ⚠️ ISTO FALTAVA DESDE SEMPRE. `conversas.transferir()` aceita
+        # `para_atendente_id` desde a primeira versão e a tela nunca teve o
+        # seletor -- o comentário de lá ("a tela já não o oferece") descrevia
+        # uma tela que nunca existiu. Achado em 15/09.
+        "transferiveis": [
+            {"id": a["id"], "nome": a["nome"]}
+            for a in banco.varios(
+                "SELECT id, nome FROM atendente "
+                "WHERE ativo AND transferivel ORDER BY nome")
+            if a["id"] != conversa_atual["atendente_id"]],
     }
 
 
@@ -1927,6 +2132,27 @@ async def _em_uso(request: Request, exc: operacao.EmUso):
                         headers={"X-Request-Id": getattr(request.state, "req_id", "")})
 
 
+@app.exception_handler(psycopg.OperationalError)
+@app.exception_handler(psycopg_pool.PoolTimeout)
+async def _banco_piscou(request: Request, exc: Exception):
+    """🟡 S3, feito em 15/09: o `apt upgrade` dele reinicia o Postgres e o
+    painel fica ~12 s sem banco. O pool reconecta sozinho -- o problema nunca
+    foi a recuperação, foi a JANELA: toda tela aberta cuspia erro cru de
+    driver, e quem estava atendendo achava que o sistema tinha caído.
+
+    🚨 503 E NÃO 500, de propósito: 500 é "quebrou", 503 é "volte já". O
+    cliente só repete GET em cima deste código -- repetir um POST reenviaria
+    mensagem para cliente, que é pior do que o erro.
+    """
+    log.warning("banco indisponível em %s: %s", request.url.path, exc)
+    return JSONResponse(
+        status_code=503,
+        content={"detail": "O banco está reiniciando. Isso costuma levar "
+                           "alguns segundos — a tela volta sozinha.",
+                 "banco_piscou": True},
+        headers={"X-Request-Id": getattr(request.state, "req_id", "")})
+
+
 class TimeEntrada(BaseModel):
     nome: str = Field(min_length=1, max_length=200)
     descricao: str | None = Field(default=None, max_length=1000)
@@ -1990,7 +2216,17 @@ def alertas_da_operacao(usuario: dict = Depends(auth.requer_tela("CAD_2.2"))):
 
 @app.get("/api/times")
 def listar_times(incluir_inativos: bool = False,
-                 usuario: dict = Depends(auth.requer_tela("CAD_2.2"))):
+                 usuario: dict = Depends(auth.requer_tela("ATD_1.1"))):
+    """Leitura aberta a quem atende, não só a quem cadastra.
+
+    🚨 ATÉ 15/09 EXIGIA CAD_2.2 (Times, permissao=owner) -- a MESMA rota que a
+    tela de atendimento usa para preencher o painel "Transferir". Um atendente
+    comum nunca teve como ver a lista: a chamada vinha 403, o catch da tela
+    engolia em silêncio ("sem estes a tela ainda mostra conversa; só as ações
+    ficam sem opção"), e o painel abria vazio para sempre -- achado pelo
+    relato da Claudia ("cadê os atendentes?"). CRIAR e EDITAR time continuam
+    em CAD_2.2: só listar é ação de quem atende, não de quem administra.
+    """
     return operacao.listar_times(incluir_inativos)
 
 
@@ -2059,6 +2295,10 @@ class AtalhosLigados(BaseModel):
     ligados: bool
 
 
+class EnterEnvia(BaseModel):
+    ligado: bool
+
+
 class AtalhosTeclas(BaseModel):
     teclas: dict
 
@@ -2105,6 +2345,22 @@ def definir_minhas_teclas(dados: AtalhosTeclas,
     if not r.get("ok"):
         raise HTTPException(status_code=400, detail=r.get("motivo"))
     return r
+
+
+@app.put("/api/eu/enviar-com-enter")
+def definir_enviar_com_enter(dados: EnterEnvia,
+                             usuario: dict = Depends(auth.requer_tela("CFG_6.1"))):
+    """🟢 Pedido da Erika (15/09). Mora na CFG_6.1 porque é a mesma pergunta
+    das outras teclas -- criar tela nova para um interruptor faria a pessoa
+    procurar em dois lugares o que o teclado faz por ela.
+    """
+    atendente_id = _atendente_do_usuario(usuario)
+    if not atendente_id:
+        raise HTTPException(
+            status_code=400,
+            detail="A sua conta não está ligada a um atendente, então não há "
+                   "onde guardar a preferência.")
+    return preferencia.definir_enviar_com_enter(atendente_id, dados.ligado)
 
 
 @app.get("/api/config/jornada")

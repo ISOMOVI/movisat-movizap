@@ -5,7 +5,7 @@
    A mensagem de erro é única de propósito, espelhando o backend: não se diz
    se o que estava errado era o login ou a senha.
    ============================================================================ */
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import { entrar } from '../estado/sessao.js'
@@ -22,6 +22,22 @@ const enviando = ref(false)
 const campoLogin = ref(null)   // preenchido pelo ref="campoLogin" do template
 
 const googleDisponivel = ref(false)
+const verificandoGoogle = ref(true)
+
+// 🔵 "oculte a visibilidade do login por usuario e senha, deixe somente do
+// google" (09/09). O formulário some da tela por padrão; continua alcançável
+// por /login?senha=1, sem link visível — link visível convida clique, e
+// clique gasta a ficha do rate limit à toa.
+const mostrarSenha = ref(rota.query.senha === '1')
+
+// 🔵 "caso dê erro de instabilidade no login, só neste caso, ter o botão de
+// 'logar sem acesso ao google'" (15/09). Erro do Google (recusa) ou a
+// checagem /disponivel dando falso depois de resolvida -- nunca enquanto
+// ainda está checando, senão pisca em toda carga normal da tela.
+const semGoogle = computed(() =>
+  !mostrarSenha.value &&
+  (Boolean(erro.value) || (!verificandoGoogle.value && !googleDisponivel.value))
+)
 
 onMounted(async () => {
   /* 🚨 O RETORNO DO GOOGLE VEM NO FRAGMENTO (`#t=`), não na query. Fragmento
@@ -45,6 +61,8 @@ onMounted(async () => {
     googleDisponivel.value = Boolean(r.disponivel)
   } catch {
     googleDisponivel.value = false
+  } finally {
+    verificandoGoogle.value = false
   }
   campoLogin.value?.focus()
 })
@@ -82,8 +100,26 @@ async function enviar() {
         <p class="entrada__sub">Painel de comunicação · MoviZap</p>
       </div>
 
-      <div v-if="googleDisponivel" class="entrada__google">
-        <button class="entrada__google-botao" type="button" @click="entrarComGoogle">
+      <!-- Fora de qualquer condicional: erro do Google (recusa no fragmento)
+           tem de aparecer mesmo com o formulário oculto. -->
+      <p v-if="erro" class="aviso aviso--erro entrada__erro" role="alert">
+        <i class="bi bi-exclamation-octagon aviso__icone" aria-hidden="true"></i>
+        <span>
+          {{ erro }}
+          <span v-if="reqIdDoErro" class="mono pequeno"> (req {{ reqIdDoErro }})</span>
+        </span>
+      </p>
+
+      <!-- Sempre desenhado: nada some por não poder ser usado, fica cinza
+           com o motivo (mesma regra do resto do painel). Uma falha de rede
+           no /disponivel não pode deixar a tela vazia quando o form some. -->
+      <div class="entrada__google">
+        <button
+          class="entrada__google-botao"
+          type="button"
+          :disabled="!googleDisponivel"
+          @click="entrarComGoogle"
+        >
           <!-- G oficial do Google. Inline porque é a única cor da tela e não
                pode depender de fonte de ícone carregar. -->
           <svg class="entrada__google-g" viewBox="0 0 18 18" aria-hidden="true">
@@ -94,12 +130,27 @@ async function enviar() {
           </svg>
           <span>Entrar com Google</span>
         </button>
-        <p class="entrada__google-nota">Contas @movisat.com.br já cadastradas</p>
+        <p v-if="googleDisponivel" class="entrada__google-nota">Contas @movisat.com.br já cadastradas</p>
+        <p v-else class="aviso aviso--erro entrada__google-nota" role="alert">
+          Login pelo Google indisponível no momento. Recarregue a página em instantes.
+        </p>
 
-        <div class="entrada__ou"><span>ou</span></div>
+        <!-- Só aparece quando o Google falhou ou recusou -- não é uma porta
+             lateral permanente, é o contorno para o instante de instabilidade. -->
+        <button
+          v-if="semGoogle"
+          class="botao botao--fantasma entrada__sem-google"
+          type="button"
+          @click="mostrarSenha = true"
+        >
+          Entrar sem o Google
+        </button>
+
+        <!-- Só faz sentido com duas opções na tela ao mesmo tempo. -->
+        <div v-if="mostrarSenha" class="entrada__ou"><span>ou</span></div>
       </div>
 
-      <form class="cartao entrada__cartao" @submit.prevent="enviar">
+      <form v-if="mostrarSenha" class="cartao entrada__cartao" @submit.prevent="enviar">
         <h2 class="entrada__titulo">Acesse sua conta</h2>
 
         <label class="campo campo--grande">
@@ -129,14 +180,6 @@ async function enviar() {
             required
           />
         </label>
-
-        <p v-if="erro" class="aviso aviso--erro entrada__erro" role="alert">
-          <i class="bi bi-exclamation-octagon aviso__icone" aria-hidden="true"></i>
-          <span>
-            {{ erro }}
-            <span v-if="reqIdDoErro" class="mono pequeno"> (req {{ reqIdDoErro }})</span>
-          </span>
-        </p>
 
         <button class="botao botao--primario botao--largo entrada__enviar"
                 type="submit" :disabled="enviando">
@@ -210,6 +253,15 @@ async function enviar() {
   background: var(--superficie-3);
   box-shadow: none;
 }
+.entrada__google-botao:disabled {
+  cursor: not-allowed;
+  opacity: .55;
+  box-shadow: none;
+}
+.entrada__google-botao:disabled:hover {
+  background: var(--superficie);
+  border-color: var(--borda-forte);
+}
 
 .entrada__google-g {
   width: 20px;
@@ -273,6 +325,7 @@ async function enviar() {
   font-weight: var(--peso-forte);
 }
 
+.entrada__sem-google { width: 100%; margin-top: var(--e-3); font-size: var(--txt-sm); }
 .entrada__erro { margin-bottom: var(--e-4); }
 .entrada__enviar { min-height: var(--altura-campo); font-size: var(--txt-lg); }
 .entrada__esqueci { width: 100%; margin-top: var(--e-3); font-size: var(--txt-sm); }

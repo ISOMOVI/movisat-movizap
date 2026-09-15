@@ -177,6 +177,54 @@ def participantes_do_grupo(instancia: str, grupo_jid: str) -> list[dict]:
     return pessoas
 
 
+def url_da_foto(instancia: str, numero_e164: str) -> str | None:
+    """A URL da foto de perfil de um número -- 🟢 pedido da Erika (15/09).
+
+    🚨 ELA EXPIRA. Medido em 15/09 no payload real: a URL do WhatsApp traz
+    `oe=` no fim, que é a hora da morte dela. Quem chamar isto tem de BAIXAR
+    o arquivo; guardar o link dá uma foto que funciona hoje e vira quadrado
+    quebrado semana que vem, sem nada no log dizendo por quê.
+
+    ⚠️ Devolve `None` quando a pessoa não tem foto ou a escondeu na
+    privacidade -- o Evolution responde 400 nesse caso, e isso é resposta,
+    não falha.
+    """
+    try:
+        r = _pedir("POST", f"/chat/fetchProfilePictureUrl/{instancia}",
+                   corpo={"number": destino_para_evolution(numero_e164)})
+    except ErroEvolution as e:
+        if e.status in (400, 404):
+            return None
+        raise
+    return (r or {}).get("profilePictureUrl") or None
+
+
+def criar_grupo(instancia: str, nome: str, numeros_e164: list[str],
+                descricao: str | None = None) -> dict:
+    """🟡 S15, 15/09: até aqui o painel só LIA grupo (participantes e nome).
+    Criar era o que faltava atrás do `+` quando ele foi procurar.
+
+    🚨 O GRUPO NASCE COM O NOSSO NÚMERO COMO DONO -- é a instância que cria.
+    Não há como criar "em nome de" outra pessoa, e isso não é limitação nossa:
+    é do WhatsApp.
+
+    ⚠️ Número que não tem WhatsApp faz o Evolution recusar o LOTE INTEIRO, não
+    só aquele participante (mesmo comportamento já medido no envio em lote).
+    Quem chama deve conferir antes, com `numeros_com_whatsapp`.
+    """
+    corpo = {
+        "subject": nome,
+        "participants": [destino_para_evolution(n) for n in numeros_e164],
+    }
+    if descricao:
+        corpo["description"] = descricao
+    resposta = _pedir("POST", f"/group/create/{instancia}", corpo=corpo)
+    # O Evolution devolve o objeto do grupo; o que interessa é o JID, que é
+    # como a conversa passa a ser identificada aqui dentro.
+    jid = (resposta or {}).get("id") or (resposta or {}).get("groupJid")
+    return {"jid": jid, "nome": nome, "bruto": resposta}
+
+
 def enviar_reacao(instancia: str, chave: dict, emoji: str) -> dict:
     """Reage a uma mensagem — o polegar de um clique.
 

@@ -85,13 +85,19 @@ def _state_valido(state: str) -> bool:
     return corpo.get("tipo") == "movizap_google_state"
 
 
-def url_da_caixa() -> str:
+def url_da_caixa(atendente_id: int) -> str:
     """Consentimento para LER a caixa -- fluxo à parte do login.
 
     ⚠️ `access_type=offline` e `prompt=consent` não são enfeite: sem eles o
     Google devolve só um token de uma hora, e a leitura de fundo pararia
     sozinha. O refresh token vem UMA vez, no consentimento -- guardar na hora
     ou perder.
+
+    🚨 O `atendente_id` viaja DENTRO do `state`. Desde a migração 030 a caixa
+    pertence a quem a conectou (`UNIQUE (atendente_id, endereco)`), e o
+    callback do Google é uma rota pública sem sessão -- não tem outro jeito
+    de saber quem clicou "Conectar minha caixa" a não ser o que foi assinado
+    aqui na ida.
     """
     return AUTORIZAR + "?" + urlencode({
         "client_id": settings.google_client_id,
@@ -99,7 +105,8 @@ def url_da_caixa() -> str:
         "response_type": "code",
         "scope": f"openid email {ESCOPO_CAIXA} {ESCOPO_AGENDA}",
         "state": jwt.encode(
-            {"tipo": "movizap_caixa_state", "exp": int(time.time()) + VALIDADE_STATE},
+            {"tipo": "movizap_caixa_state", "atendente_id": atendente_id,
+             "exp": int(time.time()) + VALIDADE_STATE},
             settings.jwt_secret, algorithm=auth.ALGORITMO),
         "hd": settings.google_dominio,
         "access_type": "offline",
@@ -115,6 +122,14 @@ def _e_state_de_caixa(state: str) -> bool:
     return corpo.get("tipo") == "movizap_caixa_state"
 
 
+def _atendente_do_state_de_caixa(state: str) -> int:
+    corpo = jwt.decode(state, settings.jwt_secret, algorithms=[auth.ALGORITMO])
+    atendente_id = corpo.get("atendente_id")
+    if not atendente_id:
+        raise GoogleRecusado("Pedido de autorização expirado. Tente de novo.")
+    return atendente_id
+
+
 def conectar_caixa(codigo: str, state: str) -> dict:
     """Guarda a autorização da caixa. Não mexe em sessão nem em login.
 
@@ -126,6 +141,7 @@ def conectar_caixa(codigo: str, state: str) -> dict:
 
     if not _e_state_de_caixa(state):
         raise GoogleRecusado("Pedido de autorização expirado. Tente de novo.")
+    atendente_id = _atendente_do_state_de_caixa(state)
 
     resposta = httpx.post(TROCAR, timeout=20, data={
         "code": codigo,
@@ -156,15 +172,20 @@ def conectar_caixa(codigo: str, state: str) -> dict:
             "O Google não devolveu autorização de longo prazo. Revogue o "
             "acesso do MoviZap em myaccount.google.com e autorize de novo.")
 
+    # 🚨 Desde a migração 030 o UNIQUE é (atendente_id, endereco), não mais
+    # `endereco` sozinho -- duas pessoas podem conectar a mesma caixa. Este
+    # INSERT ficou parado no modelo de antes de 25/08 e quebrava com
+    # InvalidColumnReference: o ON CONFLICT citava uma constraint que não
+    # existe mais.
     banco.executar(
-        """INSERT INTO email_conta (endereco, provedor, refresh_token,
-                                    puxar_desde, ativa)
-           VALUES (%s, 'gmail', %s, DATE '2026-01-01', true)
-           ON CONFLICT (endereco) DO UPDATE
+        """INSERT INTO email_conta (atendente_id, endereco, provedor,
+                                    refresh_token, puxar_desde, ativa)
+           VALUES (%s, %s, 'gmail', %s, DATE '2026-01-01', true)
+           ON CONFLICT ON CONSTRAINT ux_email_conta_dono DO UPDATE
               SET refresh_token = EXCLUDED.refresh_token,
                   ativa = true,
                   atualizada_em = now()""",
-        (email, refresh))
+        (atendente_id, email, refresh))
 
     log.info("caixa autorizada: %s", email)
     return {"endereco": email}

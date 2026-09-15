@@ -33,6 +33,14 @@ const harmonit = computed(() => dados.value?.harmonit || {})
 const ultima = computed(() => dados.value?.ultima || null)
 const historico = computed(() => dados.value?.historico || [])
 
+/* 🟡 S4, 15/09: o que chegou do WhatsApp e NÃO virou conversa. Ele autorizou
+   isto em agosto e eu tinha deixado cair. */
+const ignorados = computed(() => dados.value?.ignorados || [])
+/* Tipo que o parser não sabe tratar é o sinal que importa: o descarte está
+   certo, mas ninguém fica sabendo que chegou coisa nova. */
+const naoTratados = computed(() =>
+  ignorados.value.filter((i) => (i.motivo || '').includes('tipo não tratado')))
+
 /** A base cadastral só é confiável se alguém leu recentemente. */
 const idadeDaBase = computed(() => {
   const quando = ultima.value?.terminado_em || ultima.value?.iniciado_em
@@ -299,6 +307,56 @@ onMounted(carregar)
           <p class="fraco pequeno sync__legenda">
             <strong>Vazios</strong> são campos de telefone em branco no
             Harmonit — 1.857 dos 3.150 numa base saudável. <strong>Erros</strong> são telefones que não deu para normalizar. <strong>Inativados</strong> conta quem passou a inativo nesta execução.
+          </p>
+        </div>
+      </section>
+
+      <!-- 🟡 S4 — o que chegou do WhatsApp e não virou conversa (15/09) -->
+      <section class="cartao">
+        <header class="cartao__cabecalho">
+          <span class="linha">
+            <i class="bi bi-funnel" aria-hidden="true"></i>
+            O que chegou e não virou conversa
+          </span>
+          <span v-if="naoTratados.length" class="chip chip--aviso">
+            {{ naoTratados.length }} tipo(s) novo(s)
+          </span>
+        </header>
+
+        <div class="cartao__corpo">
+          <div v-if="!ignorados.length" class="vazio">
+            <i class="bi bi-check2-circle vazio__icone" aria-hidden="true"></i>
+            <p class="vazio__titulo">Nada descartado nos últimos 30 dias</p>
+          </div>
+
+          <div v-else class="tabela--rolavel">
+            <table class="tabela">
+              <thead>
+                <tr>
+                  <th>Motivo</th>
+                  <th class="sync__num">Quantos</th>
+                  <th>Último</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="i in ignorados" :key="i.motivo">
+                  <td>
+                    <span v-if="(i.motivo || '').includes('tipo não tratado')"
+                          class="chip chip--aviso">novo</span>
+                    {{ i.motivo }}
+                  </td>
+                  <td class="sync__num mono">{{ numero(i.quantos) }}</td>
+                  <td class="mono pequeno">{{ quando(i.ultimo) }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <p class="fraco pequeno sync__legenda">
+            Descartar está certo: tipo desconhecido virando balão foi o que
+            criou <strong>84 linhas falsas</strong> em 28 conversas até 27/08.
+            O que esta tabela existe para mostrar é <strong>que chegou</strong> —
+            o WhatsApp inventa tipo novo, e sem isto a novidade passa em silêncio.
           </p>
         </div>
       </section>

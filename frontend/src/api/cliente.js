@@ -57,7 +57,7 @@ export class ErroDeApi extends Error {
   }
 }
 
-async function pedir(metodo, caminho, corpo) {
+async function pedir(metodo, caminho, corpo, jaRepetiu = false) {
   const cabecalhos = { Accept: 'application/json' }
   if (token) cabecalhos.Authorization = `Bearer ${token}`
   if (corpo !== undefined) cabecalhos['Content-Type'] = 'application/json'
@@ -99,6 +99,19 @@ async function pedir(metodo, caminho, corpo) {
       throw new ErroDeApi(`Resposta não-JSON em ${caminho}.`, resposta.status, reqId)
     }
     return dados
+  }
+
+  /* 🟡 S3, 15/09: o Postgres reinicia no `apt upgrade` e o backend devolve
+     503 com `banco_piscou` por ~12 s. Uma segunda chance depois de 3 s cobre
+     a janela sem a pessoa precisar fazer nada.
+
+     🚨 SÓ GET, E SÓ UMA VEZ. Repetir POST reenviaria mensagem para cliente --
+     erro na tela é muito melhor que mensagem duplicada no WhatsApp de alguém.
+     E uma vez só: se em 3 s não voltou, quem decide esperar mais é a pessoa. */
+  if (resposta.status === 503 && dados && dados.banco_piscou
+      && metodo === 'GET' && !jaRepetiu) {
+    await new Promise((r) => setTimeout(r, 3000))
+    return pedir(metodo, caminho, corpo, true)
   }
 
   if (resposta.status === 401) {
@@ -153,4 +166,22 @@ export const api = {
   post: (caminho, corpo) => pedir('POST', caminho, corpo ?? {}),
   put: (caminho, corpo) => pedir('PUT', caminho, corpo ?? {}),
   del: (caminho) => pedir('DELETE', caminho),
+}
+
+/* 🔵 Pedido dele em 15/09, pelo caso da Aline: um journal de erro de BOTÃO
+   pra eu conseguir olhar depois, sem precisar de print na hora.
+
+   🚨 DISPARA E ESQUECE, DE PROPÓSITO. Isto é chamado de DENTRO do `catch` de
+   uma ação que já falhou -- se o relato também falhar (rede caiu), não pode
+   virar um segundo erro por cima do primeiro. */
+export function relatarErroDeBotao(acao, erro, conversaId = null) {
+  const mensagem = erro instanceof ErroDeApi ? erro.message : String(erro?.message || erro)
+  api.post('/api/erros/frontend', {
+    acao,
+    mensagem: mensagem.slice(0, 500),
+    url: window.location.pathname,
+    conversa_id: conversaId,
+  }).catch(() => {
+    // Se até relatar falhar, não há mais nada a fazer daqui.
+  })
 }

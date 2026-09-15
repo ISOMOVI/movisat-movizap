@@ -66,6 +66,7 @@ MOD_a.b[.c]
 | `CFG_5.1` | Automação por tipo | `/config/automacao` | `owner` | 1 |
 | `CFG_6.1` | Atalhos de teclado | `/config/atalhos` | `atendimento` | 1 |
 | `CFG_7.1` | Geral | `/config/geral` | `owner` | 1 |
+| `CFG_8.1` | Eventos do WhatsApp | `/config/eventos` | `owner` | 1 |
 | `CFG_9.1` | Registro de telas | `/config/telas` | `owner` | 1 |
 | `CFG_2.2` | IA — analytics | `/config/ia/analytics` | `owner` | 2 |
 | `REL_1.1` | Relatórios | `/relatorios` | `owner` | 3 |
@@ -117,6 +118,7 @@ O campo **`icone`** deste registro é o que o menu desenha, e ele é **a fonte
 | `CFG_5.1` Automação por tipo | `bi-robot` | aba |
 | `CFG_6.1` Atalhos de teclado | `bi-keyboard` | aba |
 | `CFG_7.1` Geral | `bi-sliders` | aba |
+| `CFG_8.1` Eventos do WhatsApp | `bi-broadcast` | aba |
 | `CFG_9.1` Registro de telas | `bi-list-check` | aba |
 
 ### `bi-question-circle` — a ajuda da tela (27/08)

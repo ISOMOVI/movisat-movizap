@@ -34,6 +34,7 @@ import IaPrompt from './IaPrompt.vue'
 import Sincronizacao from './Sincronizacao.vue'
 import Classificacoes from './Classificacoes.vue'
 import Automacao from './Automacao.vue'
+import EventosWebhook from './EventosWebhook.vue'
 import RegistroDeTelas from './RegistroDeTelas.vue'
 
 const route = useRoute()
@@ -49,12 +50,13 @@ const COMPONENTE = {
   'CFG_4.1': Classificacoes,
   'CFG_3.1': Sincronizacao,
   'CFG_6.1': Atalhos,
+  'CFG_8.1': EventosWebhook,
   'CFG_9.1': RegistroDeTelas,
 }
 // Atalhos fica ANTES de Telas: e preferencia de quem usa, nao registro do
 // sistema -- e quem procura ajuste pessoal nao vai olhar no fim da fila.
 // Geral vem PRIMEIRO: e o que vale para o painel inteiro.
-const ORDEM = ['CFG_7.1', 'CFG_2.1', 'CFG_1.1', 'CFG_5.1', 'CFG_4.1', 'CFG_3.1', 'CFG_6.1', 'CFG_9.1']
+const ORDEM = ['CFG_7.1', 'CFG_2.1', 'CFG_1.1', 'CFG_5.1', 'CFG_4.1', 'CFG_3.1', 'CFG_6.1', 'CFG_8.1', 'CFG_9.1']
 
 /* Título curto para a aba. O do registro é bom para o menu e comprido para uma
    barra de abas ("IA — prompt" vira só "IA", porque a escada mora aqui). */
@@ -66,6 +68,7 @@ const ROTULO = {
   'CFG_4.1': 'Classificações',
   'CFG_3.1': 'Sincronização',
   'CFG_6.1': 'Atalhos',
+  'CFG_8.1': 'Eventos',
   'CFG_9.1': 'Telas',
 }
 

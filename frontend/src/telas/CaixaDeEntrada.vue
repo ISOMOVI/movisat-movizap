@@ -20,7 +20,7 @@
 import { ref, reactive, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
-import { api, pedirBlob, ErroDeApi } from '../api/cliente.js'
+import { api, pedirBlob, ErroDeApi, relatarErroDeBotao } from '../api/cliente.js'
 import { codigosPermitidos } from '../estado/sessao.js'
 import { marcar, partir } from '../util/destaque.js'
 import { corDaInicial, iniciais } from '../util/avatar.js'
@@ -44,6 +44,19 @@ const classificacoes = ref([])
 // '' | 'transferir' | 'convidar' | 'encerrar' | 'vincular'
 const painelAcao = ref('')
 const timeEscolhido = ref('')
+/* 🔵 15/09: transferir para PESSOA sempre existiu no backend
+   (`conversas.transferir` recebe `para_atendente_id` desde a primeira versão)
+   e a tela nunca teve o seletor -- só o de time. Os dois são exclusivos:
+   escolher um limpa o outro, porque a API aceita um destino por vez. */
+const atendenteEscolhido = ref('')
+const transferiveis = ref([])
+
+/* 🔵 15/09, pedido da Claudia: o nome do contato nascia do apelido do
+   WhatsApp e às vezes era só um emoji. Quem atende digita o nome certo aqui.
+   ⚠️ VAZIO NÃO É ERRO: o backend deriva do apelido (já limpo) ou usa o
+   telefone. A regra de limpeza mora LÁ, não aqui -- duplicá-la no navegador
+   seria criar uma segunda verdade que diverge na primeira mudança. */
+const nomeDoContato = ref('')
 const motivo = ref('')
 const classificacaoEscolhida = ref('')
 const comentario = ref('')
@@ -108,6 +121,7 @@ async function reagir(m, emoji) {
   } catch (e) {
     m.reacoes = antes
     erro.value = e instanceof ErroDeApi ? e.message : 'Não consegui reagir.'
+    relatarErroDeBotao('reagir', e, aberta.value?.id)
   }
 }
 
@@ -191,6 +205,7 @@ async function enviarGravacao() {
     await Promise.all([abrir(aberta.value.id), carregar({ silencioso: true })])
   } catch (e) {
     erro.value = e.message || 'Não consegui enviar o áudio.'
+    relatarErroDeBotao('enviar_audio', e, aberta.value?.id)
   } finally {
     enviando.value = false
   }
@@ -268,6 +283,7 @@ async function trocarTipo(nova) {
   } catch (e) {
     if (contato) contato.relacao = antes
     erro.value = e instanceof ErroDeApi ? e.message : 'Não consegui marcar o tipo.'
+    relatarErroDeBotao('marcar_tipo', e, aberta.value?.id)
   }
 }
 
@@ -299,6 +315,7 @@ async function confirmarEncaminhar() {
     encaminhando.value = null
   } catch (e) {
     erro.value = e instanceof ErroDeApi ? e.message : 'Não consegui encaminhar.'
+    relatarErroDeBotao('encaminhar', e, aberta.value?.id)
   }
 }
 
@@ -439,6 +456,7 @@ async function carregarAnteriores() {
     }
   } catch (e) {
     erro.value = e instanceof ErroDeApi ? e.message : 'Não consegui carregar.'
+    relatarErroDeBotao('carregar_anteriores', e, aberta.value?.id)
   } finally {
     carregandoAnteriores.value = false
   }
@@ -482,6 +500,7 @@ function fecharPainel() {
 function limparPaineis() {
   convidados.value = []
   timeEscolhido.value = ''
+  atendenteEscolhido.value = ''
   motivo.value = ''
   classificacaoEscolhida.value = ''
   comentario.value = ''
@@ -491,6 +510,7 @@ function limparPaineis() {
      a empresa certa ao telefone errado. */
   buscaCliente.value = ''
   achadosCliente.value = []
+  nomeDoContato.value = ''
 }
 
 function perguntar(titulo, texto, rotulo, acao, perigo = false) {
@@ -509,6 +529,7 @@ async function carregarParticipantes(id) {
     const r = await api.get(`/api/conversas/${id}/participantes`)
     acompanham.value = r.participantes || []
     convidaveis.value = r.convidaveis || []
+    transferiveis.value = r.transferiveis || []
     souDono.value = Boolean(r.sou_dono)
     souParticipante.value = Boolean(r.sou_participante)
   } catch {
@@ -530,31 +551,42 @@ async function convidar() {
   if (!convidados.value.length || mexendo.value) return
   mexendo.value = true
   erro.value = ''
-  const nomeDe = (id) => {
-    const a = convidaveis.value.find((x) => String(x.id) === String(id))
-    return a ? a.nome : `#${id}`
-  }
-  const entraram = []
-  const falharam = []
-  for (const id of convidados.value) {
-    try {
-      const r = await api.post(`/api/conversas/${aberta.value.id}/convidar`,
-                               { atendente_id: Number(id) })
-      entraram.push(r.nome || nomeDe(id))
-    } catch (e) {
-      falharam.push(`${nomeDe(id)} (${e instanceof ErroDeApi ? e.message : 'falhou'})`)
+  // 🚨 ACHADO EM 15/09, validando o relato da Aline sobre "Reabrir e
+  // assumir": esta era a ÚNICA das quatro funções que usam `mexendo` sem
+  // `try/finally` em volta do corpo inteiro. Uma exceção fora do laço (por
+  // exemplo `aberta.value` virar null por troca de conversa no meio do
+  // convite) travava `mexendo` em `true` para sempre -- e `confirmar()`
+  // (usado pelo modal de "Reabrir e assumir", entre outros) recusa agir
+  // enquanto `mexendo` estiver true. Não é a causa confirmada do caso dela,
+  // mas é a única fresta real que achei lendo o código inteiro.
+  try {
+    const nomeDe = (id) => {
+      const a = convidaveis.value.find((x) => String(x.id) === String(id))
+      return a ? a.nome : `#${id}`
     }
+    const entraram = []
+    const falharam = []
+    for (const id of convidados.value) {
+      try {
+        const r = await api.post(`/api/conversas/${aberta.value.id}/convidar`,
+                                 { atendente_id: Number(id) })
+        entraram.push(r.nome || nomeDe(id))
+      } catch (e) {
+        falharam.push(`${nomeDe(id)} (${e instanceof ErroDeApi ? e.message : 'falhou'})`)
+      }
+    }
+    if (entraram.length) {
+      recado.value = entraram.length === 1
+        ? `${entraram[0]} foi chamado para a conversa.`
+        : `${entraram.length} pessoas foram chamadas: ${entraram.join(', ')}.`
+    }
+    if (falharam.length) erro.value = `Não entrou: ${falharam.join(' · ')}`
+    convidados.value = []
+    painelAcao.value = ''
+    await carregarParticipantes(aberta.value.id)
+  } finally {
+    mexendo.value = false
   }
-  if (entraram.length) {
-    recado.value = entraram.length === 1
-      ? `${entraram[0]} foi chamado para a conversa.`
-      : `${entraram.length} pessoas foram chamadas: ${entraram.join(', ')}.`
-  }
-  if (falharam.length) erro.value = `Não entrou: ${falharam.join(' · ')}`
-  convidados.value = []
-  painelAcao.value = ''
-  await carregarParticipantes(aberta.value.id)
-  mexendo.value = false
 }
 
 /* 🚨 SÓ QUEM ESTÁ NA CONVERSA AGE NELA. Até 12/08 qualquer atendente com a
@@ -576,6 +608,7 @@ async function entrarNaConversa() {
     await Promise.all([abrir(aberta.value.id), carregar({ silencioso: true })])
   } catch (e) {
     erro.value = e instanceof ErroDeApi ? e.message : 'Não consegui entrar.'
+    relatarErroDeBotao('entrar_na_conversa', e, aberta.value?.id)
   } finally {
     mexendo.value = false
   }
@@ -593,6 +626,7 @@ async function sairDaConversa() {
     await Promise.all([abrir(aberta.value.id), carregar({ silencioso: true })])
   } catch (e) {
     erro.value = e instanceof ErroDeApi ? e.message : 'Não consegui sair.'
+    relatarErroDeBotao('sair_da_conversa', e, aberta.value?.id)
   } finally {
     mexendo.value = false
   }
@@ -605,6 +639,7 @@ async function removerParticipante(id) {
     await carregarParticipantes(aberta.value.id)
   } catch (e) {
     erro.value = e instanceof ErroDeApi ? e.message : 'Não consegui remover.'
+    relatarErroDeBotao('remover_participante', e, aberta.value?.id)
   } finally {
     mexendo.value = false
   }
@@ -665,6 +700,10 @@ function parametros() {
    mandar. */
 const novaAberta = ref(false)
 const novoNumero = ref('')
+/* 🟡 S15, 15/09: o mesmo `+` agora abre os dois destinos. */
+const modoGrupo = ref(false)
+const grupoNome = ref('')
+const grupoNumeros = ref('')
 const novoTexto = ref('')
 const enviandoNova = ref(false)
 const erroNova = ref('')
@@ -676,6 +715,35 @@ function abrirNova() {
   novoTexto.value = ''
   erroNova.value = ''
   semWhatsapp.value = false
+}
+
+async function criarGrupo() {
+  enviandoNova.value = true
+  erroNova.value = ''
+  semWhatsapp.value = false
+  try {
+    // Vírgula, ponto-e-vírgula ou linha: quem cola de uma planilha não devia
+    // precisar arrumar o separador à mão.
+    const numeros = grupoNumeros.value
+      .split(/[\n,;]+/).map((n) => n.trim()).filter(Boolean)
+    const r = await api.post('/api/grupos', {
+      nome: grupoNome.value.trim(),
+      numeros,
+    })
+    recado.value = `Grupo "${grupoNome.value.trim()}" criado com `
+      + `${numeros.length} participante(s). Ele aparece aqui quando alguém escrever.`
+    novaAberta.value = false
+    modoGrupo.value = false
+    grupoNome.value = ''
+    grupoNumeros.value = ''
+    await carregar({ silencioso: true })
+    return r
+  } catch (e) {
+    erroNova.value = e instanceof ErroDeApi ? e.message : 'Não consegui criar o grupo.'
+    relatarErroDeBotao('criar_grupo', e)
+  } finally {
+    enviandoNova.value = false
+  }
 }
 
 async function enviarNova() {
@@ -705,6 +773,7 @@ async function enviarNova() {
     semWhatsapp.value = Boolean(detalhe && detalhe.sem_whatsapp)
     erroNova.value = (detalhe && detalhe.motivo)
       || (e instanceof ErroDeApi ? e.message : 'Não consegui enviar.')
+    relatarErroDeBotao('iniciar_conversa', e)
   } finally {
     enviandoNova.value = false
   }
@@ -782,6 +851,7 @@ async function abrir(id) {
     aberta.value = await api.get(`/api/conversas/${id}`)
     carregarParticipantes(id)
     carregarMidiasDaConversa(aberta.value)
+    carregarFoto(aberta.value)
     rolarParaOFim()
     recado.value = ''
     if (route.params.id !== String(id)) {
@@ -789,6 +859,59 @@ async function abrir(id) {
     }
   } catch (e) {
     erro.value = e instanceof ErroDeApi ? e.message : 'Falha ao abrir a conversa.'
+  }
+}
+
+/* 🔵 Achado pelo relato do Rodrigo (15/09): o polling de 8s só atualizava a
+   LISTA (`carregar`), nunca a conversa aberta -- a resposta do cliente
+   aparecia na prévia do contato e nunca dentro da conversa que a pessoa
+   estava lendo.
+
+   ⚠️ NÃO REUSA `abrir()`. `abrir()` é troca de conversa: solta mídia, fecha
+   busca, limpa citação e menção, zera a gaveta -- tudo isso ao vivo, a cada
+   8s, apagaria o que a pessoa está fazendo na tela sem ela ter clicado em
+   nada. Este refresh só toca no que pode ter mudado de fora: mensagem nova,
+   tique de entrega/leitura, e quem é o dono da conversa.
+
+   🚨 SÓ ADICIONA, NUNCA SUBSTITUI O ARRAY INTEIRO. Quem já clicou "carregar
+   anteriores" tem mensagens mais antigas que a janela desta rota não traz de
+   volta -- substituir apagaria da tela o que a pessoa acabou de pedir pra
+   ver. */
+async function atualizarMensagens() {
+  if (!aberta.value) return
+  try {
+    const r = await api.get(`/api/conversas/${aberta.value.id}`)
+    aberta.value.estado = r.estado
+    aberta.value.atendente_id = r.atendente_id
+    aberta.value.atendente_nome = r.atendente_nome
+
+    const porId = new Map(r.mensagens.map((m) => [m.id, m]))
+    for (const m of aberta.value.mensagens) {
+      const fresca = porId.get(m.id)
+      if (fresca && fresca.entrega !== m.entrega) m.entrega = fresca.entrega
+    }
+
+    const idsAtuais = new Set(aberta.value.mensagens.map((m) => m.id))
+    const novas = r.mensagens.filter((m) => !idsAtuais.has(m.id))
+    if (!novas.length) return
+
+    // Só rola pro fim se a pessoa já estava lá -- senão puxaria quem está
+    // lendo mensagem antiga pro meio de uma resposta que acabou de chegar.
+    const noFim = baloes.value
+      ? baloes.value.scrollTop + baloes.value.clientHeight >= baloes.value.scrollHeight - 40
+      : true
+    aberta.value.mensagens.push(...novas)
+    /* 🚨 A MÍDIA DA MENSAGEM NOVA TAMBÉM PRECISA SER BUSCADA. Sem esta linha,
+       imagem/áudio/vídeo que chega com a conversa ABERTA aparece como botão
+       "Baixar" em vez de aparecer no balão -- e só se conserta fechando e
+       reabrindo a conversa. Quem abre a conversa pra conferir nunca vê o
+       defeito (o `abrir()` carrega tudo); quem fica atendendo o dia todo vê
+       sempre. Foi um defeito MEU, introduzido junto com este refresh em
+       15/09, e achado pelo usuário no mesmo dia. */
+    carregarMidiasDaConversa({ mensagens: novas })
+    if (noFim) rolarParaOFim()
+  } catch {
+    // silencioso -- é atualização de fundo, não a abertura da conversa
   }
 }
 
@@ -807,6 +930,7 @@ async function assumir(id = null) {
     // 🚨 409 aqui é o caso projetado: outra pessoa clicou primeiro, ou este
     // número já tem outra conversa aberta e é nela que a resposta chega.
     erro.value = e instanceof ErroDeApi ? e.message : 'Não consegui assumir.'
+    relatarErroDeBotao('assumir', e, alvo)
   }
 }
 
@@ -878,6 +1002,7 @@ async function enviar(interna = false) {
     await Promise.all([abrir(aberta.value.id), carregar({ silencioso: true })])
   } catch (e) {
     erro.value = e instanceof ErroDeApi ? e.message : 'Não consegui enviar.'
+    relatarErroDeBotao('enviar_mensagem', e, aberta.value?.id)
   } finally {
     enviando.value = false
   }
@@ -951,9 +1076,19 @@ function andarNaLista(passo, evento) {
    mensagem vai para o cliente e não volta, e o envio é `Ctrl+Enter` desde
    sempre — a fricção se paga. */
 function enterNoCompositor(evento) {
-  if (!listaArroba.value.length) return
-  evento.preventDefault()
-  escolherArroba(listaArroba.value[arrobaEscolhido.value])
+  /* A lista de menção `@` aberta ganha do resto: Enter ali escolhe a pessoa,
+     e é o que a pessoa acabou de pedir ao digitar `@`. */
+  if (listaArroba.value.length) {
+    evento.preventDefault()
+    escolherArroba(listaArroba.value[arrobaEscolhido.value])
+    return
+  }
+  // 🟢 Só para quem LIGOU (Erika, 15/09). Desligado, Enter segue quebrando
+  // linha -- o `.exact` do template garante que Shift+Enter nunca cai aqui.
+  if (enterEnvia.value) {
+    evento.preventDefault()
+    enviar()
+  }
 }
 
 function escolherArroba(pessoa) {
@@ -1057,6 +1192,7 @@ async function enviarArquivo(interna = false) {
     await Promise.all([abrir(aberta.value.id), carregar({ silencioso: true })])
   } catch (e) {
     erro.value = e.message || 'Não consegui enviar o arquivo.'
+    relatarErroDeBotao('enviar_arquivo', e, aberta.value?.id)
   } finally {
     enviandoArquivo.value = false
   }
@@ -1071,17 +1207,27 @@ function tamanhoDoArquivo(f) {
 
 async function transferir() {
   try {
+    const paraPessoa = Number(atendenteEscolhido.value) || null
     await api.post(`/api/conversas/${aberta.value.id}/transferir`, {
-      time_id: Number(timeEscolhido.value) || null,
+      time_id: paraPessoa ? null : (Number(timeEscolhido.value) || null),
+      para_atendente_id: paraPessoa,
       observacao: motivo.value || null,
     })
-    recado.value = 'Transferida — a conversa foi para a fila desse time.'
+    /* O recado muda porque a consequência muda: time tira o dono e volta pra
+       fila; pessoa já entrega com dono. É o que a própria função do backend
+       diz na docstring, e o atendente precisa saber qual dos dois fez. */
+    recado.value = paraPessoa
+      ? `Transferida — ${transferiveis.value.find((a) => a.id === paraPessoa)?.nome
+          || 'a pessoa escolhida'} passou a responder por ela.`
+      : 'Transferida — a conversa foi para a fila desse time.'
     painelAcao.value = ''
     timeEscolhido.value = ''
+    atendenteEscolhido.value = ''
     motivo.value = ''
     await Promise.all([abrir(aberta.value.id), carregar({ silencioso: true })])
   } catch (e) {
     erro.value = e instanceof ErroDeApi ? e.message : 'Não consegui transferir.'
+    relatarErroDeBotao('transferir', e, aberta.value?.id)
   }
 }
 
@@ -1092,6 +1238,7 @@ async function devolver() {
     await Promise.all([abrir(aberta.value.id), carregar({ silencioso: true })])
   } catch (e) {
     erro.value = e instanceof ErroDeApi ? e.message : 'Não consegui devolver.'
+    relatarErroDeBotao('devolver', e, aberta.value?.id)
   }
 }
 
@@ -1146,6 +1293,7 @@ async function encerrar() {
     erro.value = e instanceof ErroDeApi
       ? e.message
       : 'Não consegui concluir o atendimento.'
+    relatarErroDeBotao('concluir', e, aberta.value?.id)
   }
 }
 
@@ -1167,6 +1315,10 @@ async function encerrar() {
    entre montar a tela e a resposta chegar, nenhuma tecla age. Se a chamada
    falhar, continua falso -- o lado seguro é o teclado inerte. */
 const atalhosLigados = ref(false)
+/* 🟢 Erika (15/09). Desligado, Enter quebra linha e `Ctrl+Enter` envia --
+   o comportamento de sempre. Ligado, inverte: Enter envia e `Shift+Enter`
+   quebra linha, que é o que ela conhece do WhatsApp. */
+const enterEnvia = ref(false)
 const atalhosTeclas = ref({})
 
 function tecla(acao) {
@@ -1178,9 +1330,30 @@ async function carregarAtalhos() {
     const r = await api.get('/api/eu/atalhos')
     atalhosTeclas.value = r.teclas || {}
     atalhosLigados.value = Boolean(r.ligados)
+    enterEnvia.value = Boolean(r.enviar_com_enter)
   } catch {
     atalhosLigados.value = false
+    enterEnvia.value = false
   }
+}
+
+/* 🟡 S18, feito em 15/09: os sete modais da conversa fechavam só no clique
+   fora ou no botão Cancelar -- nenhum escutava Esc.
+
+   🚨 NÃO DÁ PRA PENDURAR NO `atalho()` ABAIXO: aquele é opt-in por pessoa
+   (CFG_6.1, nasce desligado) e sai cedo quando há painel aberto, que é
+   exatamente quando o Esc importa. E não dá pra pôr `@keydown.esc` no `div`
+   do modal: `div` não recebe foco, então o evento nunca chegaria nele.
+
+   ⚠️ FECHA O DE CIMA PRIMEIRO. Com confirmação aberta sobre um painel, Esc
+   tem de desfazer a pergunta, não sumir com os dois. */
+function fecharComEsc(evento) {
+  if (evento.key !== 'Escape') return
+  if (confirmacao.value) { confirmacao.value = null; return }
+  if (emTelaCheia.value) { emTelaCheia.value = null; return }
+  if (encaminhando.value) { encaminhando.value = null; return }
+  if (novaAberta.value) { novaAberta.value = false; return }
+  if (painelAcao.value) { fecharPainel() }
 }
 
 function atalho(evento) {
@@ -1219,6 +1392,7 @@ function atalho(evento) {
 
 onMounted(async () => {
   document.addEventListener('keydown', atalho)
+  document.addEventListener('keydown', fecharComEsc)
   document.addEventListener('click', fecharFiltroSeForaDele)
   /* 🚨 O FILTRO VEM DA URL QUANDO A TELA INICIAL MANDA. Os cartões da INI_1.1
      apontam para `/atendimento?minhas=1` e `?sem_dono=1`: sem ler a query, o
@@ -1257,12 +1431,16 @@ onMounted(async () => {
     }
   }
   // A fila é consumida a cada 5s no servidor; a tela reflete isso sem F5.
-  timer = setInterval(() => carregar({ silencioso: true }), 8000)
+  timer = setInterval(() => {
+    carregar({ silencioso: true })
+    atualizarMensagens()
+  }, 8000)
 })
 
 onUnmounted(() => {
   clearInterval(timer)
   document.removeEventListener('keydown', atalho)
+  document.removeEventListener('keydown', fecharComEsc)
   document.removeEventListener('click', fecharFiltroSeForaDele)
   /* 🚨 O MICROFONE TEM DE SER SOLTO AO SAIR (achado na auditoria de 25/08).
      Eu tratei disso no `onstop` do gravador e esqueci a saída pela porta:
@@ -1404,6 +1582,34 @@ async function carregarMidia(m) {
   }
 }
 
+/* 🟢 Erika (15/09): a foto de perfil de quem escreve.
+
+   🚨 NÃO DÁ PARA USAR `<img src="/api/...">`: a tag não manda o cabeçalho
+   `Authorization`, e a rota exige sessão -- é armadilha já registrada neste
+   projeto. Vai pelo mesmo caminho da mídia: busca com token e vira object
+   URL.
+
+   ⚠️ 404 é o caso NORMAL (metade das pessoas não tem foto ou a escondeu), e
+   por isso falhar aqui não mostra erro nenhum: a inicial colorida continua
+   sendo o que identifica. */
+const fotoUrl = ref('')
+
+function soltarFoto() {
+  if (fotoUrl.value) URL.revokeObjectURL(fotoUrl.value)
+  fotoUrl.value = ''
+}
+
+async function carregarFoto(conversa) {
+  soltarFoto()
+  if (!conversa || conversa.tipo === 'grupo') return
+  try {
+    const blob = await pedirBlob(`/api/conversas/${conversa.id}/foto`)
+    fotoUrl.value = URL.createObjectURL(blob)
+  } catch {
+    // sem foto: silêncio, a inicial já resolve
+  }
+}
+
 function soltarMidias() {
   for (const [id, url] of Object.entries(midias)) {
     if (url) URL.revokeObjectURL(url)
@@ -1446,6 +1652,15 @@ async function rolarParaOFim() {
 }
 
 const gaveta = ref(false)
+
+/* 🟡 S17, feito em 15/09. SEM cadastro, a gaveta não tem o que mostrar: ela
+   só servia de corredor até o botão de vincular -- dois cliques para a ação
+   que vale em 61% das conversas (medido em 28/08). COM ficha, o botão segue
+   abrindo a gaveta, que é onde a informação está. */
+function abrirFicha() {
+  if (aberta.value?.contato_id) gaveta.value = !gaveta.value
+  else abrirPainel('vincular')
+}
 
 /* As empresas que o telefone alcança -- o grupo da pessoa.
 
@@ -1498,7 +1713,10 @@ async function vincularA(clienteId) {
        resposta deixaria a falha sem lugar para aparecer: o `erro` do catch
        renderiza na tela de trás, e quem clicou já teria perdido a lista de
        onde escolher de novo. */
-    await api.post(`/api/conversas/${aberta.value.id}/vincular`, { cliente_id: clienteId })
+    await api.post(`/api/conversas/${aberta.value.id}/vincular`, {
+      cliente_id: clienteId,
+      nome: nomeDoContato.value.trim() || null,
+    })
     painelAcao.value = ''
     // Relê do servidor em vez de remendar a tela: o vínculo pode ter criado
     // contato novo, e o que vale é o que o banco diz.
@@ -1509,6 +1727,7 @@ async function vincularA(clienteId) {
     achadosCliente.value = []
   } catch (e) {
     erro.value = e instanceof ErroDeApi ? e.message : 'Falha ao vincular.'
+    relatarErroDeBotao('vincular', e, aberta.value?.id)
   } finally {
     vinculando.value = false
   }
@@ -1522,6 +1741,7 @@ async function desvincular() {
     recado.value = 'Vínculo desfeito. O telefone continua no cadastro.'
   } catch (e) {
     erro.value = e instanceof ErroDeApi ? e.message : 'Falha ao desvincular.'
+    relatarErroDeBotao('desvincular', e, aberta.value?.id)
   }
 }
 
@@ -1531,6 +1751,15 @@ function documentoLegivel(d) {
   if (s.length === 14) return s.replace(/(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})/, '$1.$2.$3/$4-$5')
   if (s.length === 11) return s.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '$1.$2.$3-$4')
   return s
+}
+
+/* A coordenada é o que vem ANTES do ' · ' no conteúdo de uma localização --
+   formato escrito por `_texto_do_local` no parser, de propósito estável.
+   Devolve vazio se não casar: link de mapa para coisa que não é coordenada
+   levaria a pessoa a uma página de erro. */
+function coordenadaDe(conteudo) {
+  const m = /^(-?\d+\.\d+,-?\d+\.\d+)/.exec(conteudo || '')
+  return m ? m[1] : ''
 }
 
 function carregarMidiasDaConversa(c) {
@@ -1771,6 +2000,13 @@ function carregarMidiasDaConversa(c) {
               <span class="conversa__corpo">
               <div class="conversa__topo">
                 <strong class="conversa__quem">{{ quem(c) }}</strong>
+                <!-- 🟢 Erika (15/09): a bolinha de quantidade, como no
+                     WhatsApp e no Bitrix. Conta só mensagem DO CLIENTE que
+                     esta pessoa ainda não viu -- abrir a conversa zera. -->
+                <span v-if="c.nao_lidas > 0" class="conversa__selo"
+                      :title="`${c.nao_lidas} mensagem(ns) que você ainda não viu`">
+                  {{ c.nao_lidas > 99 ? '99+' : c.nao_lidas }}
+                </span>
                 <span class="apagado pequeno conversa__hora">
                   {{ quando(c.ultima_atividade_em) }}
                 </span>
@@ -1848,6 +2084,20 @@ function carregarMidiasDaConversa(c) {
           <header class="cartao__cabecalho">
             <div>
               <strong>
+                <!-- 🟢 Erika (15/09): a foto de perfil de quem escreve.
+                     🚨 SÓ NA CONVERSA ABERTA, NUNCA NA LISTA. Na lista seriam
+                     dezenas de buscas por carga de tela -- e a primeira de
+                     cada número vai à rede, ao Evolution. Aqui é uma, quando
+                     a pessoa já escolheu com quem falar.
+                     ⚠️ Some sozinha se não houver foto (404 é o normal: metade
+                     das pessoas não tem ou escondeu), e a inicial colorida
+                     continua sendo o que identifica. -->
+                <img
+                  v-if="!ehGrupo && fotoUrl"
+                  :src="fotoUrl"
+                  class="conversa__foto"
+                  alt=""
+                />
                 <i v-if="ehGrupo" class="bi bi-people" aria-hidden="true"></i>
                 {{ quem(aberta) }}
               </strong>
@@ -1868,7 +2118,7 @@ function carregarMidiasDaConversa(c) {
                 :class="aberta.contato_id ? 'botao--contorno' : 'botao--faltando'"
                 type="button"
                 :aria-expanded="gaveta"
-                @click="gaveta = !gaveta"
+                @click="abrirFicha"
               >
                 <i class="bi" :class="aberta.contato_id
                      ? 'bi-person-lines-fill' : 'bi-person-exclamation'"
@@ -2003,7 +2253,7 @@ function carregarMidiasDaConversa(c) {
               <button
                 class="botao botao--pequeno botao--contorno"
                 type="button"
-                title="Transferir para outro time"
+                title="Transferir para outra pessoa ou para um time"
                 @click="abrirPainel('transferir')"
               >
                 <i class="bi bi-arrow-left-right" aria-hidden="true"></i>
@@ -2436,12 +2686,34 @@ function carregarMidiasDaConversa(c) {
                 <i class="bi bi-sticky" aria-hidden="true"></i>
                 Nota de <strong>{{ m.atendente_nome || 'autor não registrado' }}</strong>
               </p>
+              <!-- 🔵 Relato da Erika (15/09): abrindo a conversa de outro
+                   atendente, nenhuma resposta diz quem escreveu -- só a nota
+                   interna dizia. O nome já vinha da API, só a tela não
+                   imprimia pra este caso. -->
+              <p v-if="m.direcao === 'saida' && m.tipo !== 'nota' && m.atendente_nome"
+                 class="balao__autor pequeno">
+                <i class="bi bi-person-badge" aria-hidden="true"></i>
+                {{ m.atendente_nome }}
+              </p>
               <!-- Pedaços, não `v-html`: o texto é do cliente. -->
               <p v-if="m.conteudo" class="balao__texto">
                 <span v-for="(p, i) in marcar(m.conteudo, buscaNaConversa)" :key="i"
                       :class="{ 'achado': p.casa }">{{ p.texto }}</span>
               </p>
               <p v-else class="balao__texto fraco">(sem texto)</p>
+              <!-- 🔵 15/09: localização mostrava só o ícone e a palavra
+                   "localizacao". A coordenada sempre chegou no payload; o que
+                   faltava era extrair (feito no parser) e dar o que fazer com
+                   ela — que é abrir o mapa. -->
+              <a
+                v-if="m.tipo === 'localizacao' && coordenadaDe(m.conteudo)"
+                class="balao__mapa pequeno"
+                :href="`https://www.google.com/maps?q=${coordenadaDe(m.conteudo)}`"
+                target="_blank"
+                rel="noopener"
+              >
+                <i class="bi bi-geo-alt" aria-hidden="true"></i> Ver no mapa
+              </a>
               <!-- Veio de outra conversa: o histórico precisa dizer isso.
                    Seis meses depois ninguém sabe se a frase foi escrita para
                    este cliente ou repassada. -->
@@ -2757,24 +3029,61 @@ function carregarMidiasDaConversa(c) {
          "falar com esta pessoa". -->
     <div v-if="novaAberta" class="modal" @click.self="novaAberta = false">
       <div class="modal__caixa" role="dialog" aria-modal="true" aria-label="Nova mensagem">
-        <p class="modal__titulo">Nova mensagem</p>
+        <p class="modal__titulo">{{ modoGrupo ? 'Novo grupo' : 'Nova mensagem' }}</p>
+
+        <!-- 🟡 S15, 15/09: criar grupo era o que faltava atrás do `+`. Duas
+             abas em vez de dois botões no menu: é a mesma pergunta ("falar
+             com quem ainda não está aqui"), com dois destinos. -->
+        <div class="modal__abas">
+          <button class="botao botao--pequeno"
+                  :class="modoGrupo ? 'botao--fantasma' : 'botao--primario'"
+                  type="button" @click="modoGrupo = false">
+            <i class="bi bi-person" aria-hidden="true"></i> Uma pessoa
+          </button>
+          <button class="botao botao--pequeno"
+                  :class="modoGrupo ? 'botao--primario' : 'botao--fantasma'"
+                  type="button" @click="modoGrupo = true">
+            <i class="bi bi-people" aria-hidden="true"></i> Grupo
+          </button>
+        </div>
+
         <p class="modal__texto pequeno">
-          Para um número que ainda não escreveu.
+          {{ modoGrupo
+            ? 'O grupo nasce com o nosso número como dono — é o WhatsApp que manda nisso.'
+            : 'Para um número que ainda não escreveu.' }}
         </p>
 
+        <label v-if="modoGrupo" class="campo">
+          <span class="campo__rotulo">Nome do grupo</span>
+          <input v-model="grupoNome" class="campo__entrada" type="text"
+                 maxlength="100" placeholder="Obra Rua das Flores" />
+        </label>
+
         <label class="campo">
-          <span class="campo__rotulo">Número</span>
+          <span class="campo__rotulo">{{ modoGrupo ? 'Números' : 'Número' }}</span>
+          <textarea
+            v-if="modoGrupo"
+            v-model="grupoNumeros"
+            class="campo__entrada"
+            rows="3"
+            placeholder="(18) 99811-6168, (19) 99999-0000"
+          ></textarea>
           <input
+            v-else
             v-model="novoNumero"
             class="campo__entrada"
             type="tel"
             placeholder="(18) 99811-6168"
             autocomplete="off"
           />
-          <span class="campo__ajuda">Com DDD. Pode colar como estiver.</span>
+          <span class="campo__ajuda">
+            {{ modoGrupo
+              ? 'Um por linha ou separados por vírgula. Até 50. Quem não tiver WhatsApp é apontado antes.'
+              : 'Com DDD. Pode colar como estiver.' }}
+          </span>
         </label>
 
-        <label class="campo">
+        <label v-if="!modoGrupo" class="campo">
           <span class="campo__rotulo">Mensagem</span>
           <textarea
             v-model="novoTexto"
@@ -2801,6 +3110,20 @@ function carregarMidiasDaConversa(c) {
             Cancelar
           </button>
           <button
+            v-if="modoGrupo"
+            class="botao botao--primario"
+            type="button"
+            :disabled="enviandoNova || !grupoNome.trim() || !grupoNumeros.trim()"
+            :title="!grupoNome.trim() ? 'Dê um nome ao grupo'
+              : !grupoNumeros.trim() ? 'Informe ao menos um número' : ''"
+            @click="criarGrupo"
+          >
+            <span v-if="enviandoNova" class="girando"></span>
+            <i v-else class="bi bi-people" aria-hidden="true"></i>
+            Criar grupo
+          </button>
+          <button
+            v-else
             class="botao botao--primario"
             type="button"
             :disabled="enviandoNova || !novoNumero.trim() || !novoTexto.trim()"
@@ -2884,6 +3207,22 @@ function carregarMidiasDaConversa(c) {
           </div>
         </div>
 
+        <!-- 🔵 O nome de quem vai virar contato, digitável (15/09). Vazio
+             mantém o que o sistema deriva do apelido do WhatsApp. -->
+        <label class="campo">
+          <span class="campo__rotulo">Nome da pessoa (opcional)</span>
+          <input
+            v-model="nomeDoContato"
+            class="campo__entrada"
+            type="text"
+            maxlength="120"
+            :placeholder="aberta.nome_whatsapp || aberta.telefone_e164"
+          />
+          <span class="campo__ajuda">
+            Vazio usa o nome do WhatsApp — que às vezes é só um emoji.
+          </span>
+        </label>
+
         <label class="campo">
           <span class="campo__rotulo">Buscar empresa</span>
           <input
@@ -2939,15 +3278,32 @@ function carregarMidiasDaConversa(c) {
     <!-- TRANSFERIR -->
     <div v-if="painelAcao === 'transferir' && aberta" class="modal" @click.self="fecharPainel">
       <div class="modal__caixa" role="dialog" aria-modal="true" aria-label="Transferir conversa">
-        <p class="modal__titulo">Transferir para outro time</p>
-        <!-- ⚠️ A consequência fica (transferir tira o dono, e isso não se
-             desfaz); a aula sobre triagem e IA saiu. -->
+        <p class="modal__titulo">Transferir conversa</p>
+        <!-- ⚠️ A consequência de cada destino é DIFERENTE, e é isso que a
+             pessoa precisa ler antes de escolher: time larga na fila, pessoa
+             entrega com dono. Está assim na própria função do backend. -->
         <p class="modal__texto pequeno">
-          Transferir tira o dono: a conversa volta a ser do time.
+          {{ atendenteEscolhido
+            ? 'Para uma pessoa: ela passa a ser a dona e responde por ela.'
+            : 'Para um time: tira o dono e a conversa volta para a fila do time.' }}
         </p>
         <label class="campo">
-          <span class="campo__rotulo">Time</span>
-          <select v-model="timeEscolhido" class="campo__entrada">
+          <span class="campo__rotulo">Pessoa</span>
+          <select v-model="atendenteEscolhido" class="campo__entrada"
+                  @change="timeEscolhido = ''">
+            <option value="">escolha…</option>
+            <option v-for="a in transferiveis" :key="a.id" :value="a.id">
+              {{ a.nome }}
+            </option>
+          </select>
+          <span class="campo__ajuda">
+            Entrega direto: quem receber já vira dono da conversa.
+          </span>
+        </label>
+        <label class="campo">
+          <span class="campo__rotulo">…ou um time</span>
+          <select v-model="timeEscolhido" class="campo__entrada"
+                  @change="atendenteEscolhido = ''">
             <option value="">escolha…</option>
             <option v-for="t in times" :key="t.id" :value="t.id">
               {{ t.nome }}{{ t.qtd_membros ? '' : ' — sem ninguém dentro!' }}
@@ -2969,8 +3325,9 @@ function carregarMidiasDaConversa(c) {
             Cancelar
           </button>
           <button class="botao botao--primario" type="button"
-                  :disabled="!timeEscolhido"
-                  :title="timeEscolhido ? '' : 'Escolha o time de destino'"
+                  :disabled="!timeEscolhido && !atendenteEscolhido"
+                  :title="(timeEscolhido || atendenteEscolhido)
+                    ? '' : 'Escolha uma pessoa ou um time de destino'"
                   @click="transferir">
             Transferir
           </button>
@@ -3647,6 +4004,45 @@ function carregarMidiasDaConversa(c) {
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
+.modal__abas { display: flex; gap: var(--e-2); margin-bottom: var(--e-3); }
+
+/* A bolinha de não lidas. Verde do WhatsApp de propósito: é o lugar onde
+   quem atende já espera encontrá-la. */
+.conversa__selo {
+  flex: none;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--ok);
+  color: #fff;
+  font-size: 11px;
+  font-weight: var(--peso-forte);
+  line-height: 18px;
+  text-align: center;
+}
+
+/* Foto de perfil no cabeçalho da conversa: pequena e redonda, ao lado do
+   nome. Não substitui a inicial colorida da lista -- convive com ela. */
+.conversa__foto {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  object-fit: cover;
+  vertical-align: middle;
+  margin-right: var(--e-2);
+}
+
+.balao__mapa {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 4px;
+  color: var(--acento);
+  text-decoration: none;
+}
+.balao__mapa:hover { text-decoration: underline; }
+
 /* O segundo tique só existe quando a mensagem foi lida. */
 .balao__tique { margin-left: 3px; letter-spacing: -2px; }
 .balao__lida { color: var(--conversa-lida); font-weight: var(--peso-forte); }

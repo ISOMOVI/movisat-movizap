@@ -209,6 +209,12 @@ const rotas = [
     meta: { codigo: 'CFG_6.1', titulo: 'Atalhos de teclado' },
   },
   {
+    path: '/config/eventos',
+    name: 'CFG_8.1',
+    component: () => import('../telas/EventosWebhook.vue'),
+    meta: { codigo: 'CFG_8.1', titulo: 'Eventos do WhatsApp' },
+  },
+  {
     path: '/config/telas',
     name: 'CFG_9.1',
     component: Configuracoes,

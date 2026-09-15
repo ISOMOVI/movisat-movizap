@@ -614,4 +614,32 @@ def resumo() -> dict:
         "harmonit": harmonit.estado(),
         "ultima": ultima_execucao(),
         "historico": execucoes(10),
+        "ignorados": ignorados_do_webhook(),
     }
+
+
+def ignorados_do_webhook(dias: int = 30) -> list[dict]:
+    """🟡 S4, feito em 15/09 -- e ele era SEU, autorizado, e eu tinha perdido.
+
+    O que chegou pelo WhatsApp e NÃO virou conversa, por motivo. Mora na
+    CFG_3.1 porque esta já é a tela de diagnóstico: é onde se olha quando a
+    pergunta é "está entrando tudo?".
+
+    🚨 O TIPO NÃO TRATADO É O QUE IMPORTA AQUI. Desde 27/08 o parser descarta
+    tipo desconhecido em vez de exibi-lo como fala do cliente (eram 84 linhas
+    falsas em 28 conversas) -- e o nome da chave fica em `motivo_ignorado`.
+    Sem esta tela, o dia em que o WhatsApp inventar um tipo novo passa em
+    silêncio: o descarte está CERTO, mas ninguém fica sabendo que existe algo
+    novo chegando.
+
+    ⚠️ Conta por `motivo_ignorado`, coluna própria: 0,035 s. Varrer o
+    `payload::text` atrás da mesma resposta custava 1,10 s POR CHAVE.
+    """
+    return banco.varios(
+        """SELECT motivo_ignorado AS motivo, count(*) AS quantos,
+                  max(recebido_em) AS ultimo
+             FROM webhook_evento
+            WHERE motivo_ignorado IS NOT NULL
+              AND recebido_em > now() - make_interval(days => %s)
+            GROUP BY motivo_ignorado
+            ORDER BY quantos DESC""", (dias,))

@@ -161,9 +161,26 @@ describe('A ficha se anuncia como ficha', () => {
   })
 })
 
+/* Com CONTATO e sem EMPRESA: é o único estado em que a gaveta abre E ainda
+   oferece vincular empresa. Com empresa, o botão sai (não há o que vincular);
+   sem contato, desde o S17 (15/09) o botão da ficha pula direto pro modal e
+   a gaveta nem abre. */
+async function comContatoSemEmpresa() {
+  respostas['/api/conversas/7'] = {
+    ...CONVERSA,
+    contato_id: 9,
+    contato_nome: 'Velasco',
+    empresa: {
+      contato: { nome: 'Velasco', relacao: 'cliente' },
+      cliente: null,
+    },
+  }
+  return comConversaAberta()
+}
+
 describe('Vincular empresa é modal, não faixa espremida na gaveta', () => {
   it('a gaveta não carrega mais o campo de busca', async () => {
-    const w = await comConversaAberta()
+    const w = await comContatoSemEmpresa()
     await acharBotao(w, 'Ficha').trigger('click')
     await assentar(w)
     const gaveta = w.find('.gaveta')
@@ -171,6 +188,19 @@ describe('Vincular empresa é modal, não faixa espremida na gaveta', () => {
     // 🚨 O que espremia era isto: a busca dentro do teto de 42vh da gaveta.
     expect(gaveta.find('input[type="search"]').exists()).toBe(false)
     expect(gaveta.text()).toContain('Vincular a uma empresa')
+  })
+
+  /* 🚨 S17, 15/09: SEM cadastro a gaveta só servia de corredor até o vínculo
+     -- dois cliques para a ação que vale em 61% das conversas. Este teste é
+     o que impede o clique extra de voltar sem ninguém perceber. */
+  it('sem cadastro, um clique em Ficha já abre o modal', async () => {
+    const w = await comConversaAberta()
+    await acharBotao(w, 'Ficha').trigger('click')
+    await assentar(w)
+    expect(w.find('.modal').exists()).toBe(true)
+    expect(w.find('.modal').text()).toContain('Vincular a uma empresa')
+    // E a gaveta NÃO abre junto: seria duas coisas abertas por um clique só.
+    expect(w.find('.gaveta').exists()).toBe(false)
   })
 
   it('o botão abre o modal, e os achados aparecem dentro dele', async () => {
@@ -181,9 +211,8 @@ describe('Vincular empresa é modal, não faixa espremida na gaveta', () => {
       ],
     }
     const w = await comConversaAberta()
+    // Um clique só desde o S17 (15/09): sem cadastro, Ficha abre o modal.
     await acharBotao(w, 'Ficha').trigger('click')
-    await assentar(w)
-    await acharBotao(w, 'Vincular a uma empresa').trigger('click')
     await assentar(w)
 
     const modal = w.find('.modal')
@@ -204,9 +233,8 @@ describe('Vincular empresa é modal, não faixa espremida na gaveta', () => {
       itens: [{ id: 3, nome: 'Pastelaria Velasco', documento: null, ativo: true }],
     }
     const w = await comConversaAberta()
+    // Um clique só desde o S17 (15/09): sem cadastro, Ficha abre o modal.
     await acharBotao(w, 'Ficha').trigger('click')
-    await assentar(w)
-    await acharBotao(w, 'Vincular a uma empresa').trigger('click')
     await assentar(w)
     w.vm.buscaCliente = 'velasco'
     await w.vm.procurarCliente()
@@ -227,9 +255,8 @@ describe('Vincular empresa é modal, não faixa espremida na gaveta', () => {
         { id: i + 1, nome: `Empresa ${i + 1}`, documento: null, ativo: true })),
     }
     const w = await comConversaAberta()
+    // Um clique só desde o S17 (15/09): sem cadastro, Ficha abre o modal.
     await acharBotao(w, 'Ficha').trigger('click')
-    await assentar(w)
-    await acharBotao(w, 'Vincular a uma empresa').trigger('click')
     await assentar(w)
     w.vm.buscaCliente = 'empresa'
     await w.vm.procurarCliente()
