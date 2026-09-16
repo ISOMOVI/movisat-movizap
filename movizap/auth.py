@@ -26,7 +26,7 @@ from .config import settings
 log = logging.getLogger("movizap.auth")
 
 ALGORITMO = "HS256"
-TOKEN_EXPIRA_HORAS = 8
+TOKEN_EXPIRA_HORAS = 10
 
 bearer = HTTPBearer(auto_error=False)
 pwd_ctx = CryptContext(schemes=["bcrypt"], deprecated="auto")
