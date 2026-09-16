@@ -52,7 +52,12 @@ hr { border: 0; border-top: var(--borda-fina) solid var(--borda); margin: var(--
   border-radius: var(--r-sm);
 }
 
-::selection { background: var(--acento-suave); }
+/* 🔵 Relato da Erika (16/09): selecionava tudo pra apagar e não via o que
+   tinha marcado. Era `--acento-suave` (#EFF6FF) contra fundo branco
+   (`--superficie`, #FFFFFF) -- a seleção existia, mas a diferença é
+   imperceptível. 🔵 Pedido dele: o mesmo tom do Windows -- azul escuro com
+   texto branco, o mesmo par que já veste o `.botao--primario`. */
+::selection { background: var(--acento); color: var(--acento-texto); }
 
 /* Barra de rolagem discreta, mesma cor nos dois temas. */
 * { scrollbar-width: thin; scrollbar-color: var(--borda-forte) transparent; }
