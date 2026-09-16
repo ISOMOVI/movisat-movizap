@@ -8,7 +8,7 @@
    ============================================================================ */
 import { describe, expect, it } from 'vitest'
 
-import { ANTES, DEPOIS, marcar, partir } from './destaque.js'
+import { ANTES, DEPOIS, linkificar, marcar, partir } from './destaque.js'
 
 /** Junta os pedaços de volta, para conferir que nada se perdeu. */
 const inteiro = (pedacos) => pedacos.map((p) => p.texto).join('')
@@ -170,5 +170,62 @@ describe('partir — prévia da lista', () => {
     const r = partir(`${'a'.repeat(100)}ALVO${'b'.repeat(100)}`, 'ALVO')
     const texto = inteiro(r).replaceAll('…', '')
     expect(texto).toBe(`${'a'.repeat(ANTES)}ALVO${'b'.repeat(DEPOIS)}`)
+  })
+})
+
+describe('linkificar — link dentro do balão', () => {
+  const links = (pedacos) => pedacos.filter((p) => p.link).map((p) => p.texto)
+
+  it('texto sem link devolve tudo como não-link', () => {
+    const r = linkificar('bom dia, tudo bem?')
+    expect(inteiro(r)).toBe('bom dia, tudo bem?')
+    expect(links(r)).toEqual([])
+  })
+
+  it('mensagem que é só o link', () => {
+    const r = linkificar('https://sishab2.antt.gov.br/login')
+    expect(links(r)).toEqual(['https://sishab2.antt.gov.br/login'])
+    expect(inteiro(r)).toBe('https://sishab2.antt.gov.br/login')
+  })
+
+  it('link no meio da frase preserva o texto ao redor', () => {
+    const r = linkificar('acesse https://exemplo.com/x agora')
+    expect(inteiro(r)).toBe('acesse https://exemplo.com/x agora')
+    expect(links(r)).toEqual(['https://exemplo.com/x'])
+  })
+
+  it('http (sem s) também conta como link', () => {
+    expect(links(linkificar('http://exemplo.com'))).toEqual(['http://exemplo.com'])
+  })
+
+  it('duas URLs na mesma mensagem, as duas viram link', () => {
+    const r = linkificar('https://a.com e https://b.com')
+    expect(links(r)).toEqual(['https://a.com', 'https://b.com'])
+  })
+
+  it('pontuação de frase colada no fim NÃO entra no link', () => {
+    const r = linkificar('veja em https://exemplo.com/pagina.')
+    expect(links(r)).toEqual(['https://exemplo.com/pagina'])
+    expect(inteiro(r)).toBe('veja em https://exemplo.com/pagina.')
+  })
+
+  it('link entre parênteses não carrega o fechamento', () => {
+    const r = linkificar('(https://exemplo.com/x)')
+    expect(links(r)).toEqual(['https://exemplo.com/x'])
+    expect(inteiro(r)).toBe('(https://exemplo.com/x)')
+  })
+
+  it('texto vazio ou nulo não quebra', () => {
+    expect(inteiro(linkificar(''))).toBe('')
+    expect(inteiro(linkificar(null))).toBe('')
+    expect(linkificar(null)).toEqual([{ texto: '', link: false }])
+  })
+
+  it('🚨 nunca devolve HTML, só pedaços de string', () => {
+    const veneno = '<img src=x onerror="alert(1)"> https://exemplo.com/a'
+    const r = linkificar(veneno)
+    expect(inteiro(r)).toBe(veneno)
+    expect(r.every((p) => typeof p.texto === 'string')).toBe(true)
+    expect(links(r)).toEqual(['https://exemplo.com/a'])
   })
 })

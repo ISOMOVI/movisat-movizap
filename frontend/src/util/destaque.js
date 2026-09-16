@@ -77,3 +77,44 @@ export function marcar(texto, termo) {
   }
   return pedacos
 }
+
+/* ⚠️ AQUI SIM É REGEX, e de propósito -- o contrário de `marcar`/`partir`.
+   Lá o alvo é digitado por gente (o termo de busca) e vira ele mesmo o
+   padrão; aqui o padrão é FIXO (a forma de uma URL) e o texto é dado, então
+   não há metacaractere de usuário para escapar. */
+const URL = /https?:\/\/[^\s<>"']+/gi
+
+/* Pontuação de frase que gruda no fim de um link colado ("...gov.br/login.",
+   "(veja aqui: https://x.com)"): não faz parte da URL, e mandar assim quebra
+   o destino. Fica de fora do link e volta como texto comum. */
+const PONTUACAO_NO_FIM = /[).,;:!?\]]+$/
+
+/**
+ * Separa um texto em pedaços de link e não-link, sem tocar em HTML.
+ *
+ * Mesma garantia de `marcar`: nunca devolve marcação, só pedaços de string
+ * que, somados, reconstroem o texto original -- quem transforma link em
+ * `<a>` é o template, com `:href`, não esta função.
+ *
+ * @returns {{texto: string, link: boolean}[]}
+ */
+export function linkificar(texto) {
+  if (!texto) return [{ texto: texto || '', link: false }]
+
+  const pedacos = []
+  let i = 0
+  for (const m of texto.matchAll(URL)) {
+    const inicio = m.index
+    if (inicio > i) pedacos.push({ texto: texto.slice(i, inicio), link: false })
+
+    let url = m[0]
+    const sufixo = url.match(PONTUACAO_NO_FIM)
+    if (sufixo) url = url.slice(0, url.length - sufixo[0].length)
+
+    if (url) pedacos.push({ texto: url, link: true })
+    if (sufixo) pedacos.push({ texto: sufixo[0], link: false })
+    i = m.index + m[0].length
+  }
+  if (i < texto.length) pedacos.push({ texto: texto.slice(i), link: false })
+  return pedacos.length ? pedacos : [{ texto, link: false }]
+}

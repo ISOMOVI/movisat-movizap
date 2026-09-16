@@ -22,7 +22,7 @@ import { useRoute, useRouter } from 'vue-router'
 
 import { api, pedirBlob, ErroDeApi, relatarErroDeBotao } from '../api/cliente.js'
 import { codigosPermitidos } from '../estado/sessao.js'
-import { marcar, partir } from '../util/destaque.js'
+import { linkificar, marcar, partir } from '../util/destaque.js'
 import { corDaInicial, iniciais } from '../util/avatar.js'
 import AjudaDaTela from '../componentes/AjudaDaTela.vue'
 
@@ -2695,10 +2695,18 @@ function carregarMidiasDaConversa(c) {
                 <i class="bi bi-person-badge" aria-hidden="true"></i>
                 {{ m.atendente_nome }}
               </p>
-              <!-- Pedaços, não `v-html`: o texto é do cliente. -->
+              <!-- Pedaços, não `v-html`: o texto é do cliente. Link vira
+                   `<a>` pelo `:href` do Vue -- a URL nunca passa por HTML
+                   bruto, só pelo mesmo recorte que já existia. -->
               <p v-if="m.conteudo" class="balao__texto">
-                <span v-for="(p, i) in marcar(m.conteudo, buscaNaConversa)" :key="i"
-                      :class="{ 'achado': p.casa }">{{ p.texto }}</span>
+                <template v-for="(p, i) in marcar(m.conteudo, buscaNaConversa)" :key="i">
+                  <template v-for="(q, j) in linkificar(p.texto)" :key="`${i}-${j}`">
+                    <a v-if="q.link" :href="q.texto" target="_blank"
+                       rel="noopener noreferrer" class="balao__link"
+                       :class="{ 'achado': p.casa }">{{ q.texto }}</a>
+                    <span v-else :class="{ 'achado': p.casa }">{{ q.texto }}</span>
+                  </template>
+                </template>
               </p>
               <p v-else class="balao__texto fraco">(sem texto)</p>
               <!-- 🔵 15/09: localização mostrava só o ícone e a palavra
@@ -3990,6 +3998,9 @@ function carregarMidiasDaConversa(c) {
 .balao--interna::before { display: none; }
 
 .balao__texto { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+/* Mesmo azul de link do resto do painel (`--acento`); sublinhado porque a
+   cor sozinha não basta pra quem não distingue bem cores. */
+.balao__link { color: var(--acento); text-decoration: underline; }
 .balao__tipo { margin: 0 0 var(--e-1); }
 
 /* ⚠️ HORA À DIREITA, sempre -- inclusive no balão de entrada. É onde o olho

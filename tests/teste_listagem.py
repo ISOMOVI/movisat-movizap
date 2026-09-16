@@ -79,6 +79,15 @@ def ids(linhas):
     return {x["id"] for x in linhas}
 
 
+def entrada(conversa_id, sufixo):
+    """Insere uma mensagem de CLIENTE (`direcao='entrada'`) na conversa."""
+    banco.executar(
+        """INSERT INTO mensagem (conversa_id, id_externo, direcao, autor,
+                                 tipo, conteudo, criada_em)
+           VALUES (%s, %s, 'entrada', 'cliente', 'texto', 'oi', now())""",
+        (conversa_id, f"{LOGIN}{sufixo}"))
+
+
 class TestListagemDoDono:
     def test_minhas_conversas_traz_so_as_minhas(self, cena):
         r = ids(conversas.listar(atendente_id=cena["eu"], limite=500))
@@ -202,23 +211,16 @@ class TestNaoLidas:
     pegado o bug se existissem em 15/09.
     """
 
-    def _entrada(self, conversa_id, sufixo):
-        banco.executar(
-            """INSERT INTO mensagem (conversa_id, id_externo, direcao, autor,
-                                     tipo, conteudo, criada_em)
-               VALUES (%s, %s, 'entrada', 'cliente', 'texto', 'oi', now())""",
-            (conversa_id, f"{LOGIN}{sufixo}"))
-
     def test_sem_visualizador_nao_lidas_vem_zero(self, cena):
         # Não é o bug -- é a honestidade de não saber quem está olhando.
         # O bug estava em `main.py` nunca mandar visualizador nenhum.
-        self._entrada(cena["minha"], "a")
+        entrada(cena["minha"], "a")
         linha = next(x for x in conversas.listar(limite=500)
                      if x["id"] == cena["minha"])
         assert linha["nao_lidas"] == 0
 
     def test_com_visualizador_conta_a_mensagem_nao_lida(self, cena):
-        self._entrada(cena["minha"], "b")
+        entrada(cena["minha"], "b")
         linha = next(x for x in conversas.listar(
             limite=500, visualizador_id=cena["eu"]) if x["id"] == cena["minha"])
         assert linha["nao_lidas"] == 1
@@ -227,13 +229,13 @@ class TestNaoLidas:
         # A conversa é do "outro" -- "eu" só está de passagem pela fila
         # geral (atendente_id=None), que é exatamente a Caixa de Entrada
         # padrão. Sem isto, a bolinha só existiria dentro de "minhas".
-        self._entrada(cena["dele"], "c")
+        entrada(cena["dele"], "c")
         linha = next(x for x in conversas.listar(
             limite=500, visualizador_id=cena["eu"]) if x["id"] == cena["dele"])
         assert linha["nao_lidas"] == 1
 
     def test_marcar_lida_zera_so_pra_quem_leu(self, cena):
-        self._entrada(cena["minha"], "d")
+        entrada(cena["minha"], "d")
         conversas.marcar_lida(cena["minha"], cena["eu"])
         linha_eu = next(x for x in conversas.listar(
             limite=500, visualizador_id=cena["eu"]) if x["id"] == cena["minha"])
@@ -241,3 +243,48 @@ class TestNaoLidas:
             limite=500, visualizador_id=cena["outro"]) if x["id"] == cena["minha"])
         assert linha_eu["nao_lidas"] == 0
         assert linha_outro["nao_lidas"] == 1, "é por pessoa, não por conversa"
+
+
+class TestMarcarLidaSoDonoOuParticipante:
+    """Decisão do usuário, 16/09: abrir uma conversa vindo de "Todas" ou "Sem
+    dono" é ESPIAR a fila, não atender -- e não pode consumir a bolinha de
+    ninguém. Só marca como lida quem é dono OU participante, o mesmo critério
+    de "aba Minhas".
+    """
+
+    def test_quem_nao_e_dono_nem_participante_nao_marca_como_lida(self, cena):
+        entrada(cena["minha"], "e")
+        # "outro" abre a conversa do "eu" só de passagem pela fila geral.
+        antes = conversas.marcar_lida(cena["minha"], cena["outro"])
+        assert antes == 0, "marcou lida mesmo sem ser dono nem participante"
+
+        linha_eu = next(x for x in conversas.listar(
+            limite=500, visualizador_id=cena["eu"]) if x["id"] == cena["minha"])
+        assert linha_eu["nao_lidas"] == 1, (
+            "espiar pela fila geral consumiu a bolinha do DONO de verdade")
+
+    def test_dono_marca_normalmente(self, cena):
+        entrada(cena["minha"], "f")
+        r = conversas.marcar_lida(cena["minha"], cena["eu"])
+        assert r > 0
+        linha = next(x for x in conversas.listar(
+            limite=500, visualizador_id=cena["eu"]) if x["id"] == cena["minha"])
+        assert linha["nao_lidas"] == 0
+
+    def test_participante_convidado_tambem_marca(self, cena):
+        # Quem foi chamado pra acompanhar TAMBÉM está na "aba Minhas" dele
+        # (é a regra de `listar`) -- então abrir e ler conta igual ao dono.
+        conversas.convidar(cena["minha"], cena["outro"], cena["eu"])
+        entrada(cena["minha"], "g")
+        r = conversas.marcar_lida(cena["minha"], cena["outro"])
+        assert r > 0
+        linha = next(x for x in conversas.listar(
+            limite=500, visualizador_id=cena["outro"]) if x["id"] == cena["minha"])
+        assert linha["nao_lidas"] == 0
+
+    def test_conversa_sem_dono_ninguem_marca(self, cena):
+        # "Sem dono" literalmente não tem quem seja dono -- e "eu" não foi
+        # convidado pra ela, então também não é participante.
+        entrada(cena["orfa"], "h")
+        r = conversas.marcar_lida(cena["orfa"], cena["eu"])
+        assert r == 0

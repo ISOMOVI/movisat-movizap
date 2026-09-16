@@ -1275,6 +1275,23 @@ def _empresa_da_conversa(conversa: dict) -> dict | None:
     return empresa
 
 
+def _e_meu_atendimento(conversa_id: int, atendente_id: int) -> bool:
+    """Esta pessoa é DONA ou PARTICIPANTE desta conversa -- o mesmo critério
+    do filtro "minhas conversas" em `listar()` (mantido idêntico de propósito:
+    são a mesma pergunta, em dois lugares diferentes).
+    """
+    linha = banco.um(
+        """SELECT 1 FROM conversa c
+            WHERE c.id = %s
+              AND (c.atendente_id = %s
+                   OR EXISTS (SELECT 1 FROM conversa_participante p
+                               WHERE p.conversa_id = c.id
+                                 AND p.atendente_id = %s
+                                 AND p.saiu_em IS NULL))""",
+        (conversa_id, atendente_id, atendente_id))
+    return linha is not None
+
+
 def marcar_lida(conversa_id: int, atendente_id: int | None) -> int:
     """Esta pessoa leu esta conversa até a última mensagem. 🟢 Erika, 15/09.
 
@@ -1285,8 +1302,14 @@ def marcar_lida(conversa_id: int, atendente_id: int | None) -> int:
     ⚠️ Silenciosa quando não há atendente vinculado: ler conversa não exige
     vínculo (a régua de LER é a tela, não o vínculo), e estourar aqui
     quebraria a abertura da conversa por causa de um contador.
+
+    🚨 SÓ CONTA PARA QUEM É DONO OU PARTICIPANTE (usuário, 16/09). Abrir uma
+    conversa vindo de "Todas" ou "Sem dono" é ESPIAR a fila, não atender --
+    e não pode consumir a bolinha de ninguém. Sem esta trava, qualquer pessoa
+    passando o olho na fila geral marcava como lida a conversa de OUTRO
+    atendente, que nunca chegou a ver a mensagem.
     """
-    if not atendente_id:
+    if not atendente_id or not _e_meu_atendimento(conversa_id, atendente_id):
         return 0
     linha = banco.um(
         "SELECT COALESCE(max(id), 0) AS ultima FROM mensagem "
