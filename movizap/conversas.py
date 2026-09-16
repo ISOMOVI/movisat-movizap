@@ -1012,11 +1012,23 @@ def _trechos_achados(ids: list[int], termo: str) -> dict[int, str]:
 
 def listar(estado: str | None = None, atendente_id: int | None = None,
            sem_dono: bool = False, busca: str = "", limite: int = 100,
-           relacoes: list[str] | None = None) -> list[dict]:
+           relacoes: list[str] | None = None,
+           visualizador_id: int | None = None) -> list[dict]:
     """As conversas para a lista da caixa de entrada.
 
     Cada linha traz o que o doc pede: nome (ou telefone, quando não
     identificado), última mensagem, há quanto tempo, quem atende e o time.
+
+    🚨 `atendente_id` E `visualizador_id` SÃO PERGUNTAS DIFERENTES, e até
+    16/09 uma respondia pela outra por acidente. `atendente_id` é o FILTRO
+    "minhas conversas" (só entra no WHERE, e só quando a tela pede); ele vem
+    `None` em toda visão que não seja essa. `visualizador_id` é "quem está
+    olhando", e alimenta SÓ `acompanho` e `nao_lidas` -- precisa valer SEMPRE,
+    filtro nenhum ligado ou não, senão a bolinha de não lida nunca aparece
+    fora da aba "minhas". Foi exatamente isso que aconteceu: `main.py` só
+    passava `atendente_id` quando `minhas=True`, e a Caixa de Entrada -- a
+    visão padrão, sem esse filtro -- sempre recebia `None` nos dois usos,
+    saindo com `nao_lidas = 0` em toda conversa, sempre, silenciosamente.
     """
     # ⚠️ GRUPO E CONVERSA DIRETA NA MESMA LISTA, como no WhatsApp. A 027 tinha
     # criado uma aba separada; a 028 desfez. O painel não importa grupo --
@@ -1091,8 +1103,10 @@ def listar(estado: str | None = None, atendente_id: int | None = None,
     #
     # ⚠️ PASSARAM DE DOIS PARA QUATRO em 15/09, com a contagem de não lidas:
     # dois do `acompanho` e dois do `nao_lidas`, nessa ordem, que é a ordem em
-    # que aparecem no texto do SELECT.
-    params = [atendente_id, atendente_id, atendente_id, atendente_id] + params
+    # que aparecem no texto do SELECT. Os quatro usam `visualizador_id`, NUNCA
+    # `atendente_id` -- ver o comentário no topo da função.
+    params = ([visualizador_id, visualizador_id, visualizador_id, visualizador_id]
+              + params)
     params.append(limite)
     linhas = banco.varios(
         f"""

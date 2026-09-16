@@ -134,16 +134,22 @@ class TestListagemDoParticipante:
 
     def test_a_linha_diz_que_e_acompanhamento_e_nao_posse(self, cena):
         """Sem este campo a caixa de entrada misturaria 'minha' com 'fui
-        chamado', e o atendente não saberia por qual ele responde."""
+        chamado', e o atendente não saberia por qual ele responde.
+
+        🚨 `visualizador_id` vai junto com `atendente_id` nas duas chamadas --
+        é o que `main.py` faz quando `minhas=True` (o próprio filtro É o
+        viewer). Ver `TestNaoLidas`, que testa os dois separados.
+        """
         conversas.convidar(cena["minha"], cena["outro"], cena["eu"])
 
-        do_convidado = next(x for x in conversas.listar(atendente_id=cena["outro"],
-                                                        limite=500)
+        do_convidado = next(x for x in conversas.listar(
+            atendente_id=cena["outro"], visualizador_id=cena["outro"], limite=500)
                             if x["id"] == cena["minha"])
         assert do_convidado["acompanho"] is True
         assert do_convidado["atendente_id"] == cena["eu"], "o dono mudou sozinho"
 
-        do_dono = next(x for x in conversas.listar(atendente_id=cena["eu"], limite=500)
+        do_dono = next(x for x in conversas.listar(
+            atendente_id=cena["eu"], visualizador_id=cena["eu"], limite=500)
                        if x["id"] == cena["minha"])
         assert do_dono["acompanho"] is False, "o dono apareceu como acompanhante"
 
@@ -174,8 +180,64 @@ class TestListagemDoParticipante:
     def test_o_dono_que_herdou_aparece_como_dono_e_nao_participante(self, cena):
         conversas.convidar(cena["minha"], cena["outro"], cena["eu"])
         conversas.sair(cena["minha"], cena["eu"])   # o dono sai, `outro` herda
-        linha = next(x for x in conversas.listar(atendente_id=cena["outro"],
-                                                 limite=500)
+        linha = next(x for x in conversas.listar(
+            atendente_id=cena["outro"], visualizador_id=cena["outro"], limite=500)
                      if x["id"] == cena["minha"])
         assert linha["atendente_id"] == cena["outro"]
         assert linha["acompanho"] is False, "herdou a posse e continuou participante"
+
+
+class TestNaoLidas:
+    """A bolinha de não lidas (migração 042, pedido da Erika em 15/09).
+
+    🚨 O BUG DE 16/09: `main.py` só mandava o viewer (`atendente_id`) para
+    `conversas.listar` quando a tela pedia "minhas conversas" (`minhas=True`).
+    A Caixa de Entrada ABRE sem esse filtro -- é a fila inteira -- então todo
+    mundo via `nao_lidas = 0` sempre, em toda conversa, e a bolinha nunca
+    aparecia fora de uma aba que quase ninguém usa como visão principal.
+
+    O conserto separou as duas perguntas: `atendente_id` continua sendo só o
+    filtro "minhas"; `visualizador_id` é "quem está olhando" e agora vai
+    SEMPRE, seja qual for o filtro. Estes testes travam isso -- e teriam
+    pegado o bug se existissem em 15/09.
+    """
+
+    def _entrada(self, conversa_id, sufixo):
+        banco.executar(
+            """INSERT INTO mensagem (conversa_id, id_externo, direcao, autor,
+                                     tipo, conteudo, criada_em)
+               VALUES (%s, %s, 'entrada', 'cliente', 'texto', 'oi', now())""",
+            (conversa_id, f"{LOGIN}{sufixo}"))
+
+    def test_sem_visualizador_nao_lidas_vem_zero(self, cena):
+        # Não é o bug -- é a honestidade de não saber quem está olhando.
+        # O bug estava em `main.py` nunca mandar visualizador nenhum.
+        self._entrada(cena["minha"], "a")
+        linha = next(x for x in conversas.listar(limite=500)
+                     if x["id"] == cena["minha"])
+        assert linha["nao_lidas"] == 0
+
+    def test_com_visualizador_conta_a_mensagem_nao_lida(self, cena):
+        self._entrada(cena["minha"], "b")
+        linha = next(x for x in conversas.listar(
+            limite=500, visualizador_id=cena["eu"]) if x["id"] == cena["minha"])
+        assert linha["nao_lidas"] == 1
+
+    def test_visualizador_conta_mesmo_sem_filtro_minhas(self, cena):
+        # A conversa é do "outro" -- "eu" só está de passagem pela fila
+        # geral (atendente_id=None), que é exatamente a Caixa de Entrada
+        # padrão. Sem isto, a bolinha só existiria dentro de "minhas".
+        self._entrada(cena["dele"], "c")
+        linha = next(x for x in conversas.listar(
+            limite=500, visualizador_id=cena["eu"]) if x["id"] == cena["dele"])
+        assert linha["nao_lidas"] == 1
+
+    def test_marcar_lida_zera_so_pra_quem_leu(self, cena):
+        self._entrada(cena["minha"], "d")
+        conversas.marcar_lida(cena["minha"], cena["eu"])
+        linha_eu = next(x for x in conversas.listar(
+            limite=500, visualizador_id=cena["eu"]) if x["id"] == cena["minha"])
+        linha_outro = next(x for x in conversas.listar(
+            limite=500, visualizador_id=cena["outro"]) if x["id"] == cena["minha"])
+        assert linha_eu["nao_lidas"] == 0
+        assert linha_outro["nao_lidas"] == 1, "é por pessoa, não por conversa"

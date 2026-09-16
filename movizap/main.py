@@ -1296,12 +1296,20 @@ def listar_conversas(estado: str | None = None, sem_dono: bool = False,
     `relacoes` é a lista de chips separada por vírgula. `sem_cadastro` entra
     junto com os valores de `contato.relacao` e quer dizer outra coisa: a
     conversa sem contato nenhum. Ver `conversas.listar`.
+
+    🚨 `visualizador_id` VAI SEMPRE, `minhas` ou não. Até 16/09 só o
+    `atendente_id` (o filtro) ia para `conversas.listar`, e ele só nasce
+    fora de `None` quando `minhas=True` -- então a Caixa de Entrada padrão
+    (todo mundo entra assim, sem marcar "minhas") sempre calculava
+    `nao_lidas` contra um viewer `None`, e a bolinha nunca aparecia. Ver o
+    comentário em `conversas.listar`.
     """
     escolhidas = [r.strip() for r in relacoes.split(",") if r.strip()]
     return conversas.listar(
         estado=estado, sem_dono=sem_dono, busca=busca,
         relacoes=escolhidas or None,
-        atendente_id=_atendente_do_usuario(usuario) if minhas else None)
+        atendente_id=_atendente_do_usuario(usuario) if minhas else None,
+        visualizador_id=_atendente_do_usuario(usuario))
 
 
 class ConversaNova(BaseModel):
