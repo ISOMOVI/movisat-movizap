@@ -2954,13 +2954,8 @@ function carregarMidiasDaConversa(c) {
                 {{ arquivo ? 'Guardar como nota' : 'Salvar nota' }}
               </button>
 
-              <span class="apagado pequeno">
-                <template v-if="arquivo">
-                  O texto acima vai junto com o arquivo.
-                </template>
-                <template v-else>
-                  Ctrl+Enter envia. Até {{ TETO_ARQUIVO_MB }} MB.
-                </template>
+              <span v-if="arquivo" class="apagado pequeno">
+                O texto acima vai junto com o arquivo.
               </span>
             </div>
           </div>
