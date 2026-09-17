@@ -171,11 +171,24 @@ class TestTextoLegivel:
     def test_menu_com_valor_nulo_nao_estoura(self):
         assert conversas._tipo_e_texto(MENU_VAZIO) == ("texto", None)
 
-    def test_visualizacao_unica_vira_aviso_legivel(self):
+    def test_mensagem_cifrada_vira_aviso_legivel(self):
         """Ela não pode sumir: o atendente precisa saber que o cliente mandou
-        algo. E não pode ser lida: chega criptografada e não temos a chave."""
+        algo. E não pode ser lida: chega criptografada e não temos a chave.
+
+        🚨 O NOME DESTE TESTE ERA `..._visualizacao_unica_...` E A ASSERÇÃO
+        PRENDIA "[mensagem de visualização única]" -- que é OUTRO recurso do
+        WhatsApp. A razão escrita acima sempre esteve certa; o rótulo é que
+        nunca a seguiu. Corrigido em 17/09, depois de 92 linhas em 60
+        conversas terem dito ao atendente que chegou uma foto que some.
+
+        ⚠️ A frase exata é prendida em `teste_rotulo_cifrado.py`, que mede a
+        PROMESSA (não afirma tipo que não sabemos, diz que veio e que não
+        abre). Aqui basta garantir que o aviso existe e é legível.
+        """
         _, texto = conversas._tipo_e_texto(SECRETA)
-        assert texto == "[mensagem de visualização única]"
+        assert texto == conversas.AVISOS["secretEncryptedMessage"]
+        assert texto.startswith("[") and texto.endswith("]")
+        assert "visualiza" not in texto.lower()
 
 
 class TestNuncaMaisONomeCru:

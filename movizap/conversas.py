@@ -111,8 +111,24 @@ DESCARTADOS = {
 #
 # ⚠️ `secretEncryptedMessage` chega CRIPTOGRAFADO e não temos a chave -- não há
 # caminho para ler o conteúdo, nem hoje nem depois. 34 ocorrências até 27/08.
+# 🚨 O RÓTULO ESTAVA ERRADO DESDE 27/08, e o próprio commit que o criou
+# (`adefc9e`) descrevia outra coisa: *"aviso (secretEncryptedMessage, que chega
+# criptografado)"*. O `docs/02` diz o mesmo -- *"chega criptografado e não temos
+# a chave; o atendente precisa saber que veio algo"*. Mas o texto que ia para a
+# tela dizia **"[mensagem de visualização única]"**, que é OUTRO recurso do
+# WhatsApp: a foto que some depois de aberta. Ninguém decidiu chamar assim; o
+# rótulo simplesmente não seguiu a razão escrita ao lado dele.
+#
+# 🚨 CUSTO MEDIDO EM 17/09: **92 linhas em 60 conversas**, de 07/08 até hoje,
+# dizendo ao atendente que chegou uma foto que some -- quando chegou outra
+# coisa, que nem sabemos qual é.
+#
+# ⚠️ O QUE O TEXTO NOVO PROMETE, ele cumpre: alguma coisa chegou, veio cifrada,
+# e o painel não consegue abrir. Não afirma O QUE é, porque não sabemos -- em
+# 17/09 um destes apareceu no lugar exato de uma edição de mensagem, e mesmo
+# assim não dá para provar que era ela.
 AVISOS = {
-    "secretEncryptedMessage": "[mensagem de visualização única]",
+    "secretEncryptedMessage": "[mensagem cifrada que o painel não consegue abrir]",
 }
 
 # O que o WhatsApp chama de status, no vocabulário do nosso CHECK.

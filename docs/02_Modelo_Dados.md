@@ -917,6 +917,19 @@ Hoje o parser tem três destinos, e nenhum deles é o nome cru da chave:
 | **texto legível** | `templateMessage`, `pollCreationMessage*`, `listMessage`, `listResponseMessage` | extratores em `conversas.py` |
 | **aviso** | `secretEncryptedMessage` — chega criptografado e não temos a chave; o atendente precisa saber que veio algo | `conversas.AVISOS` |
 
+🚨 **O RÓTULO DO AVISO MENTIU DE 27/08 A 17/09.** A razão escrita acima sempre
+esteve certa, mas o texto que ia para a tela dizia **"[mensagem de visualização
+única]"** — que é OUTRO recurso do WhatsApp, a foto que some depois de aberta.
+Ninguém decidiu chamar assim: o rótulo não seguiu a razão escrita ao lado dele,
+e o nome do teste que o prendia (`test_visualizacao_unica_...`) carimbou o
+engano. **Custo medido: 92 linhas em 60 conversas**, de 07/08 a 17/09.
+Hoje é **"[mensagem cifrada que o painel não consegue abrir]"**, as 92 linhas
+foram corrigidas (`scripts/corrigir_rotulo_cifrado.py`) e o
+`teste_rotulo_cifrado.py` prende a **promessa**, não a frase: o aviso não pode
+afirmar tipo que não sabemos, e tem de dizer que veio algo e que não abre.
+⚠️ **Ainda não sabemos o que é.** Em 17/09 um destes apareceu no lugar exato de
+uma edição de mensagem, e nem isso dá para afirmar — o conteúdo é cifrado.
+
 ⚠️ **O DESCARTE ACONTECE ANTES DE `garantir_conversa`**, no mesmo ponto da
 reação. Depois dela, um voto de enquete abriria conversa a partir de ruído.
 
