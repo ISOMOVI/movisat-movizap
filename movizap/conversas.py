@@ -59,7 +59,11 @@ def cutucar() -> None:
 # Eventos que este módulo sabe interpretar. O resto é marcado como processado
 # sem virar nada: `connection.update` e `qrcode.updated` são assunto do vigia,
 # que já grava em `canal_evento`.
-EVENTOS_TRATADOS = {"messages.upsert", "messages.update", "send.message"}
+EVENTOS_TRATADOS = {"messages.upsert", "messages.update", "send.message",
+                    # 🚨 ENTROU EM 17/09. Antes disso o evento nem era
+                    # assinado no Evolution -- e sem este nome aqui, ele
+                    # chegaria, seria gravado e ficaria eternamente pendente.
+                    "messages.delete"}
 
 # `data.message` traz UMA destas chaves. A ordem importa: `extendedTextMessage`
 # é texto com citação/link, e precisa ser visto antes do genérico.
@@ -796,6 +800,42 @@ def _aplicar_edicao(cur, corpo: dict) -> str | None:
     return f"edição aplicada ({id_msg})"
 
 
+def _aplicar_exclusao(cur, corpo: dict) -> str:
+    """O cliente apagou para todos uma mensagem que já está na tela.
+
+    🚨 PROVADO EM 17/09, e só depois de três medições que diziam o contrário.
+    O evento não chegava por DOIS motivos somados: `MESSAGES_DELETE` não
+    estava assinado no webhook, e -- mesmo depois de assinar -- o que NÓS
+    apagamos não volta. Exercitado duas vezes: o REVOKE acontece (ele
+    confirmou no celular) e o webhook não recebe nada. O que destravou foi o
+    teste dele do próprio celular para o número do painel.
+
+    🚨 O ID DO ALVO VEM EM `data.id`, e é o TERCEIRO lugar do mesmo provedor:
+    o upsert usa `data.key.id`, o update usa `data.keyId`, o delete usa
+    `data.id`. Quem escrever isto olhando só o que já conhecia erra o alvo e
+    não apaga nada -- calado, porque `UPDATE` sem linha não é erro.
+
+    ⚠️ O TEXTO NÃO É DESTRUÍDO. O atendente AGIU sobre o que leu; apagar o
+    registro faria a conversa mentir sobre o que foi dito. Muda a EXIBIÇÃO: o
+    balão diz que foi apagada e o texto fica atrás de um clique.
+
+    ⚠️ ALVO QUE NÃO TEMOS NÃO VIRA NADA -- mesma regra da reação e da edição.
+    """
+    id_msg = (_cavar(corpo, "data", "id")
+              or _cavar(corpo, "data", "key", "id")
+              or _cavar(corpo, "data", "keyId"))
+    if not id_msg:
+        return "exclusão sem id de alvo"
+
+    cur.execute(
+        """UPDATE mensagem SET apagada_em = now()
+            WHERE id_externo = %s AND apagada_em IS NULL""",
+        (id_msg,))
+    if not cur.rowcount:
+        return f"exclusão de mensagem que não temos ou já marcada ({id_msg})"
+    return f"exclusão aplicada ({id_msg})"
+
+
 def _atualizar_entrega(cur, evento: dict, corpo: dict) -> str:
     """`messages.update` normalmente só diz que mudou o status de entrega.
 
@@ -853,7 +893,7 @@ def processar_pendentes(limite: int = 500) -> dict:
             LIMIT %s""", (limite,))
 
     contas = {"lidos": len(pendentes), "mensagens": 0, "entregas": 0,
-              "ignorados": 0, "erros": 0, "boas_vindas": 0}
+              "exclusoes": 0, "ignorados": 0, "erros": 0, "boas_vindas": 0}
     # Local, por execução: duas execuções simultâneas não se atrapalham.
     a_olhar: list[int] = []
 
@@ -867,6 +907,9 @@ def processar_pendentes(limite: int = 500) -> dict:
                 elif evento["evento"] == "messages.update":
                     nota = _atualizar_entrega(cur, evento, corpo)
                     contas["entregas"] += 1
+                elif evento["evento"] == "messages.delete":
+                    nota = _aplicar_exclusao(cur, corpo)
+                    contas["exclusoes"] += 1
                 else:
                     nota = "evento sem conversa (conexão/QR): assunto do vigia"
                     contas["ignorados"] += 1
@@ -1674,6 +1717,9 @@ def mensagens(conversa_id: int, limite: int = JANELA_INICIAL,
                       -- "editada" e deixa o original alcançável, em vez de
                       -- trocar o texto por baixo de quem já leu.
                       m.editada_em, m.conteudo_original,
+                      -- Apagada pelo cliente: a tela diz que foi, e deixa o
+                      -- texto atrás de um clique. O registro não se destrói.
+                      m.apagada_em,
                       m.encaminhada_de
                  FROM mensagem m
                  LEFT JOIN atendente a ON a.id = m.atendente_id

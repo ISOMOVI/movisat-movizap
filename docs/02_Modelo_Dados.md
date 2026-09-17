@@ -1276,3 +1276,71 @@ diante; os 5 eventos continuam em `webhook_evento`, já marcados como
 processados. Reaplicá-los é decisão do usuário — o ensaio com `ROLLBACK`
 provou que funcionaria nos 5.
 
+
+### `mensagem.apagada_em` (045)
+
+| Campo | Nota |
+|---|---|
+| `apagada_em` | quando o WhatsApp avisou que foi apagada **para todos**. NULL = nunca apagada. O `conteudo` **não** é destruído |
+
+🚨 **PROVADO CONTRA O MUNDO REAL EM 17/09, e só depois de três medições que
+diziam o contrário.** O `messages.delete` nunca tinha chegado em **54.544
+eventos** (18/08 a 17/09), por **dois motivos somados**:
+
+1. **`MESSAGES_DELETE` não estava assinado** no webhook do Evolution — a lista
+   tinha 5 eventos e este não era um deles;
+2. **mesmo depois de assinar, o que NÓS apagamos não volta.** Exercitado duas
+   vezes contra o número de teste: o Evolution executa o REVOKE (a resposta
+   traz `protocolMessage` com `type: REVOKE`, e ele confirmou que a mensagem
+   aparece apagada no celular) e o webhook **não recebe nada**.
+
+**O que destravou foi o teste dele:** três *"Oi"* do próprio celular para o
+número do painel, e o terceiro apagado para todos. O evento chegou **6
+segundos depois**, e aponta certo para a mensagem.
+
+🚨 **O ID DO ALVO VEM EM `data.id`, E ESTE É O TERCEIRO LUGAR** do mesmo
+provedor, para a mesma coisa:
+
+| Evento | Onde está o id da mensagem |
+|---|---|
+| `messages.upsert` | `data.key.id` |
+| `messages.update` | `data.keyId` |
+| **`messages.delete`** | **`data.id`** |
+
+Quem escrever o handler olhando só o que já conhecia erra o alvo **e não
+acusa nada**: `UPDATE` que não casa linha nenhuma não é erro. O handler aceita
+os três, e há teste preso nisso.
+
+⚠️ **O TEXTO NÃO É DESTRUÍDO**, e é a mesma razão da 043: o atendente **agiu
+sobre o que leu**. Apagar o registro faria a conversa mentir sobre o que foi
+dito. O que muda é a **exibição** — o balão diz *"mensagem apagada"* e o texto
+fica atrás de *"ver o que dizia"*.
+
+🟡 **A ESCOLHA DA EXIBIÇÃO É REVERSÍVEL, E É DELE.** As três saídas eram:
+esconder de vez (o atendente nunca mais lê), não esconder nada (só um aviso no
+balão) ou o meio — marcar e esconder atrás de um clique. Escolhi o meio porque
+não perde informação e respeita a intenção de quem apagou. **Mudar é trocar um
+`v-if`.**
+
+⚠️ **REENTREGA NÃO REMARCA.** O `UPDATE` tem `AND apagada_em IS NULL`: sem
+isso, uma reentrega do Evolution moveria a hora do apagamento para a hora da
+reentrega.
+
+### O achado paralelo: a edição em conversa direta chega cifrada
+
+⚠️ **NO MESMO TESTE, A EDIÇÃO DO SEGUNDO *"Oi"* NÃO CHEGOU COMO
+`editedMessage`.** O que chegou 6 segundos depois dos três *"Oi"* foi um
+`secretEncryptedMessage` — id novo, conteúdo cifrado, ilegível para nós. É o
+único candidato pelo horário, mas **não dá para provar que é a edição**, porque
+não temos a chave.
+
+🔴 **E ELE VIROU UMA LINHA FALSA NA CONVERSA.** O `AVISOS` traduz
+`secretEncryptedMessage` para **"[mensagem de visualização única]"**, que é
+outro recurso do WhatsApp — o atendente lê que chegou uma foto que some, e o
+que houve foi outra coisa. **Rótulo errado, e é do mesmo tipo dos que já
+custaram caro aqui.** Fica registrado como pendência, separado desta entrega.
+
+⚠️ **As 5 edições que FUNCIONAM não vieram todas de grupo** — 2 de `@lid`
+(conversa direta) e 3 de `@g.us`. Então não é "grupo sim, direto não": alguma
+outra coisa decide se a edição vem legível ou cifrada, e ainda não sei o quê.
+

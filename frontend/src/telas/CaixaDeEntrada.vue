@@ -2708,7 +2708,18 @@ function carregarMidiasDaConversa(c) {
               <!-- Pedaços, não `v-html`: o texto é do cliente. Link vira
                    `<a>` pelo `:href` do Vue -- a URL nunca passa por HTML
                    bruto, só pelo mesmo recorte que já existia. -->
-              <p v-if="m.conteudo" class="balao__texto">
+              <!-- 🚨 APAGADA PARA TODOS: o texto sai da vista, mas NÃO some
+                   do registro. O atendente agiu sobre o que leu, e pode
+                   precisar dizer depois o que foi dito — por isso fica atrás
+                   de um clique, em vez de sumir ou continuar exposto. -->
+              <p v-if="m.apagada_em && !originalAberto.has(m.id)"
+                 class="balao__texto balao__apagada">
+                <i class="bi bi-slash-circle" aria-hidden="true"></i>
+                mensagem apagada
+                <button v-if="m.conteudo" type="button" class="balao__revelar"
+                        @click="alternarOriginal(m.id)">ver o que dizia</button>
+              </p>
+              <p v-else-if="m.conteudo" class="balao__texto">
                 <template v-for="(p, i) in marcar(m.conteudo, buscaNaConversa)" :key="i">
                   <template v-for="(q, j) in linkificar(p.texto)" :key="`${i}-${j}`">
                     <a v-if="q.link" :href="q.texto" target="_blank"
@@ -2719,6 +2730,14 @@ function carregarMidiasDaConversa(c) {
                 </template>
               </p>
               <p v-else class="balao__texto fraco">(sem texto)</p>
+              <!-- Revelada: diz que está revelada, e deixa esconder de novo. -->
+              <p v-if="m.apagada_em && originalAberto.has(m.id)"
+                 class="balao__marca pequeno">
+                <i class="bi bi-slash-circle" aria-hidden="true"></i>
+                apagada pelo cliente ·
+                <button type="button" class="balao__revelar"
+                        @click="alternarOriginal(m.id)">esconder</button>
+              </p>
               <!-- 🔵 15/09: localização mostrava só o ícone e a palavra
                    "localizacao". A coordenada sempre chegou no payload; o que
                    faltava era extrair (feito no parser) e dar o que fazer com
@@ -4376,6 +4395,30 @@ function carregarMidiasDaConversa(c) {
   text-underline-offset: 2px;
 }
 .balao__editada:hover { text-decoration: underline; }
+
+/* Apagada: em itálico e apagado, para não se confundir com fala do cliente. */
+.balao__apagada {
+  color: var(--texto-apagado);
+  font-style: italic;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+/* Mesmo desenho do "editada": link de texto, não caixa de botão -- dentro do
+   balão, um botão desenhado competiria com a conversa. */
+.balao__revelar {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+}
+.balao__revelar:hover { text-decoration: underline; }
 
 /* O texto de antes. Recuado e apagado: é prova, não é a conversa. */
 .balao__original {
