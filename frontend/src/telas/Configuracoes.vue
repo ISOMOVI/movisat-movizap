@@ -36,6 +36,7 @@ import Classificacoes from './Classificacoes.vue'
 import Automacao from './Automacao.vue'
 import EventosWebhook from './EventosWebhook.vue'
 import RegistroDeTelas from './RegistroDeTelas.vue'
+import MinhaConta from './MinhaConta.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -52,11 +53,14 @@ const COMPONENTE = {
   'CFG_6.1': Atalhos,
   'CFG_8.1': EventosWebhook,
   'CFG_9.1': RegistroDeTelas,
+  'CFG_10.1': MinhaConta,
 }
 // Atalhos fica ANTES de Telas: e preferencia de quem usa, nao registro do
 // sistema -- e quem procura ajuste pessoal nao vai olhar no fim da fila.
 // Geral vem PRIMEIRO: e o que vale para o painel inteiro.
-const ORDEM = ['CFG_7.1', 'CFG_2.1', 'CFG_1.1', 'CFG_5.1', 'CFG_4.1', 'CFG_3.1', 'CFG_6.1', 'CFG_8.1', 'CFG_9.1']
+// "Minha conta" fica ao lado de Atalhos: as duas são da PESSOA, não do
+// sistema, e quem procura ajuste pessoal procura as duas juntas.
+const ORDEM = ['CFG_7.1', 'CFG_2.1', 'CFG_1.1', 'CFG_5.1', 'CFG_4.1', 'CFG_3.1', 'CFG_10.1', 'CFG_6.1', 'CFG_8.1', 'CFG_9.1']
 
 /* Título curto para a aba. O do registro é bom para o menu e comprido para uma
    barra de abas ("IA — prompt" vira só "IA", porque a escada mora aqui). */
@@ -70,6 +74,7 @@ const ROTULO = {
   'CFG_6.1': 'Atalhos',
   'CFG_8.1': 'Eventos',
   'CFG_9.1': 'Telas',
+  'CFG_10.1': 'Minha conta',
 }
 
 /* 🚨 SÓ AS ABAS QUE ESTE USUÁRIO ENXERGA. A permissão continua sendo por tela,

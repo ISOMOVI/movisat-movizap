@@ -262,6 +262,28 @@ TELAS = [
         "aba_de": "CFG_0.1",
     },
     {
+        # 🔵 Pedido dele em 17/09: *"central de perfil 'minha conta' para foto
+        # de usuario, dados de perfil, tipo de envio 'entrer ou clique'"*. O
+        # status é 🟢 pedido do Rodrigo, trazido em 15/09.
+        #
+        # 🚨 O `atendente.estado` JÁ EXISTIA desde a 001, com três valores, e
+        # não chegava a tela nenhuma -- por isso ele lembrava do status e não
+        # o via. A 044 acrescentou o quarto (`offline`) e esta tela é o
+        # produto que faltava em cima da coluna.
+        #
+        # ⚠️ `atendimento` e não `owner`: cada um mexe em SI MESMO. É a mesma
+        # razão da CFG_6.1, e o contrário do que vale para as telas de
+        # cadastro, onde se edita a ficha dos outros.
+        "codigo": "CFG_10.1",
+        "titulo": "Minha conta",
+        "rota": "/config/minha-conta",
+        "icone": "bi-person-circle",
+        "descricao": "Sua foto, seus dados, como você envia e como você está.",
+        "permissao": "atendimento",
+        "fase": 1,
+        "aba_de": "CFG_0.1",
+    },
+    {
         # 🚨 SUBIU PARA FASE 1 EM 07/08. Decisão do usuário: "o informativo é o
         # que vai enviar, sem resposta de cliente". O canal foi pareado no
         # mesmo dia e já entrega (TESTE BOT com DELIVERY_ACK em 2s).

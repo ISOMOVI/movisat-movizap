@@ -38,8 +38,14 @@ vi.mock('vue-router', () => ({
   RouterLink: { template: '<a><slot /></a>' },
 }))
 
+vi.mock('./estado/sessao.js', () => ({
+  sessao: { nome: 'Fulano de Tal', telas: [], owner: false },
+  sair: () => {},
+}))
+
 import Atalhos from './telas/Atalhos.vue'
 import Geral from './telas/Geral.vue'
+import MinhaConta from './telas/MinhaConta.vue'
 
 const CATALOGO = [
   { acao: 'proxima', tela: 'Caixa de entrada', padrao: 'j',
@@ -60,6 +66,13 @@ function estadoPadrao() {
       catalogo: CATALOGO,
     },
     '/api/config/jornada': { jornada_ativa: false },
+    '/api/eu/perfil': {
+      id: 7, nome: 'Fulano de Tal', login: 'fulano',
+      email: 'fulano@movisat.com.br', perfil: 'atendimento',
+      estado: 'disponivel', tem_foto: false, fuso: 'America/Sao_Paulo',
+      max_conversas: null, ativo: true, enviar_com_enter: false,
+      estados_possiveis: ['disponivel', 'ausente', 'nao_perturbe', 'offline'],
+    },
   }
 }
 
@@ -134,5 +147,68 @@ describe('CFG_7.1 — Geral', () => {
     await jornada.trigger('change')
     await assentar(w)
     expect(puts.some((p) => p.rota === '/api/config/jornada')).toBe(true)
+  })
+})
+
+/* ==========================================================================
+   CFG_10.1 — Minha conta (17/09).
+
+   🚨 MONTA DE VERDADE, porque foi assim que se descobriu, em 28/08, que duas
+   telas novas tinham markup quebrado com a suíte inteira verde.
+   ========================================================================== */
+describe('CFG_10.1 — Minha conta', () => {
+  it('abre e mostra os quatro blocos', async () => {
+    const w = mount(MinhaConta)
+    await assentar(w)
+    expect(w.text()).toContain('Como você está')
+    expect(w.text()).toContain('Sua foto')
+    expect(w.text()).toContain('Como você envia')
+    expect(w.text()).toContain('Seus dados')
+  })
+
+  it('🚨 mostra o RÓTULO, não o valor do banco', async () => {
+    /* `nao_perturbe` é o que o CHECK aceita; quem atende lê "Não perturbe".
+       Mostrar nome de coluna na tela foi erro real em outras telas. */
+    const w = mount(MinhaConta)
+    await assentar(w)
+    expect(w.text()).toContain('Não perturbe')
+    expect(w.text()).toContain('Fora do expediente')
+    expect(w.text()).not.toContain('nao_perturbe')
+  })
+
+  it('trocar de estado chama a rota de "eu"', async () => {
+    const w = mount(MinhaConta)
+    await assentar(w)
+    const pausa = w.findAll('button').find((b) => b.text().includes('Em pausa'))
+    await pausa.trigger('click')
+    await assentar(w)
+    const chamada = puts.find((p) => p.rota === '/api/eu/estado')
+    expect(chamada).toBeTruthy()
+    expect(chamada.corpo).toEqual({ estado: 'ausente' })
+  })
+
+  it('sem foto, cai nas iniciais do nome', async () => {
+    const w = mount(MinhaConta)
+    await assentar(w)
+    expect(w.find('img').exists()).toBe(false)
+    expect(w.text()).toContain('FT')          // Fulano de Tal
+  })
+
+  it('com foto, desenha a imagem do atendente', async () => {
+    respostas['/api/eu/perfil'] = { ...estadoPadrao()['/api/eu/perfil'], tem_foto: true }
+    const w = mount(MinhaConta)
+    await assentar(w)
+    const img = w.find('img')
+    expect(img.exists()).toBe(true)
+    expect(img.attributes('src')).toContain('/api/atendentes/7/foto')
+  })
+
+  it('o tipo de envio usa a MESMA rota da CFG_6.1', async () => {
+    /* Espelho, não cópia: duas portas para o mesmo quarto. */
+    const w = mount(MinhaConta)
+    await assentar(w)
+    await w.find('input[type="checkbox"]').trigger('change')
+    await assentar(w)
+    expect(puts.some((p) => p.rota === '/api/eu/enviar-com-enter')).toBe(true)
   })
 })

@@ -257,12 +257,21 @@ def eu(usuario: dict = Depends(auth.get_usuario)):
     agora a tela inicial diz o que houve, em vez de deixar a pessoa trabalhar
     e o histórico ficar anônimo.
     """
+    eu_id = _atendente_do_usuario(usuario)
+    # 🚨 CAMPO NOVO NÃO CHEGA SOZINHO: esta resposta é montada à mão. O
+    # `estado` existe no banco desde a 001 e nunca apareceu aqui -- foi por
+    # isso que ele lembrava do status e não o via em lugar nenhum.
+    meu = banco.um("SELECT estado, foto FROM atendente WHERE id = %s",
+                   (eu_id,)) if eu_id else None
     return {
         "login": usuario["login"],
         "nome": usuario["nome"],
         "owner": usuario["owner"],
         "email": usuario.get("email"),
-        "vinculo_atendimento": _atendente_do_usuario(usuario) is not None,
+        "vinculo_atendimento": eu_id is not None,
+        "atendente_id": eu_id,
+        "estado": (meu or {}).get("estado"),
+        "tem_foto": bool((meu or {}).get("foto")),
         "telas": registro_telas.do_usuario(usuario),
     }
 
@@ -2369,6 +2378,141 @@ def definir_enviar_com_enter(dados: EnterEnvia,
             detail="A sua conta não está ligada a um atendente, então não há "
                    "onde guardar a preferência.")
     return preferencia.definir_enviar_com_enter(atendente_id, dados.ligado)
+
+
+# ---------------------------------------------------------------- minha conta
+# 🔵 Pedido dele em 17/09: *"central de perfil 'minha conta' para foto de
+# usuario, dados de perfil, tipo de envio"*. 🟢 E o status é pedido do Rodrigo.
+#
+# 🚨 SEM `requer_tela` NAS ROTAS DE "EU". Trocar a própria foto e dizer que se
+# está em pausa não é permissão de tela: é a pessoa mexendo nela mesma. Prender
+# isso a um código de tela faria quem não vê a `CFG_10.1` ficar sem conseguir
+# sair de "disponível" -- e o status existe justamente para quem atende.
+
+ESTADOS_ATENDENTE = ("disponivel", "ausente", "nao_perturbe", "offline")
+TETO_FOTO = 2 * 1024 * 1024
+PASTA_FOTOS_ATENDENTE = pathlib.Path("/home/claude/movizap_midia/atendente")
+
+
+class MeuEstado(BaseModel):
+    estado: str = Field(min_length=1, max_length=20)
+
+
+def _meu_atendente(usuario: dict) -> int:
+    eu = _atendente_do_usuario(usuario)
+    if not eu:
+        raise HTTPException(
+            status_code=409,
+            detail="A sua conta não tem linha em `atendente`, então não há "
+                   "perfil de atendimento para editar.")
+    return eu
+
+
+@app.get("/api/eu/perfil")
+def meu_perfil(usuario: dict = Depends(auth.get_usuario)):
+    """O que a tela "Minha conta" mostra sobre quem está logado."""
+    eu = _meu_atendente(usuario)
+    linha = banco.um(
+        """SELECT a.id, a.nome, a.login, a.email, a.perfil, a.estado,
+                  a.foto IS NOT NULL AS tem_foto, a.fuso, a.max_conversas,
+                  a.ativo
+             FROM atendente a WHERE a.id = %s""", (eu,))
+    linha["enviar_com_enter"] = preferencia.enviar_com_enter(eu)
+    linha["estados_possiveis"] = list(ESTADOS_ATENDENTE)
+    return linha
+
+
+@app.put("/api/eu/estado")
+def definir_meu_estado(dados: MeuEstado,
+                       usuario: dict = Depends(auth.get_usuario)):
+    """A pessoa diz como está: disponível, em pausa, não perturbe ou fora.
+
+    🚨 ESCOLHIDO, NÃO DEDUZIDO. O painel fica aberto em aba esquecida o dia
+    inteiro; derivar presença de atividade mentiria mais do que informaria.
+
+    ⚠️ A LISTA É CONFERIDA AQUI E NO BANCO. O `CHECK` da 044 é a segunda
+    ponta: sem a conferência aqui, o erro chegaria como 500 do Postgres em vez
+    de uma frase que a tela sabe mostrar.
+    """
+    eu = _meu_atendente(usuario)
+    if dados.estado not in ESTADOS_ATENDENTE:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Estado desconhecido. Os que existem: "
+                   f"{', '.join(ESTADOS_ATENDENTE)}.")
+    banco.executar(
+        "UPDATE atendente SET estado = %s, atualizado_em = now() WHERE id = %s",
+        (dados.estado, eu))
+    # A prova é reler, não o código de retorno.
+    return banco.um("SELECT id, estado FROM atendente WHERE id = %s", (eu,))
+
+
+@app.post("/api/eu/foto")
+async def subir_minha_foto(arquivo: UploadFile = File(...),
+                           usuario: dict = Depends(auth.get_usuario)):
+    """Foto de quem atende. Mesmo desenho da assinatura (017) e da foto de
+    contato (041): o arquivo vai para o disco, o banco guarda o caminho.
+
+    🚨 O CAMINHO NUNCA VEM DA TELA. O nome que o navegador manda vira só o
+    nome-base; a pasta é nossa, por atendente. Se a tela mandasse caminho,
+    `../../.env` viraria foto de perfil.
+    """
+    eu = _meu_atendente(usuario)
+    tipo = (arquivo.content_type or "").lower()
+    if not tipo.startswith("image/"):
+        raise HTTPException(status_code=400,
+                            detail="A foto tem de ser uma imagem (PNG ou JPG).")
+    dados = await arquivo.read()
+    if not dados:
+        raise HTTPException(status_code=400, detail="Arquivo vazio.")
+    if len(dados) > TETO_FOTO:
+        raise HTTPException(
+            status_code=400,
+            detail=f"A imagem passa de {TETO_FOTO // (1024 * 1024)} MB. "
+                   f"Foto de perfil é retrato, não pôster.")
+
+    seguro = pathlib.Path((arquivo.filename or "foto").replace("\\", "/")).name
+    pasta = PASTA_FOTOS_ATENDENTE / str(eu)
+    pasta.mkdir(parents=True, exist_ok=True)
+    # Uma por pessoa: a anterior sai junto, senão o disco acumula foto velha.
+    for antigo in pasta.iterdir():
+        antigo.unlink(missing_ok=True)
+    caminho = pasta / seguro
+    caminho.write_bytes(dados)
+    banco.executar(
+        "UPDATE atendente SET foto = %s, atualizado_em = now() WHERE id = %s",
+        (str(caminho), eu))
+    return {"ok": True, "nome": seguro, "tamanho": len(dados)}
+
+
+@app.delete("/api/eu/foto")
+def tirar_minha_foto(usuario: dict = Depends(auth.get_usuario)):
+    """Volta para as iniciais do nome."""
+    eu = _meu_atendente(usuario)
+    linha = banco.um("SELECT foto FROM atendente WHERE id = %s", (eu,))
+    if linha and linha["foto"]:
+        pathlib.Path(linha["foto"]).unlink(missing_ok=True)
+    banco.executar(
+        "UPDATE atendente SET foto = NULL, atualizado_em = now() WHERE id = %s",
+        (eu,))
+    return {"ok": True}
+
+
+@app.get("/api/atendentes/{atendente_id}/foto")
+def foto_do_atendente(atendente_id: int,
+                      usuario: dict = Depends(auth.get_usuario)):
+    """A foto de QUALQUER colega, porque ela existe para ser vista por eles.
+
+    ⚠️ 404 quando não há foto, não 500 nem imagem em branco: quem chama é o
+    `<img>` da tela, e ele já sabe cair no lugar certo quando a imagem falha.
+    """
+    linha = banco.um("SELECT foto FROM atendente WHERE id = %s", (atendente_id,))
+    if not linha or not linha["foto"]:
+        raise HTTPException(status_code=404, detail="Sem foto.")
+    caminho = pathlib.Path(linha["foto"])
+    if not caminho.exists():
+        raise HTTPException(status_code=404, detail="Arquivo não está no disco.")
+    return FileResponse(caminho)
 
 
 @app.get("/api/config/jornada")

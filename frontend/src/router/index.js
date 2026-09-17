@@ -215,6 +215,12 @@ const rotas = [
     meta: { codigo: 'CFG_8.1', titulo: 'Eventos do WhatsApp' },
   },
   {
+    path: '/config/minha-conta',
+    name: 'CFG_10.1',
+    component: () => import('../telas/MinhaConta.vue'),
+    meta: { codigo: 'CFG_10.1', titulo: 'Minha conta' },
+  },
+  {
     path: '/config/telas',
     name: 'CFG_9.1',
     component: Configuracoes,

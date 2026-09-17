@@ -2489,3 +2489,67 @@ assinatura) e "o nome do contato está certo" (5 de 17 estavam sujos,
 lidos no código em vez de medidos no banco). As duas vezes a correção veio
 de enumerar TUDO — todos os `INSERT INTO contato`, todos os nomes reais —
 em vez de confiar numa amostra ou numa leitura rápida.
+
+## CFG_10.1 — Minha conta
+
+🔵 **Pedido dele em 17/09:** *"central de perfil 'minha conta' para foto de
+usuario, dados de perfil, tipo de envio 'entrer ou clique'"*. O status é
+🟢 pedido do Rodrigo, trazido por ele em 15/09.
+
+🚨 **A COLUNA JÁ EXISTIA E EU AFIRMEI DUAS VEZES QUE NÃO.** O
+`atendente.estado` nasceu na migração **001**, com
+`disponivel`/`ausente`/`nao_perturbe` — exatamente os três valores que a
+memória dizia. Ela não apareceu nas minhas buscas porque **se chama `estado`,
+não `status`**, e eu procurei por `status`, `online`, `pausa` e `presenca`.
+Fica a regra: **ausência se afirma lendo o `CREATE TABLE`, nunca por `grep` de
+uma palavra que eu supus** — é a mesma família do `M13`.
+
+🚨 **O QUE FALTAVA NÃO ERA A COLUNA, ERA O PRODUTO.** Medido em 17/09: `estado`
+aparecia em **um** lugar do código (`main.py`, modelo `AtendenteEntrada`), não
+chegava ao `/api/sessao/eu`, não era desenhado em tela nenhuma e não decidia
+nada. Por isso ele lembrava do status e não o via.
+
+### O que a tela tem
+
+| Bloco | O que faz |
+|---|---|
+| **Como você está** | os 4 estados, um clique cada, com a explicação do que cada um significa ao lado |
+| **Sua foto** | sobe PNG/JPG até 2 MB; sem foto, a tela cai nas **iniciais do nome** |
+| **Como você envia** | o mesmo interruptor `enviar_com_enter` da CFG_6.1 |
+| **Seus dados** | nome, login, e-mail, perfil e teto de conversas, **em leitura** |
+
+### As decisões, e por quê
+
+⚠️ **`offline` É ESCOLHIDO, NÃO DEDUZIDO.** Não é "sem sessão aberta": é a
+pessoa dizendo *"encerrei"*. Deduzir de atividade exigiria bater ponto por
+requisição, e o painel fica aberto em aba esquecida o dia inteiro — o derivado
+mentiria mais do que informaria.
+
+⚠️ **O TIPO DE ENVIO É ESPELHO, NÃO CÓPIA.** O mesmo interruptor mora na
+CFG_6.1, onde responde *"o que o teclado faz por mim"*; aqui responde *"como
+EU envio"*. Mesma preferência (`enviar_com_enter`), mesma rota — **duas portas
+para o mesmo quarto, nunca dois quartos.**
+
+⚠️ **NOME, LOGIN, E-MAIL E PERFIL SÃO LEITURA.** Todos entram por Google com
+domínio travado, então nome e e-mail vêm de lá; perfil é **permissão**, e
+permissão é decisão do owner, na tela de cadastro. Mostrar em leitura é melhor
+que esconder — regra *"nada some"* (27/08): a pessoa vê o que vale para ela e
+por que não pode mudar.
+
+⚠️ **AS ROTAS DE "EU" NÃO PEDEM `requer_tela`.** Trocar a própria foto e dizer
+que está em pausa não é permissão de tela: é a pessoa mexendo nela mesma.
+Prender isso a um código faria quem não enxerga a `CFG_10.1` ficar preso em
+"disponível" — e o status existe justamente para quem atende.
+
+⚠️ **A FOTO GUARDA O CAMINHO, NUNCA OS BYTES**, e o caminho **nunca vem da
+tela**: o nome que o navegador manda vira só o nome-base, a pasta é nossa, por
+atendente (`/home/claude/movizap_midia/atendente/<id>/`). Mesma decisão da
+assinatura (017) e da foto de contato (041).
+
+### O que ficou de fora desta entrega
+
+🔴 **O estado ainda não aparece PARA OS OUTROS.** Esta tela é onde a pessoa se
+declara; mostrar a bolinha ao lado do nome de cada um no Chat interno e na
+conversa é o passo seguinte, e é o que fecha o pedido do Rodrigo por inteiro.
+Sem ele, o estado vale como registro e não como aviso à equipe.
+
