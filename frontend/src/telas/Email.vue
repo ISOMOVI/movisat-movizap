@@ -28,6 +28,9 @@ const marcadores = ref([])
 const mensagens = ref([])
 const aberta = ref(null)
 const marcadorAtual = ref('INBOX')
+// 🔵 17/09: as duas abas que faltavam -- "arquivada" existia desde sempre
+// sem tela nenhuma para ver de novo, e "sumiu do Gmail" não era detectado.
+const caixaAtual = ref('entrada')
 const busca = ref('')
 const carregando = ref(false)
 
@@ -506,7 +509,8 @@ async function carregar() {
   carregando.value = true
   erro.value = ''
   try {
-    const q = new URLSearchParams({ marcador: marcadorAtual.value, busca: busca.value })
+    const q = new URLSearchParams({ marcador: marcadorAtual.value, busca: busca.value,
+                                    caixa: caixaAtual.value })
     if (contaAtual.value) q.set('conta_id', String(contaAtual.value))
     mensagens.value = (await api.get(`/api/email/mensagens?${q}`)).mensagens || []
   } catch (e) {
@@ -554,6 +558,32 @@ async function arquivarAberta() {
     recado.value = 'Arquivada — saiu da caixa aqui e no Gmail.'
   } catch (e) {
     erro.value = e instanceof ErroDeApi ? e.message : 'Não consegui arquivar.'
+  }
+}
+
+async function excluirAberta() {
+  if (!aberta.value) return
+  const id = aberta.value.id
+  try {
+    await api.post(`/api/email/mensagens/${id}/excluir`)
+    aberta.value = null
+    await carregar()
+    recado.value = 'Foi para a lixeira — aqui e no Gmail. Dá para restaurar.'
+  } catch (e) {
+    erro.value = e instanceof ErroDeApi ? e.message : 'Não consegui excluir.'
+  }
+}
+
+async function restaurarAberta() {
+  if (!aberta.value) return
+  const id = aberta.value.id
+  try {
+    await api.post(`/api/email/mensagens/${id}/restaurar`)
+    aberta.value = null
+    await carregar()
+    recado.value = 'Restaurada para a Caixa.'
+  } catch (e) {
+    erro.value = e instanceof ErroDeApi ? e.message : 'Não consegui restaurar.'
   }
 }
 
@@ -648,6 +678,12 @@ async function buscarNovos() {
 
 function trocar(id) {
   marcadorAtual.value = id
+  aberta.value = null
+  carregar()
+}
+
+function trocarAba(id) {
+  caixaAtual.value = id
   aberta.value = null
   carregar()
 }
@@ -760,6 +796,26 @@ onUnmounted(() => document.removeEventListener('keydown', atalho))
         <span class="caixas__cor" :style="{ background: corDaCaixa(cx) }"
               aria-hidden="true"></span>
         {{ cx.endereco }}
+      </button>
+    </div>
+
+    <!-- 🔵 17/09: Entrada, Arquivadas e Lixeira. As duas últimas não tinham
+         tela nenhuma antes -- "arquivada" só tirava da vista, sem lugar
+         para ver de novo, e exclusão no Gmail nem era detectada. -->
+    <div class="caixas caixas--secundaria" role="tablist">
+      <button v-for="ab in [
+                { id: 'entrada', rotulo: 'Entrada', icone: 'bi-inbox' },
+                { id: 'arquivadas', rotulo: 'Arquivadas', icone: 'bi-archive' },
+                { id: 'lixeira', rotulo: 'Lixeira', icone: 'bi-trash' },
+              ]"
+              :key="ab.id"
+              class="caixas__aba"
+              :class="{ 'caixas__aba--ativa': ab.id === caixaAtual }"
+              type="button" role="tab"
+              :aria-selected="ab.id === caixaAtual"
+              @click="trocarAba(ab.id)">
+        <i class="bi" :class="ab.icone" aria-hidden="true"></i>
+        {{ ab.rotulo }}
       </button>
     </div>
 
@@ -1098,13 +1154,36 @@ onUnmounted(() => document.removeEventListener('keydown', atalho))
                      e pela régua de 28/08 ela tem palavra. O envelope de
                      "não lida" fica só ícone -- é convenção de caixa de
                      correio e o atalho `u` está no ícone de ajuda. -->
-                <button class="botao botao--pequeno botao--fantasma"
+                <button v-if="!aberta.na_lixeira_desde"
+                        class="botao botao--pequeno botao--fantasma"
                         type="button" title="Arquivar (e)"
                         @click="arquivarAberta">
                   <i class="bi bi-archive" aria-hidden="true"></i>
                   Arquivar
                 </button>
+                <!-- 🔵 17/09: excluir e restaurar, espelhando o Gmail --
+                     um ou outro, nunca os dois, porque não faz sentido
+                     restaurar o que não está na lixeira. -->
+                <button v-if="!aberta.na_lixeira_desde"
+                        class="botao botao--pequeno botao--fantasma"
+                        type="button" title="Excluir"
+                        @click="excluirAberta">
+                  <i class="bi bi-trash" aria-hidden="true"></i>
+                  Excluir
+                </button>
+                <button v-else
+                        class="botao botao--pequeno botao--contorno"
+                        type="button" title="Restaurar para a Caixa"
+                        @click="restaurarAberta">
+                  <i class="bi bi-arrow-counterclockwise" aria-hidden="true"></i>
+                  Restaurar
+                </button>
               </div>
+              <p v-if="aberta.sumida_do_gmail_em" class="aviso aviso--erro pequeno">
+                <i class="bi bi-exclamation-triangle" aria-hidden="true"></i>
+                Removida do Gmail — esta é a cópia que já tínhamos. Não dá
+                para restaurar lá.
+              </p>
             </div>
             <p class="apagado pequeno mono">
               {{ aberta.remetente }} ·
@@ -1486,6 +1565,10 @@ onUnmounted(() => document.removeEventListener('keydown', atalho))
   border-radius: var(--r-full);
   flex: none;
 }
+
+/* A segunda fileira (Entrada/Arquivadas/Lixeira) fica colada na primeira
+   por padrão (margin-bottom: -1px do .caixas); esta reabre o respiro. */
+.caixas--secundaria { margin-top: var(--e-2); margin-bottom: 0; }
 
 .email__de-fixo {
   display: flex;

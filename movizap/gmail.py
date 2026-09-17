@@ -411,6 +411,128 @@ def arquivar(mensagem_id: int, arquivada: bool) -> dict:
     return {"ok": True, "arquivada": arquivada}
 
 
+def excluir(mensagem_id: int) -> dict:
+    """Manda para a lixeira -- no Gmail também, mesma razão do arquivar.
+
+    🔵 Pedido dele (17/09): *"não deveria ser espelhado o uso?"*, ao notar
+    que arquivar não tinha aba própria e exclusão não era nem detectada.
+
+    🚨 O RÓTULO `TRASH` TIRA O `INBOX` JUNTO -- testado ao vivo em 17/09
+    contra a caixa real: `modify` com `addLabelIds:["TRASH"]` some com o
+    `INBOX` sozinho. Não precisa (nem pode) tirar os dois na mesma chamada
+    do jeito ingênuo -- `removeLabelIds` com `INBOX` aqui seria redundante,
+    mas inofensivo, então fica explícito para não depender do efeito colateral.
+    """
+    r = _mexer_rotulo(mensagem_id, ["TRASH"], ["INBOX"], "excluir")
+    if not r.get("ok"):
+        return r
+    banco.executar(
+        "UPDATE email_mensagem SET na_lixeira_desde = now() WHERE id = %s",
+        (mensagem_id,))
+    return {"ok": True, "na_lixeira": True}
+
+
+def restaurar(mensagem_id: int) -> dict:
+    """Tira da lixeira e devolve para a CAIXA -- decisão dele (17/09).
+
+    🚨 O `untrash` SOZINHO NÃO DEVOLVE O `INBOX`. Testado ao vivo em 17/09:
+    depois do `untrash`, os rótulos ficam `SENT, UNREAD` -- sem `TRASH` e
+    sem `INBOX`. A mensagem "existe" mas não aparece em lugar nenhum da
+    tela do Gmail. Por isso `poe=["INBOX"]` aqui, explícito -- sem ele a
+    pessoa clicaria "restaurar" e o e-mail sumiria de vez visualmente,
+    mesmo sem ter sido apagado.
+    """
+    r = _mexer_rotulo(mensagem_id, ["INBOX"], ["TRASH"], "restaurar")
+    if not r.get("ok"):
+        return r
+    banco.executar(
+        "UPDATE email_mensagem SET na_lixeira_desde = NULL, arquivada = false "
+        " WHERE id = %s", (mensagem_id,))
+    return {"ok": True, "na_lixeira": False}
+
+
+def sincronizar_exclusoes(conta_id: int | None = None) -> dict:
+    """A varredura: o que sumiu ou foi parar na lixeira, sem o painel saber.
+
+    🚨 POR QUE VARREDURA, E NÃO `history.list`. Medido em 17/09: das 575
+    mensagens de uma conta, 33% já estavam na lixeira e 13% apagadas de vez
+    -- 46% da caixa desatualizada, acumulado desde sempre porque `ler()` só
+    baixa mensagem NUNCA vista e nunca reconfere o que já importou.
+    `history.list` resolveria só daqui para frente; a varredura resolve o
+    passado acumulado e o futuro com o mesmo código.
+
+    🚨 O CUSTO É O DE LISTAR, NÃO O DE BAIXAR. Medido ao vivo: listar 539
+    ids (com e sem lixeira) custou 2 chamadas -- 500 por página. É a mesma
+    lição do `ler()`: listar é barato, o que apertaria a cota seria baixar
+    corpo por mensagem, e aqui não se baixa nada.
+
+    ⚠️ TRÊS ESTADOS, LIDOS NA ORDEM CERTA: se o id está nas duas listas
+    (sem e com lixeira), está ativo -- limpa os dois campos, e é assim que
+    uma restauração feita DIRETO no Gmail chega ao painel. Se está só na
+    lista "com lixeira", foi para lá. Se não está em nenhuma, sumiu de vez
+    -- e antes de marcar como sumida, a mensagem pode já estar marcada como
+    "na lixeira" há dias; isso é normal, o Gmail apaga em definitivo depois
+    de um tempo.
+    """
+    onde = "WHERE ativa" + (" AND id = %s" if conta_id else "")
+    contas = banco.varios(
+        f"SELECT id, endereco, refresh_token FROM email_conta {onde}",
+        (conta_id,) if conta_id else ())
+    total = {"contas": len(contas), "foram_para_lixeira": 0,
+             "restauradas": 0, "sumidas_de_vez": 0}
+
+    for conta in contas:
+        token = _token_de_acesso(conta)
+        with httpx.Client(headers={"Authorization": f"Bearer {token}"},
+                          timeout=60) as cliente:
+
+            def listar_ids(com_lixeira: bool) -> set[str]:
+                ids, pagina = set(), None
+                while True:
+                    params = {"maxResults": 500}
+                    if com_lixeira:
+                        params["includeSpamTrash"] = "true"
+                    if pagina:
+                        params["pageToken"] = pagina
+                    r = _pedir(cliente, "/messages", **params)
+                    for m in r.get("messages") or []:
+                        ids.add(m["id"])
+                    pagina = r.get("nextPageToken")
+                    if not pagina:
+                        return ids
+
+            sem_lixeira = listar_ids(False)
+            com_lixeira = listar_ids(True)
+
+        nossas = banco.varios(
+            "SELECT id, id_externo, na_lixeira_desde, sumida_do_gmail_em "
+            "FROM email_mensagem WHERE conta_id = %s", (conta["id"],))
+
+        for m in nossas:
+            if m["id_externo"] in sem_lixeira:
+                # Ativa. Se estava marcada (lixeira ou sumida), volta.
+                if m["na_lixeira_desde"] or m["sumida_do_gmail_em"]:
+                    banco.executar(
+                        "UPDATE email_mensagem SET na_lixeira_desde = NULL, "
+                        " sumida_do_gmail_em = NULL WHERE id = %s", (m["id"],))
+                    total["restauradas"] += 1
+            elif m["id_externo"] in com_lixeira:
+                if not m["na_lixeira_desde"]:
+                    banco.executar(
+                        "UPDATE email_mensagem SET na_lixeira_desde = now(), "
+                        " sumida_do_gmail_em = NULL WHERE id = %s", (m["id"],))
+                    total["foram_para_lixeira"] += 1
+            else:
+                if not m["sumida_do_gmail_em"]:
+                    banco.executar(
+                        "UPDATE email_mensagem SET sumida_do_gmail_em = now() "
+                        " WHERE id = %s", (m["id"],))
+                    total["sumidas_de_vez"] += 1
+
+    log.info("gmail: varredura de exclusão -- %s", total)
+    return total
+
+
 def anexo(mensagem_id: int, indice: int) -> dict:
     """Baixa UM anexo do Gmail na hora do clique. Não guarda nada.
 

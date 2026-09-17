@@ -794,12 +794,15 @@ def email_marcadores(conta_id: int | None = None,
 
 @app.get("/api/email/mensagens")
 def email_mensagens(marcador: str = "", busca: str = "", limite: int = 60,
-                    conta_id: int | None = None,
+                    conta_id: int | None = None, caixa: str = "entrada",
                     usuario: dict = Depends(auth.requer_tela("EML_1.1"))):
-    """A lista da caixa.
+    """A lista da caixa, com três abas -- `caixa=entrada|arquivadas|lixeira`.
 
-    ⚠️ SPAM e TRASH nunca entram: ninguém quer lixeira num painel de
-    atendimento, e filtrar na tela deixaria o dado passando pela rede à toa.
+    🚨 ATÉ 17/09 SÓ HAVIA "ENTRADA", e a nota aqui dizia "ninguém quer
+    lixeira num painel de atendimento". Medido no mesmo dia: 46% da caixa
+    já não batia com o Gmail (33% na lixeira dele, 13% apagada de vez), e
+    "arquivada" já existia desde a 014 sem NENHUMA tela para ver de novo --
+    a mesma pergunta dele achou as duas lacunas.
 
     🚨 SÓ AS CAIXAS DE QUEM PEDE. Sem `conta_id`, todas as dele -- nunca as
     dos outros. Ver `_caixas_do_usuario`.
@@ -807,7 +810,15 @@ def email_mensagens(marcador: str = "", busca: str = "", limite: int = 60,
     contas = _caixa_permitida(usuario, conta_id)
     if not contas:
         return {"mensagens": []}
-    condicoes = ["NOT e.arquivada", "e.conta_id = ANY(%s)"]
+
+    if caixa == "lixeira":
+        condicoes = ["e.na_lixeira_desde IS NOT NULL", "e.conta_id = ANY(%s)"]
+    elif caixa == "arquivadas":
+        condicoes = ["e.arquivada", "e.na_lixeira_desde IS NULL",
+                     "e.conta_id = ANY(%s)"]
+    else:
+        condicoes = ["NOT e.arquivada", "e.na_lixeira_desde IS NULL",
+                     "e.conta_id = ANY(%s)"]
     params: list = [contas]
 
     # 🚨 O PARÂMETRO EXISTIA E ERA IGNORADO. A tela mandava `?marcador=SENT` e
@@ -827,6 +838,9 @@ def email_mensagens(marcador: str = "", busca: str = "", limite: int = 60,
     return {"mensagens": banco.varios(
         f"""SELECT e.id, e.remetente, e.remetente_nome, e.assunto, e.enviado_em,
                    e.tem_anexo, e.lida, e.estrela, e.conta_id,
+                   -- A tela da Lixeira distingue "ainda dá pra restaurar"
+                   -- de "sumiu de vez, isto é só a nossa cópia".
+                   e.na_lixeira_desde, e.sumida_do_gmail_em,
                    c.nome AS cliente_nome
               FROM email_mensagem e
               LEFT JOIN cliente c ON c.id = e.cliente_id
@@ -1153,6 +1167,28 @@ def email_estrela(mensagem_id: int, ligada: bool = True,
     _exige_mensagem_minha(usuario, mensagem_id)
     try:
         return gmail.estrela(mensagem_id, ligada)
+    except gmail.GmailIndisponivel as e:
+        raise HTTPException(status_code=503, detail=str(e))
+
+
+@app.post("/api/email/mensagens/{mensagem_id}/excluir")
+def email_excluir(mensagem_id: int,
+                  usuario: dict = Depends(auth.requer_tela("EML_1.1"))):
+    """Manda para a lixeira -- reversível, no Gmail também."""
+    _exige_mensagem_minha(usuario, mensagem_id)
+    try:
+        return gmail.excluir(mensagem_id)
+    except gmail.GmailIndisponivel as e:
+        raise HTTPException(status_code=503, detail=str(e))
+
+
+@app.post("/api/email/mensagens/{mensagem_id}/restaurar")
+def email_restaurar(mensagem_id: int,
+                    usuario: dict = Depends(auth.requer_tela("EML_1.1"))):
+    """Tira da lixeira e devolve para a Caixa -- decisão dele, 17/09."""
+    _exige_mensagem_minha(usuario, mensagem_id)
+    try:
+        return gmail.restaurar(mensagem_id)
     except gmail.GmailIndisponivel as e:
         raise HTTPException(status_code=503, detail=str(e))
 

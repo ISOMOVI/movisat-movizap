@@ -891,6 +891,59 @@ respondendo 200 e a lista completa em tudo o mais. Achado exercitando, não por
 teste. Ficou a regra, com teste que a prende: **campo que a tela desenha tem de
 estar na consulta que a tela pede.**
 
+### `email_mensagem.na_lixeira_desde` e `email_mensagem.sumida_do_gmail_em` (046)
+
+🔵 **Pedido dele em 17/09:** *"não temos lixeira também no movizap? não
+deveria se espelhado o uso?"* — e resolve de quebra outra lacuna que a mesma
+pergunta descobriu: `arquivada` existe desde a **014** e **nunca teve tela
+própria**. Uma vez arquivada, a mensagem só desaparecia — sem lugar para ver
+de novo.
+
+🚨 **MEDIDO EM 17/09, CONTRA O GMAIL AO VIVO:** das 575 mensagens que o painel
+mostrava, **190 (33%) já estavam na lixeira** do Gmail e **72 (13%) tinham
+sido apagadas de vez** — **46% da caixa desatualizada**, e o painel não tinha
+como saber. O `ler()` só baixa mensagem **nunca vista**; uma vez importada,
+nunca é reconferida. Depois de rodar a varredura de verdade: **191 e 72** —
+bateu com a medição manual.
+
+| Campo | Nota |
+|---|---|
+| `na_lixeira_desde` | quando a varredura viu esta mensagem na lixeira do Gmail. NULL = não está lá. Volta a NULL se a pessoa restaurar — no Gmail **ou** no painel |
+| `sumida_do_gmail_em` | quando a varredura deixou de achar a mensagem em **qualquer lugar** do Gmail. NULL = ainda existe, de algum jeito |
+
+🚨 **NUNCA PERDEMOS O CONTEÚDO**, e é a diferença para o caso análogo do
+WhatsApp (045): texto, HTML e anexos já foram baixados na importação.
+"Sumida do Gmail" não apaga nada nosso — só registra que **lá** não existe
+mais.
+
+🚨 **A VARREDURA, NÃO `history.list`.** Medido ao vivo: listar 539 ids (com e
+sem lixeira) custou **2 chamadas** — 500 por página, a mesma lição do `ler()`
+("listar é barato, baixar é caro"). `history.list` resolveria só daqui para
+frente; a varredura resolve o **passado acumulado** (as 262 já divergentes) e
+o futuro com o mesmo código, e se autocorrige se o histórico do Google
+expirar. Roda a cada 15 minutos (`scripts/sincronizar_lixeira.py`), separada
+do `ler_caixa.py` de 2 em 2 — ninguém precisa saber em 2 minutos que um
+e-mail sumiu.
+
+🚨 **`excluir()` E `restaurar()` REUSAM O `_mexer_rotulo()`**, o mesmo
+mecanismo de estrela/lida/arquivar — testado ao vivo em 17/09, não é rota
+nova.
+
+⚠️ **O `untrash` SOZINHO NÃO DEVOLVE O `INBOX`.** Testado ao vivo: depois do
+`untrash` puro, os rótulos ficam `SENT, UNREAD` — sem `TRASH` e sem `INBOX`.
+A mensagem "existe" mas não aparece em lugar nenhum da tela do Gmail. Por
+isso `restaurar()` faz `poe=["INBOX"], tira=["TRASH"]` explícito, e devolve
+para a **Caixa** (decisão dele) — não para Arquivadas.
+
+⚠️ **ARQUIVADA + NA LIXEIRA SÓ CONTA COMO LIXEIRA.** Se o Gmail mandou para a
+lixeira algo que também estava arquivado, a mensagem aparece na aba Lixeira,
+não nas duas. Testado.
+
+⚠️ **RESTAURAÇÃO FEITA DIRETO NO GMAIL CHEGA AO PAINEL** — não só a que passa
+pelo botão daqui. A varredura lê as duas listas a cada rodada; se o id
+reaparece na lista sem lixeira, os dois campos voltam a NULL. Testado
+mockando as duas listagens.
+
 ### `mensagem.reacao` e `mensagem.encaminhada_de` (034)
 
 | Campo | Nota |

@@ -2553,3 +2553,28 @@ declara; mostrar a bolinha ao lado do nome de cada um no Chat interno e na
 conversa é o passo seguinte, e é o que fecha o pedido do Rodrigo por inteiro.
 Sem ele, o estado vale como registro e não como aviso à equipe.
 
+
+## EML_1.1 — as duas abas que faltavam: Arquivadas e Lixeira (17/09)
+
+🔵 **Pedido dele:** *"não temos lixeira também no movizap? não deveria se
+espelhado o uso?"*
+
+Antes de hoje só existia "Entrada". Arquivar já era possível desde a 014, mas
+sem tela: a mensagem só sumia. Exclusão não era detectada de jeito nenhum.
+
+### O que a tela ganhou
+
+- Uma segunda fileira de abas, abaixo das contas: **Entrada · Arquivadas ·
+  Lixeira**
+- Botão **Excluir**, ao lado de Arquivar, na mensagem aberta
+- Botão **Restaurar** no lugar de Excluir, quando a mensagem já está na
+  lixeira — os dois nunca aparecem juntos
+- Aviso vermelho quando a mensagem **sumiu de vez** do Gmail: *"Removida do
+  Gmail — esta é a cópia que já tínhamos. Não dá para restaurar lá."*
+
+⚠️ **Restaurar devolve para a Caixa, não para Arquivadas** — decisão dele.
+Tecnicamente o Gmail exige as duas operações (`untrash` sozinho não recoloca
+o `INBOX`, medido ao vivo em 17/09); o botão faz as duas de uma vez.
+
+📁 Detalhe técnico completo — a varredura, os dois campos novos, os
+achados medidos: `docs/02_Modelo_Dados.md`, seção `email_mensagem.na_lixeira_desde`.
