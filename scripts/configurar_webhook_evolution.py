@@ -33,6 +33,13 @@ INSTANCIAS = ["atendimento", "informativos"]
 EVENTOS = [
     "MESSAGES_UPSERT",
     "MESSAGES_UPDATE",
+    # 🚨 ENTROU EM 17/09, e só depois de provar que faltava. A exclusão de
+    # mensagem NUNCA chegou: zero `protocolMessage` e zero `messageStubType`
+    # nos 54.544 eventos crus recebidos entre 18/08 e 17/09. Exercitado contra
+    # o número de teste no mesmo dia -- o Evolution executa o REVOKE (a
+    # resposta dele traz `protocolMessage type REVOKE`) e o webhook não recebe
+    # nada. Sem este evento assinado, tratar exclusão é escrever código morto.
+    "MESSAGES_DELETE",
     "SEND_MESSAGE",
     "CONNECTION_UPDATE",
     "QRCODE_UPDATED",
