@@ -64,8 +64,13 @@ const semConversa = computed(() => {
    escrever: adianta chamar agora? */
 const ESTADO = {
   disponivel: { rotulo: 'disponível', cor: 'var(--ok)' },
-  ausente: { rotulo: 'ausente', cor: 'var(--aviso)' },
+  ausente: { rotulo: 'em pausa', cor: 'var(--aviso)' },
   nao_perturbe: { rotulo: 'não perturbe', cor: 'var(--erro)' },
+  /* 🚨 ENTROU COM A 044 (17/09). A tela desenhava três estados e o banco
+     passou a aceitar quatro -- sem esta linha, quem escolhesse "fora do
+     expediente" apareceria aqui como "sem estado", que é o rótulo de quem
+     nunca escolheu nada. Valor novo no `CHECK` obriga a olhar quem o desenha. */
+  offline: { rotulo: 'fora do expediente', cor: 'var(--texto-apagado)' },
 }
 
 function corDoEstado(estado) {
