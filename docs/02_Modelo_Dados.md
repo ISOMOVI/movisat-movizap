@@ -1229,3 +1229,50 @@ inteira: medido antes de ligar, a Erika via **536 não lidas** numa conversa de
 agosto que ela já tinha atendido. O passado entrou como lido (4.500 linhas,
 9 atendentes × as conversas existentes) e a contagem vale daqui para a frente.
 Reverter é `DELETE FROM conversa_leitura`; nenhuma mensagem é tocada.
+
+### `mensagem.editada_em` e `mensagem.conteudo_original` (043)
+
+| Campo | Nota |
+|---|---|
+| `editada_em` | quando a **última** edição chegou. NULL = nunca editada, que é o caso de praticamente todas as 26.559 de hoje |
+| `conteudo_original` | o texto como chegou da **primeira** vez. Não se sobrescreve nas edições seguintes (`COALESCE(conteudo_original, conteudo)`) |
+
+🚨 **A EDIÇÃO JÁ CHEGAVA E ERA JOGADA FORA.** Medido em 17/09 nos **54.544
+eventos crus** recebidos desde 18/08: `editedMessage` apareceu **5 vezes**, e
+as 5 casam com uma mensagem nossa pelo `keyId` — 5 de 5. Elas entram por
+`messages.update`, o **mesmo evento do tique de entrega**, e o
+`_atualizar_entrega` só olhava `data.status`: o texto novo ia para o lixo, e o
+atendente seguia lendo a versão velha para sempre. Casos reais desta base:
+*"Bom dia"* virou *"Boa tarde"*, *"ponstuais"* virou *"pontuais"*, e um comando
+SMS de rastreador ganhou *"para ativar ign virtual"* que ninguém do atendimento
+chegou a ver.
+
+🚨 **O TEXTO NOVO MORA EM DOIS LUGARES**, e ler só um esvaziaria quase metade
+das edições — pior que não tratar, porque apagaria o que estava certo:
+
+| Formato | Quantos dos 5 casos reais | Quando o WhatsApp usa |
+|---|---|---|
+| `editedMessage.message.conversation` | 2 | texto simples |
+| `editedMessage.message.extendedTextMessage.text` | 3 | texto com citação, menção ou prévia de link |
+
+🚨 **A EDIÇÃO NÃO TOCA EM `entrega`, de propósito.** O `status` que vem junto é
+o ack da **edição** (`SERVER_ACK` → "enviada"), não o da mensagem. Gravá-lo
+rebaixaria para "enviada" um tique que já estava **lida** — o ✓✓ azul
+desapareceria porque o cliente corrigiu uma vírgula. É o que o teste
+`test_nao_rebaixa_o_tique_de_leitura` prende.
+
+⚠️ **ALVO QUE NÃO TEMOS NÃO VIRA NADA**, mesma regra da reação (036): a edição
+pode ser de mensagem anterior ao painel, e inventar linha para ela poria na
+conversa um texto sem contexto nenhum.
+
+⚠️ **O ORIGINAL FICA PORQUE O ATENDENTE AGIU SOBRE O QUE LEU.** Se o cliente
+edita depois, o que foi lido não pode sumir do registro — é a mesma razão de
+*"esconder conversa é para mim, não para o outro"* (27/08). Na tela, o balão
+mostra a palavra **editada** ao lado da hora (palavra visível, não `title` —
+M10) e clicar nela abre o texto anterior.
+
+⚠️ **AS 5 EDIÇÕES ANTIGAS NÃO FORAM APLICADAS.** O tratamento vale de 17/09 em
+diante; os 5 eventos continuam em `webhook_evento`, já marcados como
+processados. Reaplicá-los é decisão do usuário — o ensaio com `ROLLBACK`
+provou que funcionaria nos 5.
+

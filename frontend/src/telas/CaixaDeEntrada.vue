@@ -42,6 +42,16 @@ const busca = ref('')
 const times = ref([])
 const classificacoes = ref([])
 // '' | 'transferir' | 'convidar' | 'encerrar' | 'vincular'
+// Quais mensagens editadas estão com o texto ANTERIOR aberto. Por id, e só
+// nesta sessão: é conferência pontual ("o que ele tinha escrito antes?"),
+// não um estado que valha guardar.
+const originalAberto = ref(new Set())
+function alternarOriginal (id) {
+  const s = new Set(originalAberto.value)
+  s.has(id) ? s.delete(id) : s.add(id)
+  originalAberto.value = s
+}
+
 const painelAcao = ref('')
 const timeEscolhido = ref('')
 /* 🔵 15/09: transferir para PESSOA sempre existiu no backend
@@ -2729,6 +2739,16 @@ function carregarMidiasDaConversa(c) {
                 <i class="bi bi-arrow-right" aria-hidden="true"></i> encaminhada
               </p>
 
+              <!-- O texto ANTES da edição, quando alguém pede para ver.
+                   🚨 Fica guardado porque o atendente AGIU sobre o que leu:
+                   se o cliente corrige depois, o que foi lido não pode sumir
+                   do registro. Mesma razão de "esconder conversa é para mim,
+                   não para o outro" (27/08). -->
+              <p v-if="m.editada_em && m.conteudo_original && originalAberto.has(m.id)"
+                 class="balao__original pequeno">
+                antes: {{ m.conteudo_original }}
+              </p>
+
               <p class="balao__rodape apagado pequeno">
                 {{ hora(m.criada_em) }}
                 <!-- Só na saída: quem respondeu pelo painel. O eco do WhatsApp
@@ -2736,6 +2756,17 @@ function carregarMidiasDaConversa(c) {
                 <span v-if="m.direcao === 'saida' && m.atendente_nome">
                   · {{ m.atendente_nome }}
                 </span>
+                <!-- "editada" ao lado da hora, como no WhatsApp: é onde quem
+                     atende procura. 🚨 PALAVRA VISÍVEL, não `title` -- balão
+                     do navegador demora ~1 s e não existe em toque (M10).
+                     Clicar mostra o texto de antes, para quem precisa
+                     conferir o que leu. -->
+                <button v-if="m.editada_em" type="button" class="balao__editada"
+                        :aria-expanded="originalAberto.has(m.id)"
+                        :title="m.conteudo_original ? 'ver o texto anterior' : ''"
+                        @click="alternarOriginal(m.id)">
+                  · editada
+                </button>
                 <!-- 🚨 O TIQUE, não a palavra (27/08). "enviada / entregue /
                      lida" é vocabulário nosso, do CHECK do banco; quem atende
                      lê ✓ e ✓✓ sem pensar. O segundo tique fica AZUL só quando
@@ -4328,6 +4359,32 @@ function carregarMidiasDaConversa(c) {
   color: var(--texto-apagado);
 }
 .balao__marca { color: var(--texto-apagado); display: flex; gap: 4px; align-items: center; }
+
+/* "editada" vive no rodapé, junto da hora: é do mesmo assunto que o tique.
+   Nasce botão para poder abrir o texto anterior, mas não se veste como
+   botão -- no meio do rodapé, uma caixa desenhada roubaria a leitura da
+   conversa. */
+.balao__editada {
+  background: none;
+  border: 0;
+  padding: 0;
+  margin-left: 3px;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+}
+.balao__editada:hover { text-decoration: underline; }
+
+/* O texto de antes. Recuado e apagado: é prova, não é a conversa. */
+.balao__original {
+  margin-top: var(--e-1);
+  padding-left: var(--e-2);
+  border-left: 2px solid var(--borda);
+  color: var(--texto-apagado);
+  white-space: pre-wrap;
+}
 
 .balao__imagem--clicavel { cursor: zoom-in; }
 

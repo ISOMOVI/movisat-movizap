@@ -737,6 +737,65 @@ def _gravar_mensagem(cur, evento: dict, corpo: dict,
     return f"conversa {conversa_id}: mensagem {tipo} gravada"
 
 
+def _aplicar_edicao(cur, corpo: dict) -> str | None:
+    """A pessoa editou uma mensagem que já está na tela do atendente.
+
+    Devolve `None` quando o evento não é edição -- é o sinal para o chamador
+    seguir tratando entrega.
+
+    🚨 A EDIÇÃO VEM PELO MESMO EVENTO DA ENTREGA (`messages.update`), e era
+    descartada: o `_atualizar_entrega` olhava só `data.status`. Medido em
+    17/09 nos 54.544 eventos crus desde 18/08: `editedMessage` chegou 5 vezes
+    e as 5 casam com uma mensagem nossa pelo `keyId` -- 5 de 5. Nenhuma virou
+    correção na tela.
+
+    🚨 O TEXTO NOVO MORA EM DOIS LUGARES, e ler só um apagaria o conteúdo de
+    quase metade das edições. Medido nas 5: `conversation` em 2 delas (texto
+    simples) e `extendedTextMessage.text` nas outras 3 (texto com citação,
+    menção ou prévia de link). É a mesma dobra que o `_texto_da_mensagem`
+    enfrenta no upsert -- o WhatsApp escolhe o formato pelo que a mensagem
+    carrega, não pelo que ela é.
+
+    🚨 NÃO TOCA EM `entrega`, de propósito. O `status` que vem junto é o ack
+    da EDIÇÃO (`SERVER_ACK` -> "enviada"), não o da mensagem: gravá-lo
+    rebaixaria para "enviada" um tique que já estava "lida", e o atendente
+    veria a leitura desaparecer porque o cliente corrigiu uma vírgula.
+
+    ⚠️ ALVO QUE NÃO TEMOS NÃO VIRA NADA -- mesma regra da reação. A edição
+    pode ser de mensagem anterior ao painel; inventar linha para ela poria na
+    conversa um texto sem contexto nenhum.
+    """
+    editada = _cavar(corpo, "data", "message", "editedMessage", "message")
+    if not isinstance(editada, dict):
+        return None
+
+    novo = editada.get("conversation")
+    if not novo:
+        novo = _cavar(editada, "extendedTextMessage", "text")
+    novo = (novo or "").strip()
+
+    id_msg = _cavar(corpo, "data", "keyId") or _cavar(corpo, "data", "key", "id")
+    if not id_msg:
+        return "edição sem id de alvo"
+    if not novo:
+        # Edição de mídia (legenda) ou formato ainda não visto: melhor não
+        # gravar nada do que esvaziar a mensagem que está na tela.
+        return f"edição sem texto reconhecido ({id_msg})"
+
+    # `COALESCE` guarda só a PRIMEIRA versão: na segunda edição o original
+    # continua sendo o de origem, não a penúltima.
+    cur.execute(
+        """UPDATE mensagem
+              SET conteudo_original = COALESCE(conteudo_original, conteudo),
+                  conteudo = %s,
+                  editada_em = now()
+            WHERE id_externo = %s""",
+        (novo, id_msg))
+    if not cur.rowcount:
+        return f"edição de mensagem que não temos ({id_msg})"
+    return f"edição aplicada ({id_msg})"
+
+
 def _atualizar_entrega(cur, evento: dict, corpo: dict) -> str:
     """`messages.update` normalmente só diz que mudou o status de entrega.
 
@@ -753,6 +812,13 @@ def _atualizar_entrega(cur, evento: dict, corpo: dict) -> str:
     O id da mensagem-alvo vem direto do payload cru deste evento.
     """
     from . import informativos
+
+    # A edição entra por aqui e sai por aqui: se este evento for edição, ele
+    # NÃO é evento de entrega, e tratar os dois no mesmo update rebaixaria o
+    # tique (ver `_aplicar_edicao`).
+    nota_edicao = _aplicar_edicao(cur, corpo)
+    if nota_edicao is not None:
+        return nota_edicao
 
     bruto = str(_cavar(corpo, "data", "status") or "").upper()
     estado = ENTREGA.get(bruto)
@@ -1604,6 +1670,10 @@ def mensagens(conversa_id: int, limite: int = JANELA_INICIAL,
                                  FROM mensagem_reacao r
                                 WHERE r.mensagem_id = m.id
                                 GROUP BY emoji) x) AS reacoes,
+                      -- A marca de editada e o texto de antes: a tela mostra
+                      -- "editada" e deixa o original alcançável, em vez de
+                      -- trocar o texto por baixo de quem já leu.
+                      m.editada_em, m.conteudo_original,
                       m.encaminhada_de
                  FROM mensagem m
                  LEFT JOIN atendente a ON a.id = m.atendente_id
