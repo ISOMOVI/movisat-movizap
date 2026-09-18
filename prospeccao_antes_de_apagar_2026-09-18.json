@@ -1,0 +1,43 @@
+{
+  "id": "3c127869-cbac-4d73-8a6d-ec431c02d1eb",
+  "name": "prospeccao",
+  "connectionStatus": "close",
+  "ownerJid": null,
+  "profileName": null,
+  "profilePicUrl": null,
+  "integration": "WHATSAPP-BAILEYS",
+  "number": null,
+  "businessId": null,
+  "token": "1312692E-AF03-4FE4-8954-68C9F9713E63",
+  "clientName": "evolution_exchange",
+  "disconnectionReasonCode": null,
+  "disconnectionObject": null,
+  "disconnectionAt": null,
+  "createdAt": "2026-08-07T14:23:13.251Z",
+  "updatedAt": "2026-08-07T14:23:13.251Z",
+  "Chatwoot": null,
+  "Proxy": null,
+  "Rabbitmq": null,
+  "Nats": null,
+  "Sqs": null,
+  "Websocket": null,
+  "Setting": {
+    "id": "cmsj1bl9l10s0nd4pwnzxipm9",
+    "rejectCall": false,
+    "msgCall": "",
+    "groupsIgnore": false,
+    "alwaysOnline": false,
+    "readMessages": false,
+    "readStatus": false,
+    "syncFullHistory": false,
+    "wavoipToken": "",
+    "createdAt": "2026-08-07T14:23:13.256Z",
+    "updatedAt": "2026-08-07T14:23:13.256Z",
+    "instanceId": "3c127869-cbac-4d73-8a6d-ec431c02d1eb"
+  },
+  "_count": {
+    "Message": 0,
+    "Contact": 0,
+    "Chat": 0
+  }
+}
