@@ -2578,3 +2578,112 @@ o `INBOX`, medido ao vivo em 17/09); o botão faz as duas de uma vez.
 
 📁 Detalhe técnico completo — a varredura, os dois campos novos, os
 achados medidos: `docs/02_Modelo_Dados.md`, seção `email_mensagem.na_lixeira_desde`.
+
+---
+
+# ✅ Validado em 2026-09-18 — o botão da ficha e o campo Tipo
+
+> 🚨 **AS DUAS COISAS DESTA RODADA NASCERAM DE SUGESTÃO MINHA QUE ELE NÃO
+> PEDIU.** Uma (o S17) ele mandou desfazer; a outra (tirar "Sem identificação"
+> da lista) ele corrigiu. Registro aqui porque a origem é o que separa
+> demanda de dívida minha — e as duas eram dívida minha.
+
+## ATD_1.2 — o botão "Ficha" volta a abrir só a gaveta
+
+Pedido dele: *"proponha o botão Ficha - vincular para a tela original, de
+volta, pois não pedi isso a você. Era para abrir o modal a partir do botão
+'vincular empresa', já dentro da ficha e não no botão de Ficha-Vincular"*.
+
+```
+Objetivo:     um botão, um efeito -- Ficha abre a ficha
+Hoje:         `abrirFicha()` só alterna a gaveta, com cadastro ou sem. O
+              modal de vínculo abre pelo botão "Vincular a uma empresa",
+              que mora dentro da gaveta
+Por quê:      o S17 (15/09, sugestão minha) fazia o botão pular a gaveta e
+              abrir o modal direto quando não havia cadastro. Economizava um
+              clique e escondia o resto: o Tipo e o selo do Bitrix moram na
+              gaveta, e com 319 conversas sem contato a gaveta simplesmente
+              nunca abria para a maioria
+Reavaliar se: ele achar o clique a mais caro no uso diário -- aí a saída é
+              atalho, não sumir com a gaveta
+```
+
+## ATD_1.2 — o Tipo mostrava "sem cadastro" para quem tinha tipo
+
+🚨 **O DEFEITO:** no estado "contato sem empresa", o seletor de Tipo estava
+preso a um `ref` local (`tipoSemCadastro`) que nascia vazio e **só era
+escrito ao SALVAR, nunca ao abrir a ficha**. Quem já tinha tipo via "sem
+cadastro" no lugar dele.
+
+**Medido em 18/09, na produção:** 5 contatos `tecnico` sem empresa (7
+conversas). E não é cosmético — `contato.relacao` é chave primária da
+`relacao_automacao`, a tabela que decide se a saudação automática e a IA
+atendem a pessoa (`CFG_5.1`). A tela mentia sobre o que governa o
+atendimento.
+
+⚠️ **Atingia os dois públicos:** quem tem `ATD_1.2` via o seletor errado;
+quem não tem via o chip fixo *"Sem cadastro"*, que mentia igual.
+
+```
+Objetivo:     o campo mostra o que a pessoa É, sempre
+Hoje:         `tipoAtual`, um `computed` com get/set: o getter lê
+              `empresa.contato.relacao` do servidor, o setter chama
+              `trocarTipo`. Não há mais cópia local para dessincronizar
+Por quê:      estado de tela duplicando dado de servidor diverge em silêncio
+              -- ninguém erra, nada estoura, e o campo mente
+Reavaliar se: aparecer um caso em que a tela precise segurar uma escolha
+              antes de gravar (rascunho); aí a cópia volta, mas semeada
+```
+
+⚠️ **O que isto NÃO conserta, e é anterior:** sem contato nenhum, o
+`trocarTipo` não grava otimista (não há `contato` para escrever), então um
+PUT que falha deixa a escolha aparente no seletor. Quem avisa é a faixa de
+erro. Vale igual para o `:value` de antes e o `v-model` de agora.
+
+## 🚫 "Sem identificação" VOLTOU à lista — decisão dele, corrigindo a minha
+
+Em 28/08 **eu** tirei `sem_identificacao` da escolha, chamando-o de valor de
+nascimento da migração 031. Ele corrigiu em 18/09:
+
+> *"sem identificação é sem identificação mesmo, não é só porque tem empresa
+> vinculada que é cliente. esse cad deve ser feito a mão"*
+
+**E o banco já concordava com ele:** `conversas.vincular()` insere o contato
+**sem definir `relacao`**, então ele nasce `sem_identificacao` pelo default da
+coluna. **Vincular empresa nunca marcou ninguém como cliente.** Medido em
+18/09: **19 contatos `sem_identificacao`, todos COM empresa** — pessoas que
+ninguém identificou ainda, não clientes.
+
+| Onde o Tipo aparece | Antes de 18/09 | Agora |
+|---|---|---|
+| Contatos (`CAD_1.2`) | 8 valores | 8 valores |
+| Conversa, **com** empresa | 8 valores | 8 valores |
+| Conversa, **sem** empresa | 7 (sem `sem_identificacao`) | **8** |
+
+Sem o valor na lista não havia como desfazer uma classificação errada de
+dentro da conversa — só pela tela de Contatos. `RELACOES_ESCOLHIVEIS` saiu do
+código, sem uso.
+
+🚨 **O placeholder `<option value="">"sem cadastro"` agora só aparece enquanto
+é verdade** (`v-if="!aberta.contato_id"`): com contato criado não há volta, e
+opção que não leva a lugar nenhum é ruído. Ele fica **selecionável, não
+cinza** — o painel inteiro não tem uma única `<option>` desabilitada (22
+`<option>` em 6 telas, conferido), e a convenção de placeholder aqui é
+`<option value="">`, como nas outras 7. A regra do "cinza com motivo" vive em
+**botão**, não em item de lista.
+
+## O que a suíte passou a defender
+
+Os 21 testes de `ficha_e_rotulos.teste.js` afirmavam o rótulo do botão, o
+modal e a classe do campo — **nenhum afirmava o valor selecionado do Tipo**, e
+é por isso que o defeito passou por suíte verde. Entraram 4:
+
+| Teste | O que trava |
+|---|---|
+| contato `tecnico` sem empresa | o seletor mostra `tecnico`, não `""` |
+| sem contato nenhum | o seletor fica em `""` e diz "sem cadastro" |
+| `sem_identificacao` escolhível | está nas opções; o placeholder some com cadastro |
+| sem permissão | o chip **lê** "Técnico", em vez de "Sem cadastro" fixo |
+
+⚠️ `codigosPermitidos` no duplo virou `ref` (era `computed`, somente leitura):
+sem isso não dá para tirar a permissão e conferir o que o outro público vê.

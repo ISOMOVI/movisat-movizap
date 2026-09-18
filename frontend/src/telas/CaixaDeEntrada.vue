@@ -242,10 +242,21 @@ const RELACOES = [
 ]
 const NOME_RELACAO = Object.fromEntries(RELACOES)
 
-/* ⚠️ `sem_identificacao` fica de fora da ESCOLHA (28/08): ele é o valor de
-   nascimento do contato (migração 031), não uma marcação de ninguém. Continua
-   em `RELACOES` porque é valor válido do banco e precisa ter nome legível. */
-const RELACOES_ESCOLHIVEIS = RELACOES.filter(([v]) => v !== 'sem_identificacao')
+/* 🚫 A LISTA FILTRADA SAIU EM 18/09. Eu tinha tirado `sem_identificacao` da
+   escolha em 28/08 -- decisão MINHA, declarada na época -- tratando-o como
+   lixo de nascimento da migração 031. Ele corrigiu: *"sem identificação é sem
+   identificação mesmo, não é só porque tem empresa vinculada que é cliente.
+   esse cad deve ser feito a mão"*.
+
+   E o banco já dizia isso: `vincular()` insere o contato SEM definir
+   `relacao`, então ele nasce `sem_identificacao` por default -- vincular
+   empresa nunca marcou ninguém como cliente. Medido em 18/09: 19 contatos
+   assim, todos COM empresa. São pessoas ainda não identificadas, não
+   clientes.
+
+   Com o valor de volta à lista, as três telas que mostram o tipo (Contatos,
+   conversa com empresa, conversa sem empresa) passam a oferecer os mesmos 8
+   valores do CHECK do banco. */
 
 const podeTrocarTipo = computed(() => codigosPermitidos.value.has('CAD_1.2'))
 
@@ -268,7 +279,28 @@ const tipoSalvo = ref(false)
    `candidatos`, `bitrix` e o rótulo do botão da ficha de uma vez -- remendar
    quatro campos à mão é onde a tela começa a divergir do banco. Mesma decisão
    do `vincularA`. */
-const tipoSemCadastro = ref('')
+
+/* 🚨 O TIPO VEM DO SERVIDOR, NÃO DE UMA CÓPIA LOCAL (18/09). Aqui havia um
+   `ref` próprio (`tipoSemCadastro`) que nascia vazio e só era escrito ao
+   SALVAR, nunca ao abrir a ficha -- então quem já tinha tipo e não tinha
+   empresa via "sem cadastro" no lugar do tipo dele. Eram 5 contatos
+   `tecnico`, e o campo decide se a automação e a IA atendem a pessoa
+   (`CFG_5.1`): a tela mentia sobre o que governa o atendimento.
+
+   ⚠️ É `computed` com get/set para haver UMA fonte: o getter é o dado do
+   servidor e o setter é a gravação. Não há mais estado de tela para
+   dessincronizar.
+
+   ⚠️ O QUE ISTO **NÃO** CONSERTA, e é anterior a 18/09: quando NÃO há
+   contato, o `trocarTipo` não grava otimista (não há `contato` para
+   escrever), então um PUT que falha deixa a escolha aparente no seletor --
+   o Vue não repinta um valor que, para ele, continua `''`. O que avisa é a
+   faixa de erro ("Não consegui marcar o tipo"). Vale para o `:value` de
+   antes e para o `v-model` de agora, igual. */
+const tipoAtual = computed({
+  get: () => aberta.value?.empresa?.contato?.relacao || '',
+  set: (nova) => trocarTipo(nova),
+})
 
 async function trocarTipo(nova) {
   const contato = aberta.value?.empresa?.contato
@@ -286,7 +318,6 @@ async function trocarTipo(nova) {
     if (r.criou_contato) {
       recado.value = `Cadastro criado e marcado como ${NOME_RELACAO[nova] || nova}. `
         + 'A automação por tipo passa a valer para esta pessoa.'
-      tipoSemCadastro.value = ''
       await abrir(aberta.value.id)
       await carregar({ silencioso: true })
     }
@@ -1663,13 +1694,17 @@ async function rolarParaOFim() {
 
 const gaveta = ref(false)
 
-/* 🟡 S17, feito em 15/09. SEM cadastro, a gaveta não tem o que mostrar: ela
-   só servia de corredor até o botão de vincular -- dois cliques para a ação
-   que vale em 61% das conversas (medido em 28/08). COM ficha, o botão segue
-   abrindo a gaveta, que é onde a informação está. */
+/* 🚫 S17 (15/09) DESFEITO EM 18/09, a pedido dele: *"proponha o botão Ficha -
+   vincular para a tela original, de volta, pois não pedi isso a você. Era
+   para abrir o modal a partir do botão 'vincular empresa', já dentro da
+   ficha e não no botão de Ficha-Vincular"*. O S17 era sugestão minha, não
+   pedido dele, e ela tinha um custo que eu não tinha visto: sem contato
+   algum (61-63% das conversas), a gaveta nunca abria, e o Tipo "sem
+   cadastro" e o aviso do Bitrix -- que moram dentro dela -- ficavam
+   inalcançáveis. Ficha volta a abrir sempre a gaveta; o modal só abre pelo
+   botão "Vincular a uma empresa", que já mora dentro dela. */
 function abrirFicha() {
-  if (aberta.value?.contato_id) gaveta.value = !gaveta.value
-  else abrirPainel('vincular')
+  gaveta.value = !gaveta.value
 }
 
 /* As empresas que o telefone alcança -- o grupo da pessoa.
@@ -2460,23 +2495,38 @@ function carregarMidiasDaConversa(c) {
                    cadastro" -- estado, sem saída. O tipo mora em `contato`, e
                    o que faltava não era o campo: era o registro.
 
-                   ⚠️ `sem_identificacao` NÃO entra na lista: é o valor com que
-                   o contato NASCE (migração 031), não uma escolha. Oferecê-lo
-                   seria convidar a marcar "não sei" de propósito. -->
+                   🚫 CORRIGIDO EM 18/09: `sem_identificacao` VOLTOU à lista.
+                   Eu o tinha tirado em 28/08 chamando-o de valor de
+                   nascimento; ele corrigiu -- *"sem identificação é sem
+                   identificação mesmo, não é só porque tem empresa vinculada
+                   que é cliente. esse cad deve ser feito a mão"*. É estado
+                   real de quem ninguém classificou ainda, e sem ele na lista
+                   não havia como desfazer uma marcação errada daqui. -->
               <dl class="gaveta__dados">
                 <dt>Tipo</dt>
                 <dd>
                   <select
                     v-if="podeMarcarTipo"
-                    v-model="tipoSemCadastro"
+                    v-model="tipoAtual"
                     class="campo__entrada campo__entrada--compacto"
-                    @change="trocarTipo(tipoSemCadastro)"
                   >
-                    <option value="">sem cadastro</option>
-                    <option v-for="[valor, rotulo] in RELACOES_ESCOLHIVEIS"
+                    <!-- O placeholder só existe enquanto é verdade: com
+                         contato criado não há como voltar a "sem cadastro",
+                         e opção que não leva a lugar nenhum é ruído. Ele
+                         fica selecionável (não cinza) porque o painel inteiro
+                         não tem uma única `<option>` desabilitada -- placeholder
+                         aqui é `<option value="">`, como nas outras 7. -->
+                    <option v-if="!aberta.contato_id" value="">sem cadastro</option>
+                    <option v-for="[valor, rotulo] in RELACOES"
                             :key="valor" :value="valor">{{ rotulo }}</option>
                   </select>
-                  <span v-else class="chip">Sem cadastro</span>
+                  <!-- 🚨 O CHIP MENTIA IGUAL AO SELETOR (18/09): dizia sempre
+                       "Sem cadastro", inclusive para quem já tinha tipo. Quem
+                       não pode marcar continua sem poder -- mas passa a LER a
+                       verdade. -->
+                  <span v-else class="chip">
+                    {{ NOME_RELACAO[tipoAtual] || 'Sem cadastro' }}
+                  </span>
                 </dd>
               </dl>
 

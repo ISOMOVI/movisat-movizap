@@ -139,14 +139,25 @@ class TestD7TipoSemCadastro:
         ⚠️ E o que era um chip morto ("Sem cadastro", estado sem saida) virou
         um `<select>` que CRIA o contato -- entao o teste passou a exigir a
         escolha, nao so a exibicao.
+
+        🚨 A AFIRMACAO MUDOU DE NOVO EM 18/09, E PELO MESMO VICIO DE SEMPRE:
+        ela exigia a palavra `trocarTipo` DENTRO do markup, porque ali havia
+        um `@change="trocarTipo(tipoSemCadastro)"`. A gravacao continua
+        existindo -- mudou de lugar, para o setter do `computed` `tipoAtual`,
+        quando a copia local saiu. O teste reprovou codigo correto por medir
+        onde a palavra estava, nao se a escolha grava. Agora afirma o vinculo
+        do campo (`v-model="tipoAtual"`), que e o que torna o Tipo uma
+        escolha; o VALOR que ele mostra e afirmado de verdade, com a tela
+        montada, em `frontend/src/ficha_e_rotulos.teste.js`.
         """
         fonte = _sem_comentario(CAIXA)
         i = fonte.index("Não está no cadastro")
         trecho = fonte[i:i + 2600]
         assert "<dt>Tipo</dt>" in trecho, (
             "a ficha continua muda justamente no caso mais comum")
-        assert "trocarTipo" in trecho, (
-            "sem cadastro o tipo virou escolha, nao mais um chip morto")
+        assert 'v-model="tipoAtual"' in trecho, (
+            "sem cadastro o tipo virou escolha, nao mais um chip morto -- e "
+            "escolher grava pelo setter de `tipoAtual`")
 
     def test_e_diz_o_que_falta_para_trocar(self):
         """⚠️ A regra que ele aprovou na escada da IA: o que não dá para mudar

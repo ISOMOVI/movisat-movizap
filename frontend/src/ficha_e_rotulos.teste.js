@@ -54,11 +54,15 @@ vi.mock('vue-router', () => ({
   useRouter: () => ({ replace: () => {}, push: () => {} }),
 }))
 
+/* ⚠️ `codigosPermitidos` é `ref`, não `computed`, DE PROPÓSITO (18/09):
+   `computed` só de getter é somente leitura, e o teste do campo Tipo precisa
+   tirar a permissão para conferir o que quem NÃO pode marcar enxerga. Lê
+   igual (`.value.has(...)`); o que muda é poder escrever no duplo. */
 vi.mock('./estado/sessao.js', async () => {
-  const { computed } = await import('vue')
+  const { computed, ref } = await import('vue')
   return {
     sessao: { usuario: { id: 1, nome: 'Teste' }, telas: [], iniciadaEm: 0 },
-    codigosPermitidos: computed(() => new Set(['ATD_1.2', 'CAD_1.2', 'ATD_6.1'])),
+    codigosPermitidos: ref(new Set(['ATD_1.2', 'CAD_1.2', 'ATD_6.1'])),
     autenticado: computed(() => true),
   }
 })
@@ -161,10 +165,9 @@ describe('A ficha se anuncia como ficha', () => {
   })
 })
 
-/* Com CONTATO e sem EMPRESA: é o único estado em que a gaveta abre E ainda
-   oferece vincular empresa. Com empresa, o botão sai (não há o que vincular);
-   sem contato, desde o S17 (15/09) o botão da ficha pula direto pro modal e
-   a gaveta nem abre. */
+/* Com CONTATO e sem EMPRESA: mesmo estado "SEM EMPRESA" de quem não tem
+   contato nenhum, só que com o chip "Cadastro sem empresa" em vez de "Não
+   está no cadastro". Os dois oferecem Tipo e o botão de vincular. */
 async function comContatoSemEmpresa() {
   respostas['/api/conversas/7'] = {
     ...CONVERSA,
@@ -178,6 +181,83 @@ async function comContatoSemEmpresa() {
   return comConversaAberta()
 }
 
+describe('O Tipo mostra o que a pessoa É, não uma cópia vazia', () => {
+  /* 🚨 O DEFEITO QUE ISTO DEFENDE (18/09): o seletor estava preso a um `ref`
+     local que nascia vazio e só era escrito ao SALVAR -- quem já tinha tipo e
+     não tinha empresa via "sem cadastro" no lugar do tipo. Eram 5 contatos
+     `tecnico` na produção, e o campo decide se a automação e a IA atendem a
+     pessoa (`CFG_5.1`).
+
+     ⚠️ Afirma o VALOR SELECIONADO, não a presença do campo. Nenhum dos 21
+     testes anteriores olhava para o valor -- por isso o defeito passou por
+     suíte verde. */
+  it('contato com tipo e sem empresa mostra o tipo, não "sem cadastro"', async () => {
+    respostas['/api/conversas/7'] = {
+      ...CONVERSA,
+      contato_id: 9,
+      contato_nome: 'Adriano',
+      empresa: { contato: { nome: 'Adriano', relacao: 'tecnico' }, cliente: null },
+    }
+    const w = await comConversaAberta()
+    await acharBotao(w, 'Ficha').trigger('click')
+    await assentar(w)
+    const tipo = w.find('.gaveta select')
+    expect(tipo.exists()).toBe(true)
+    expect(tipo.element.value).toBe('tecnico')
+  })
+
+  it('sem contato nenhum, o seletor fica em "sem cadastro"', async () => {
+    const w = await comConversaAberta()
+    await acharBotao(w, 'Ficha').trigger('click')
+    await assentar(w)
+    const tipo = w.find('.gaveta select')
+    expect(tipo.element.value).toBe('')
+    expect(tipo.text()).toContain('sem cadastro')
+  })
+
+  /* 🔵 Decisão dele em 18/09: *"sem identificação é sem identificação mesmo,
+     não é só porque tem empresa vinculada que é cliente. esse cad deve ser
+     feito a mão"*. Eu tinha tirado o valor da lista em 28/08 por conta
+     própria; sem ele não havia como desfazer uma marcação errada daqui. */
+  it('"Sem identificação" é escolhível, e some só o placeholder com cadastro', async () => {
+    respostas['/api/conversas/7'] = {
+      ...CONVERSA,
+      contato_id: 9,
+      contato_nome: 'Adriano',
+      empresa: { contato: { nome: 'Adriano', relacao: 'tecnico' }, cliente: null },
+    }
+    const w = await comConversaAberta()
+    await acharBotao(w, 'Ficha').trigger('click')
+    await assentar(w)
+    const valores = w.find('.gaveta select').findAll('option').map((o) => o.element.value)
+    expect(valores).toContain('sem_identificacao')
+    // Com contato criado não há volta para "sem cadastro": o placeholder sai.
+    expect(valores).not.toContain('')
+  })
+
+  it('quem não pode marcar LÊ o tipo, em vez de "Sem cadastro" fixo', async () => {
+    const { codigosPermitidos } = await import('./estado/sessao.js')
+    const original = codigosPermitidos.value
+    codigosPermitidos.value = new Set(['ATD_6.1'])
+    try {
+      respostas['/api/conversas/7'] = {
+        ...CONVERSA,
+        contato_id: 9,
+        contato_nome: 'Adriano',
+        empresa: { contato: { nome: 'Adriano', relacao: 'tecnico' }, cliente: null },
+      }
+      const w = await comConversaAberta()
+      await acharBotao(w, 'Ficha').trigger('click')
+      await assentar(w)
+      const gaveta = w.find('.gaveta')
+      expect(gaveta.find('select').exists()).toBe(false)
+      expect(gaveta.text()).toContain('Técnico')
+    } finally {
+      codigosPermitidos.value = original
+    }
+  })
+})
+
 describe('Vincular empresa é modal, não faixa espremida na gaveta', () => {
   it('a gaveta não carrega mais o campo de busca', async () => {
     const w = await comContatoSemEmpresa()
@@ -190,17 +270,22 @@ describe('Vincular empresa é modal, não faixa espremida na gaveta', () => {
     expect(gaveta.text()).toContain('Vincular a uma empresa')
   })
 
-  /* 🚨 S17, 15/09: SEM cadastro a gaveta só servia de corredor até o vínculo
-     -- dois cliques para a ação que vale em 61% das conversas. Este teste é
-     o que impede o clique extra de voltar sem ninguém perceber. */
-  it('sem cadastro, um clique em Ficha já abre o modal', async () => {
+  /* 🔵 Revertido em 18/09, a pedido dele: *"proponha o botão Ficha -
+     vincular para a tela original, de volta, pois não pedi isso a você. Era
+     para abrir o modal a partir do botão 'vincular empresa', já dentro da
+     ficha e não no botão de Ficha-Vincular"*. O clique único (S17, 15/09)
+     era sugestão minha, e escondia o Tipo "sem cadastro" e o Bitrix -- que
+     moram na gaveta -- para quem não tem contato algum (61-63% das
+     conversas), porque a gaveta nunca chegava a abrir. */
+  it('sem cadastro, Ficha abre a gaveta, não o modal direto', async () => {
     const w = await comConversaAberta()
     await acharBotao(w, 'Ficha').trigger('click')
     await assentar(w)
-    expect(w.find('.modal').exists()).toBe(true)
-    expect(w.find('.modal').text()).toContain('Vincular a uma empresa')
-    // E a gaveta NÃO abre junto: seria duas coisas abertas por um clique só.
-    expect(w.find('.gaveta').exists()).toBe(false)
+    expect(w.find('.modal').exists()).toBe(false)
+    const gaveta = w.find('.gaveta')
+    expect(gaveta.exists()).toBe(true)
+    expect(gaveta.text()).toContain('Não está no cadastro')
+    expect(gaveta.text()).toContain('Vincular a uma empresa')
   })
 
   it('o botão abre o modal, e os achados aparecem dentro dele', async () => {
@@ -211,8 +296,9 @@ describe('Vincular empresa é modal, não faixa espremida na gaveta', () => {
       ],
     }
     const w = await comConversaAberta()
-    // Um clique só desde o S17 (15/09): sem cadastro, Ficha abre o modal.
     await acharBotao(w, 'Ficha').trigger('click')
+    await assentar(w)
+    await acharBotao(w, 'Vincular a uma empresa').trigger('click')
     await assentar(w)
 
     const modal = w.find('.modal')
@@ -233,8 +319,9 @@ describe('Vincular empresa é modal, não faixa espremida na gaveta', () => {
       itens: [{ id: 3, nome: 'Pastelaria Velasco', documento: null, ativo: true }],
     }
     const w = await comConversaAberta()
-    // Um clique só desde o S17 (15/09): sem cadastro, Ficha abre o modal.
     await acharBotao(w, 'Ficha').trigger('click')
+    await assentar(w)
+    await acharBotao(w, 'Vincular a uma empresa').trigger('click')
     await assentar(w)
     w.vm.buscaCliente = 'velasco'
     await w.vm.procurarCliente()
@@ -255,8 +342,9 @@ describe('Vincular empresa é modal, não faixa espremida na gaveta', () => {
         { id: i + 1, nome: `Empresa ${i + 1}`, documento: null, ativo: true })),
     }
     const w = await comConversaAberta()
-    // Um clique só desde o S17 (15/09): sem cadastro, Ficha abre o modal.
     await acharBotao(w, 'Ficha').trigger('click')
+    await assentar(w)
+    await acharBotao(w, 'Vincular a uma empresa').trigger('click')
     await assentar(w)
     w.vm.buscaCliente = 'empresa'
     await w.vm.procurarCliente()
