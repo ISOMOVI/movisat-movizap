@@ -222,3 +222,41 @@ class TestPerfis:
 
     def test_atendimento_nao_alcanca_configuracao(self):
         assert "admin" not in telas.permissoes_do_perfil("atendimento")
+
+
+class TestPortaDoConfig:
+    """🚨 A PORTA TRANCADA DE 22/09. `Minha conta` (CFG_10.1) e `Atalhos`
+    (CFG_6.1) eram `atendimento`, mas viviam dentro de um `/config` (CFG_0.1)
+    que era `owner` -- e o `MenuLateral` não desenha item para tela com
+    `aba_de`. Resultado medido no banco: 9 dos 10 atendentes sem nenhuma
+    entrada para as duas telas desde que elas nasceram, com a suíte verde.
+
+    Nenhum teste prendia isto até 23/09. O terceiro caso é a REGRA, e vale
+    para qualquer perfil: pega a próxima aba que nascer com a mãe mais
+    apertada que ela.
+    """
+
+    @staticmethod
+    def _do_perfil(perfil):
+        u = {"owner": perfil == "owner",
+             "permissoes": sorted(telas.permissoes_do_perfil(perfil))}
+        return telas.do_usuario(u)
+
+    def test_atendente_alcanca_o_config(self):
+        codigos = {t["codigo"] for t in self._do_perfil("atendimento")}
+        assert "CFG_0.1" in codigos
+
+    def test_atendente_ve_exatamente_as_duas_abas_pessoais(self):
+        abas = {t["codigo"] for t in self._do_perfil("atendimento")
+                if t["aba_de"] == "CFG_0.1"}
+        assert abas == {"CFG_6.1", "CFG_10.1"}
+
+    @pytest.mark.parametrize("perfil", sorted(telas.PERFIS))
+    def test_nenhuma_aba_visivel_tem_a_mae_invisivel(self, perfil):
+        vistas = self._do_perfil(perfil)
+        codigos = {t["codigo"] for t in vistas}
+        orfas = sorted(t["codigo"] for t in vistas
+                       if t["aba_de"] and t["aba_de"] not in codigos)
+        assert not orfas, (
+            f"perfil {perfil!r} alcança {orfas} mas não a tela-mãe: "
+            "a aba existe e não tem porta")

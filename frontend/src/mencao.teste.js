@@ -8,33 +8,15 @@
  * "email@movisat.com.br" e "@10h" como se fossem gente — e erraria em
  * silêncio, que é o defeito que este projeto mais paga.
  *
- * ⚠️ A função é testada isolada, com o mesmo algoritmo do componente: o que
- * importa aqui é a REGRA de quebra, e ela é pura.
+ * ⚠️ A função é pura e mora em `util/mencao.js`, de onde o componente e
+ * este teste a importam.
  */
 import { describe, it, expect } from 'vitest'
 
-/* Mesma lógica de `partesDoTexto` do ChatInterno.vue. */
-function partesDoTexto(m) {
-  const nomes = (m.mencionados || []).map((p) => p.nome)
-    .sort((a, b) => b.length - a.length)
-  if (!nomes.length) return [{ texto: m.texto }]
-  const partes = []
-  let resto = m.texto
-  let guarda = 0
-  while (resto && guarda++ < 200) {
-    let achou = null
-    for (const nome of nomes) {
-      const i = resto.indexOf('@' + nome)
-      if (i !== -1 && (achou === null || i < achou.i)) achou = { i, nome }
-    }
-    if (!achou) break
-    if (achou.i) partes.push({ texto: resto.slice(0, achou.i) })
-    partes.push({ texto: '@' + achou.nome, mencao: true, eu: Boolean(m.me_chamou) })
-    resto = resto.slice(achou.i + achou.nome.length + 1)
-  }
-  if (resto) partes.push({ texto: resto })
-  return partes
-}
+/* 🚨 A FUNÇÃO DA TELA, importada -- não uma cópia (23/09). Até ali este
+   arquivo reescrevia `partesDoTexto` à mão, e as verificações abaixo
+   defendiam a cópia, não o que o Chat interno desenha. */
+import { partesDoTexto } from './util/mencao.js'
 
 const acesas = (partes) => partes.filter((p) => p.mencao).map((p) => p.texto)
 

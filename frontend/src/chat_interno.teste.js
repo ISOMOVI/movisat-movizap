@@ -21,11 +21,13 @@ import { mount, flushPromises } from '@vue/test-utils'
 
 let respostas
 let posts
+let gets
 let falharGet
 
 vi.mock('./api/cliente.js', () => ({
   api: {
     get: (rota) => {
+      gets.push(rota)
       if (falharGet) return Promise.reject(new Error('rede caiu'))
       const chave = Object.keys(respostas)
         .filter((k) => rota.startsWith(k))
@@ -98,7 +100,7 @@ async function digitarArroba(tela, valor) {
   return campo
 }
 
-beforeEach(() => { respostas = base(); posts = []; falharGet = false })
+beforeEach(() => { respostas = base(); posts = []; gets = []; falharGet = false })
 
 describe('Chat interno: o rascunho', () => {
   it('sobrevive ao ciclo de atualização de 5 s', async () => {
@@ -293,5 +295,51 @@ describe('Chat interno: o Enter obedece à preferência', () => {
     await t.get('textarea').trigger('keydown', { key: 'Enter', ctrlKey: true })
     await flushPromises()
     expect(posts.some((p) => p.rota.includes('/escrever'))).toBe(true)
+  })
+})
+
+/* ── 23/09 ──────────────────────────────────────────────────────────────── */
+
+describe('Chat interno: o laço de 5 s busca a lista UMA vez', () => {
+  /* 🚨 Medido em 22/09: a lista ia DUAS vezes por volta -- o ciclo buscava, e o
+     `abrir()` buscava de novo no fim. Com 10 pessoas de tela aberta, o dobro
+     do tráfego para nenhuma novidade. */
+  it('com uma conversa aberta: 1 lista e 1 sala por ciclo', async () => {
+    vi.useFakeTimers()
+    const t = mount(ChatInterno)
+    await flushPromises()
+    await abrirSala(t, 'Erika')
+    gets = []
+    await vi.advanceTimersByTimeAsync(5000)
+    await flushPromises()
+    expect(gets.filter((r) => r === '/api/chat/salas')).toHaveLength(1)
+    expect(gets.filter((r) => r === '/api/chat/salas/1')).toHaveLength(1)
+    vi.useRealTimers()
+  })
+
+  it('o clique numa sala continua atualizando a lista na hora', async () => {
+    const t = mount(ChatInterno)
+    await flushPromises()
+    gets = []
+    await abrirSala(t, 'Erika')
+    expect(gets).toContain('/api/chat/salas')
+  })
+})
+
+describe('Chat interno: o destaque da menção NA TELA', () => {
+  /* 🚨 O `mencao.teste.js` testava uma cópia da função. Este monta a TELA:
+     se o balão deixar de usar a regra, é aqui que reprova. */
+  it('acende só quem está gravado como menção, e forte para mim', async () => {
+    respostas = base({ mensagens: [{
+      id: 1, texto: '@Erika manda para suporte@movisat.com.br',
+      mencionados: [{ id: 2, nome: 'Erika' }], me_chamou: true,
+      autor: 'Rodrigo', autor_id: 5, criada_em: '2026-09-23T10:00:00-03:00',
+    }] })
+    const t = mount(ChatInterno)
+    await flushPromises()
+    await abrirSala(t, 'Erika')
+    const marcas = t.findAll('mark.mencao')
+    expect(marcas.map((m) => m.text())).toEqual(['@Erika'])
+    expect(marcas[0].classes()).toContain('mencao--eu')
   })
 })

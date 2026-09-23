@@ -13,6 +13,8 @@ import { ref, reactive, computed, onMounted, onUnmounted, nextTick, watch } from
 
 import { api, pedirBlob, ErroDeApi } from '../api/cliente.js'
 import { corDaInicial, iniciais } from '../util/avatar.js'
+import { partesDoTexto } from '../util/mencao.js'
+import { corDoEstado, rotuloDoEstado } from '../util/estado.js'
 
 const salas = ref([])
 const contatos = ref([])
@@ -82,25 +84,8 @@ const semConversa = computed(() => {
 
 /* 🚨 `atendente.estado` EXISTE DESDE A MIGRAÇÃO 001 E NENHUMA TELA O USAVA.
    Num canal interno é ele que responde a pergunta que se faz ANTES de
-   escrever: adianta chamar agora? */
-const ESTADO = {
-  disponivel: { rotulo: 'disponível', cor: 'var(--ok)' },
-  ausente: { rotulo: 'em pausa', cor: 'var(--aviso)' },
-  nao_perturbe: { rotulo: 'não perturbe', cor: 'var(--erro)' },
-  /* 🚨 ENTROU COM A 044 (17/09). A tela desenhava três estados e o banco
-     passou a aceitar quatro -- sem esta linha, quem escolhesse "fora do
-     expediente" apareceria aqui como "sem estado", que é o rótulo de quem
-     nunca escolheu nada. Valor novo no `CHECK` obriga a olhar quem o desenha. */
-  offline: { rotulo: 'fora do expediente', cor: 'var(--texto-apagado)' },
-}
-
-function corDoEstado(estado) {
-  return (ESTADO[estado] || {}).cor || 'var(--texto-apagado)'
-}
-
-function rotuloDoEstado(estado) {
-  return (ESTADO[estado] || {}).rotulo || 'sem estado'
-}
+   escrever: adianta chamar agora? A régua (cores e rótulos) mora em
+   `util/estado.js` desde 23/09 -- a Caixa de entrada usa a mesma. */
 
 /* ---- separador de dia ----------------------------------------------------
    Sem ele o fio é um bloco só, e "14:32" não diz se foi hoje ou em julho. */
@@ -182,7 +167,7 @@ async function carregar({ silencioso = false } = {}) {
   }
 }
 
-async function abrir(salaId, { silencioso = false } = {}) {
+async function abrir(salaId, { silencioso = false, recarregarLista = true } = {}) {
   try {
     const r = await api.get(`/api/chat/salas/${salaId}`)
     sala.value = salas.value.find((s) => s.id === salaId) || { id: salaId }
@@ -203,7 +188,10 @@ async function abrir(salaId, { silencioso = false } = {}) {
     }
     // Abrir zera o não lido desta sala: o servidor já marcou, a lista precisa
     // refletir sem esperar o próximo ciclo.
-    await carregar({ silencioso: true })
+    // ⚠️ O CICLO DE 5 s PEDE `recarregarLista: false` (23/09): ele mesmo busca
+    // a lista logo depois, e buscar aqui também fazia a lista ir DUAS vezes a
+    // cada volta -- 3 requisições por ciclo numa conversa direta, 4 num grupo.
+    if (recarregarLista) await carregar({ silencioso: true })
   } catch (e) {
     // 🚨 CICLO DE FUNDO NÃO PINTA ERRO (22/09). O `catch` escrevia na faixa
     // vermelha mesmo no ciclo silencioso: um soluço de rede de um segundo
@@ -423,31 +411,8 @@ function tirarMencionado(id) {
   mencionados.value = mencionados.value.filter((m) => m.id !== id)
 }
 
-/* Quebra o texto do balão em pedaços, acendendo só os nomes que estão
-   GRAVADOS como menção. */
-function partesDoTexto(m) {
-  const nomes = (m.mencionados || []).map((p) => p.nome)
-    .sort((a, b) => b.length - a.length)   // o mais longo primeiro: "Ana Paula" antes de "Ana"
-  if (!nomes.length) return [{ texto: m.texto }]
-  const partes = []
-  let resto = m.texto
-  let guarda = 0
-  while (resto && guarda++ < 200) {
-    let achou = null
-    for (const nome of nomes) {
-      const i = resto.indexOf('@' + nome)
-      if (i !== -1 && (achou === null || i < achou.i)) achou = { i, nome }
-    }
-    if (!achou) break
-    if (achou.i) partes.push({ texto: resto.slice(0, achou.i) })
-    // ⚠️ `me_chamou` vem do backend. Um nome pode se repetir na frase; o que
-    // decide o destaque forte é ter sido EU o chamado, não o texto.
-    partes.push({ texto: '@' + achou.nome, mencao: true, eu: Boolean(m.me_chamou) })
-    resto = resto.slice(achou.i + achou.nome.length + 1)
-  }
-  if (resto) partes.push({ texto: resto })
-  return partes
-}
+/* `partesDoTexto` vem de `util/mencao.js` (23/09): a MESMA função que o
+   `mencao.teste.js` testa. Antes o teste defendia uma cópia. */
 
 const FAMILIA = { image: 'imagem', audio: 'audio', video: 'video' }
 
@@ -714,13 +679,17 @@ onMounted(async () => {
   document.addEventListener('click', fecharEmojiSeForaDele)
   await carregarPreferencia()
   await carregar()
+  /* 🚨 UMA BUSCA DA LISTA POR VOLTA (23/09). Antes: lista, sala, e a lista de
+     NOVO no fim do `abrir`. Agora a sala vem PRIMEIRO -- é ela que marca a
+     leitura -- e a lista depois, uma vez, já com o não lido zerado. A ordem
+     importa: lista antes da sala mostraria por 5 s um não lido que já foi lido. */
   timer = setInterval(async () => {
     const estava = estaNoFim()
-    await carregar({ silencioso: true })
     if (sala.value) {
-      await abrir(sala.value.id, { silencioso: true })
+      await abrir(sala.value.id, { silencioso: true, recarregarLista: false })
       if (estava) rolarParaOFim()
     }
+    await carregar({ silencioso: true })
   }, 5000)
 })
 

@@ -1455,3 +1455,68 @@ custaram caro aqui.** Fica registrado como pendência, separado desta entrega.
 (conversa direta) e 3 de `@g.us`. Então não é "grupo sim, direto não": alguma
 outra coisa decide se a edição vem legível ou cifrada, e ainda não sei o quê.
 
+
+---
+
+## 23/09 — bloqueio pelo painel, e o resumo da transferência que ninguém lia
+
+### `numero_bloqueado` — o que o painel bloqueou (050)
+
+🔵 Pedido dele em 23/09: *"permitir ler e só bloquear se existir pelo painel
+tbm"*.
+
+```sql
+numero_bloqueado (
+    id               BIGSERIAL PRIMARY KEY,
+    canal_id         BIGINT NOT NULL REFERENCES canal(id),
+    telefone_e164    TEXT   NOT NULL,
+    bloqueado_por    BIGINT REFERENCES atendente(id) ON DELETE SET NULL,
+    bloqueado_em     TIMESTAMPTZ NOT NULL DEFAULT now(),
+    desbloqueado_por BIGINT REFERENCES atendente(id) ON DELETE SET NULL,
+    desbloqueado_em  TIMESTAMPTZ,
+    CHECK (desbloqueado_em IS NULL OR desbloqueado_em >= bloqueado_em)
+)
+-- UM bloqueio ativo por número e canal:
+UNIQUE (canal_id, telefone_e164) WHERE desbloqueado_em IS NULL
+```
+
+🚨 **O PAINEL GUARDA O PRÓPRIO REGISTRO PORQUE O WHATSAPP NÃO CONTA.** Medido
+na instância real (Evolution 2.3.7) em 23/09: bloquear existe
+(`POST /chat/updateBlockStatus`), mas **não existe rota que liste os
+bloqueados** — cinco nomes testados, todos 404 — e **nenhum evento de
+bloqueio** chega pelo webhook (57 mil eventos: só mensagens, conexão e QR).
+Bloqueio feito **no celular** é invisível para o painel.
+
+⚠️ **HISTÓRICO, NÃO ESTADO.** Desbloquear preenche `desbloqueado_em`; a linha
+fica. **Anota depois de o WhatsApp aceitar** — anotar antes deixaria o painel
+dizendo "bloqueado" para um número que o WhatsApp não bloqueou.
+
+**Efeitos na tela e nas rotas:** a conversa bloqueada sai das abas (menos na
+**busca**, onde aparece marcada) e vai para o filtro "Bloqueados"; as rotas de
+envio ao cliente (`responder`, `arquivo` não interno, `audio`) recusam 409;
+**nota interna continua valendo**. Grupo não se bloqueia.
+
+### O resumo da transferência vira nota interna (049)
+
+🔵 Pergunta dele: *"o campo 'Resumo' tem uso real? ou apenas front?"* —
+**era só frente**: o texto ia para `transferencia.resumo` e nenhuma consulta o
+lia de volta. Desde 23/09 `conversas.transferir` grava, na mesma transação,
+uma `mensagem` `tipo = 'nota'`, `direcao = 'interna'`:
+*"Transferida para {pessoa | o time X}. Resumo: …"*. A 049 fez o mesmo para
+o que já estava gravado — **só `motivo = 'manual'`**: das 22 linhas com
+resumo, 21 eram texto automático da saída do dono. Entrou 1 (conversa 12853).
+
+### Colunas que a lista e a conversa passaram a devolver (sem migração)
+
+- `atendente_estado` (de `atendente.estado`) na lista e na conversa — a
+  bolinha de quem responde;
+- `bloqueado` na lista e `bloqueio` na conversa;
+- `mensagem.atendente_id` na leitura das mensagens — a tela só oferece
+  editar e apagar na mensagem de quem está olhando.
+
+### Editar e apagar o que NÓS mandamos (sem migração)
+
+Reusam `editada_em`, `conteudo_original` (o `COALESCE` guarda a primeira
+versão) e `apagada_em` — as mesmas colunas da edição e exclusão feitas pelo
+**cliente**. 🚨 **O que nós apagamos não volta pelo webhook** (provado em
+17/09): a rota marca `apagada_em` ela mesma.

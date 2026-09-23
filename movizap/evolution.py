@@ -242,6 +242,57 @@ def enviar_reacao(instancia: str, chave: dict, emoji: str) -> dict:
                   {"key": chave, "reaction": emoji or ""})
 
 
+def editar_mensagem(instancia: str, chave: dict, texto: str) -> dict:
+    """Edita uma mensagem que NÓS mandamos (23/09).
+
+    ⚠️ Rota conferida na instância real em 23/09 (Evolution 2.3.7): com corpo
+    vazio responde 500 "Cannot read properties of undefined (reading
+    'replace')" -- a rota existe e tenta ler o `number`.
+
+    🚨 O `number` É O DESTINO DA CONVERSA, e a `key` aponta a mensagem --
+    mesmo trio `{remoteJid, fromMe, id}` da reação. O WhatsApp só aceita
+    editar mensagem própria, e por um tempo curto (ver `JANELA_EDITAR` em
+    `conversas.py`).
+    """
+    numero = chave.get("remoteJid", "")
+    numero = numero if numero.endswith("@g.us") else numero.split("@")[0]
+    return _pedir("POST", f"/chat/updateMessage/{instancia}",
+                  {"number": numero, "key": chave, "text": texto})
+
+
+def apagar_para_todos(instancia: str, chave: dict) -> dict:
+    """Apaga para todos uma mensagem que NÓS mandamos (23/09).
+
+    ⚠️ Rota conferida na instância real em 23/09: `DELETE` com corpo vazio
+    responde 400 pedindo `id`, `fromMe` e `remoteJid`.
+
+    🚨 O QUE NÓS APAGAMOS NÃO VOLTA PELO WEBHOOK (provado em 17/09, ver
+    `_aplicar_exclusao`). Quem chama tem de marcar a mensagem ele mesmo.
+    """
+    return _pedir("DELETE", f"/chat/deleteMessageForEveryone/{instancia}",
+                  {"id": chave["id"], "fromMe": chave["fromMe"],
+                   "remoteJid": chave["remoteJid"]})
+
+
+def mudar_bloqueio(instancia: str, numero_e164: str, bloquear: bool) -> dict:
+    """Bloqueia ou desbloqueia um número NO WHATSAPP DA INSTÂNCIA (23/09).
+
+    🚨 ISTO MEXE NO APARELHO DE VERDADE: o número bloqueado deixa de conseguir
+    mandar mensagem para a empresa. Por isso a tela confirma antes.
+
+    ⚠️ Rota conferida na instância real em 23/09: com corpo vazio responde 400
+    pedindo `number` e `status`. E NÃO EXISTE rota que LISTE os bloqueados
+    (5 nomes testados, todos 404) nem evento de webhook de bloqueio -- o
+    painel só conhece o bloqueio que ELE fez, e é por isso que ele guarda o
+    próprio registro (`numero_bloqueado`, migração 050).
+    """
+    numero = destino_para_evolution(numero_e164)
+    if not numero:
+        raise ErroEvolution("Sem número para bloquear.", 0)
+    return _pedir("POST", f"/chat/updateBlockStatus/{instancia}",
+                  {"number": numero, "status": "block" if bloquear else "unblock"})
+
+
 def enviar_audio(instancia: str, numero_e164: str, base64_dados: str) -> dict:
     """Manda um áudio gravado no navegador, como mensagem de voz.
 

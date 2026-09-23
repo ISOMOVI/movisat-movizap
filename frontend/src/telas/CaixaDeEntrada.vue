@@ -24,6 +24,7 @@ import { api, pedirBlob, ErroDeApi, relatarErroDeBotao } from '../api/cliente.js
 import { codigosPermitidos } from '../estado/sessao.js'
 import { linkificar, marcar, partir } from '../util/destaque.js'
 import { corDaInicial, iniciais } from '../util/avatar.js'
+import { corDoEstado, rotuloDoEstado } from '../util/estado.js'
 import AjudaDaTela from '../componentes/AjudaDaTela.vue'
 
 const route = useRoute()
@@ -509,10 +510,16 @@ async function carregarAnteriores() {
 const acompanham = ref([])
 const convidaveis = ref([])
 const souDono = ref(false)
+/* 🔵 23/09: quem sou eu -- editar e apagar só aparecem na MINHA mensagem.
+   Vem da rota de participantes (`eu`), que já existia. */
+const meuId = ref(null)
 const souParticipante = ref(false)
 /* Vários de uma vez (12/08): era um <select> de um só, e chamar três pessoas
    custava três idas ao painel. */
 const convidados = ref([])
+/* 🔵 23/09: o recado de quem convida. Vira NOTA INTERNA na conversa, pela
+   mesma rota da nota -- o convite em si não tinha onde guardar texto. */
+const recadoConvite = ref('')
 const mexendo = ref(false)
 
 /* ---- confirmação --------------------------------------------------------
@@ -540,6 +547,7 @@ function fecharPainel() {
 
 function limparPaineis() {
   convidados.value = []
+  recadoConvite.value = ''
   timeEscolhido.value = ''
   atendenteEscolhido.value = ''
   motivo.value = ''
@@ -552,6 +560,102 @@ function limparPaineis() {
   buscaCliente.value = ''
   achadosCliente.value = []
   nomeDoContato.value = ''
+}
+
+/* ---- editar e apagar o que EU mandei (23/09) ----------------------------
+   🔵 Pergunta dele: *"então eu envio por lá e posso editar, certo?"*. Até
+   23/09 não dava. As janelas são do WhatsApp -- 15 min para editar, cerca de
+   dois dias para apagar (o servidor usa 48 h) -- e a tela só oferece o botão
+   dentro delas, para não prometer o que o WhatsApp vai recusar. O servidor
+   confere de novo: a tela é conveniência, a trava é a rota. */
+const JANELA_EDITAR_MIN = 15
+const JANELA_APAGAR_MIN = 48 * 60
+const editando = ref(null)   // { id, texto }
+
+function idadeMin(m) {
+  return (Date.now() - new Date(m.criada_em).getTime()) / 60000
+}
+function minhaEnviada(m) {
+  return m.direcao === 'saida' && m.tipo !== 'nota' && !m.apagada_em &&
+    meuId.value != null && m.atendente_id === meuId.value
+}
+function podeEditar(m) {
+  return minhaEnviada(m) && m.tipo === 'texto' && idadeMin(m) <= JANELA_EDITAR_MIN
+}
+function podeApagar(m) {
+  return minhaEnviada(m) && idadeMin(m) <= JANELA_APAGAR_MIN
+}
+function abrirEdicao(m) {
+  editando.value = { id: m.id, texto: m.conteudo || '' }
+}
+async function salvarEdicao() {
+  const e = editando.value
+  if (!e || !e.texto.trim() || mexendo.value) return
+  mexendo.value = true
+  erro.value = ''
+  try {
+    await api.post(`/api/conversas/${aberta.value.id}/editar`,
+                   { mensagem_id: e.id, texto: e.texto })
+    editando.value = null
+    recado.value = 'Mensagem editada — o cliente vê a versão nova, marcada como editada.'
+    await abrir(aberta.value.id)
+  } catch (x) {
+    erro.value = x instanceof ErroDeApi ? x.message : 'Não consegui editar.'
+    relatarErroDeBotao('editar_mensagem', x, aberta.value?.id)
+  } finally {
+    mexendo.value = false
+  }
+}
+function pedirParaApagar(m) {
+  perguntar('Apagar para todos?',
+    'A mensagem some do WhatsApp do cliente. Aqui ela continua registrada, marcada como apagada.',
+    'Apagar para todos',
+    async () => {
+      try {
+        await api.post(`/api/conversas/${aberta.value.id}/apagar`, { mensagem_id: m.id })
+        recado.value = 'Mensagem apagada para todos.'
+        await abrir(aberta.value.id)
+      } catch (x) {
+        erro.value = x instanceof ErroDeApi ? x.message : 'Não consegui apagar.'
+        relatarErroDeBotao('apagar_mensagem', x, aberta.value?.id)
+      }
+    }, true)
+}
+
+/* ---- bloquear pelo painel (23/09) ----------------------------------------
+   🔵 Pedido dele: *"permitir ler e só bloquear se existir pelo painel tbm"*.
+   🚨 MEXE NO APARELHO: o número deixa de conseguir falar com a empresa --
+   por isso confirma. Desbloquear não confirma: é o lado que desfaz. */
+function pedirParaBloquear() {
+  perguntar('Bloquear este número?',
+    'O número deixa de conseguir mandar mensagem para a empresa pelo WhatsApp. ' +
+    'A conversa sai das abas e fica em "Bloqueados", onde se desbloqueia.',
+    'Bloquear',
+    async () => {
+      try {
+        await api.post(`/api/conversas/${aberta.value.id}/bloquear`, {})
+        recado.value = 'Número bloqueado. A conversa está em "Bloqueados".'
+        await Promise.all([abrir(aberta.value.id), carregar({ silencioso: true })])
+      } catch (x) {
+        erro.value = x instanceof ErroDeApi ? x.message : 'Não consegui bloquear.'
+        relatarErroDeBotao('bloquear', x, aberta.value?.id)
+      }
+    }, true)
+}
+async function desbloquear() {
+  if (mexendo.value) return
+  mexendo.value = true
+  erro.value = ''
+  try {
+    await api.post(`/api/conversas/${aberta.value.id}/desbloquear`, {})
+    recado.value = 'Número desbloqueado. A conversa voltou para as abas.'
+    await Promise.all([abrir(aberta.value.id), carregar({ silencioso: true })])
+  } catch (x) {
+    erro.value = x instanceof ErroDeApi ? x.message : 'Não consegui desbloquear.'
+    relatarErroDeBotao('desbloquear', x, aberta.value?.id)
+  } finally {
+    mexendo.value = false
+  }
 }
 
 function perguntar(titulo, texto, rotulo, acao, perigo = false) {
@@ -573,6 +677,7 @@ async function carregarParticipantes(id) {
     transferiveis.value = r.transferiveis || []
     souDono.value = Boolean(r.sou_dono)
     souParticipante.value = Boolean(r.sou_participante)
+    meuId.value = r.eu ?? null
   } catch {
     // A conversa abre mesmo se isto falhar: participante é informação a mais,
     // não pré-requisito para atender.
@@ -622,9 +727,27 @@ async function convidar() {
         : `${entraram.length} pessoas foram chamadas: ${entraram.join(', ')}.`
     }
     if (falharam.length) erro.value = `Não entrou: ${falharam.join(' · ')}`
+    /* 🔵 23/09: o recado fica NA conversa, como nota interna. Só se alguém
+       entrou: recado para ninguém seria uma nota falando de um convite que
+       não aconteceu. Falhou a nota, o convite continua valendo e a tela diz. */
+    const textoRecado = recadoConvite.value.trim()
+    let gravouNota = false
+    if (textoRecado && entraram.length) {
+      try {
+        await api.post(`/api/conversas/${aberta.value.id}/nota`, {
+          texto: `Chamou ${entraram.join(', ')} para a conversa. Recado: ${textoRecado}`,
+        })
+        gravouNota = true
+      } catch (e) {
+        erro.value = [erro.value, 'O convite entrou, mas o recado não foi gravado.']
+          .filter(Boolean).join(' ')
+      }
+    }
     convidados.value = []
+    recadoConvite.value = ''
     painelAcao.value = ''
     await carregarParticipantes(aberta.value.id)
+    if (gravouNota) await abrir(aberta.value.id)
   } finally {
     mexendo.value = false
   }
@@ -692,6 +815,10 @@ const FILTROS = [
   { valor: 'todas', rotulo: 'Todas' },
   { valor: 'sem_dono', rotulo: 'Sem dono' },
   { valor: 'minhas', rotulo: 'Minhas' },
+  /* 🔵 23/09 (pedido dele): as conversas SEM DONO dos times de que eu sou
+     membro -- para onde vai o "transferir para o time". Antes disso a
+     transferência para um time caía em "Sem dono" para todo mundo. */
+  { valor: 'time', rotulo: 'Time' },
 ]
 
 /* ---- filtro por tipo de cadastro (pedido do usuário em 25/08) -----------
@@ -730,6 +857,8 @@ function parametros() {
   const p = new URLSearchParams()
   if (filtro.value === 'sem_dono') p.set('sem_dono', 'true')
   if (filtro.value === 'minhas') p.set('minhas', 'true')
+  if (filtro.value === 'time') p.set('meus_times', 'true')
+  if (filtro.value === 'bloqueados') p.set('bloqueados', 'true')
   if (busca.value.trim()) p.set('busca', busca.value.trim())
   if (tiposMarcados.value.length) p.set('relacoes', tiposMarcados.value.join(','))
   return p.toString()
@@ -879,6 +1008,7 @@ async function abrir(id) {
        citar mensagem desta conversa"), mas a tela mentia até a pessoa
        tentar. */
     citando.value = null
+    editando.value = null
     // ⚠️ Os ACHADOS também. Antes de 25/08 eles eram `computed` e sumiam
     // sozinhos com o termo; agora são estado, e estado não se limpa sozinho --
     // sobrariam marcações de balão de outra conversa.
@@ -925,6 +1055,8 @@ async function atualizarMensagens() {
     aberta.value.estado = r.estado
     aberta.value.atendente_id = r.atendente_id
     aberta.value.atendente_nome = r.atendente_nome
+    aberta.value.atendente_estado = r.atendente_estado
+    aberta.value.bloqueio = r.bloqueio
 
     const porId = new Map(r.mensagens.map((m) => [m.id, m]))
     for (const m of aberta.value.mensagens) {
@@ -1442,6 +1574,7 @@ onMounted(async () => {
      confiar nos dois. */
   if (route.query.minhas) filtro.value = 'minhas'
   else if (route.query.sem_dono) filtro.value = 'sem_dono'
+  else if (route.query.time) filtro.value = 'time'
 
   /* 🚨 VEM DA FICHA DO CLIENTE. O botão "Conversar" da CAD_1.1 manda o número
      para cá: se já existe conversa aberta com ele, abre; senão, abre o painel
@@ -1872,13 +2005,23 @@ function carregarMidiasDaConversa(c) {
               <span v-if="resumo.sem_dono" class="lista__pede">
                 · {{ resumo.sem_dono }} sem dono
               </span>
+              <!-- 🔵 23/09: quem o painel bloqueou. Só existe quando há algum;
+                   clicar de novo volta para Todas. -->
+              <button v-if="resumo.bloqueados" type="button"
+                      class="botao botao--pequeno"
+                      :class="filtro === 'bloqueados' ? 'botao--primario' : 'botao--fantasma'"
+                      :aria-pressed="filtro === 'bloqueados'"
+                      @click="filtro = filtro === 'bloqueados' ? 'todas' : 'bloqueados'">
+                <i class="bi bi-slash-circle" aria-hidden="true"></i>
+                Bloqueados ({{ resumo.bloqueados }})
+              </button>
             </div>
           </div>
 
           <div class="linha linha--quebra">
-            <!-- ⚠️ CONTROLE SEGMENTADO, não três botões soltos. Três botões
-                 com cores diferentes leem como três ações; segmentado lê como
-                 UMA escolha entre três -- que é o que é. -->
+            <!-- ⚠️ CONTROLE SEGMENTADO, não botões soltos. Botões com cores
+                 diferentes leem como ações; segmentado lê como UMA escolha --
+                 que é o que é. Quatro desde 23/09, com a aba Time. -->
             <div class="abas" role="tablist">
               <button
                 v-for="f in FILTROS"
@@ -2009,7 +2152,13 @@ function carregarMidiasDaConversa(c) {
         <div v-else-if="!lista.length" class="vazio">
           <i class="bi bi-chat-dots vazio__icone" aria-hidden="true"></i>
           <p class="vazio__titulo">Nenhuma conversa</p>
-          <p>Assim que alguém escrever, ela aparece aqui sozinha.</p>
+          <!-- A aba Time vazia tem OUTRO motivo, e a tela diz qual: ou não
+               há conversa esperando nos seus times, ou você não é de time
+               nenhum -- quem decide isso é a tela de Times. -->
+          <p v-if="filtro === 'time'">
+            Nenhuma conversa sem dono nos times de que você faz parte.
+          </p>
+          <p v-else>Assim que alguém escrever, ela aparece aqui sozinha.</p>
         </div>
 
         <ul v-else class="conversas">
@@ -2093,7 +2242,13 @@ function carregarMidiasDaConversa(c) {
                 <span v-if="c.estado === 'resolvida'" class="chip chip--ok chip--pequeno">
                   concluída
                 </span>
-                <span v-if="c.atendente_nome" class="chip chip--acento chip--pequeno">
+                <!-- 🔵 23/09: a bolinha diz se quem responde está DISPONÍVEL -- a
+                     conversa de alguém fora do expediente não anda. Mesma régua
+                     do Chat interno (`util/estado.js`). -->
+                <span v-if="c.atendente_nome" class="chip chip--acento chip--pequeno"
+                      :title="`${c.atendente_nome}: ${rotuloDoEstado(c.atendente_estado)}`">
+                  <span class="estado-bolinha" aria-hidden="true"
+                        :style="{ background: corDoEstado(c.atendente_estado) }"></span>
                   {{ c.atendente_nome }}
                 </span>
               </div>
@@ -2208,7 +2363,12 @@ function carregarMidiasDaConversa(c) {
               <i class="bi" :class="aberta.estado === 'resolvida' ? 'bi-arrow-counterclockwise' : 'bi-hand-index-thumb'" aria-hidden="true"></i>
               {{ aberta.estado === 'resolvida' ? 'Reabrir e assumir' : 'Assumir' }}
             </button>
-            <span v-else class="chip chip--acento">{{ aberta.atendente_nome }}</span>
+            <span v-else class="chip chip--acento">
+              <span class="estado-bolinha" aria-hidden="true"
+                    :style="{ background: corDoEstado(aberta.atendente_estado) }"></span>
+              {{ aberta.atendente_nome }}
+              <span class="estado-rotulo">· {{ rotuloDoEstado(aberta.atendente_estado) }}</span>
+            </span>
           </header>
 
           <!-- ⚠️ Só aparece quando há alguém: linha vazia em toda conversa
@@ -2332,6 +2492,18 @@ function carregarMidiasDaConversa(c) {
               >
                 <i class="bi bi-box-arrow-left" aria-hidden="true"></i>
                 Sair
+              </button>
+              <!-- 🔵 23/09: só conversa com UMA pessoa se bloqueia -- grupo não. -->
+              <button
+                v-if="!aberta.grupo_jid && !aberta.bloqueio"
+                class="botao botao--pequeno botao--contorno"
+                type="button"
+                :disabled="mexendo"
+                title="O número deixa de conseguir falar com a empresa pelo WhatsApp"
+                @click="pedirParaBloquear"
+              >
+                <i class="bi bi-slash-circle" aria-hidden="true"></i>
+                Bloquear
               </button>
               <span class="espaco"></span>
               <button
@@ -2883,6 +3055,18 @@ function carregarMidiasDaConversa(c) {
                         @click="abrirEncaminhar(m)">
                   <i class="bi bi-arrow-right" aria-hidden="true"></i>
                 </button>
+                <!-- 🔵 23/09: só na MINHA mensagem, e dentro da janela do
+                     WhatsApp (15 min para editar, 48 h para apagar). -->
+                <button v-if="podeEditar(m)" class="balao__acao" type="button"
+                        title="Editar (até 15 minutos depois de enviar)"
+                        aria-label="Editar mensagem" @click="abrirEdicao(m)">
+                  <i class="bi bi-pencil" aria-hidden="true"></i>
+                </button>
+                <button v-if="podeApagar(m)" class="balao__acao" type="button"
+                        title="Apagar para todos"
+                        aria-label="Apagar para todos" @click="pedirParaApagar(m)">
+                  <i class="bi bi-trash" aria-hidden="true"></i>
+                </button>
 
                 <div v-if="reagindoEm === m.id" class="reacoes">
                   <!-- ⚠️ A NOSSA FICA MARCADA NO SELETOR TAMBÉM: clicar nela
@@ -2922,6 +3106,22 @@ function carregarMidiasDaConversa(c) {
           </p>
 
           <div v-else class="cartao__corpo pilha rodape-conversa">
+            <!-- 🔵 23/09: NÚMERO BLOQUEADO. O campo continua aberto porque a
+                 NOTA interna continua valendo; o envio ao cliente o servidor
+                 recusa, e a faixa diz antes de a pessoa tentar. -->
+            <p v-if="aberta.bloqueio" class="aviso aviso--atencao" role="status">
+              <i class="bi bi-slash-circle aviso__icone" aria-hidden="true"></i>
+              <span>
+                <strong>Número bloqueado pelo painel</strong>
+                <template v-if="aberta.bloqueio.bloqueado_por_nome">
+                  por {{ aberta.bloqueio.bloqueado_por_nome }}</template>.
+                Mensagem ao cliente está travada; nota interna continua valendo.
+              </span>
+              <button class="botao botao--pequeno botao--contorno" type="button"
+                      :disabled="mexendo" @click="desbloquear">
+                Desbloquear
+              </button>
+            </p>
             <!-- 🚨 NÃO EXISTE MAIS SELETOR DE MODO. Havia um par
                  "Para o cliente | Nota interna" que só trocava um estado
                  invisível: clicar no lado que já estava ativo não fazia nada,
@@ -3243,6 +3443,29 @@ function carregarMidiasDaConversa(c) {
     </div>
 
     <!-- CONVIDAR — vários de uma vez, por caixa de seleção -->
+    <!-- 🔵 23/09: EDITAR A MINHA MENSAGEM -->
+    <div v-if="editando && aberta" class="modal" @click.self="editando = null">
+      <div class="modal__caixa" role="dialog" aria-modal="true" aria-label="Editar mensagem">
+        <p class="modal__titulo">Editar mensagem</p>
+        <p class="modal__texto pequeno">
+          O cliente vê a versão nova, marcada como editada. Dá para editar por
+          15 minutos depois de enviar.
+        </p>
+        <textarea v-model="editando.texto" class="campo__entrada" rows="4"
+                  maxlength="4096"></textarea>
+        <div class="modal__acoes">
+          <button class="botao botao--contorno" type="button" @click="editando = null">
+            Cancelar
+          </button>
+          <button class="botao botao--primario" type="button"
+                  :disabled="!editando.texto.trim() || mexendo" @click="salvarEdicao">
+            <span v-if="mexendo" class="girando"></span>
+            Salvar
+          </button>
+        </div>
+      </div>
+    </div>
+
     <div v-if="painelAcao === 'convidar' && aberta" class="modal" @click.self="fecharPainel">
       <div class="modal__caixa" role="dialog" aria-modal="true" aria-label="Convidar atendentes">
         <p class="modal__titulo">Convidar para esta conversa</p>
@@ -3255,10 +3478,19 @@ function carregarMidiasDaConversa(c) {
         <div v-if="convidaveis.length" class="modal__opcoes">
           <label v-for="a in convidaveis" :key="a.id" class="modal__opcao">
             <input v-model="convidados" type="checkbox" :value="a.id" />
-            <span>{{ a.nome }}</span>
+            <span class="estado-bolinha" aria-hidden="true"
+                  :style="{ background: corDoEstado(a.estado) }"></span>
+            <span>{{ a.nome }}
+              <span class="apagado pequeno">· {{ rotuloDoEstado(a.estado) }}</span></span>
           </label>
         </div>
         <p v-else class="apagado pequeno">Todo mundo já está nesta conversa.</p>
+
+        <label v-if="convidaveis.length" class="campo">
+          <span class="campo__rotulo">Recado para quem você chamou (opcional)</span>
+          <input v-model="recadoConvite" class="campo__entrada" maxlength="2000" />
+          <span class="campo__ajuda">Fica na conversa como nota interna — o cliente não vê.</span>
+        </label>
 
         <div class="modal__acoes">
           <button class="botao botao--contorno" type="button" @click="fecharPainel">
@@ -3395,8 +3627,11 @@ function carregarMidiasDaConversa(c) {
           <select v-model="atendenteEscolhido" class="campo__entrada"
                   @change="timeEscolhido = ''">
             <option value="">escolha…</option>
+            <!-- 🔵 23/09: o estado vai em TEXTO -- <option> não desenha bolinha,
+                 e passar a conversa para quem está fora do expediente é
+                 entregá-la a ninguém. -->
             <option v-for="a in transferiveis" :key="a.id" :value="a.id">
-              {{ a.nome }}
+              {{ a.nome }} — {{ rotuloDoEstado(a.estado) }}
             </option>
           </select>
           <span class="campo__ajuda">
@@ -3420,7 +3655,8 @@ function carregarMidiasDaConversa(c) {
           <span class="campo__rotulo">Resumo para quem vai receber</span>
           <input v-model="motivo" class="campo__entrada" maxlength="2000" />
           <span class="campo__ajuda">
-            O que já foi conversado. Quem assume não deve precisar ler tudo de novo.
+            O que já foi conversado. Fica na conversa como nota interna — quem
+            assume lê ali, e o cliente não vê.
           </span>
         </label>
         <div class="modal__acoes">
@@ -3520,6 +3756,12 @@ function carregarMidiasDaConversa(c) {
 </template>
 
 <style scoped>
+/* 🔵 23/09: o estado de quem responde (util/estado.js decide a cor). */
+.estado-bolinha {
+  display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+  margin-right: 4px; vertical-align: middle; flex-shrink: 0;
+}
+.estado-rotulo { font-weight: normal; opacity: .8; }
 /* A ficha é uma faixa dentro da conversa, não uma tela: some ao trocar de
    conversa e não tem rota. É o equivalente a clicar no contato no WhatsApp. */
 .gaveta {

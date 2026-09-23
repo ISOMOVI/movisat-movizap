@@ -31,6 +31,9 @@ LOGIN = "zz_reg_listar_"
 
 def limpar():
     for f in (FONE_DONO, FONE_OUTRO, FONE_ORFA):
+        # 🔵 23/09: a aba Time transfere as conversas de teste.
+        banco.executar("DELETE FROM transferencia WHERE conversa_id IN "
+                       "(SELECT id FROM conversa WHERE telefone_e164 = %s)", (f,))
         banco.executar("DELETE FROM conversa_participante WHERE conversa_id IN "
                        "(SELECT id FROM conversa WHERE telefone_e164 = %s)", (f,))
         banco.executar("DELETE FROM mensagem WHERE conversa_id IN "
@@ -288,3 +291,133 @@ class TestMarcarLidaSoDonoOuParticipante:
         entrada(cena["orfa"], "h")
         r = conversas.marcar_lida(cena["orfa"], cena["eu"])
         assert r == 0
+
+
+class TestOrdemNaoLidasPrimeiro:
+    """🔵 Decisão dele, 23/09: *"o que precisamos é que seja ordenado por
+    mensagens não lidas e depois ordem da mensagem mais recente, pois acabam
+    se perdendo"*. Medido antes: na aba Todas, para uma atendente real, a 1ª
+    conversa estava LIDA e a última não lida na posição 98 de 100.
+
+    A cena, vista por "eu":
+      minha  -> LIDA, atividade agora
+      dele   -> NÃO LIDA, atividade de dois dias atrás
+      orfa   -> CONCLUÍDA, com não lida, atividade no futuro próximo
+    """
+
+    @staticmethod
+    def _preparar(cena):
+        entrada(cena["minha"], "o1")
+        conversas.marcar_lida(cena["minha"], cena["eu"])
+        entrada(cena["dele"], "o2")
+        entrada(cena["orfa"], "o3")
+        banco.executar("UPDATE conversa SET ultima_atividade_em = now() WHERE id = %s",
+                       (cena["minha"],))
+        banco.executar("UPDATE conversa SET ultima_atividade_em = now() - interval '2 days' "
+                       "WHERE id = %s", (cena["dele"],))
+        banco.executar("UPDATE conversa SET estado = 'resolvida', "
+                       "ultima_atividade_em = now() + interval '1 minute' WHERE id = %s",
+                       (cena["orfa"],))
+
+    @staticmethod
+    def _ordem(linhas, cena):
+        nossas = {cena["minha"]: "minha", cena["dele"]: "dele", cena["orfa"]: "orfa"}
+        return [nossas[x["id"]] for x in linhas if x["id"] in nossas]
+
+    def test_nao_lida_antiga_vem_antes_da_lida_recente(self, cena):
+        self._preparar(cena)
+        linhas = conversas.listar(limite=5000, visualizador_id=cena["eu"])
+        assert self._ordem(linhas, cena) == ["dele", "minha", "orfa"]
+
+    def test_concluida_continua_no_fim_mesmo_com_nao_lida(self, cena):
+        self._preparar(cena)
+        linhas = conversas.listar(limite=5000, visualizador_id=cena["eu"])
+        assert self._ordem(linhas, cena)[-1] == "orfa"
+
+    def test_nao_lida_e_por_pessoa_na_ordem_tambem(self, cena):
+        # Para "outro" a conversa "minha" NÃO foi lida (quem leu foi "eu"):
+        # as duas abertas têm não lida para ele, e vale a mais recente.
+        self._preparar(cena)
+        linhas = conversas.listar(limite=5000, visualizador_id=cena["outro"])
+        assert self._ordem(linhas, cena) == ["minha", "dele", "orfa"]
+
+    def test_busca_continua_pela_mais_recente(self, cena):
+        # ⚠️ Buscar é outra pergunta que listar (decisão de 25/08): quem digita
+        # procura UMA conversa, e a ordem é só a da atividade.
+        self._preparar(cena)
+        linhas = conversas.listar(limite=5000, visualizador_id=cena["eu"],
+                                  busca="+55999333300")
+        assert self._ordem(linhas, cena) == ["orfa", "minha", "dele"]
+
+
+class TestEstadoDoDono:
+    """🔵 23/09 (*"deveria, proponha"*): a conversa não mostrava o estado de
+    quem responde por ela. A lista e a conversa aberta passam a trazer
+    `atendente_estado` -- a bolinha da Caixa de entrada."""
+
+    def test_a_lista_traz_o_estado_do_dono(self, cena):
+        banco.executar("UPDATE atendente SET estado = 'offline' WHERE id = %s",
+                       (cena["eu"],))
+        linha = next(x for x in conversas.listar(limite=5000) if x["id"] == cena["minha"])
+        assert linha["atendente_estado"] == "offline"
+
+    def test_o_estado_acompanha_a_mudanca(self, cena):
+        banco.executar("UPDATE atendente SET estado = 'nao_perturbe' WHERE id = %s",
+                       (cena["eu"],))
+        linha = next(x for x in conversas.listar(limite=5000) if x["id"] == cena["minha"])
+        assert linha["atendente_estado"] == "nao_perturbe"
+
+    def test_sem_dono_o_estado_vem_vazio(self, cena):
+        linha = next(x for x in conversas.listar(limite=5000) if x["id"] == cena["orfa"])
+        assert linha["atendente_estado"] is None
+
+    def test_a_conversa_aberta_traz_o_estado(self, cena):
+        banco.executar("UPDATE atendente SET estado = 'ausente' WHERE id = %s",
+                       (cena["eu"],))
+        assert conversas.conversa(cena["minha"])["atendente_estado"] == "ausente"
+
+
+class TestAbaDoTime:
+    """🔵 23/09 (*"uma nova aba de tipo de conversa além das 3: 'Time', onde
+    poderemos transferir para times"*). A aba mostra as conversas SEM DONO
+    dos times de que a pessoa é membro. Antes, transferir para um time punha
+    a conversa em "Sem dono" para todo mundo, sem filtro."""
+
+    @staticmethod
+    def _dois_times():
+        ts = banco.varios("SELECT id FROM time WHERE ativo ORDER BY id LIMIT 2")
+        if len(ts) < 2:
+            pytest.skip("precisa de dois times ativos")
+        return ts[0]["id"], ts[1]["id"]
+
+    def test_so_as_sem_dono_do_meu_time(self, cena):
+        meu, alheio = self._dois_times()
+        banco.executar("INSERT INTO atendente_time (atendente_id, time_id) VALUES (%s, %s)",
+                       (cena["eu"], meu))
+        conversas.transferir(cena["orfa"], meu, None)
+        conversas.transferir(cena["dele"], alheio, None)
+        vistas = ids(conversas.listar(limite=5000, do_meu_time=cena["eu"]))
+        assert cena["orfa"] in vistas, "a do meu time não apareceu"
+        assert cena["dele"] not in vistas, "apareceu conversa de time que não é meu"
+        assert cena["minha"] not in vistas, "conversa com dono não é fila de time"
+
+    def test_quem_nao_e_de_time_nenhum_ve_vazio(self, cena):
+        meu, _ = self._dois_times()
+        conversas.transferir(cena["orfa"], meu, None)
+        assert conversas.listar(limite=5000, do_meu_time=cena["outro"]) == []
+
+    def test_quando_alguem_assume_sai_da_aba(self, cena):
+        meu, _ = self._dois_times()
+        banco.executar("INSERT INTO atendente_time (atendente_id, time_id) VALUES (%s, %s)",
+                       (cena["eu"], meu))
+        conversas.transferir(cena["orfa"], meu, None)
+        conversas.assumir(cena["orfa"], cena["outro"])
+        assert cena["orfa"] not in ids(conversas.listar(limite=5000, do_meu_time=cena["eu"]))
+
+    def test_sem_o_filtro_nada_muda(self, cena):
+        # ⚠️ É FILTRO DE VISTA: "Sem dono" continua mostrando a conversa do
+        # time para quem não é dele.
+        meu, _ = self._dois_times()
+        conversas.transferir(cena["orfa"], meu, None)
+        assert cena["orfa"] in ids(conversas.listar(limite=5000, sem_dono=True,
+                                                    visualizador_id=cena["outro"]))

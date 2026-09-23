@@ -1138,7 +1138,9 @@ def _trechos_achados(ids: list[int], termo: str) -> dict[int, str]:
 def listar(estado: str | None = None, atendente_id: int | None = None,
            sem_dono: bool = False, busca: str = "", limite: int = 100,
            relacoes: list[str] | None = None,
-           visualizador_id: int | None = None) -> list[dict]:
+           visualizador_id: int | None = None,
+           do_meu_time: int | None = None,
+           bloqueados: bool = False) -> list[dict]:
     """As conversas para a lista da caixa de entrada.
 
     Cada linha traz o que o doc pede: nome (ou telefone, quando não
@@ -1176,6 +1178,33 @@ def listar(estado: str | None = None, atendente_id: int | None = None,
         params.extend([atendente_id, atendente_id])
     if sem_dono:
         condicoes.append("c.atendente_id IS NULL")
+    # 🔵 A ABA "TIME" (pedido dele, 23/09: *"uma nova aba de tipo de conversa
+    # além das 3: 'Time', onde poderemos transferir para times"*). Transferir
+    # para um time tira o dono e grava `time_id` -- e até aqui a conversa caía
+    # em "Sem dono" para TODO MUNDO, sem filtro nenhum por time. Esta aba é a
+    # fila de quem é MEMBRO do time (`atendente_time`): sem dono, time meu.
+    #
+    # ⚠️ É FILTRO DE VISTA, NÃO PERMISSÃO. Quem não é do time continua vendo a
+    # conversa em "Sem dono" e "Todas" -- a permissão de dado por time é outra
+    # tabela (`atendente_time_permissao`), e não foi tocada.
+    # 🔵 BLOQUEADO SAI DA LISTA (23/09) e vai para o filtro "Bloqueados", onde
+    # se lê quem está bloqueado e se desbloqueia. ⚠️ NA BUSCA, NÃO: quem digita
+    # procura UMA conversa -- a mesma regra da concluída no fim da fila --, e a
+    # linha vem marcada (`bloqueado`) para a tela dizer.
+    _bloq = ("""EXISTS (SELECT 1 FROM numero_bloqueado nb
+                         WHERE nb.canal_id = c.canal_id
+                           AND nb.telefone_e164 = c.telefone_e164
+                           AND nb.desbloqueado_em IS NULL)""")
+    if bloqueados:
+        condicoes.append(_bloq)
+    elif not busca.strip():
+        condicoes.append("NOT " + _bloq)
+    if do_meu_time:
+        condicoes.append(
+            """c.atendente_id IS NULL
+               AND c.time_id IN (SELECT at.time_id FROM atendente_time at
+                                  WHERE at.atendente_id = %s)""")
+        params.append(do_meu_time)
 
     # ---- filtro por tipo de cadastro (pedido do usuário em 25/08) ----------
     # 🚨 "SEM CADASTRO" E "SEM IDENTIFICAÇÃO" SÃO COISAS DIFERENTES, e o
@@ -1219,8 +1248,22 @@ def listar(estado: str | None = None, atendente_id: int | None = None,
     # ⚠️ NA BUSCA, NÃO. Quem digita um termo está procurando UMA conversa, e
     # empurrar a concluída para depois de 300 abertas é escondê-la de quem
     # sabe que ela existe. Buscar é outra pergunta que listar.
+    #
+    # 🔵 NÃO LIDAS PRIMEIRO (decisão dele, 23/09): *"o que precisamos é que
+    # seja ordenado por mensagens não lidas e depois ordem da mensagem mais
+    # recente, pois acabam se perdendo"*. Medido antes: na aba Todas, para uma
+    # atendente real, a 1ª da lista estava LIDA e a última não lida na posição
+    # 98 de 100. A concluída continua no fim -- ela vem antes na chave.
+    #
+    # 🚨 ISTO TEM DE SER NO BANCO, NÃO NA TELA. A lista tem LIMITE; ordenar
+    # depois dele deixaria de fora justamente a não lida antiga que caiu além
+    # da centésima. Por isso `nao_lidas` saiu do SELECT para um LATERAL (`nl`):
+    # o ORDER BY não enxerga apelido de coluna dentro de expressão.
+    #
+    # ⚠️ Sem visualizador, `nl.tem` é falso para todas e a ordem é a de antes.
     ordem = ("c.ultima_atividade_em DESC" if busca.strip()
-             else "(c.estado = 'resolvida'), c.ultima_atividade_em DESC")
+             else "(c.estado = 'resolvida'), nl.tem DESC, "
+                  "c.ultima_atividade_em DESC")
 
     # 🚨 ORDEM POSICIONAL: os %s do SELECT são os PRIMEIROS da query, então
     # entram na frente de tudo que o WHERE já empilhou. Errar isso não dá erro
@@ -1230,8 +1273,9 @@ def listar(estado: str | None = None, atendente_id: int | None = None,
     # dois do `acompanho` e dois do `nao_lidas`, nessa ordem, que é a ordem em
     # que aparecem no texto do SELECT. Os quatro usam `visualizador_id`, NUNCA
     # `atendente_id` -- ver o comentário no topo da função.
-    params = ([visualizador_id, visualizador_id, visualizador_id, visualizador_id]
-              + params)
+    # 🔵 23/09: SEIS, não quatro -- os dois do LATERAL `nl` (a ordem por não
+    # lida) entram depois dos quatro do SELECT e antes dos do WHERE.
+    params = ([visualizador_id] * 6) + params
     params.append(limite)
     linhas = banco.varios(
         f"""
@@ -1248,6 +1292,13 @@ def listar(estado: str | None = None, atendente_id: int | None = None,
                ct.nome AS contato_nome,
                cl.nome AS cliente_nome,
                a.nome  AS atendente_nome,
+               -- 🔵 23/09: o estado de quem responde (disponível, em pausa,
+               -- não perturbe, fora do expediente) -- a bolinha da lista.
+               a.estado AS atendente_estado,
+               EXISTS (SELECT 1 FROM numero_bloqueado nb
+                        WHERE nb.canal_id = c.canal_id
+                          AND nb.telefone_e164 = c.telefone_e164
+                          AND nb.desbloqueado_em IS NULL) AS bloqueado,
                t.nome  AS time_nome,
                ca.nome AS canal_nome,
                u.conteudo AS ultima_mensagem,
@@ -1284,6 +1335,25 @@ def listar(estado: str | None = None, atendente_id: int | None = None,
                  WHERE m.conversa_id = c.id
                  ORDER BY m.criada_em DESC, m.id DESC LIMIT 1
           ) u ON true
+          -- 🔵 23/09: SÓ PARA A ORDEM -- "tem não lida?", e não "quantas".
+          -- O ORDER BY roda sobre TODAS as candidatas, antes do LIMIT; contar
+          -- em cada uma levou a listagem de 25 para 117 ms (medido). O EXISTS
+          -- para na primeira mensagem não lida, e a contagem exata continua
+          -- no SELECT, onde só roda para as linhas que saem. A regra é a
+          -- mesma da contagem: só `entrada`, acima do `lido_ate` da pessoa.
+          -- (Nada de marcador de parâmetro em comentário SQL: o driver conta
+          -- e desalinha a lista -- aconteceu aqui, 23/09.)
+          LEFT JOIN LATERAL (
+                SELECT CASE WHEN %s::bigint IS NULL THEN false ELSE EXISTS (
+                    SELECT 1 FROM mensagem m4
+                     WHERE m4.conversa_id = c.id
+                       AND m4.direcao = 'entrada'
+                       AND m4.id > COALESCE(
+                             (SELECT lr.lido_ate FROM conversa_leitura lr
+                               WHERE lr.conversa_id = c.id
+                                 AND lr.atendente_id = %s::bigint), 0)
+                ) END AS tem
+          ) nl ON true
          WHERE {' AND '.join(condicoes)}
          ORDER BY {ordem}
          LIMIT %s
@@ -1304,6 +1374,7 @@ def conversa(conversa_id: int) -> dict | None:
     linha = banco.um(
         """SELECT c.*, ct.nome AS contato_nome, cl.nome AS cliente_nome,
                   cl.id AS cliente_id, a.nome AS atendente_nome,
+                  a.estado AS atendente_estado,
                   t.nome AS time_nome, ca.nome AS canal_nome
              FROM conversa c
              LEFT JOIN contato ct ON ct.id = c.contato_id
@@ -1315,6 +1386,9 @@ def conversa(conversa_id: int) -> dict | None:
     if not linha:
         return None
     linha["mensagens"] = mensagens(conversa_id)
+    # 🔵 23/09: o bloqueio feito pelo painel -- a tela trava o compositor e
+    # oferece "Desbloquear" em vez de deixar escrever para quem não recebe.
+    linha["bloqueio"] = bloqueio_ativo(conversa_id)
     # 🚨 "TRUNCADA" SAIU, E ISSO É A MUDANÇA DE FUNDO. Ela avisava que a
     # conversa passava do teto e que a busca não alcançava o resto -- um aviso
     # que existia porque não havia como buscar o resto. Agora há: a busca roda
@@ -1702,6 +1776,10 @@ def mensagens(conversa_id: int, limite: int = JANELA_INICIAL,
         """SELECT * FROM (
                SELECT m.id, m.direcao, m.autor, m.tipo, m.conteudo, m.entrega,
                       m.criada_em, m.id_externo, a.nome AS atendente_nome,
+                      -- 🔵 23/09: o id de quem mandou -- a tela só oferece
+                      -- editar e apagar na mensagem que é MINHA, e nome não
+                      -- serve para isso (dois atendentes podem ter o mesmo).
+                      m.atendente_id,
                       -- Quem falou DENTRO do grupo. Nulo em conversa direta,
                       -- onde o remetente é a própria conversa.
                       m.remetente_jid, m.remetente_nome,
@@ -2703,6 +2781,15 @@ def _recebe_transferencia(cur, atendente_id: int) -> bool:
     return bool(linha and linha["transferivel"])
 
 
+def texto_da_nota_de_transferencia(destino: str | None, resumo: str) -> str:
+    """O texto da nota que a transferência deixa na conversa (23/09).
+
+    ⚠️ A migração 049 escreve o MESMO formato para o resumo que já estava
+    gravado -- se um mudar, o outro precisa mudar junto.
+    """
+    return f"Transferida para {destino or 'a fila'}. Resumo: {resumo}"
+
+
 def transferir(conversa_id: int, time_id: int | None,
                para_atendente_id: int | None, motivo: str = "manual",
                de_atendente_id: int | None = None,
@@ -2752,6 +2839,31 @@ def transferir(conversa_id: int, time_id: int | None,
                VALUES (%s, %s, %s, %s, %s, %s)""",
             (conversa_id, de_atendente_id or atual["atendente_id"],
              para_atendente_id, time_id, motivo, texto_resumo))
+        # 🔵 O RESUMO VIRA NOTA INTERNA (23/09). A tela promete *"Resumo para
+        # quem vai receber — quem assume não deve precisar ler tudo de novo"*,
+        # e até aqui o texto ia para `transferencia.resumo` e NINGUÉM o lia de
+        # volta: nenhuma consulta, nenhuma tela. Como nota ele aparece NA
+        # conversa, no ponto do tempo certo, e nunca vai ao cliente (o CHECK
+        # `ck_nota_e_interna`). Mesma transação da transferência: ou entram as
+        # duas, ou nenhuma. Nota não conta como não lida (só `entrada` conta).
+        resumo_limpo = (texto_resumo or "").strip()
+        if resumo_limpo:
+            destino = None
+            if para_atendente_id:
+                cur.execute("SELECT nome FROM atendente WHERE id = %s",
+                            (para_atendente_id,))
+                destino = (cur.fetchone() or {}).get("nome")
+            elif time_id:
+                cur.execute("SELECT nome FROM time WHERE id = %s", (time_id,))
+                nome_time = (cur.fetchone() or {}).get("nome")
+                destino = f"o time {nome_time}" if nome_time else None
+            cur.execute(
+                """INSERT INTO mensagem
+                       (conversa_id, direcao, autor, tipo, conteudo,
+                        atendente_id, criada_em)
+                   VALUES (%s, 'interna', 'atendente', 'nota', %s, %s, now())""",
+                (conversa_id, texto_da_nota_de_transferencia(destino, resumo_limpo),
+                 de_atendente_id or atual["atendente_id"]))
     log.info("conversa %s transferida (time=%s pessoa=%s)",
              conversa_id, time_id, para_atendente_id)
     return {"ok": True, "conversa_id": conversa_id}
@@ -2919,6 +3031,11 @@ def resumo() -> dict:
             "WHERE atendente_id IS NULL AND estado <> 'resolvida'")["n"],
         "nao_identificadas": banco.um(
             "SELECT COUNT(*) AS n FROM conversa WHERE contato_id IS NULL")["n"],
+        # 🔵 23/09: quantos números o painel bloqueou -- o botão do filtro
+        # "Bloqueados" só aparece quando há algum.
+        "bloqueados": banco.um(
+            "SELECT COUNT(*) AS n FROM numero_bloqueado "
+            "WHERE desbloqueado_em IS NULL")["n"],
         "mensagens": banco.um("SELECT COUNT(*) AS n FROM mensagem")["n"],
         "eventos_pendentes": banco.um(
             "SELECT COUNT(*) AS n FROM webhook_evento WHERE NOT processado")["n"],
@@ -3182,4 +3299,201 @@ def remover(conversa_id: int, atendente_id: int, quem_pede: int | None) -> dict:
             RETURNING atendente_id""", (conversa_id, atendente_id))
     if not linha:
         return {"ok": False, "motivo": "Esta pessoa não está na conversa."}
+    return {"ok": True, "conversa_id": conversa_id}
+
+
+# ── Editar e apagar o que NÓS mandamos (23/09) ───────────────────────────────
+#
+# 🔵 Pergunta dele: *"essa edição é de remetente enviado pelo Movizap, certo?
+# então eu envio por lá e posso editar, certo?"*. Até 23/09, NÃO: o painel
+# mostrava a edição e a exclusão feitas pelo CLIENTE, mas não tinha como
+# editar nem apagar o que a própria equipe mandou. A Evolution tem as duas
+# rotas (conferidas na instância real em 23/09).
+#
+# ⚠️ AS JANELAS SÃO DO WHATSAPP, e estão aqui para a tela dizer "não dá mais"
+# ANTES de tentar: editar vale por 15 minutos; apagar para todos, por cerca de
+# dois dias -- ficamos em 48 horas, abaixo do limite, para não prometer o que o
+# WhatsApp pode recusar.
+#
+# 🚨 SÓ QUEM ESCREVEU. Mensagem de outro atendente, da automação ou da IA não
+# se edita nem se apaga por aqui -- corrigir a fala de um colega em nome dele
+# seria o painel mentindo sobre quem disse o quê.
+
+JANELA_EDITAR_MIN = 15
+JANELA_APAGAR_HORAS = 48
+
+
+def _minha_enviada(conversa_id: int, mensagem_id: int, atendente_id: int | None):
+    """(linha, motivo). A mensagem, se ela for MINHA e tiver ido ao WhatsApp."""
+    m = banco.um(
+        """SELECT m.id, m.conversa_id, m.direcao, m.tipo, m.conteudo,
+                  m.atendente_id, m.id_externo, m.criada_em, m.apagada_em,
+                  ca.instancia
+             FROM mensagem m
+             JOIN conversa c ON c.id = m.conversa_id
+             JOIN canal ca ON ca.id = c.canal_id
+            WHERE m.id = %s""", (mensagem_id,))
+    if not m or m["conversa_id"] != conversa_id:
+        return None, "Mensagem não encontrada nesta conversa."
+    if m["direcao"] != "saida" or m["tipo"] == "nota":
+        return None, "Só dá para mudar mensagem que a equipe mandou ao cliente."
+    if not atendente_id or m["atendente_id"] != atendente_id:
+        return None, "Só quem escreveu a mensagem pode editar ou apagar."
+    if m["apagada_em"]:
+        return None, "Esta mensagem já foi apagada."
+    if not m["id_externo"] or not m["instancia"]:
+        return None, "Esta mensagem não tem identificação no WhatsApp."
+    return m, None
+
+
+def _idade_minutos(m: dict) -> float:
+    return (datetime.now(timezone.utc) - m["criada_em"]).total_seconds() / 60
+
+
+def editar_enviada(conversa_id: int, mensagem_id: int, texto: str,
+                   atendente_id: int | None) -> dict:
+    """Edita no WhatsApp uma mensagem de texto que eu mandei."""
+    from . import evolution
+    texto = (texto or "").strip()
+    if not texto:
+        return {"ok": False, "motivo": "O texto novo está vazio."}
+    m, motivo = _minha_enviada(conversa_id, mensagem_id, atendente_id)
+    if not m:
+        return {"ok": False, "motivo": motivo}
+    if m["tipo"] != "texto":
+        return {"ok": False, "motivo": "Só mensagem de texto pode ser editada."}
+    if texto == (m["conteudo"] or "").strip():
+        return {"ok": False, "motivo": "O texto não mudou."}
+    if _idade_minutos(m) > JANELA_EDITAR_MIN:
+        return {"ok": False, "motivo": f"O WhatsApp só deixa editar por "
+                                       f"{JANELA_EDITAR_MIN} minutos."}
+    chave = _chave_da_mensagem(mensagem_id)
+    try:
+        evolution.editar_mensagem(m["instancia"], chave, texto)
+    except evolution.ErroEvolution as e:
+        return {"ok": False, "motivo": f"O WhatsApp recusou a edição: {e}"}
+    # ⚠️ O mesmo `COALESCE` do eco do webhook: guarda só a PRIMEIRA versão, e
+    # o eco que chegar depois com o mesmo texto não apaga o original.
+    banco.executar(
+        """UPDATE mensagem
+              SET conteudo_original = COALESCE(conteudo_original, conteudo),
+                  conteudo = %s, editada_em = now()
+            WHERE id = %s""", (texto, mensagem_id))
+    log.info("mensagem %s editada pelo atendente %s", mensagem_id, atendente_id)
+    return {"ok": True, "mensagem_id": mensagem_id}
+
+
+def apagar_enviada(conversa_id: int, mensagem_id: int,
+                   atendente_id: int | None) -> dict:
+    """Apaga para todos, no WhatsApp, uma mensagem que eu mandei.
+
+    ⚠️ O TEXTO NÃO É DESTRUÍDO -- a mesma regra da exclusão feita pelo
+    cliente: o registro diz o que foi dito; muda a exibição.
+    """
+    from . import evolution
+    m, motivo = _minha_enviada(conversa_id, mensagem_id, atendente_id)
+    if not m:
+        return {"ok": False, "motivo": motivo}
+    if _idade_minutos(m) > JANELA_APAGAR_HORAS * 60:
+        return {"ok": False, "motivo": f"O WhatsApp só deixa apagar para todos "
+                                       f"por cerca de {JANELA_APAGAR_HORAS} horas."}
+    chave = _chave_da_mensagem(mensagem_id)
+    try:
+        evolution.apagar_para_todos(m["instancia"], chave)
+    except evolution.ErroEvolution as e:
+        return {"ok": False, "motivo": f"O WhatsApp recusou apagar: {e}"}
+    # 🚨 O que NÓS apagamos não volta pelo webhook (provado em 17/09): a
+    # marca é daqui, ou nunca aparece.
+    banco.executar(
+        "UPDATE mensagem SET apagada_em = now() WHERE id = %s AND apagada_em IS NULL",
+        (mensagem_id,))
+    log.info("mensagem %s apagada para todos pelo atendente %s",
+             mensagem_id, atendente_id)
+    return {"ok": True, "mensagem_id": mensagem_id}
+
+
+# ── Bloquear pelo painel (23/09) ─────────────────────────────────────────────
+#
+# 🔵 Pedido dele: *"permitir ler e só bloquear se existir pelo painel tbm"*.
+# O painel só conhece o bloqueio que ELE fez -- o WhatsApp não lista os
+# bloqueados nem avisa (medido, ver migração 050).
+
+def bloqueio_ativo(conversa_id: int) -> dict | None:
+    """O bloqueio ativo do número desta conversa, ou None."""
+    return banco.um(
+        """SELECT b.id, b.bloqueado_em, b.bloqueado_por, a.nome AS bloqueado_por_nome
+             FROM conversa c
+             JOIN numero_bloqueado b ON b.canal_id = c.canal_id
+                                    AND b.telefone_e164 = c.telefone_e164
+                                    AND b.desbloqueado_em IS NULL
+             LEFT JOIN atendente a ON a.id = b.bloqueado_por
+            WHERE c.id = %s""", (conversa_id,))
+
+
+def _alvo_do_bloqueio(conversa_id: int):
+    c = banco.um(
+        """SELECT c.id, c.canal_id, c.telefone_e164, c.grupo_jid, ca.instancia
+             FROM conversa c JOIN canal ca ON ca.id = c.canal_id
+            WHERE c.id = %s""", (conversa_id,))
+    if not c:
+        return None, "Conversa não encontrada."
+    if c["grupo_jid"]:
+        return None, "Grupo não se bloqueia — só conversa com uma pessoa."
+    if not c["telefone_e164"] or not c["instancia"]:
+        return None, "Esta conversa não tem número ou canal para bloquear."
+    return c, None
+
+
+def bloquear(conversa_id: int, atendente_id: int | None) -> dict:
+    """Bloqueia o número desta conversa no WhatsApp da empresa, e anota."""
+    from . import evolution
+    c, motivo = _alvo_do_bloqueio(conversa_id)
+    if not c:
+        return {"ok": False, "motivo": motivo}
+    if bloqueio_ativo(conversa_id):
+        return {"ok": False, "motivo": "Este número já está bloqueado."}
+    try:
+        evolution.mudar_bloqueio(c["instancia"], c["telefone_e164"], True)
+    except evolution.ErroEvolution as e:
+        # 🚨 MEDIDO NA PRIMEIRA PROVA REAL (23/09): o WhatsApp respondeu
+        # "Error blocking user / bad-request" para um número que ele já
+        # endereça por LID (`addressingMode: lid` no webhook) -- e a Evolution
+        # 2.3.7 não expõe o LID por rota nenhuma. A tela diz isso em vez de
+        # "Internal Server Error", e deixa claro que NADA foi bloqueado.
+        if "bad-request" in str(e):
+            return {"ok": False,
+                    "motivo": "O WhatsApp recusou bloquear este número (bad-request). "
+                              "Com a versão atual da Evolution isso acontece com contatos "
+                              "que o WhatsApp já identifica por LID. Nada foi bloqueado."}
+        return {"ok": False, "motivo": f"O WhatsApp recusou o bloqueio: {e}"}
+    # ⚠️ ANOTA DEPOIS DO WHATSAPP ACEITAR. Anotar antes deixaria o painel
+    # dizendo "bloqueado" para um número que o WhatsApp não bloqueou.
+    banco.executar(
+        """INSERT INTO numero_bloqueado (canal_id, telefone_e164, bloqueado_por)
+           VALUES (%s, %s, %s) ON CONFLICT DO NOTHING""",
+        (c["canal_id"], c["telefone_e164"], atendente_id))
+    log.info("numero da conversa %s bloqueado pelo atendente %s",
+             conversa_id, atendente_id)
+    return {"ok": True, "conversa_id": conversa_id}
+
+
+def desbloquear(conversa_id: int, atendente_id: int | None) -> dict:
+    """Desbloqueia no WhatsApp e fecha o registro (sem apagar o histórico)."""
+    from . import evolution
+    c, motivo = _alvo_do_bloqueio(conversa_id)
+    if not c:
+        return {"ok": False, "motivo": motivo}
+    if not bloqueio_ativo(conversa_id):
+        return {"ok": False, "motivo": "Este número não está bloqueado pelo painel."}
+    try:
+        evolution.mudar_bloqueio(c["instancia"], c["telefone_e164"], False)
+    except evolution.ErroEvolution as e:
+        return {"ok": False, "motivo": f"O WhatsApp recusou o desbloqueio: {e}"}
+    banco.executar(
+        """UPDATE numero_bloqueado
+              SET desbloqueado_em = now(), desbloqueado_por = %s
+            WHERE canal_id = %s AND telefone_e164 = %s AND desbloqueado_em IS NULL""",
+        (atendente_id, c["canal_id"], c["telefone_e164"]))
+    log.info("numero da conversa %s desbloqueado pelo atendente %s",
+             conversa_id, atendente_id)
     return {"ok": True, "conversa_id": conversa_id}

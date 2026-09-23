@@ -12,8 +12,12 @@ Convenção de Gmail numa tela que existe para parecer WhatsApp.
 ⚠️ E um deles agia sem perguntar: `a` assumia a conversa direto, com 380
 conversas sem dono e nove pessoas testando.
 
-🚨 NASCEM DESLIGADOS, e ausência de linha significa desligado. Quem nunca abriu
-a tela não tem atalho -- que é o risco que este módulo veio fechar.
+🚨 OS ATALHOS NASCEM DESLIGADOS, e para eles ausência de linha significa
+desligado. Quem nunca abriu a tela não tem atalho -- que é o risco que este
+módulo veio fechar.
+
+⚠️ O `enviar_com_enter` É A EXCEÇÃO desde 22/09: mesma tabela, e para ele a
+ausência significa LIGADO. Ver o comentário de `CHAVE_ENTER_ENVIA`.
 """
 import json
 import logging

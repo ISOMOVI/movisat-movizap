@@ -116,6 +116,59 @@ class TestTransferenciaEATriagemManual:
         assert rastro["resumo"] == "cliente quer segunda via"
         assert rastro["para_time_id"] == t["id"]
 
+    # ── 23/09: o resumo passa a ser LIDO -- vira nota interna na conversa ──
+    # 🔵 Pergunta dele: *"o campo 'Resumo' tem uso real? ou apenas front?"*.
+    # Era só frente: o texto ia para `transferencia.resumo` e nada o lia.
+
+    @staticmethod
+    def _notas(conversa_id):
+        return banco.varios(
+            "SELECT direcao, tipo, conteudo FROM mensagem "
+            "WHERE conversa_id = %s AND tipo = 'nota'", (conversa_id,))
+
+    def test_resumo_vira_nota_interna_para_o_time(self, uma_conversa):
+        t = banco.um("SELECT id, nome FROM time WHERE ativo ORDER BY id LIMIT 1")
+        conversas.transferir(uma_conversa, t["id"], None,
+                             texto_resumo="  cliente quer segunda via  ")
+        notas = self._notas(uma_conversa)
+        assert len(notas) == 1
+        assert notas[0]["direcao"] == "interna", "nota vazaria para o cliente"
+        assert notas[0]["conteudo"] == (
+            f"Transferida para o time {t['nome']}. Resumo: cliente quer segunda via")
+
+    def test_resumo_vira_nota_com_o_nome_da_pessoa(self, uma_conversa):
+        a = banco.um("SELECT id, nome FROM atendente WHERE ativo AND perfil = 'atendimento' "
+                     "ORDER BY id LIMIT 1")
+        if not a:
+            pytest.skip("nenhum atendente cadastrado")
+        r = conversas.transferir(uma_conversa, None, a["id"],
+                                 texto_resumo="placa ABC1D23")
+        if not r["ok"]:
+            pytest.skip(f"atendente não recebe transferência: {r['motivo']}")
+        assert [n["conteudo"] for n in self._notas(uma_conversa)] == [
+            f"Transferida para {a['nome']}. Resumo: placa ABC1D23"]
+
+    def test_sem_resumo_nao_cria_nota(self, uma_conversa):
+        t = banco.um("SELECT id FROM time WHERE ativo ORDER BY id LIMIT 1")
+        conversas.transferir(uma_conversa, t["id"], None, texto_resumo="   ")
+        conversas.transferir(uma_conversa, t["id"], None)
+        assert self._notas(uma_conversa) == []
+
+    def test_transferencia_recusada_nao_deixa_nota(self, uma_conversa):
+        r = conversas.transferir(uma_conversa, 999999, None, texto_resumo="x")
+        assert r["ok"] is False
+        assert self._notas(uma_conversa) == []
+
+    def test_a_migracao_049_escreve_o_mesmo_texto(self):
+        """⚠️ O resumo antigo entra pela migração 049, em SQL; o novo, pela
+        função. Os dois formatos têm de ser o mesmo."""
+        from pathlib import Path
+        sql = Path("/home/claude/movizap_painel/migracoes/"
+                   "049_resumo_da_transferencia_vira_nota.sql").read_text(encoding="utf-8")
+        exemplo = conversas.texto_da_nota_de_transferencia("Fulano", "R")
+        assert exemplo == "Transferida para Fulano. Resumo: R"
+        assert "'Transferida para '" in sql and "'. Resumo: '" in sql
+
     def test_motivo_fora_do_vocabulario_e_recusado(self, uma_conversa):
         t = banco.um("SELECT id FROM time WHERE ativo ORDER BY id LIMIT 1")
         r = conversas.transferir(uma_conversa, t["id"], None, "porque sim")

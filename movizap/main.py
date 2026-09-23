@@ -1334,7 +1334,8 @@ def resumo_das_conversas(usuario: dict = Depends(auth.requer_tela("ATD_1.1"))):
 @app.get("/api/conversas")
 def listar_conversas(estado: str | None = None, sem_dono: bool = False,
                      minhas: bool = False, busca: str = "",
-                     relacoes: str = "",
+                     relacoes: str = "", meus_times: bool = False,
+                     bloqueados: bool = False,
                      usuario: dict = Depends(auth.requer_tela("ATD_1.1"))):
     """A lista da caixa: conversa direta e grupo juntos, como no WhatsApp.
 
@@ -1354,7 +1355,11 @@ def listar_conversas(estado: str | None = None, sem_dono: bool = False,
         estado=estado, sem_dono=sem_dono, busca=busca,
         relacoes=escolhidas or None,
         atendente_id=_atendente_do_usuario(usuario) if minhas else None,
-        visualizador_id=_atendente_do_usuario(usuario))
+        visualizador_id=_atendente_do_usuario(usuario),
+        # 🔵 23/09: a aba "Time" -- sem dono, dos times de que eu sou membro.
+        do_meu_time=_atendente_do_usuario(usuario) if meus_times else None,
+        # 🔵 23/09: o filtro "Bloqueados" -- os números que o painel bloqueou.
+        bloqueados=bloqueados)
 
 
 class ConversaNova(BaseModel):
@@ -1786,6 +1791,19 @@ def pausar_disparo(disparo_id: int,
     return informativos.pausar(disparo_id)
 
 
+def _recusa_se_bloqueada(conversa_id: int) -> None:
+    """🔵 23/09: número bloqueado pelo painel não recebe nada do painel.
+
+    ⚠️ A trava é na ROTA, não no botão -- a tela também trava o compositor,
+    mas quem chamar a API direto esbarra aqui. Nota interna continua valendo:
+    ela nunca vai ao WhatsApp.
+    """
+    if conversas.bloqueio_ativo(conversa_id):
+        raise HTTPException(
+            status_code=409,
+            detail="Este número está bloqueado pelo painel. Desbloqueie para responder.")
+
+
 def _exige_estar_na_conversa(conversa_id: int, usuario: dict) -> int:
     """Devolve o id do atendente, ou recusa quem está de fora da conversa.
 
@@ -1880,6 +1898,7 @@ def responder_conversa(conversa_id: int, dados: RespostaEntrada,
     `/api/conversas/nova`; para repassar, `/api/conversas/encaminhar`.
     """
     eu = _exige_estar_na_conversa(conversa_id, usuario)
+    _recusa_se_bloqueada(conversa_id)
     resultado = conversas.responder(conversa_id, dados.texto, eu,
                                     citando_id=dados.citando_id,
                                     mencionados=dados.mencionados)
@@ -1910,6 +1929,8 @@ async def enviar_arquivo(conversa_id: int,
     na memória para depois recusar.
     """
     eu = _exige_estar_na_conversa(conversa_id, usuario)
+    if not interna:
+        _recusa_se_bloqueada(conversa_id)
 
     teto = conversas.TETO_ARQUIVO
     pedacos, total = [], 0
@@ -1987,10 +2008,12 @@ def ver_participantes(conversa_id: int,
         "eu": eu,
         "sou_dono": eu is not None and conversa_atual["atendente_id"] == eu,
         "sou_participante": eu in {p["atendente_id"] for p in lista},
+        # 🔵 23/09: com o ESTADO -- chamar quem está fora do expediente é
+        # chamar ninguém, e a tela passa a dizer isso antes do clique.
         "convidaveis": [
-            {"id": a["id"], "nome": a["nome"]}
+            {"id": a["id"], "nome": a["nome"], "estado": a["estado"]}
             for a in banco.varios(
-                "SELECT id, nome FROM atendente WHERE ativo ORDER BY nome")
+                "SELECT id, nome, estado FROM atendente WHERE ativo ORDER BY nome")
             if a["id"] not in dentro],
         # 🚨 QUEM PODE RECEBER A CONVERSA, e por que é uma lista SEPARADA de
         # `convidaveis`: convidar exclui quem já está dentro, mas transferir
@@ -2003,9 +2026,9 @@ def ver_participantes(conversa_id: int,
         # seletor -- o comentário de lá ("a tela já não o oferece") descrevia
         # uma tela que nunca existiu. Achado em 15/09.
         "transferiveis": [
-            {"id": a["id"], "nome": a["nome"]}
+            {"id": a["id"], "nome": a["nome"], "estado": a["estado"]}
             for a in banco.varios(
-                "SELECT id, nome FROM atendente "
+                "SELECT id, nome, estado FROM atendente "
                 "WHERE ativo AND transferivel ORDER BY nome")
             if a["id"] != conversa_atual["atendente_id"]],
     }
@@ -2107,6 +2130,67 @@ class ReacaoEntrada(BaseModel):
     emoji: str = ""
 
 
+class EdicaoEntrada(BaseModel):
+    mensagem_id: int
+    texto: str = Field(max_length=4096)
+
+
+class MensagemAlvo(BaseModel):
+    mensagem_id: int
+
+
+@app.post("/api/conversas/{conversa_id}/editar")
+def editar_mensagem_enviada(conversa_id: int, dados: EdicaoEntrada,
+                            usuario: dict = Depends(auth.requer_tela("ATD_1.2"))):
+    """🔵 23/09: edita no WhatsApp uma mensagem de texto que EU mandei (15 min)."""
+    eu = _exige_estar_na_conversa(conversa_id, usuario)
+    r = conversas.editar_enviada(conversa_id, dados.mensagem_id, dados.texto, eu)
+    if not r["ok"]:
+        raise HTTPException(status_code=409, detail=r["motivo"])
+    return r
+
+
+@app.post("/api/conversas/{conversa_id}/apagar")
+def apagar_mensagem_enviada(conversa_id: int, dados: MensagemAlvo,
+                            usuario: dict = Depends(auth.requer_tela("ATD_1.2"))):
+    """🔵 23/09: apaga para todos uma mensagem que EU mandei (até 48 h)."""
+    eu = _exige_estar_na_conversa(conversa_id, usuario)
+    r = conversas.apagar_enviada(conversa_id, dados.mensagem_id, eu)
+    if not r["ok"]:
+        raise HTTPException(status_code=409, detail=r["motivo"])
+    return r
+
+
+@app.post("/api/conversas/{conversa_id}/bloquear")
+def bloquear_numero(conversa_id: int,
+                    usuario: dict = Depends(auth.requer_tela("ATD_1.2"))):
+    """🔵 23/09: bloqueia o número no WhatsApp da empresa.
+
+    ⚠️ Só quem está na conversa bloqueia -- é ação sobre o aparelho, e a tela
+    confirma antes.
+    """
+    eu = _exige_estar_na_conversa(conversa_id, usuario)
+    r = conversas.bloquear(conversa_id, eu)
+    if not r["ok"]:
+        raise HTTPException(status_code=409, detail=r["motivo"])
+    return r
+
+
+@app.post("/api/conversas/{conversa_id}/desbloquear")
+def desbloquear_numero(conversa_id: int,
+                       usuario: dict = Depends(auth.requer_tela("ATD_1.2"))):
+    """🔵 23/09: desfaz o bloqueio.
+
+    ⚠️ QUALQUER atendente desbloqueia, sem precisar estar na conversa: o
+    filtro "Bloqueados" é justamente onde se chega a ela, e desfazer um
+    bloqueio é o lado seguro da ação.
+    """
+    r = conversas.desbloquear(conversa_id, _atendente_do_usuario(usuario))
+    if not r["ok"]:
+        raise HTTPException(status_code=409, detail=r["motivo"])
+    return r
+
+
 @app.post("/api/conversas/{conversa_id}/reagir")
 def reagir_na_conversa(conversa_id: int, dados: ReacaoEntrada,
                        usuario: dict = Depends(auth.requer_tela("ATD_1.2"))):
@@ -2124,6 +2208,7 @@ async def responder_com_audio(conversa_id: int,
                               usuario: dict = Depends(auth.requer_tela("ATD_1.2"))):
     """O áudio gravado no navegador — mensagem de VOZ, não anexo."""
     _exige_estar_na_conversa(conversa_id, usuario)
+    _recusa_se_bloqueada(conversa_id)
     dados = await arquivo.read()
     r = conversas.responder_com_audio(
         conversa_id, dados, _atendente_do_usuario(usuario))

@@ -14,9 +14,13 @@
    ⚠️ E um deles agia sem perguntar: `a` assumia a conversa na hora, com 380
    conversas sem dono e nove pessoas testando ao mesmo tempo.
 
-   🚨 NASCEM DESLIGADOS. Ausência de preferência = desligado, no banco e aqui.
-   Quem nunca abriu esta tela não tem atalho nenhum -- e isso é o recurso, não
-   uma limitação.
+   🚨 OS ATALHOS NASCEM DESLIGADOS. Ausência de preferência = desligado, no
+   banco e aqui. Quem nunca abriu esta tela não tem atalho nenhum -- e isso é o
+   recurso, não uma limitação.
+
+   ⚠️ O "ENVIAR COM ENTER" DESTA MESMA TELA É A EXCEÇÃO, desde 22/09: para ele,
+   ausência = LIGADO (decisão dele; ver `enviar_com_enter` em
+   `movizap/preferencia.py`). Mesma tabela, regra de ausência oposta.
 
    🚨 O CATÁLOGO VEM DO BACKEND. A tela não sabe quais atalhos existem: ela
    desenha o que `/api/eu/atalhos` devolver. Escrever a lista aqui criaria duas

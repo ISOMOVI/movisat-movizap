@@ -2433,7 +2433,10 @@ no menu, que muda de cor quando há menção — dois badges brigariam por
 18px.
 
 **Enter para enviar** (🟢 Erika). Preferência por pessoa
-(`preferencia_atendente`, mesma tabela dos atalhos), nasce desligada.
+(`preferencia_atendente`, mesma tabela dos atalhos). Nasceu desligada em
+15/09; **desde 22/09 nasce LIGADA** por decisão dele (*"mudar o envio para
+todos pelo 'enter' conforme a opção no perfil"*) -- quem desligar grava
+`"false"` e fica desligado.
 Ligada: Enter envia, Shift+Enter quebra linha. Desligada: comportamento de
 sempre (Ctrl+Enter envia).
 
@@ -2687,3 +2690,72 @@ modal e a classe do campo — **nenhum afirmava o valor selecionado do Tipo**, e
 
 ⚠️ `codigosPermitidos` no duplo virou `ref` (era `computed`, somente leitura):
 sem isso não dá para tirar a permissão e conferir o que o outro público vê.
+
+
+---
+
+# 2026-09-23 — a rodada dos dez itens (ordem de execução aprovada por ele)
+
+Origem de cada linha: 🔵 frase dele · 🟡 sugestão minha. Tudo com teste que
+**reprova sem a mudança** (conferido rodando contra a versão anterior), suíte
+inteira uma vez antes de publicar, servidor primeiro e tela por último.
+
+| # | Item | O que mudou | Prova |
+|---|---|---|---|
+| 1 | 🔵 20 | "Sem preferência = desligado" corrigido em `Atalhos.vue`, `preferencia.py` e aqui (linha do Enter): **o Enter é a exceção desde 22/09, nasce LIGADO** | leitura |
+| 2 | 🔵 19 | `partesDoTexto` foi para `util/mencao.js`; a tela e o `mencao.teste.js` importam a MESMA função. Teste novo monta o Chat interno e confere o destaque no balão | 9 + 1 |
+| 3 | 🔵 18 | O laço de 5 s do Chat interno: **sala primeiro, lista depois, uma vez** (era lista, sala, lista) | reprova na versão antiga: lista ia 2× |
+| 4 | 🟡 6 | Teste que trava a porta do `/config` para o atendente, e a REGRA geral: nenhuma aba visível com a mãe invisível, em qualquer perfil | com `CFG_0.1` trancado em memória, 2 reprovam |
+| 5 | 🔵 13 | Lista: **não lidas primeiro**, depois a mais recente; concluída no fim; **busca continua só pela mais recente** | reprova na versão antiga |
+| 6 | 🔵 21 | O resumo da transferência vira **nota interna** na conversa; o convite ganha "Recado (opcional)", que também vira nota | 5 backend + 3 tela |
+| 7 | 🔵 17 | Bolinha do estado de quem responde: lista, cabeçalho (em texto), convidar e transferir (em texto no `<option>`) | 4 backend + 3 tela |
+| 8 | 🔵 22 | Aba **Time**: conversas sem dono dos times de que eu sou membro | 4 backend + 2 tela |
+| 9 | 🔵 11 | **Bloquear / desbloquear** pelo painel, filtro "Bloqueados (N)", envio ao cliente travado para bloqueado | 9 backend + 4 tela |
+| 10 | 🔵 16 | **Editar** (15 min) e **apagar para todos** (48 h) a MINHA mensagem | 11 backend + 5 tela |
+
+Medido antes do item 5: na aba Todas, para uma atendente real, a 1ª conversa
+estava **lida** e a última não lida na **posição 98 de 100**. Depois: as 91
+não lidas nas posições 0–90 — **23 delas nem entravam nas 100 antes**.
+
+## Prova real (23/09, número dele, conversa 12845, `assumir=False`)
+
+| Passo | Resultado |
+|---|---|
+| Enviar, **editar** | ✅ o WhatsApp aceitou; `conteudo` novo, `conteudo_original` guardado |
+| **Apagar para todos** | ✅ aceito; `apagada_em` marcado, texto preservado |
+| **Bloquear** | 🔴 **o WhatsApp recusou: "Error blocking user / bad-request"**. Nada foi anotado nem bloqueado |
+| A conversa 12845 | igual antes e depois (`fila`, sem dono) |
+
+🚨 **O BLOQUEIO NÃO FUNCIONA COM O NÚMERO DELE.** O webhook mostra o contato
+em `addressingMode: lid`; a Evolution 2.3.7 **não expõe o LID** por nenhuma
+rota de leitura (`whatsappNumbers`, `findContacts`). Não provei se vale para
+todos — provar exigiria bloquear o número de outra pessoa. A tela agora diz a
+causa em vez de "Internal Server Error".
+
+## Decisões que tomei dentro do meu limite
+
+1. **Ordem por "tem não lida", não por quantas** — e o `EXISTS` na ordem, com
+   a contagem exata só nas linhas mostradas: 117 ms → **38 ms** (antes da
+   mudança eram 25 ms).
+2. **A migração 049 trouxe só resumo manual** — 21 dos 22 eram texto
+   automático da saída do dono.
+3. **Recado de convite só vira nota se alguém entrou**; falhou a nota, o
+   convite vale e a tela diz.
+4. **Uma régua de estado** (`util/estado.js`), com os rótulos do Chat interno.
+   A tela de Atendentes diz "Ausente" onde as outras dizem "em pausa" — **não
+   mexi**.
+5. **Aba Time é filtro de vista, não permissão** — quem não é do time continua
+   vendo a conversa em "Sem dono".
+6. **Bloqueio:** sai das abas mas **aparece na busca, marcado**; nota interna
+   continua; **só quem está na conversa bloqueia**, **qualquer um desbloqueia**;
+   grupo não se bloqueia; histórico, não estado.
+7. **Editar e apagar: só o autor.** Janelas 15 min e 48 h (o WhatsApp dá ~2
+   dias para apagar; ficamos abaixo).
+8. **O acesso a "Bloqueados" só aparece quando há algum** — não é uma quinta aba.
+
+## ⚠️ O que só o uso fecha
+
+- a **barra com quatro abas** (Todas · Sem dono · Minhas · Time) cabendo na
+  coluna da lista — build limpo não vê layout (`M9`);
+- a aba Time **com 8–9 membros por time** mostra quase tudo para todos: ela
+  só separa de verdade quando os times forem revisados na tela Times.
