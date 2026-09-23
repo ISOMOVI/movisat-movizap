@@ -2718,7 +2718,21 @@ def definir_jornada(atendente_id: int, dados: JornadaEntrada,
 
 @app.get("/api/classificacoes")
 def listar_classificacoes(incluir_inativas: bool = False,
-                          usuario: dict = Depends(auth.requer_tela("CFG_4.1"))):
+                          usuario: dict = Depends(auth.requer_tela("ATD_1.2"))):
+    """A LISTA é de quem atende; o CADASTRO é da configuração.
+
+    🔴 ATÉ 23/09 A LEITURA EXIGIA `CFG_4.1`, e isso derrubava a Caixa de quem
+    atende. Ela pede esta rota e `/api/times` juntas; o 403 daqui (20 em 12 h,
+    medido) rejeitava as duas, e o atendente abria "Transferir" com a lista de
+    times VAZIA -- por isso nenhuma conversa tinha time -- e "Concluir" sem
+    classificação. Existia desde 07/08. Achado na verificação de 23/09.
+
+    ⚠️ Só a LEITURA abriu: criar, editar e desativar continuam em `CFG_4.1`.
+    E as INATIVAS continuam da configuração -- quem atende escolhe entre as
+    que valem, não entre as aposentadas.
+    """
+    if incluir_inativas and not registro_telas.pode_acessar(usuario, "CFG_4.1"):
+        incluir_inativas = False
     return operacao.listar_classificacoes(incluir_inativas)
 
 

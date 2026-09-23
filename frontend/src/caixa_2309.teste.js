@@ -27,6 +27,8 @@ vi.mock('./api/cliente.js', () => ({
       const chave = Object.keys(respostas)
         .filter((k) => rota.startsWith(k))
         .sort((a, b) => b.length - a.length)[0]
+      // Rota marcada como NEGADA devolve erro, como o 403 real.
+      if (chave && respostas[chave] === 'NEGADO') return Promise.reject(new Error('403'))
       return Promise.resolve(chave ? JSON.parse(JSON.stringify(respostas[chave])) : {})
     },
     post: (rota, corpo) => { posts.push({ rota, corpo }); return Promise.resolve({ ok: true }) },
@@ -277,5 +279,18 @@ describe('11 — bloquear pelo painel', () => {
     const w = mount(CaixaDeEntrada)
     await assentar(w)
     expect(w.text()).not.toContain('Bloqueados (')
+  })
+})
+
+describe('o defeito de 07/08: classificação negada não apaga os times', () => {
+  /* 🔴 A Caixa pedia times e classificações num Promise.all; o 403 da segunda
+     derrubava a primeira, e o atendente via "Transferir" sem time nenhum. */
+  it('com classificações negadas, o Transferir mostra os times', async () => {
+    respostas['/api/classificacoes'] = 'NEGADO'
+    const w = await aberta()
+    await botao(w, 'Transferir').trigger('click')
+    await assentar(w)
+    const opcoes = w.findAll('option').map((o) => o.text())
+    expect(opcoes.some((t) => t.startsWith('Financeiro')), opcoes.join(' | ')).toBe(true)
   })
 })

@@ -1586,14 +1586,18 @@ onMounted(async () => {
   }
   carregarAtalhos()
   await carregar()
-  try {
-    ;[times.value, classificacoes.value] = await Promise.all([
-      api.get('/api/times'),
-      api.get('/api/classificacoes'),
-    ])
-  } catch {
-    // sem estes a tela ainda mostra conversa; só as ações ficam sem opção
-  }
+  /* 🔴 CADA LISTA POR CONTA PRÓPRIA (23/09). Eram um `Promise.all`: a rota
+     de classificações dava 403 para quem atende, e a rejeição levava a de
+     TIMES junto -- o atendente abria "Transferir" com a lista de times vazia
+     desde 07/08. A rota foi aberta à leitura, e mesmo assim as duas ficam
+     separadas: uma lista que falha não pode apagar a outra. Sem elas a tela
+     ainda mostra conversa; só a ação daquela lista fica sem opção. */
+  const [rTimes, rClassif] = await Promise.allSettled([
+    api.get('/api/times'),
+    api.get('/api/classificacoes'),
+  ])
+  if (rTimes.status === 'fulfilled') times.value = rTimes.value
+  if (rClassif.status === 'fulfilled') classificacoes.value = rClassif.value
   if (route.params.id) await abrir(route.params.id)
   else if (numeroPedido) {
     /* A busca já rodou com o número: se achou exatamente uma, abre; se não

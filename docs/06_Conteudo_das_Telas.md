@@ -2806,3 +2806,27 @@ devolvendo 200 para tudo — o 403 é do perfil, e o dublê não tem perfil.
 
 As 4 rodam **2.3.7**, a última estável; acima só a 2.4.0-rc (mai/2026), com
 licença obrigatória. Detalhe e propostas no `Proximos_Passos` › 0.5 › 3.
+
+
+## ✅ Corrigido em 23/09 (16h30), com a palavra dele (*"pode aplicar 1"*)
+
+- `GET /api/classificacoes` passou a exigir **`ATD_1.2`** (quem atende); criar,
+  editar e desativar continuam em `CFG_4.1`; as **inativas** só vêm para quem
+  alcança `CFG_4.1`.
+- A Caixa carrega times e classificações com `Promise.allSettled`: uma lista
+  que falha não apaga a outra.
+
+**Prova:** `tests/teste_classificacoes_leitura.py` (atendente real de teste)
+e o caso novo do `caixa_2309.teste.js` — **os dois reprovam com o código
+anterior**; o caso das inativas reprova sem a guarda. Suíte **1.148 verdes**
+antes de publicar. **No serviço no ar, como a atendente Karla:** as duas rotas
+respondem 200 e os **7 times** aparecem.
+
+⚠️ **Achado da mesma medição:** o cadastro de classificações está **vazio**
+(0 linhas; nenhuma das 121 concluídas tem classificação). A lista vazia é
+correta — "Classificar" está pausado por ele desde 31/08.
+
+⚠️ **E um defeito MEU no caminho:** a primeira versão do teste das inativas
+lia a coluna `ativa`, que não existe (é `ativo`), e passaria sempre. Pego ao
+medir o banco; o teste passou a criar uma ativa e uma inativa e conferir pelo
+nome.
