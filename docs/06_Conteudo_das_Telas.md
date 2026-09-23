@@ -2759,3 +2759,50 @@ causa em vez de "Internal Server Error".
   coluna da lista — build limpo não vê layout (`M9`);
 - a aba Time **com 8–9 membros por time** mostra quase tudo para todos: ela
   só separa de verdade quando os times forem revisados na tela Times.
+
+
+---
+
+# ✅ A verificação de 23/09 (16h), depois da rodada — só leitura
+
+🔵 Pedido dele: *"verifique se os serviços e recursos para uso do movizap
+funcionam corretamente"*. Nada foi enviado nem alterado.
+
+| Recurso | Medido |
+|---|---|
+| Serviço `movizap` | ativo; **3.767 requisições na última hora, 0 erro** no log |
+| Tela | a publicada é a nova (`index-nQqmIY-R.js`) |
+| WhatsApp | Atendimento e Informativos com estado `open` |
+| Webhook | 349 eventos na última hora; **0 pendente; 0 erro em 24 h**; mensagem entrando e saindo |
+| E-mail (`ler_caixa`, a cada 2 min) | lendo; 2 `ReadTimeout` do Gmail no log inteiro, recuperados na rodada seguinte |
+| Chat interno | 18 mensagens nas últimas 24 h |
+| Sync do Harmonit | 05:45 e 17:45 em dia (#106); **os mesmos 7 erros por rodada** há dias |
+| Backup do banco | 02:40 (cron) e 15:22 (manual, antes da 049/050) |
+| Migrações | 049 e 050 aplicadas; `numero_bloqueado` existe |
+
+## 🔴 O defeito que a verificação achou (existe desde 07/08)
+
+**O atendente fica SEM a lista de times e SEM as classificações na Caixa.**
+
+- A Caixa carrega `/api/times` e `/api/classificacoes` num `Promise.all`;
+- `/api/classificacoes` exige `CFG_4.1` (tela de configuração) — atendente
+  recebe **403** (20 vezes em 12 h);
+- a rejeição derruba o `Promise.all` inteiro, e `times` também fica vazio,
+  embora `/api/times` responda 200 (é aberta a `ATD_1.1`).
+
+**Efeito:** no "Transferir", o seletor de time aparece vazio para quem não é
+dono — **é por isso que nenhuma conversa tem time**, e a aba Time (entregue
+hoje) não recebe nada. No "Concluir", a classificação fica sem opção (ela
+não é obrigatória desde 11/08, então concluir funciona).
+
+🟡 **Proposta, não aplicada:** pedir as duas listas separadas e abrir a
+LEITURA das classificações a quem atende (`ATD_1.2`); a escrita continua em
+`CFG_4.1`. Teste de tela com o 403 simulado. **Esperando a palavra dele.**
+
+⚠️ **Por que a suíte não pegou:** os testes da Caixa montam a tela com o dublê
+devolvendo 200 para tudo — o 403 é do perfil, e o dublê não tem perfil.
+
+## A Evolution — avaliada, atualização adiada por ele
+
+As 4 rodam **2.3.7**, a última estável; acima só a 2.4.0-rc (mai/2026), com
+licença obrigatória. Detalhe e propostas no `Proximos_Passos` › 0.5 › 3.
