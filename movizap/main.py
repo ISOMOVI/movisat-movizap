@@ -1479,22 +1479,55 @@ def foto_do_contato(conversa_id: int,
     return FileResponse(caminho, media_type="image/jpeg")
 
 
-@app.get("/api/midia/{midia_id}")
-def baixar_midia(midia_id: int,
-                 usuario: dict = Depends(auth.requer_tela("ATD_1.2"))):
-    """O arquivo que o cliente mandou.
+def _midia_que_posso_ver(midia_id: int, usuario: dict) -> dict:
+    """A linha da mídia, ou 404 -- e o 404 vale também para "existe, mas não é sua".
 
-    🚨 PASSA PELA API, não pelo nginx. Servir a pasta direto deixaria qualquer
-    um com o link ver anexo de cliente sem token nenhum -- e o link vaza no
-    histórico do navegador, no print, no grupo de WhatsApp. Aqui vale a mesma
-    permissão da tela de conversa.
+    🚨 A PERMISSÃO PASSOU A OLHAR O DONO (22/09, migração 047). Antes estas
+    rotas exigiam só a tela `ATD_1.2` e NÃO conferiam participação. Numa caixa
+    compartilhada isso passa: conversa de cliente é responsabilidade coletiva
+    e qualquer atendente lê. Com o anexo no chat interno deixou de passar --
+    o `midia_id` é sequencial, e trocar o número no link entregaria o print
+    que alguém mandou numa conversa de duas pessoas.
 
-    ⚠️ `Content-Disposition: attachment` é o que faz o botão "baixar" baixar
-    em vez de abrir. A tela mostra a imagem por outro caminho (`?ver=1`).
+    ⚠️ 404 E NÃO 403, de propósito e seguindo o `_minha_sala`: 403 confirma
+    que aquele id existe, e "existe mas não é seu" já é informação sobre a
+    conversa dos outros.
+
+    ⚠️ A REGRA DA CONVERSA NÃO MUDOU. Continua sendo a tela `ATD_1.2`, como
+    sempre foi -- apertar isso seria mudar uma regra que ninguém pediu.
     """
+    dono = chat.dono_da_midia(midia_id)
+    if not dono:
+        raise HTTPException(status_code=404, detail="Mídia não encontrada.")
+    if dono["sala_id"]:
+        _minha_sala(dono["sala_id"], usuario)     # 404 se não for membro
+    elif not registro_telas.pode_acessar(usuario, "ATD_1.2"):
+        raise HTTPException(status_code=404, detail="Mídia não encontrada.")
+
     linha = midia.arquivo(midia_id)
     if not linha:
         raise HTTPException(status_code=404, detail="Mídia não encontrada.")
+    return linha
+
+
+@app.get("/api/midia/{midia_id}")
+def baixar_midia(midia_id: int,
+                 usuario: dict = Depends(auth.get_usuario)):
+    """O arquivo que o cliente mandou, ou o anexo do chat interno.
+
+    🚨 PASSA PELA API, não pelo nginx. Servir a pasta direto deixaria qualquer
+    um com o link ver anexo de cliente sem token nenhum -- e o link vaza no
+    histórico do navegador, no print, no grupo de WhatsApp.
+
+    🚨 A GUARDA SAIU DO `Depends` E FOI PARA DENTRO (22/09). Exigir `ATD_1.2`
+    na porta barraria quem tem o chat interno e não tem a Caixa de entrada --
+    e a régua do chat é outra, mais apertada. Quem decide agora é o dono da
+    mídia; ver `_midia_que_posso_ver`.
+
+    ⚠️ `Content-Disposition: attachment` é o que faz o botão "baixar" baixar
+    em vez de abrir. A tela mostra a imagem por outro caminho (`/ver`).
+    """
+    linha = _midia_que_posso_ver(midia_id, usuario)
     return FileResponse(
         linha["caminho"],
         media_type=linha["mime"] or "application/octet-stream",
@@ -1504,11 +1537,9 @@ def baixar_midia(midia_id: int,
 
 @app.get("/api/midia/{midia_id}/ver")
 def ver_midia(midia_id: int,
-              usuario: dict = Depends(auth.requer_tela("ATD_1.2"))):
+              usuario: dict = Depends(auth.get_usuario)):
     """A mesma mídia, para aparecer DENTRO da conversa em vez de baixar."""
-    linha = midia.arquivo(midia_id)
-    if not linha:
-        raise HTTPException(status_code=404, detail="Mídia não encontrada.")
+    linha = _midia_que_posso_ver(midia_id, usuario)
     return FileResponse(linha["caminho"],
                         media_type=linha["mime"] or "application/octet-stream")
 
@@ -2787,6 +2818,56 @@ def chat_escrever(sala_id: int, dados: ChatTexto,
                   usuario: dict = Depends(auth.requer_tela("ATD_6.1"))):
     eu = _minha_sala(sala_id, usuario)
     resultado = chat.escrever(sala_id, eu, dados.texto, dados.mencionados)
+    if not resultado["ok"]:
+        raise HTTPException(status_code=409, detail=resultado["motivo"])
+    return resultado
+
+
+@app.post("/api/chat/salas/{sala_id}/arquivo")
+async def chat_arquivo(sala_id: int,
+                       arquivo: UploadFile = File(...),
+                       legenda: str = Form(""),
+                       mencionados: str = Form(""),
+                       usuario: dict = Depends(auth.requer_tela("ATD_6.1"))):
+    """Anexo na sala do chat interno. 🔵 Pedido dele em 22/09.
+
+    🚨 NADA SAI PARA O CLIENTE. Esta rota chama o `chat`, que não conhece o
+    `evolution` nem o `conversas` -- a garantia é de import, não de intenção.
+
+    🚨 O DESTINATÁRIO NÃO É PARÂMETRO: sai da sala, como no texto. É a mesma
+    trava que impede o painel de virar ferramenta de disparo.
+
+    ⚠️ O TETO É CONFERIDO LENDO, não pelo `content-length` -- cabeçalho é o
+    que o cliente DIZ, não o que ele envia. Lê em pedaços e para no primeiro
+    byte acima do teto, em vez de carregar 500 MB na memória para depois
+    recusar. Mesmo cuidado da rota da conversa.
+
+    ⚠️ `mencionados` VEM COMO TEXTO porque `multipart` não tem lista de
+    inteiros -- é "5,7" e não um JSON. Id que não for número é descartado
+    aqui: o `chat` confere depois se cada um é membro, e recusa com o nome.
+    """
+    eu = _minha_sala(sala_id, usuario)
+
+    teto = chat.TETO_ARQUIVO
+    pedacos, total = [], 0
+    while True:
+        pedaco = await arquivo.read(256 * 1024)
+        if not pedaco:
+            break
+        total += len(pedaco)
+        if total > teto:
+            raise HTTPException(
+                status_code=413,
+                detail=f"Arquivo acima de {chat.TETO_ARQUIVO_MB} MB.")
+        pedacos.append(pedaco)
+    dados = b"".join(pedacos)
+
+    chamados = [int(p) for p in (mencionados or "").split(",") if p.strip().isdigit()]
+
+    resultado = chat.escrever_com_arquivo(
+        sala_id, eu, dados,
+        arquivo.content_type or "application/octet-stream",
+        arquivo.filename or "arquivo", legenda, chamados)
     if not resultado["ok"]:
         raise HTTPException(status_code=409, detail=resultado["motivo"])
     return resultado

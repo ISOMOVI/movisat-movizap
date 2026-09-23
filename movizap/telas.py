@@ -146,7 +146,18 @@ TELAS = [
         "rota": "/config",
         "icone": "bi-sliders",
         "descricao": "As configurações do painel, em abas. O interruptor da IA mora aqui.",
-        "permissao": "owner",
+        # 🚨 `atendimento` E NÃO `owner` DESDE 22/09, e a casca não concede nada:
+        # cada aba continua com a permissão dela, e o `Configuracoes.vue` só
+        # desenha as que `sessao.telas` traz. Owner vê as dez; atendente vê
+        # duas -- Minha conta e Atalhos.
+        #
+        # ⚠️ ERA UMA PORTA TRANCADA. `CFG_6.1` e `CFG_10.1` nasceram
+        # `atendimento` ("cada um mexe em SI MESMO"), mas têm `aba_de` -- e o
+        # `MenuLateral` pula toda tela com `aba_de`. Sem item de menu e com o
+        # `/config` em `owner`, as duas telas PESSOAIS não tinham entrada
+        # nenhuma: 9 dos 10 atendentes ativos só chegariam nelas digitando a
+        # URL. A tabela de preferência tinha UMA linha, a do owner.
+        "permissao": "atendimento",
         "fase": 1,
     },
     {

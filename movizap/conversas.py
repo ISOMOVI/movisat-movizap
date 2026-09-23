@@ -729,7 +729,7 @@ def _gravar_mensagem(cur, evento: dict, corpo: dict,
     if nova is not None:
         achado = midia_mod.extrair(data.get("message") or {})
         if achado:
-            midia_id = midia_mod.guardar(cur, conversa_id, achado)
+            midia_id = midia_mod.guardar(cur, achado, conversa_id=conversa_id)
             if midia_id:
                 cur.execute("UPDATE mensagem SET midia_id = %s WHERE id = %s",
                             (midia_id, nova["id"]))
@@ -2540,10 +2540,10 @@ def responder_com_arquivo(conversa_id: int, dados: bytes, mime: str,
 
     nosso = _TIPO_POR_FAMILIA.get((mime or "").split("/")[0], "documento")
     with banco.cursor() as cur:
-        midia_id = midia_mod.guardar(cur, conversa_id, {
+        midia_id = midia_mod.guardar(cur, {
             "dados": dados, "mime": mime, "tipo": nosso,
             "nome_original": nome_arquivo,
-        })
+        }, conversa_id=conversa_id)
         cur.execute(
             """INSERT INTO mensagem
                    (conversa_id, id_externo, direcao, autor, tipo, conteudo,
@@ -2596,11 +2596,11 @@ def anotar_com_arquivo(conversa_id: int, dados: bytes, mime: str,
         return {"ok": False, "motivo": "Conversa não encontrada."}
 
     with banco.cursor() as cur:
-        midia_id = midia_mod.guardar(cur, conversa_id, {
+        midia_id = midia_mod.guardar(cur, {
             "dados": dados, "mime": mime,
             "tipo": _TIPO_POR_FAMILIA.get((mime or "").split("/")[0], "documento"),
             "nome_original": nome_arquivo,
-        })
+        }, conversa_id=conversa_id)
         cur.execute(
             """INSERT INTO mensagem
                    (conversa_id, direcao, autor, tipo, conteudo, atendente_id,

@@ -9,9 +9,9 @@
    ⚠️ NÃO SUBSTITUI A NOTA INTERNA. A nota responde "falar sobre ESTA
    conversa" e vive dentro dela; isto responde "falar sobre qualquer coisa".
    ============================================================================ */
-import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 
-import { api, ErroDeApi } from '../api/cliente.js'
+import { api, pedirBlob, ErroDeApi } from '../api/cliente.js'
 import { corDaInicial, iniciais } from '../util/avatar.js'
 
 const salas = ref([])
@@ -25,6 +25,27 @@ const erro = ref('')
 const abrindo = ref(false)
 const baloes = ref(null)
 let timer = null
+
+/* ---- anexo (22/09) --------------------------------------------------------
+   🔵 Pedido dele: *"sobre envio de anexos no chat interno, igual no aberto"*,
+   com o áudio junto e teto de 25 MB, decididos por ele no mesmo dia.
+
+   🚨 NADA DAQUI SAI PARA O CLIENTE, como o resto desta tela. A rota é
+   `/api/chat/salas/{id}/arquivo`, que grava e serve -- o módulo `chat` do
+   backend não importa o `evolution`.
+
+   ⚠️ O TETO TAMBÉM MORA AQUI, e não é duplicação preguiçosa: subir 40 MB
+   para levar 413 no fim é desperdício do tempo de quem está atendendo. O
+   servidor continua sendo quem decide. */
+const TETO_ARQUIVO_MB = 25
+const arquivo = ref(null)
+const enviandoArquivo = ref(false)
+
+/* 🚨 A IMAGEM NÃO PODE IR POR `<img src="/api/...">`: a tag não manda o
+   cabeçalho `Authorization` e a rota exige sessão -- armadilha já registrada
+   neste projeto. Busca com token, vira object URL, e as URLs são REVOGADAS ao
+   sair da tela, senão cada visita vaza um pedaço de memória. */
+const midias = reactive({})
 
 const naoLidasTotal = computed(
   () => salas.value.reduce((s, x) => s + (x.nao_lidas || 0), 0),
@@ -166,7 +187,16 @@ async function abrir(salaId, { silencioso = false } = {}) {
     const r = await api.get(`/api/chat/salas/${salaId}`)
     sala.value = salas.value.find((s) => s.id === salaId) || { id: salaId }
     mensagens.value = r.mensagens || []
+    // ⚠️ Cada anexo é buscado UMA vez: o `carregarMidia` marca "em andamento"
+    // antes de ir, então o laço de 5 s não rebaixa o que já está na mão.
+    for (const m of mensagens.value) carregarMidia(m)
+    // 🚨 O `else` NÃO É ENFEITE (22/09). Sem ele, `membros` guardava o último
+    // GRUPO aberto para sempre: quem saísse de um grupo para uma conversa de
+    // dois e digitasse `@` recebia a lista do grupo -- gente que não está
+    // nesta sala e que o backend recusa pelo nome. A régua da tela tem de ser
+    // a mesma da rota, que é o que o comentário do `chamaveis` promete.
     if (sala.value.tipo === 'grupo') await carregarMembros(salaId)
+    else membros.value = []
     if (!silencioso) {
       mostrandoMembros.value = false
       rolarParaOFim()
@@ -175,7 +205,14 @@ async function abrir(salaId, { silencioso = false } = {}) {
     // refletir sem esperar o próximo ciclo.
     await carregar({ silencioso: true })
   } catch (e) {
-    erro.value = e instanceof ErroDeApi ? e.message : 'Falha ao abrir a conversa.'
+    // 🚨 CICLO DE FUNDO NÃO PINTA ERRO (22/09). O `catch` escrevia na faixa
+    // vermelha mesmo no ciclo silencioso: um soluço de rede de um segundo
+    // deixava "Falha ao abrir a conversa" na tela de quem não clicou em nada.
+    // É o mesmo critério que o `carregar()` aqui em cima já usa -- este foi o
+    // que ficou de fora.
+    if (!silencioso) {
+      erro.value = e instanceof ErroDeApi ? e.message : 'Falha ao abrir a conversa.'
+    }
   }
 }
 
@@ -348,12 +385,21 @@ function andarNaLista(passo) {
 
 /* Enter escolhe da lista quando ela está aberta; senão envia. Sem isto, quem
    digitasse `@a` e apertasse Enter mandaria a mensagem pela metade. */
-function enterNoCampo() {
+function enterNoCampo(evento) {
   if (listaArroba.value.length) {
+    evento.preventDefault()
     escolherArroba(listaArroba.value[arrobaEscolhido.value])
     return
   }
-  enviar()
+  // 🟢 Agora obedece à preferência (22/09). O `.prevent` saiu do template e
+  // veio para cá: desligado, Enter tem de QUEBRAR LINHA, e um `prevent` fixo
+  // engolia a quebra sem enviar nada -- tecla que não faz nada é pior que
+  // tecla que faz outra coisa. É a mesma forma do `enterNoCompositor` da
+  // Caixa de entrada.
+  if (enterEnvia.value) {
+    evento.preventDefault()
+    enviar()
+  }
 }
 
 function escolherArroba(pessoa) {
@@ -403,7 +449,213 @@ function partesDoTexto(m) {
   return partes
 }
 
+const FAMILIA = { image: 'imagem', audio: 'audio', video: 'video' }
+
+function tipoDaMidia(m) {
+  return FAMILIA[(m.midia_mime || '').split('/')[0]] || 'documento'
+}
+
+function tamanhoLegivel(bytes) {
+  if (!bytes) return ''
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`
+}
+
+async function carregarMidia(m) {
+  if (!m.midia_id || midias[m.midia_id] !== undefined) return
+  midias[m.midia_id] = ''   // "em andamento": o laço de 5 s não busca de novo
+  try {
+    const blob = await pedirBlob(`/api/midia/${m.midia_id}/ver`)
+    midias[m.midia_id] = URL.createObjectURL(blob)
+  } catch {
+    // Falhar aqui não derruba a conversa: sobra o botão de baixar e o texto.
+    midias[m.midia_id] = null
+  }
+}
+
+function soltarMidias() {
+  for (const [id, url] of Object.entries(midias)) {
+    if (url) URL.revokeObjectURL(url)
+    delete midias[id]
+  }
+}
+
+/* 🚨 BAIXAR TAMBÉM PASSA PELO TOKEN. Um `<a href="/api/midia/...">` comum
+   não manda o cabeçalho `Authorization` e a rota responde 401 -- a pessoa
+   veria "não autorizado" ao clicar em baixar, dentro de uma tela onde ela
+   está autenticada. Busca com token e entrega o arquivo por um link
+   temporário, que some em seguida. */
+async function baixar(m) {
+  try {
+    const blob = await pedirBlob(`/api/midia/${m.midia_id}`)
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = m.midia_nome || 'arquivo'
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    URL.revokeObjectURL(url)
+  } catch {
+    erro.value = 'Não consegui baixar o arquivo.'
+  }
+}
+
+/* 🚨 O CAMINHO MAIS CURTO PARA MANDAR UM PRINT. Sem isto, quem tira print
+   precisa salvar em arquivo, achar a pasta e anexar -- três passos para o que
+   o WhatsApp resolve com um. É o mesmo atalho da Caixa de entrada. */
+function colar(evento) {
+  const itens = Array.from(evento.clipboardData?.items || [])
+  const imagem = itens.find((i) => i.type.startsWith('image/'))
+  if (!imagem) return          // colar texto continua sendo colar texto
+  const arq = imagem.getAsFile()
+  if (!arq) return
+  evento.preventDefault()
+  const carimbo = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')
+  arquivo.value = new File([arq], `print-${carimbo}.png`, { type: arq.type })
+}
+
+function escolherArquivo(evento) {
+  const f = evento.target.files?.[0] || null
+  erro.value = ''
+  if (f && f.size > TETO_ARQUIVO_MB * 1024 * 1024) {
+    erro.value = `O arquivo tem ${(f.size / 1024 / 1024).toFixed(1)} MB e o `
+      + `teto é ${TETO_ARQUIVO_MB} MB.`
+    evento.target.value = ''
+    arquivo.value = null
+    return
+  }
+  arquivo.value = f
+}
+
+function limparArquivo() {
+  arquivo.value = null
+  const campo = document.getElementById('chat-campo-arquivo')
+  if (campo) campo.value = ''
+}
+
+/* ⚠️ NÃO passa pelo `api.post`, que serializa JSON. Arquivo vai por
+   `FormData`, e aí o navegador monta o `Content-Type` com o boundary sozinho
+   -- definir o cabeçalho na mão quebra o upload EM SILÊNCIO, com o servidor
+   recebendo corpo vazio. */
+async function subirArquivo(blob, nome) {
+  const dados = new FormData()
+  dados.append('arquivo', blob, nome)
+  dados.append('legenda', texto.value.trim())
+  const vivos = mencionados.value.filter((p) => texto.value.includes('@' + p.nome))
+  dados.append('mencionados', vivos.map((p) => p.id).join(','))
+  const r = await fetch(`/api/chat/salas/${sala.value.id}/arquivo`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${localStorage.getItem('movizap.token')}` },
+    body: dados,
+  })
+  if (!r.ok) {
+    let motivo = 'Não consegui enviar o arquivo.'
+    try { motivo = (await r.json()).detail || motivo } catch { /* corpo não-JSON */ }
+    throw new Error(motivo)
+  }
+}
+
+async function enviarArquivo() {
+  if (!arquivo.value || enviando.value || !sala.value) return
+  enviandoArquivo.value = true
+  erro.value = ''
+  try {
+    await subirArquivo(arquivo.value, arquivo.value.name)
+    texto.value = ''
+    mencionados.value = []
+    listaArroba.value = []
+    limparArquivo()
+    await abrir(sala.value.id)
+  } catch (e) {
+    erro.value = e.message || 'Não consegui enviar o arquivo.'
+  } finally {
+    enviandoArquivo.value = false
+  }
+}
+
+/* ---- gravar voz ----------------------------------------------------------
+   🚨 SOLTAR O MICROFONE É PARTE DA FUNÇÃO, não um detalhe. Na Caixa de
+   entrada isso já foi defeito: a trilha ficava aberta e a luz de gravação
+   acesa depois de sair da tela, com a pessoa achando que o painel continuava
+   ouvindo. Aqui ele é solto no `onstop`, no cancelar E na saída da tela. */
+const gravando = ref(false)
+const segundosGravados = ref(0)
+let gravador = null
+let pedacosAudio = []
+let relogioGravacao = null
+
+async function comecarGravacao() {
+  try {
+    const trilha = await navigator.mediaDevices.getUserMedia({ audio: true })
+    pedacosAudio = []
+    gravador = new MediaRecorder(trilha)
+    gravador.ondataavailable = (e) => { if (e.data.size) pedacosAudio.push(e.data) }
+    gravador.onstop = () => trilha.getTracks().forEach((t) => t.stop())
+    gravador.start()
+    gravando.value = true
+    segundosGravados.value = 0
+    relogioGravacao = setInterval(() => { segundosGravados.value += 1 }, 1000)
+  } catch {
+    erro.value = 'Não consegui usar o microfone. Verifique a permissão do navegador.'
+  }
+}
+
+function pararRelogio() {
+  clearInterval(relogioGravacao)
+  gravando.value = false
+}
+
+/* Cancelar existe porque gravar sem poder desistir faz a pessoa não gravar. */
+function cancelarGravacao() {
+  if (!gravador) return
+  gravador.onstop = null
+  gravador.stream?.getTracks().forEach((t) => t.stop())
+  gravador.stop()
+  gravador = null
+  pedacosAudio = []
+  pararRelogio()
+}
+
+async function enviarGravacao() {
+  if (!gravador) return
+  const pronto = new Promise((resolve) => {
+    const antes = gravador.onstop
+    gravador.onstop = (e) => { antes?.(e); resolve() }
+  })
+  gravador.stop()
+  await pronto
+  pararRelogio()
+
+  const blob = new Blob(pedacosAudio, { type: 'audio/ogg; codecs=opus' })
+  gravador = null
+  pedacosAudio = []
+  if (!blob.size) return
+
+  enviandoArquivo.value = true
+  erro.value = ''
+  try {
+    const carimbo = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')
+    await subirArquivo(blob, `voz-${carimbo}.ogg`)
+    texto.value = ''
+    mencionados.value = []
+    await abrir(sala.value.id)
+  } catch (e) {
+    erro.value = e.message || 'Não consegui enviar o áudio.'
+  } finally {
+    enviandoArquivo.value = false
+  }
+}
+
+function minutos(s) {
+  return `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`
+}
+
 async function enviar() {
+  // Com arquivo escolhido, Enter manda O ARQUIVO com o texto de legenda --
+  // senão a legenda iria numa mensagem e o arquivo em outra.
+  if (arquivo.value) return enviarArquivo()
   const t = texto.value.trim()
   if (!t || enviando.value || !sala.value) return
   enviando.value = true
@@ -440,8 +692,27 @@ async function rolarParaOFim() {
   if (baloes.value) baloes.value.scrollTop = baloes.value.scrollHeight
 }
 
+/* 🟢 A PREFERÊNCIA VALE AQUI TAMBÉM (22/09). A tecla estava FIXA no template:
+   o chat mandava com Enter sempre, sem nunca ler `/api/eu/atalhos`. O
+   checkbox de "Minha conta" diz *"como você envia"* -- e para esta tela ele
+   era uma frase sem efeito.
+
+   ⚠️ Falhou a leitura, fica DESLIGADO: `Ctrl+Enter` continua enviando e
+   Enter quebra linha. Perder a tecla é chato; mandar sem querer, não. */
+const enterEnvia = ref(false)
+
+async function carregarPreferencia() {
+  try {
+    const r = await api.get('/api/eu/atalhos')
+    enterEnvia.value = Boolean(r.enviar_com_enter)
+  } catch {
+    enterEnvia.value = false
+  }
+}
+
 onMounted(async () => {
   document.addEventListener('click', fecharEmojiSeForaDele)
+  await carregarPreferencia()
   await carregar()
   timer = setInterval(async () => {
     const estava = estaNoFim()
@@ -456,9 +727,39 @@ onMounted(async () => {
 onUnmounted(() => {
   clearInterval(timer)
   document.removeEventListener('click', fecharEmojiSeForaDele)
+  // 🚨 A SAÍDA PELA PORTA TAMBÉM CONTA. Trocar de tela no meio de uma
+  // gravação deixaria a trilha aberta e a luz vermelha do navegador acesa,
+  // sem nem o botão de cancelar à vista — defeito que a Caixa de entrada já
+  // teve, achado na auditoria de 25/08.
+  cancelarGravacao()
+  soltarMidias()
 })
 
-watch(sala, () => { texto.value = '' })
+/* 🚨 COMPARA O `id`, NUNCA O OBJETO (22/09) -- e este é o defeito que chegou
+   ao usuário: *"alguns usuários não conseguem escrever, fica apagando sozinho
+   a mensagem antes de enviar"*.
+
+   A intenção continua a mesma e é certa: trocou de conversa, limpa o
+   rascunho, senão você manda para a Erika o que escreveu para o João. O que
+   estava errado era o CRITÉRIO. `watch(sala, ...)` compara identidade de
+   objeto, e o ciclo de 5 segundos reconstrói `salas` com objetos novos a cada
+   resposta do servidor -- então `abrir()` reapontava `sala` para um objeto
+   diferente da MESMA conversa, o watcher entendia "trocou" e apagava o que a
+   pessoa estava escrevendo. A cada 5 segundos, para todo mundo. Quem não
+   percebia era só quem terminava de escrever antes do próximo ciclo.
+
+   ⚠️ `mencionados` e `listaArroba` entram junto: só `texto` era limpo, e os
+   chips de menção da conversa anterior sobreviviam à troca real de sala. */
+watch(() => sala.value?.id, (novo, velho) => {
+  if (novo === velho) return
+  texto.value = ''
+  mencionados.value = []
+  listaArroba.value = []
+  // O anexo escolhido e ainda não enviado é rascunho como o texto: ele era
+  // para AQUELA conversa. E a gravação em curso para junto.
+  limparArquivo()
+  cancelarGravacao()
+})
 
 function hora(iso) {
   return new Date(iso).toLocaleString('pt-BR',
@@ -758,7 +1059,40 @@ function quando(iso) {
                 <!-- 🚨 O DESTAQUE VEM DE `mencionados`, NÃO DE PROCURAR "@" NO
                      TEXTO. Quem foi chamado está gravado; caçar arroba no texto
                      acenderia "@10h" e "email@movisat" como se fossem gente. -->
-                <p class="balao__texto">
+                <!-- 🚨 O ANEXO (22/09). Imagem e áudio aparecem DENTRO do
+                     balão; o resto vira uma linha com nome, tamanho e o botão
+                     de baixar. Quem decide o que é o arquivo é o MIME, nunca
+                     a extensão do nome, que qualquer um renomeia. -->
+                <template v-if="m.midia_id">
+                  <img
+                    v-if="tipoDaMidia(m) === 'imagem' && midias[m.midia_id]"
+                    :src="midias[m.midia_id]"
+                    class="balao__imagem"
+                    :alt="m.midia_nome || 'Imagem enviada'"
+                  />
+                  <audio
+                    v-else-if="tipoDaMidia(m) === 'audio' && midias[m.midia_id]"
+                    :src="midias[m.midia_id]" controls class="balao__audio"
+                  ></audio>
+                  <video
+                    v-else-if="tipoDaMidia(m) === 'video' && midias[m.midia_id]"
+                    :src="midias[m.midia_id]" controls class="balao__imagem"
+                  ></video>
+                  <!-- ⚠️ `midias[id] === ''` é "buscando"; `null` é "não deu".
+                       Nos dois casos sobra esta linha, que é a que sempre
+                       funciona -- anexo que não abre ainda pode ser baixado. -->
+                  <a
+                    v-if="tipoDaMidia(m) === 'documento' || midias[m.midia_id] === null"
+                    class="balao__arquivo"
+                    :href="`/api/midia/${m.midia_id}`"
+                    @click.prevent="baixar(m)"
+                  >
+                    <i class="bi bi-paperclip" aria-hidden="true"></i>
+                    <span>{{ m.midia_nome || 'arquivo' }}</span>
+                    <span class="apagado pequeno">{{ tamanhoLegivel(m.midia_tamanho) }}</span>
+                  </a>
+                </template>
+                <p v-if="m.texto" class="balao__texto">
                   <template v-for="(p, k) in partesDoTexto(m)" :key="k">
                     <mark v-if="p.mencao" class="mencao"
                           :class="{ 'mencao--eu': p.eu }">{{ p.texto }}</mark>
@@ -774,19 +1108,32 @@ function quando(iso) {
             <!-- `position: relative` porque a lista do `@` se ancora aqui. -->
             <label class="campo campo--arroba">
               <span class="so-leitor">Mensagem</span>
-              <!-- 🚨 ENTER ENVIA, Shift+Enter quebra linha. `Ctrl+Enter` é o
-                   que se usa na CAIXA DE ENTRADA, onde a mensagem vai para o
-                   cliente e não volta. Aqui é conversa de equipe: a fricção
-                   não se paga, e ela aparecia em toda mensagem. -->
+              <!-- 🚨 QUEM DECIDE É A PREFERÊNCIA (22/09), não esta tela.
+                   Ligada: Enter envia e Shift+Enter quebra linha. Desligada:
+                   Enter quebra linha e `Ctrl+Enter` envia -- o mesmo par da
+                   Caixa de entrada. Antes o Enter estava FIXO aqui, e o
+                   checkbox de "Minha conta" não mandava em nada.
+
+                   ⚠️ `Ctrl+Enter` vale nos DOIS casos: sem ele, quem
+                   desligasse a preferência ficaria sem nenhuma tecla para
+                   enviar.
+
+                   ⚠️ O PLACEHOLDER SEGUE A PREFERÊNCIA. Ele dizia "aperte
+                   Enter" para todo mundo; desligada, seria a tela prometendo
+                   o que a tecla não faz. -->
               <textarea
                 ref="campoTexto"
                 v-model="texto"
                 class="campo__entrada"
                 rows="2"
                 maxlength="4000"
-                placeholder="Escreva e aperte Enter — @ chama alguém"
+                :placeholder="enterEnvia
+                  ? 'Escreva e aperte Enter — @ chama alguém'
+                  : 'Escreva e aperte Ctrl+Enter — @ chama alguém'"
                 @input="olharArroba"
-                @keydown.enter.exact.prevent="enterNoCampo"
+                @paste="colar"
+                @keydown.ctrl.enter.prevent="enviar"
+                @keydown.enter.exact="enterNoCampo"
                 @keydown.down.prevent="andarNaLista(1)"
                 @keydown.up.prevent="andarNaLista(-1)"
                 @keydown.esc="listaArroba = []"
@@ -819,6 +1166,33 @@ function quando(iso) {
                 {{ p.nome }} <i class="bi bi-x" aria-hidden="true"></i>
               </button>
             </p>
+            <!-- 🚨 O ANEXO ESCOLHIDO APARECE ANTES DE IR (22/09). Sem esta
+                 linha, quem cola um print não vê nada acontecer e cola de
+                 novo — e manda dois. -->
+            <p v-if="arquivo" class="linha pequeno anexo-escolhido">
+              <i class="bi bi-paperclip" aria-hidden="true"></i>
+              <span>{{ arquivo.name }}</span>
+              <span class="apagado">{{ tamanhoLegivel(arquivo.size) }}</span>
+              <button class="botao botao--pequeno botao--contorno" type="button"
+                      title="Tirar o anexo" @click="limparArquivo">
+                Tirar
+              </button>
+            </p>
+
+            <!-- 🚨 A GRAVAÇÃO TEM SAÍDA. Gravar sem poder desistir faz a
+                 pessoa não gravar; o tempo à vista evita o áudio de 4
+                 minutos que ninguém ouve. -->
+            <p v-if="gravando" class="linha pequeno gravando">
+              <span class="gravando__ponto" aria-hidden="true"></span>
+              <span>Gravando {{ minutos(segundosGravados) }}</span>
+              <button class="botao botao--pequeno botao--contorno" type="button"
+                      @click="cancelarGravacao">Cancelar</button>
+              <button class="botao botao--pequeno botao--primario" type="button"
+                      :disabled="enviandoArquivo" @click="enviarGravacao">
+                Enviar áudio
+              </button>
+            </p>
+
             <div class="linha">
               <!-- Grade própria de emoji: ~4 KB e nenhuma dependência. -->
               <div class="emoji">
@@ -848,16 +1222,50 @@ function quando(iso) {
                 </div>
               </div>
 
+              <!-- 🚨 BOTÃO COM RÓTULO, não só ícone. `title` não é rótulo: o
+                   balão do navegador demora cerca de um segundo e não existe
+                   em toque. Foi esse o erro de 25/08 que escondeu o "Criar
+                   grupo" desta mesma tela. -->
+              <label class="botao botao--contorno" :class="{ 'botao--ocupado': enviandoArquivo }">
+                <i class="bi bi-paperclip" aria-hidden="true"></i>
+                Anexar
+                <input
+                  id="chat-campo-arquivo"
+                  class="so-leitor"
+                  type="file"
+                  :disabled="enviandoArquivo || gravando"
+                  @change="escolherArquivo"
+                />
+              </label>
+
+              <button
+                v-if="!gravando"
+                class="botao botao--contorno"
+                type="button"
+                :disabled="enviandoArquivo"
+                @click="comecarGravacao"
+              >
+                <i class="bi bi-mic" aria-hidden="true"></i>
+                Gravar
+              </button>
+
               <button
                 class="botao botao--primario"
                 type="button"
-                :disabled="enviando || !texto.trim()"
+                :disabled="enviando || enviandoArquivo || (!texto.trim() && !arquivo)"
                 @click="enviar"
               >
-                <span v-if="enviando" class="girando"></span>
-                {{ enviando ? 'Enviando…' : 'Enviar' }}
+                <span v-if="enviando || enviandoArquivo" class="girando"></span>
+                {{ enviando || enviandoArquivo ? 'Enviando…' : 'Enviar' }}
               </button>
-              <span class="apagado pequeno">Enter envia · Shift+Enter quebra linha</span>
+              <!-- ⚠️ A DICA SEGUE A PREFERÊNCIA (22/09). Ela dizia "Enter
+                   envia" para todo mundo; com a preferência desligada, a tela
+                   estaria prometendo o que a tecla não faz. -->
+              <span class="apagado pequeno">
+                {{ enterEnvia
+                  ? 'Enter envia · Shift+Enter quebra linha'
+                  : 'Ctrl+Enter envia · Enter quebra linha' }}
+              </span>
             </div>
           </div>
         </template>
@@ -1150,6 +1558,49 @@ function quando(iso) {
 .balao__autor { margin: 0 0 2px; color: var(--texto-fraco); font-weight: var(--peso-forte); }
 .balao__texto { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 .balao__rodape { margin: var(--e-1) 0 0; }
+
+/* ---- anexo (22/09) --------------------------------------------------------
+   ⚠️ `max-width: 100%` e `height: auto` juntos: sem os dois, um print de
+   3000 px de largura estoura o balão e empurra a conversa inteira para o
+   lado. Os tokens são os mesmos do resto da tela -- token inventado cai no
+   valor de emergência em silêncio, e isso já aconteceu aqui. */
+.balao__imagem {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  border-radius: var(--r-md);
+  margin-bottom: var(--e-1);
+}
+
+.balao__audio { display: block; width: 100%; margin-bottom: var(--e-1); }
+
+.balao__arquivo {
+  display: flex;
+  align-items: center;
+  gap: var(--e-2);
+  padding: var(--e-2);
+  margin-bottom: var(--e-1);
+  border: var(--borda-fina);
+  border-radius: var(--r-sm);
+  text-decoration: none;
+  color: inherit;
+  /* O nome longo encolhe em vez de esticar o balão. */
+  overflow-wrap: anywhere;
+}
+
+.anexo-escolhido { align-items: center; gap: var(--e-2); margin: 0 0 var(--e-2); }
+
+.gravando { align-items: center; gap: var(--e-2); margin: 0 0 var(--e-2); }
+
+/* O ponto vermelho é o que diz "está ligado" sem depender de ler o texto. */
+.gravando__ponto {
+  width: 10px;
+  height: 10px;
+  border-radius: var(--r-full);
+  background: var(--erro);
+}
+
+.botao--ocupado { opacity: 0.6; pointer-events: none; }
 
 .chip--pequeno { font-size: var(--txt-xs); padding: 1px 6px; }
 

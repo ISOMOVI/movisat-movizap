@@ -58,7 +58,7 @@ MOD_a.b[.c]
 | `CAD_1.2` | Contatos | `/cadastro/contatos` | `cadastro` | 1 |
 | `CAD_2.1` | Atendentes | `/cadastro/atendentes` | `owner` | 1 |
 | `CAD_2.2` | Times | `/cadastro/times` | `owner` | 1 |
-| `CFG_0.1` | Configurações | `/config` | `owner` | 1 |
+| `CFG_0.1` | Configurações | `/config` | `atendimento` | 1 |
 | `CFG_1.1` | Canais | `/config/canais` | `owner` | 1 |
 | `CFG_2.1` | IA — prompt | `/config/ia/prompt` | `owner` | 1 |
 | `CFG_3.1` | Sincronização | `/config/sync` | `owner` | 1 |
@@ -82,6 +82,19 @@ campo, do mesmo jeito que já pulava rota com parâmetro.
 devolvidas por `do_usuario()`, e têm de continuar: a guarda de rota do frontend
 usa `sessao.telas` para saber o que este usuário pode abrir. Tirá-las de lá
 barraria `/config/canais` para o próprio owner.
+
+🚨 **A `CFG_0.1` PASSOU A `atendimento` EM 22/09, E ISSO NÃO CONCEDE NADA.**
+Cada aba mantém a permissão dela e o `Configuracoes.vue` só desenha as que
+`sessao.telas` traz: o owner vê dez abas, o atendente vê **duas** — Minha conta
+e Atalhos. A casca é casca.
+
+⚠️ **ERA UMA PORTA TRANCADA, e ninguém tinha visto.** `CFG_6.1` e `CFG_10.1`
+nasceram `atendimento` de propósito (*"cada um mexe em SI MESMO"*), mas têm
+`aba_de` — e o `MenuLateral` pula quem tem `aba_de`. Sem item de menu, e com o
+`/config` em `owner`, as duas telas PESSOAIS não tinham entrada nenhuma: só
+digitando a URL. Medido em 22/09: **9 dos 10 atendentes ativos** sem acesso, e a
+tabela `preferencia_atendente` com **uma linha só**, a do owner. Foi o que fez
+"nasce desligada, quem quiser liga" nunca ter sido uma escolha de verdade.
 
 🚨 **`do_usuario()` PRECISOU DE UMA LINHA.** Ela monta a resposta à mão, com
 quatro campos; um campo novo no registro não chegava ao frontend sozinho —

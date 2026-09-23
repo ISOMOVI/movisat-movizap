@@ -243,9 +243,34 @@ consulta que envia. Sem isso, um dia alguém manda "cliente chato" para o
 cliente.
 
 ### `midia`
-`id · conversa_id · mime · tamanho · caminho · nome_original · hash · baixada_em`
+`id · conversa_id · sala_id · mime · tamanho · caminho · nome_original · hash · baixada_em`
 
 Arquivo em disco, não no banco. `hash` evita guardar duas vezes o mesmo áudio.
+
+🆕 **DOIS DONOS POSSÍVEIS, UM DE CADA VEZ** (migração 047, 22/09). `conversa_id`
+é a conversa com o cliente; `sala_id` é a sala do chat interno, que passou a
+aceitar anexo. `CHECK ((conversa_id IS NULL) <> (sala_id IS NULL))` garante que
+toda linha pertence a exatamente um — nunca aos dois, nunca a nenhum.
+
+🚨 **A COLUNA DO DONO É A REGRA DE PERMISSÃO.** `/api/midia/{id}` decide quem
+pode ver lendo daí: mídia de conversa segue a tela `ATD_1.2`, como sempre;
+mídia de sala exige **ser membro da sala**. Antes da 047 a rota exigia só a
+tela e não conferia participação — numa caixa compartilhada isso passa, num
+chat de duas pessoas não, porque o `midia_id` é sequencial e trocar o número no
+link entregaria o anexo alheio. Linha órfã viraria "mídia de ninguém", e "não
+sei de quem é" acaba virando "deixa ver": por isso o `CHECK`.
+
+⚠️ **O DEDUPE É POR DONO, NÃO GLOBAL.** O mesmo print mandado na conversa do
+cliente e no chat interno são **duas linhas** apontando para **um arquivo** no
+disco — o nome do arquivo é o SHA256. Unificar as linhas daria a quem vê uma
+delas o direito de ver a outra.
+
+⚠️ **A PASTA `/home/claude/movizap_midia` TEM BACKUP DESDE 22/09** e não tinha
+antes: o `backup_projetos.sh` empacota diretórios nominais e ela fica fora do
+projeto, e o `pg_dump` guarda o caminho, não o arquivo. Pior, o
+`expurgar_base64.py` moveu as mídias do banco para o disco — antes dele o
+conteúdo viajava no dump. Agora `scripts/backup_midia.sh` faz instantâneo
+datado com hardlink às 02:50, retenção 14 dias.
 
 ---
 
@@ -1010,6 +1035,26 @@ separado, mais antigo, e **não foi tocado nesta rodada**.
 citar a reconstroem de `id_externo` + `direcao` + o destino da conversa —
 guardar o trio seria copiar o que já está aqui, contra o princípio 1 deste
 documento.
+
+### `chat_mensagem.midia_id` — anexo no chat interno (047 e 048)
+
+🔵 Pedido dele em 22/09: *"sobre envio de anexos no chat interno, igual no
+aberto"*. Teto de **25 MB** e **voz gravada junto**, decididos por ele no mesmo
+dia. A mídia vai para a tabela `midia`, com `sala_id` no lugar de
+`conversa_id` — ver a nota daquela tabela.
+
+🚨 **NADA SAI PARA O CLIENTE, e a garantia é de import.** O módulo `chat` não
+importa o `evolution` nem o `conversas`: não existe caminho de código pelo qual
+um anexo interno alcance um número de WhatsApp. É o mesmo contrato da nota
+interna, que é de 12/08.
+
+🚨 **A MENSAGEM PODE SER SÓ O ANEXO** (048). O `CHECK` original, de 026, era
+`length(btrim(texto)) > 0` — certo para o mundo onde anexo não existia. Virou
+`length(btrim(texto)) > 0 OR midia_id IS NOT NULL`: continua proibida a
+mensagem vazia, mas quem manda um print não precisa inventar legenda. **A 047
+esqueceu esta metade e quem achou foi o teste**: eu li que `texto` é `NOT NULL`
+no `information_schema.columns` e concluí que vazio passaria — `CHECK` mora em
+`pg_constraint`, que é outra consulta. É o `M15`.
 
 ### `chat_membro.oculta_ate_id` — esconder uma conversa interna (038)
 

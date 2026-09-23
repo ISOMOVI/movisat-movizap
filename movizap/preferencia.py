@@ -29,9 +29,17 @@ CHAVE_TECLAS = "atalhos_teclas"
 # não apenas no botão azul"*, e a sugestão dela mesma de que isso fosse
 # configurável por pessoa -- que é exatamente o desenho que a CFG_6.1 já usa.
 #
-# 🚨 NASCE DESLIGADA, como os atalhos. Enter é a tecla mais apertada por
-# engano que existe, e aqui ela MANDA A MENSAGEM PARA O CLIENTE -- não volta.
-# Quem quiser, liga; ninguém recebe o comportamento novo sem pedir.
+# 🔵 NASCE LIGADA DESDE 22/09, por decisão dele: *"mudar o envio para todos
+# pelo 'enter' conforme a opção no perfil"*.
+#
+# 🚨 ATÉ 22/09 NASCIA DESLIGADA, e o motivo continua VALENDO: na Caixa de
+# entrada o Enter MANDA A MENSAGEM PARA O CLIENTE, e não volta. O que mudou
+# não foi o risco, foi a porta -- `CFG_10.1` e `CFG_6.1` eram inalcançáveis
+# (ver o comentário da `CFG_0.1` em `telas.py`), então "quem quiser, liga"
+# nunca foi uma escolha real: 9 dos 10 atendentes não tinham como chegar lá.
+# Ligar por padrão só é aceitável PORQUE a porta abriu no mesmo dia -- as duas
+# mudanças sobem juntas, e separá-las tira de quem não quiser o direito de
+# desligar.
 CHAVE_ENTER_ENVIA = "enviar_com_enter"
 
 # 🚨 O CATÁLOGO VIVE NO BACKEND, e a tela o consome. Duplicá-lo no navegador
@@ -129,10 +137,20 @@ def dos_atalhos(atendente_id: int | None) -> dict:
 
 
 def enviar_com_enter(atendente_id: int | None) -> bool:
-    """Se Enter manda a mensagem para esta pessoa. Sem linha = desligado."""
+    """Se Enter manda a mensagem para esta pessoa. Sem linha = LIGADO (22/09).
+
+    🚨 O TESTE É `!= "false"`, NÃO `== "true"`. Ausência de linha passou a
+    significar ligado, e é isso que entrega o pedido dele sem migrar dado
+    nenhum: quem nunca mexeu (9 dos 10) ganha o comportamento, quem já tinha
+    `"true"` continua igual, e quem desligar grava `"false"` e fica desligado.
+
+    ⚠️ Sem `atendente_id` continua DESLIGADO. Não é a mesma pergunta: aqui não
+    há pessoa, e uma tecla que manda para o cliente não se liga por omissão de
+    identidade.
+    """
     if not atendente_id:
         return False
-    return _ler(atendente_id, CHAVE_ENTER_ENVIA) == "true"
+    return _ler(atendente_id, CHAVE_ENTER_ENVIA) != "false"
 
 
 def definir_enviar_com_enter(atendente_id: int, ligado: bool) -> dict:

@@ -14,10 +14,21 @@ para isso — este módulo não conhece o `evolution`.
 import logging
 
 from . import banco
+from . import midia as midia_mod
 
 log = logging.getLogger(__name__)
 
 TETO_TEXTO = 4000
+
+# 🔵 25 MB, DECIDIDO POR ELE EM 22/09, junto do pedido de anexo no chat
+# interno ("igual no aberto"). É o mesmo teto da conversa com o cliente, por
+# simetria — e a simetria aqui é escolha, não imposição: anexo interno não
+# passa pelo WhatsApp, então ninguém de fora impõe este número.
+#
+# ⚠️ O TETO É CONFERIDO LENDO, na rota, e não pelo `content-length` que o
+# navegador manda — cabeçalho é o que o cliente DIZ, não o que ele envia.
+TETO_ARQUIVO_MB = 25
+TETO_ARQUIVO = TETO_ARQUIVO_MB * 1024 * 1024
 
 # 🔵 TETO MEU, ROTULADO COMO MEU. Não há decisão do usuário sobre quantas
 # pessoas se pode chamar numa mensagem; 20 é maior que a equipe inteira (5
@@ -322,9 +333,12 @@ def mensagens(sala_id: int, eu: int, limite: int = 500) -> list[dict]:
     linhas = banco.varios(
         """SELECT * FROM (
                SELECT c.id, c.texto, c.criada_em, c.atendente_id,
-                      a.nome AS autor, (c.atendente_id = %s) AS minha
+                      a.nome AS autor, (c.atendente_id = %s) AS minha,
+                      c.midia_id, md.mime AS midia_mime,
+                      md.nome_original AS midia_nome, md.tamanho AS midia_tamanho
                  FROM chat_mensagem c
                  JOIN atendente a ON a.id = c.atendente_id
+                 LEFT JOIN midia md ON md.id = c.midia_id
                 WHERE c.sala_id = %s
                 ORDER BY c.id DESC LIMIT %s
            ) recentes ORDER BY id""", (eu, sala_id, limite))
@@ -408,6 +422,80 @@ def escrever(sala_id: int, eu: int, texto: str,
     # como não lida para o autor no próximo carregamento.
     marcar_lido(sala_id, eu, linha["id"])
     return {"ok": True, "mensagem_id": linha["id"], "mencionados": chamados}
+
+
+def escrever_com_arquivo(sala_id: int, eu: int, dados: bytes, mime: str,
+                         nome_arquivo: str, texto: str,
+                         mencionados: list[int] | None = None) -> dict:
+    """Mensagem da sala COM anexo. 🔵 Pedido dele em 22/09.
+
+    🚨 O ARQUIVO NÃO SAI DA CASA, e a garantia é estrutural: este módulo não
+    importa o `evolution` nem o `conversas`. É o mesmo contrato que a nota
+    interna da conversa já tem desde 12/08 -- guarda e serve, não envia.
+
+    🚨 MENSAGEM PODE SER SÓ O ANEXO. O `escrever` recusa texto vazio, e está
+    certo: mensagem sem nada não é mensagem. Aqui o anexo É o conteúdo -- quem
+    manda um print raramente escreve legenda --, então o vazio é permitido e o
+    que se grava é string vazia. Reaproveitar o `escrever` obrigaria a
+    inventar um texto, e texto inventado aparece no histórico e na busca.
+
+    ⚠️ A MÍDIA, A MENSAGEM E AS MENÇÕES NA MESMA TRANSAÇÃO. Meia gravação
+    deixaria arquivo no disco sem mensagem que o mostre -- lixo que ninguém
+    encontra para apagar.
+    """
+    if not dados:
+        return {"ok": False, "motivo": "Arquivo vazio."}
+    if len(dados) > TETO_ARQUIVO:
+        return {"ok": False,
+                "motivo": f"O arquivo tem {len(dados) / 1024 / 1024:.1f} MB e o "
+                          f"teto é {TETO_ARQUIVO_MB} MB."}
+    texto = (texto or "").strip()
+    if len(texto) > TETO_TEXTO:
+        return {"ok": False,
+                "motivo": f"Mensagem passa de {TETO_TEXTO} caracteres."}
+    if not e_membro(sala_id, eu):
+        return {"ok": False, "motivo": "Você não está nesta conversa."}
+
+    chamados = _conferir_mencionados(sala_id, mencionados)
+    if isinstance(chamados, dict):          # veio recusa, não lista
+        return chamados
+
+    familia = (mime or "").split("/")[0]
+    nosso = {"image": "imagem", "video": "video", "audio": "audio"}.get(
+        familia, "documento")
+
+    with banco.cursor() as cur:
+        midia_id = midia_mod.guardar(cur, {
+            "dados": dados, "mime": mime, "tipo": nosso,
+            "nome_original": nome_arquivo,
+        }, sala_id=sala_id)
+        cur.execute(
+            """INSERT INTO chat_mensagem (sala_id, atendente_id, texto, midia_id)
+               VALUES (%s, %s, %s, %s) RETURNING id, criada_em""",
+            (sala_id, eu, texto, midia_id))
+        linha = cur.fetchone()
+        for quem in chamados:
+            cur.execute(
+                """INSERT INTO chat_mencao (mensagem_id, atendente_id)
+                   VALUES (%s, %s) ON CONFLICT DO NOTHING""",
+                (linha["id"], quem))
+
+    marcar_lido(sala_id, eu, linha["id"])
+    return {"ok": True, "mensagem_id": linha["id"], "midia_id": midia_id,
+            "mencionados": chamados}
+
+
+def dono_da_midia(midia_id: int) -> dict | None:
+    """De quem é esta mídia: conversa, sala, ou nenhuma (não existe).
+
+    🚨 EXISTE PARA A REGRA DE PERMISSÃO (22/09). As rotas `/api/midia/{id}`
+    serviam qualquer arquivo a qualquer um que tivesse a tela da Caixa de
+    entrada, sem conferir participação. Numa caixa compartilhada isso passa;
+    numa conversa de duas pessoas, não -- o `midia_id` é sequencial, e trocar
+    o número no link daria o anexo alheio a quem chutasse.
+    """
+    return banco.um(
+        "SELECT id, conversa_id, sala_id FROM midia WHERE id = %s", (midia_id,))
 
 
 def _conferir_mencionados(sala_id: int, mencionados: list[int] | None):

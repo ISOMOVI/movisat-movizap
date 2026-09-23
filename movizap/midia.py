@@ -117,18 +117,39 @@ def extrair(mensagem: dict) -> dict | None:
     }
 
 
-def guardar(cur, conversa_id: int, achado: dict) -> int | None:
+def guardar(cur, achado: dict, *, conversa_id: int | None = None,
+            sala_id: int | None = None) -> int | None:
     """Grava o arquivo e devolve o id da linha em `midia`.
 
-    Idempotente pelo hash: a mesma mídia reprocessada não duplica arquivo nem
-    linha. Isso importa porque o reprocesso do que já chegou vai rodar mais de
-    uma vez enquanto a tela é construída.
+    Idempotente pelo hash DENTRO DE UM DONO: a mesma mídia reprocessada não
+    duplica arquivo nem linha. Isso importa porque o reprocesso do que já
+    chegou vai rodar mais de uma vez enquanto a tela é construída.
+
+    🚨 O DONO É UM SÓ, E VEM POR PALAVRA-CHAVE (22/09). A `midia` passou a
+    atender dois mundos -- a conversa com o cliente e a sala do chat interno
+    (migração 047) --, e o dono é o que decide QUEM PODE VER o arquivo. Por
+    isso ele não é mais um posicional que se possa trocar de lugar sem
+    perceber: quem chama diz o nome, e passar os dois (ou nenhum) estoura
+    aqui, não lá na frente com uma linha órfã no banco.
+
+    ⚠️ O DEDUPE É POR DONO, NÃO GLOBAL. O mesmo print mandado na conversa do
+    cliente e no chat interno são DUAS linhas -- apontando para o mesmo
+    arquivo no disco, porque o nome do arquivo é o SHA256. Unificar as linhas
+    daria a quem vê uma delas o direito de ver a outra, e é exatamente o que
+    a regra de permissão precisa impedir.
     """
+    if (conversa_id is None) == (sala_id is None):
+        raise ValueError("midia.guardar: informe conversa_id OU sala_id, nunca os dois")
+
     dados = achado["dados"]
     digest = hashlib.sha256(dados).hexdigest()
 
-    cur.execute("SELECT id FROM midia WHERE hash = %s AND conversa_id = %s",
-                (digest, conversa_id))
+    if conversa_id is not None:
+        cur.execute("SELECT id FROM midia WHERE hash = %s AND conversa_id = %s",
+                    (digest, conversa_id))
+    else:
+        cur.execute("SELECT id FROM midia WHERE hash = %s AND sala_id = %s",
+                    (digest, sala_id))
     ja = cur.fetchone()
     if ja:
         return ja["id"]
@@ -145,11 +166,11 @@ def guardar(cur, conversa_id: int, achado: dict) -> int | None:
         temporario.rename(caminho)
 
     cur.execute(
-        """INSERT INTO midia (conversa_id, mime, tamanho, caminho,
+        """INSERT INTO midia (conversa_id, sala_id, mime, tamanho, caminho,
                               nome_original, hash, baixada_em)
-           VALUES (%s, %s, %s, %s, %s, %s, now())
+           VALUES (%s, %s, %s, %s, %s, %s, %s, now())
            RETURNING id""",
-        (conversa_id, achado["mime"] or None, len(dados), str(caminho),
+        (conversa_id, sala_id, achado["mime"] or None, len(dados), str(caminho),
          achado["nome_original"], digest))
     return cur.fetchone()["id"]
 
