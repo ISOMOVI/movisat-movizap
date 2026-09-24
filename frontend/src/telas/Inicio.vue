@@ -29,6 +29,7 @@ import { useRouter } from 'vue-router'
 
 import { api } from '../api/cliente.js'
 import { sessao } from '../estado/sessao.js'
+import AvisoDistribuicao from '../componentes/AvisoDistribuicao.vue'
 
 const router = useRouter()
 const dados = ref(null)
@@ -140,6 +141,8 @@ onUnmounted(() => clearInterval(relogio))
         <i class="bi bi-arrow-clockwise" aria-hidden="true"></i> Atualizar
       </button>
     </header>
+
+    <AvisoDistribuicao />
 
     <!-- 🚨 SEM VÍNCULO DE ATENDIMENTO, A TELA PARA AQUI. A conta entra no
          painel, mas não tem linha em `atendente` com e-mail -- e sem isso

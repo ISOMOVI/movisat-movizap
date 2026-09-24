@@ -254,8 +254,14 @@ def entrar(codigo: str, state: str) -> dict:
     # pelo e-mail (primeira vez). Nunca cria.
     linha = banco.um(
         "SELECT id, login, nome, ativo FROM atendente "
-        " WHERE google_sub = %s OR lower(email) = %s",
-        (dados.get("sub"), email))
+        " WHERE google_sub = %s OR lower(email) = %s "
+        # 🚨 24/09 (auditoria): sem ORDER BY, se o `sub` casasse numa linha e
+        # o e-mail em outra, a escolha era do acaso -- e gravar o `sub` na
+        # linha errada batia no índice único e derrubava a entrada. O e-mail
+        # agora é único (053); isto garante que quem já entrou é reconhecido
+        # pelo `sub` primeiro.
+        " ORDER BY (google_sub = %s) DESC NULLS LAST LIMIT 1",
+        (dados.get("sub"), email, dados.get("sub")))
     if not linha:
         raise GoogleRecusado(
             f"{email} não tem conta no painel. Peça para o administrador "

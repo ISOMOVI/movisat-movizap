@@ -56,15 +56,15 @@ MOD_a.b[.c]
 | `EML_1.1` | E-mail | `/email` | `atendimento` | 1 |
 | `CAD_1.1` | Clientes | `/cadastro/clientes` | `cadastro` | 1 |
 | `CAD_1.2` | Contatos | `/cadastro/contatos` | `cadastro` | 1 |
-| `CAD_2.1` | Atendentes | `/cadastro/atendentes` | `owner` | 1 |
-| `CAD_2.2` | Times | `/cadastro/times` | `owner` | 1 |
+| `CAD_2.1` | Atendentes | `/cadastro/atendentes` | `equipe` | 1 |
+| `CAD_2.2` | Times | `/cadastro/times` | `equipe` | 1 |
 | `CFG_0.1` | Configurações | `/config` | `atendimento` | 1 |
 | `CFG_1.1` | Canais | `/config/canais` | `owner` | 1 |
 | `CFG_2.1` | IA — prompt | `/config/ia/prompt` | `owner` | 1 |
 | `CFG_3.1` | Sincronização | `/config/sync` | `owner` | 1 |
 | `CFG_4.1` | Classificações | `/config/classificacoes` | `owner` | 1 |
 | `CFG_5.1` | Automação por tipo | `/config/automacao` | `owner` | 1 |
-| `CFG_6.1` | Atalhos de teclado | `/config/atalhos` | `atendimento` | 1 |
+| `CFG_6.1` | Atalhos de teclado | `/config/atalhos` | `owner` | 1 |
 | `CFG_7.1` | Geral | `/config/geral` | `owner` | 1 |
 | `CFG_8.1` | Eventos do WhatsApp | `/config/eventos` | `owner` | 1 |
 | `CFG_9.1` | Registro de telas | `/config/telas` | `owner` | 1 |
@@ -85,8 +85,17 @@ barraria `/config/canais` para o próprio owner.
 
 🚨 **A `CFG_0.1` PASSOU A `atendimento` EM 22/09, E ISSO NÃO CONCEDE NADA.**
 Cada aba mantém a permissão dela e o `Configuracoes.vue` só desenha as que
-`sessao.telas` traz: o owner vê dez abas, o atendente vê **duas** — Minha conta
-e Atalhos. A casca é casca.
+`sessao.telas` traz: o owner vê dez abas, o atendente vê **uma** — Minha conta.
+A casca é casca.
+
+🔵 **ATALHOS (`CFG_6.1`) PASSOU A `owner` EM 24/09**, decisão dele: *"pode
+exibir a atalhos somente para o owner tbm"*. Até ali o atendente via duas abas.
+🚨 **O Enter não foi junto.** `GET /api/eu/atalhos` (de onde Caixa de entrada,
+Chat interno e E-mail leem o `enviar_com_enter`) e `PUT /api/eu/enviar-com-enter`
+(o interruptor da Minha conta) saíram da `CFG_6.1` para `get_usuario` —
+presas a ela, dariam 403 ao atendente e as três telas cairiam no Enter
+desligado em silêncio. Ligar atalhos e trocar teclas continuam presos à tela.
+Teste: `TestPortaDoConfig.test_enter_nao_depende_da_tela_de_atalhos`.
 
 ⚠️ **ERA UMA PORTA TRANCADA, e ninguém tinha visto.** `CFG_6.1` e `CFG_10.1`
 nasceram `atendimento` de propósito (*"cada um mexe em SI MESMO"*), mas têm
@@ -316,7 +325,8 @@ Fixa no rodapé de **toda** tela principal. Modelo mental: barra do Excel / bloc
 | Perfil | Permissões | Telas na prática |
 |---|---|---|
 | `owner` | todas | tudo, inclusive o que é exclusivo do owner |
-| `atendimento` | `atendimento` | `INI_1.1` `ATD_1.*` `ATD_5.1` `EML_1.1` |
+| `admin` | `atendimento` `equipe` | as de `atendimento` + `CAD_2.1` `CAD_2.2`; no `/config`, só `CFG_10.1` |
+| `atendimento` | `atendimento` | `INI_1.1` `ATD_1.*` `ATD_5.1` `ATD_6.1` `EML_1.1` `CFG_0.1` › `CFG_10.1` |
 | `cadastro` | `cadastro` | `CAD_1.1` `CAD_1.2` |
 
 Perfil é conjunto de **permissões**, e a permissão de cada tela vem do registro.
@@ -333,6 +343,22 @@ Decisão do usuário no mesmo dia: **owner é o único administrador, e não nas
 mais owners.** As duas telas futuras passaram a `owner`, o perfil saiu de
 `telas.PERFIS` e o `CHECK` da coluna `atendente.perfil` perdeu o valor
 (migração 024).
+
+🔵 **`admin` VOLTOU EM 24/09, COM OUTRO ALCANCE.** Decisão dele: *"o perfil
+admin deve possuir exibição de telas de atendimento + Times + Atendentes +
+Configurações > Minha conta, apenas"*. Não é o admin de 12/08: destrava a
+permissão nova `equipe` (Times e Atendentes, antes `owner`) e nada de
+`cadastro`. Migração 051 devolve o valor ao `CHECK`.
+
+🚨 **O OWNER CONTINUA ÚNICO, e a trava não é a tela.** A conta do owner passa
+de mão trocando o e-mail dela; um admin que editasse a linha do owner viraria
+owner. Por isso, em `main.py`: `_so_owner_mexe_no_owner` (dados, senha,
+jornada, desligar) e `_so_owner_da_admin` (só o owner cria, promove ou rebaixa
+admin). As duas travas são 🟡 minhas, não pedido dele.
+⚠️ Ainda em 24/09 ele pediu que o admin pudesse dar admin (*"do Admin permite
+tem todos menos owner"*). A remoção da segunda trava foi barrada pelo
+classificador de permissões da sessão, e **ele decidiu mantê-la** (*"1 mantem,
+admin não vira owner"*): o admin não dá admin.
 
 ⚠️ **`informativos` não está em nenhum perfil**, de propósito — só o owner
 alcança a `ATD_3.1`. Disparo em massa não se libera por padrão; para dar a

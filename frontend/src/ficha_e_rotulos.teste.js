@@ -478,14 +478,24 @@ describe('Botão cinza diz o que falta (item 6)', () => {
 describe('Atalhos na Caixa de entrada (item 7)', () => {
   /* O E-mail tinha 6 teclas; esta tela tinha ZERO -- a mais usada era a com
      menos ferramenta. */
-  it('as teclas estao ensinadas no icone de ajuda', async () => {
+  it('as teclas estao ensinadas no icone de ajuda QUANDO estao ligadas', async () => {
+    respostas['/api/eu/atalhos'] = {
+      ligados: true, enviar_com_enter: false, catalogo: [],
+      teclas: { proxima: 'j', anterior: 'k', buscar: '/', assumir: 'a', concluir: 'x' },
+    }
     const w = mount(CaixaDeEntrada)
     await assentar(w)
     const ajuda = w.find('.ajuda').text()
-    for (const tecla of ['j', 'k', '/', 'a', 'c']) {
-      expect(ajuda).toContain(tecla)
-    }
     expect(ajuda).toContain('Atalhos')
+    // A tecla DA PESSOA: ela trocou "concluir" para x.
+    expect(ajuda).toContain('x abre o concluir')
+  })
+
+  it('🚨 24/09: desligados, a ajuda NAO anuncia tecla que nao funciona', async () => {
+    respostas['/api/eu/atalhos'] = { ligados: false, teclas: {}, catalogo: [] }
+    const w = mount(CaixaDeEntrada)
+    await assentar(w)
+    expect(w.find('.ajuda').text()).not.toContain('Atalhos')
   })
 
   it('🚨 tecla NAO dispara enquanto se digita', async () => {

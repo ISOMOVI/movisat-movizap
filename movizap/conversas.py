@@ -950,6 +950,12 @@ def processar_pendentes(limite: int = 500) -> dict:
                         contas["boas_vindas"] += 1
                 except Exception:                             # noqa: BLE001
                     log.exception("boas-vindas falhou na conversa %s", alvo)
+                # 🔵 24/09: fim de expediente. Separada da saudação para a
+                # falha de uma não calar a outra.
+                try:
+                    automacao.fora_do_expediente(alvo)
+                except Exception:                             # noqa: BLE001
+                    log.exception("fim de expediente falhou na conversa %s", alvo)
         except Exception as e:   # noqa: BLE001 - um evento ruim não para a fila
             contas["erros"] += 1
             log.exception("evento %s falhou ao processar", evento["id"])
@@ -2769,6 +2775,10 @@ def fila() -> list[dict]:
 # doc manda o resumo da transferência ir, de qualquer forma.
 MOTIVOS = ("manual", "inatividade", "ia_triagem", "sem_time")
 
+# A frase é dele (24/09) e mora em `presenca`; repetida aqui por nome para a
+# tela e a API dizerem exatamente a mesma coisa.
+from .presenca import MENSAGEM_OFFLINE  # noqa: E402
+
 
 def _recebe_transferencia(cur, atendente_id: int) -> bool:
     """O owner assume qualquer conversa, mas ninguém transfere PARA ele.
@@ -2793,8 +2803,14 @@ def texto_da_nota_de_transferencia(destino: str | None, resumo: str) -> str:
 def transferir(conversa_id: int, time_id: int | None,
                para_atendente_id: int | None, motivo: str = "manual",
                de_atendente_id: int | None = None,
-               texto_resumo: str | None = None) -> dict:
+               texto_resumo: str | None = None,
+               so_se_sem_dono: bool = False) -> dict:
     """Manda a conversa para um time ou uma pessoa, deixando rastro.
+
+    🚨 `so_se_sem_dono` (24/09) É A TRAVA DA DISTRIBUIÇÃO AUTOMÁTICA. Sem ela, o
+    laço que distribui a fila podia sobrescrever quem ASSUMIU a conversa no
+    mesmo segundo -- o UPDATE não olhava o dono atual. Com ela, a condição vai
+    no próprio UPDATE: se alguém chegou antes, nada muda e nada é registrado.
 
     🚨 Enquanto a IA não existe, ISTO É A TRIAGEM: um humano decide o destino
     lendo a conversa. Quando a IA entrar, ela chama o mesmo caminho — e a
@@ -2822,6 +2838,17 @@ def transferir(conversa_id: int, time_id: int | None,
         if para_atendente_id and not _recebe_transferencia(cur, para_atendente_id):
             return {"ok": False,
                     "motivo": "Esta pessoa não recebe transferência."}
+        # 🔵 24/09: *"Não é possivel receber conversa se estiver offline, ao
+        # transferir, no painel, aparece informação para o atendente 'O
+        # atendente escolhido está offline e não poderá continuar o
+        # atendimento'"*. A frase é a dele, e a trava é AQUI -- a tela avisa,
+        # mas a API é pública. Afastado (férias) conta como offline.
+        if para_atendente_id:
+            cur.execute("SELECT estado, afastamento_motivo FROM atendente "
+                        "WHERE id = %s", (para_atendente_id,))
+            destino = cur.fetchone() or {}
+            if destino.get("estado") == "offline" or destino.get("afastamento_motivo"):
+                return {"ok": False, "motivo": MENSAGEM_OFFLINE}
         cur.execute(
             """UPDATE conversa
                   SET time_id = COALESCE(%s, time_id),
@@ -2829,9 +2856,12 @@ def transferir(conversa_id: int, time_id: int | None,
                       estado = %s,
                       qtd_transferencias = qtd_transferencias + 1,
                       atualizada_em = now()
-                WHERE id = %s""",
+                WHERE id = %s AND (NOT %s OR atendente_id IS NULL)""",
             (time_id, para_atendente_id,
-             "humano" if para_atendente_id else "fila", conversa_id))
+             "humano" if para_atendente_id else "fila", conversa_id,
+             so_se_sem_dono))
+        if cur.rowcount == 0:
+            return {"ok": False, "motivo": "A conversa já tem dono."}
         cur.execute(
             """INSERT INTO transferencia
                    (conversa_id, de_atendente_id, para_atendente_id, para_time_id,
@@ -3234,6 +3264,10 @@ def sair(conversa_id: int, atendente_id: int) -> dict:
             """SELECT p.atendente_id, a.nome FROM conversa_participante p
                  JOIN atendente a ON a.id = p.atendente_id
                 WHERE p.conversa_id = %s AND p.saiu_em IS NULL AND a.ativo
+                  -- 🔵 24/09 (achado da auditoria): offline não recebe
+                  -- conversa, e herdar é receber. Sem isto, o dono saía e a
+                  -- conversa caía em quem estava offline ou de férias.
+                  AND a.estado <> 'offline' AND a.afastamento_motivo IS NULL
                 ORDER BY p.entrou_em LIMIT 1""", (conversa_id,))
         herdeiro = cur.fetchone()
 

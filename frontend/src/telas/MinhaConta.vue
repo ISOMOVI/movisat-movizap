@@ -17,11 +17,13 @@
    (`enviar_com_enter`) e a mesma rota -- duas portas para o mesmo quarto,
    nunca dois quartos.
 
-   ⚠️ O QUE NÃO SE EDITA AQUI, e de propósito: nome, login, e-mail e perfil.
-   Todo mundo entra por Google com domínio travado, então o nome e o e-mail
-   são de lá; e perfil é permissão, que é decisão do owner na tela de
-   cadastro. Mostrar como leitura é melhor que esconder -- é a regra "nada
-   some" (27/08): a pessoa vê o que vale para ela e por que não pode mudar.
+   🔵 O NOME SE EDITA AQUI DESDE 24/09, decisão dele: *"Nome de exibição pode
+   ser alterado por todos os tipos, se quiser"*. Login, e-mail e perfil
+   continuam fora: e-mail é a chave do login Google, perfil é permissão.
+
+   🔵 E NEM TODO CAMPO APARECE PARA TODOS (mesmo dia): *"o campo de e-mail,
+   deve aparecer somente para admin e owner"* e *"o 'Login' pode ser oculto a
+   todos menos owner, pois usamos o auth google para logar"*.
    ============================================================================ */
 import { ref, computed, onMounted } from 'vue'
 
@@ -38,6 +40,29 @@ const perfil = ref(null)
    o caminho da imagem é o mesmo, só o conteúdo mudou. */
 const versaoFoto = ref(Date.now())
 
+/* ---- o nome de exibição (24/09) ---- */
+const nomeNovo = ref('')
+const nomeMudou = computed(() =>
+  perfil.value && nomeNovo.value.trim() && nomeNovo.value.trim() !== perfil.value.nome)
+const veEmail = computed(() => ['owner', 'admin'].includes(perfil.value?.perfil))
+const veLogin = computed(() => perfil.value?.perfil === 'owner')
+
+async function salvarNome () {
+  if (!nomeMudou.value || salvando.value) return
+  salvando.value = true
+  erro.value = ''
+  recado.value = ''
+  try {
+    await api.put('/api/eu/nome', { nome: nomeNovo.value })
+    await carregar()
+    recado.value = `Seu nome agora aparece como "${perfil.value.nome}".`
+  } catch (e) {
+    erro.value = e instanceof ErroDeApi ? e.message : 'Não consegui trocar o seu nome.'
+  } finally {
+    salvando.value = false
+  }
+}
+
 /* 🚨 O RÓTULO É DA PESSOA, O VALOR É DO BANCO. `nao_perturbe` é o que o
    `CHECK` aceita; "Não perturbe" é o que se lê. Misturar os dois faria a tela
    mostrar nome de coluna para quem atende. */
@@ -49,7 +74,7 @@ const ESTADOS = [
   { valor: 'nao_perturbe', rotulo: 'Não perturbe', cor: 'erro',
     ajuda: 'Está no painel, mas concentrado em outra coisa.' },
   { valor: 'offline', rotulo: 'Fora do expediente', cor: '',
-    ajuda: 'Encerrou o dia. É escolha sua, não é deduzido de estar ou não com o painel aberto.' },
+    ajuda: 'Encerrou o dia. Enquanto estiver assim, não recebe conversa transferida.' },
 ]
 
 const estadoAtual = computed(
@@ -69,10 +94,29 @@ async function carregar () {
   erro.value = ''
   try {
     perfil.value = await api.get('/api/eu/perfil')
+    nomeNovo.value = perfil.value.nome
   } catch (e) {
     erro.value = e instanceof ErroDeApi ? e.message : 'Não consegui carregar seus dados.'
   } finally {
     carregando.value = false
+  }
+}
+
+async function alternarSempreOnline (evento) {
+  salvando.value = true
+  erro.value = ''
+  recado.value = ''
+  try {
+    await api.put('/api/eu/sempre-online', { ligado: evento.target.checked })
+    await carregar()
+    recado.value = perfil.value.sempre_online
+      ? '"Sempre online" ligado: dentro da sua jornada, a regra de tempo não muda o seu estado.'
+      : '"Sempre online" desligado.'
+  } catch (e) {
+    erro.value = e instanceof ErroDeApi ? e.message : 'Não consegui mudar.'
+    await carregar()
+  } finally {
+    salvando.value = false
   }
 }
 
@@ -184,8 +228,28 @@ onMounted(carregar)
       <section class="cartao tela__bloco">
         <div class="cartao__corpo pilha">
           <h2 class="cartao__titulo">Como você está</h2>
-          <p class="apagado pequeno">
+          <!-- 🚨 A FRASE MUDA COM A REGRA (24/09). Dizia "É você quem escolhe —
+               não é deduzido", verdade até existir a regra de tempo. Com ela
+               ligada, o sistema também muda o estado, e a tela tem de dizer. -->
+          <p v-if="perfil.regra_de_tempo" class="apagado pequeno">
+            Você escolhe, e o sistema também muda quando você fica sem atender
+            (Configurações › Geral). O que o sistema mudou volta a
+            <strong>Disponível</strong> na sua próxima ação; o que você escolheu fica.
+          </p>
+          <p v-else class="apagado pequeno">
             É você quem escolhe — não é deduzido de ter o painel aberto.
+          </p>
+          <p v-if="perfil.estado_automatico" class="aviso aviso--info pequeno">
+            <i class="bi bi-clock-history aviso__icone" aria-hidden="true"></i>
+            <span>Este estado foi posto pelo sistema, por tempo sem atender.</span>
+          </p>
+          <p v-if="perfil.afastamento_motivo" class="aviso aviso--atencao pequeno">
+            <i class="bi bi-airplane aviso__icone" aria-hidden="true"></i>
+            <span>
+              Você está afastado ({{ perfil.afastamento_motivo }}<template
+              v-if="perfil.afastado_ate">, até {{ new Date(perfil.afastado_ate + 'T12:00').toLocaleDateString('pt-BR') }}</template>)
+              e não recebe conversa. Escolher um estado abaixo encerra o afastamento.
+            </span>
           </p>
           <div class="conta__estados">
             <button
@@ -206,6 +270,24 @@ onMounted(carregar)
               </span>
             </button>
           </div>
+
+          <!-- 🔵 24/09: *"Para o owner, pode ter o status para marcar 'sempre
+               online' - dentro da jornada que o owner tbm terá, mas será
+               exclusivo dele"*. -->
+          <label v-if="perfil.perfil === 'owner'" class="conta__sempre">
+            <input type="checkbox" :checked="perfil.sempre_online" :disabled="salvando"
+                   @change="alternarSempreOnline" />
+            <span>
+              <strong>Sempre online</strong>
+              <small class="apagado">
+                Só para o owner. Dentro da sua jornada, a regra de tempo não muda o
+                seu estado.
+                <template v-if="!perfil.tem_jornada">
+                  Você ainda não tem jornada: monte a sua em Atendentes.
+                </template>
+              </small>
+            </span>
+          </label>
         </div>
       </section>
 
@@ -252,7 +334,10 @@ onMounted(carregar)
             {{ perfil.enviar_com_enter
               ? 'Shift+Enter quebra a linha.'
               : 'Enter quebra a linha; o envio é pelo botão ou Ctrl+Enter.' }}
-            É a mesma preferência que aparece em Atalhos.
+            <!-- 🚨 Dizia "É a mesma preferência que aparece em Atalhos" -- e
+                 desde 24/09 Atalhos é só do owner: para quem atende, a frase
+                 apontava para uma tela que ele não abre. -->
+            <template v-if="perfil.perfil === 'owner'">É a mesma preferência que aparece em Atalhos.</template>
           </p>
         </div>
       </section>
@@ -261,10 +346,19 @@ onMounted(carregar)
       <section class="cartao tela__bloco">
         <div class="cartao__corpo pilha">
           <h2 class="cartao__titulo">Seus dados</h2>
+          <form class="conta__nome" @submit.prevent="salvarNome">
+            <label class="campo">
+              <span class="campo__rotulo">Nome de exibição</span>
+              <input v-model="nomeNovo" class="campo__entrada" maxlength="200" autocomplete="name" />
+              <span class="campo__ajuda">É o que o cliente e a equipe veem.</span>
+            </label>
+            <button class="botao botao--primario" type="submit" :disabled="!nomeMudou || salvando">
+              Salvar nome
+            </button>
+          </form>
           <dl class="conta__dados">
-            <div><dt>Nome</dt><dd>{{ perfil.nome }}</dd></div>
-            <div><dt>Login</dt><dd>{{ perfil.login }}</dd></div>
-            <div><dt>E-mail</dt><dd>{{ perfil.email || '—' }}</dd></div>
+            <div v-if="veLogin"><dt>Login</dt><dd>{{ perfil.login }}</dd></div>
+            <div v-if="veEmail"><dt>E-mail</dt><dd>{{ perfil.email || '—' }}</dd></div>
             <div><dt>Perfil</dt><dd>{{ perfil.perfil }}</dd></div>
             <div>
               <dt>Teto de conversas</dt>
@@ -272,8 +366,8 @@ onMounted(carregar)
             </div>
           </dl>
           <p class="apagado pequeno">
-            Estes campos são da sua ficha de atendente. Quem os altera é o
-            responsável pelo painel, em Cadastros › Atendentes.
+            O nome é seu para mudar. Os outros campos são da sua ficha de
+            atendente, e quem os altera é o owner ou um admin, em Atendentes.
           </p>
         </div>
       </section>
@@ -282,7 +376,12 @@ onMounted(carregar)
 </template>
 
 <style scoped>
+.conta__nome { display: flex; flex-direction: column; align-items: flex-start; gap: var(--e-2); }
+.conta__nome .campo { width: 100%; max-width: 420px; margin-bottom: 0; }
 .conta__estados { display: grid; gap: var(--e-2); }
+.conta__sempre { display: flex; align-items: flex-start; gap: var(--e-3); padding: var(--e-3); border: 1px dashed var(--borda-forte); border-radius: var(--r-md); cursor: pointer; }
+.conta__sempre input { width: 18px; height: 18px; margin-top: 2px; accent-color: var(--acento); }
+.conta__sempre span { display: flex; flex-direction: column; gap: 2px; }
 
 /* Alvo grande de propósito: 44px é o piso do padrão dos quatro painéis, e
    trocar de estado é coisa que se faz de celular, a caminho do almoço. */

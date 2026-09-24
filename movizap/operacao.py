@@ -17,6 +17,7 @@ AVISAR, não para impedir.
 import logging
 from datetime import datetime, timezone
 from datetime import time as _hora
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import psycopg
 
@@ -25,7 +26,10 @@ from . import telas as registro_telas
 
 log = logging.getLogger("movizap.operacao")
 
-ESTADOS = ("disponivel", "ausente", "nao_perturbe")
+# 🚨 `offline` ENTROU EM 24/09. A Minha conta (17/09) oferece os quatro, e o
+# CHECK da 044 aceita os quatro -- mas esta lista tinha três: quem se marcasse
+# offline não podia mais ser editado na CAD_2.1 ("Estado inválido" ao salvar).
+ESTADOS = ("disponivel", "ausente", "nao_perturbe", "offline")
 PERFIS = tuple(registro_telas.PERFIS.keys())
 
 # 0 = domingo, igual ao `extract(dow)` do Postgres. Fixado aqui porque a tela
@@ -225,7 +229,14 @@ def listar_atendentes(incluir_inativos: bool = False) -> list[dict]:
     linhas = banco.varios(
         """SELECT id, login, nome, email, ativo, owner, perfil, estado, fuso,
                   max_conversas, origem, criado_em,
-                  (senha_hash IS NOT NULL) AS tem_senha
+                  (senha_hash IS NOT NULL) AS tem_senha,
+                  -- A tela desenha a foto (Minha conta, 17/09) no avatar;
+                  -- sem isto ela pediria a foto de quem não tem.
+                  (foto IS NOT NULL) AS tem_foto,
+                  -- 🔵 24/09: quem pode receber (transferência, afastamento) e
+                  -- se o estado veio da regra de tempo.
+                  transferivel, estado_automatico, sempre_online,
+                  afastamento_motivo, afastado_ate
              FROM atendente
             WHERE (%s OR ativo)
             ORDER BY nome""",
@@ -268,7 +279,14 @@ def atendente(atendente_id: int) -> dict | None:
     linha = banco.um(
         """SELECT id, login, nome, email, ativo, owner, perfil, estado, fuso,
                   max_conversas, origem, criado_em,
-                  (senha_hash IS NOT NULL) AS tem_senha
+                  (senha_hash IS NOT NULL) AS tem_senha,
+                  -- A tela desenha a foto (Minha conta, 17/09) no avatar;
+                  -- sem isto ela pediria a foto de quem não tem.
+                  (foto IS NOT NULL) AS tem_foto,
+                  -- 🔵 24/09: quem pode receber (transferência, afastamento) e
+                  -- se o estado veio da regra de tempo.
+                  transferivel, estado_automatico, sempre_online,
+                  afastamento_motivo, afastado_ate
              FROM atendente WHERE id = %s""",
         (atendente_id,),
     )
@@ -326,6 +344,10 @@ def criar_atendente(nome: str, login: str, email: str | None = None,
             (login, nome, email, perfil, estado, max_conversas, fuso, origem),
         )
     except psycopg.errors.UniqueViolation as e:
+        # 🚨 E-MAIL É ÚNICO DESDE 24/09 (053): a entrada pelo Google casa pelo
+        # e-mail, e dois cadastros com o mesmo deixavam a conta ambígua.
+        if "email" in (getattr(e.diag, "constraint_name", "") or ""):
+            raise DadoInvalido(f"Já existe um atendente com o e-mail {email!r}.") from e
         raise DadoInvalido(f"Já existe um atendente com o login {login!r}.") from e
     log.info("atendente criado id=%s login=%s perfil=%s", linha["id"], login, perfil)
     return atendente(linha["id"])
@@ -390,6 +412,10 @@ def atualizar_atendente(atendente_id: int, nome: str, login: str,
              atendente_id),
         )
     except psycopg.errors.UniqueViolation as e:
+        # 🚨 E-MAIL É ÚNICO DESDE 24/09 (053): a entrada pelo Google casa pelo
+        # e-mail, e dois cadastros com o mesmo deixavam a conta ambígua.
+        if "email" in (getattr(e.diag, "constraint_name", "") or ""):
+            raise DadoInvalido(f"Já existe um atendente com o e-mail {email!r}.") from e
         raise DadoInvalido(f"Já existe um atendente com o login {login!r}.") from e
     return atendente(atendente_id)
 
@@ -486,6 +512,41 @@ def definir_times(atendente_id: int, ids: list[int]) -> dict:
     return atendente(atendente_id)
 
 
+def definir_membros(time_id: int, ids: list[int]) -> dict:
+    """Troca quem está no time. O mesmo vínculo de `definir_times`, visto
+    pelo outro lado.
+
+    🔵 Decisão dele em 24/09: *"vamos deixar a tela de times vincular os
+    atendentes e no cadastro do atendentes pode ter os times dos quais são
+    vinculados, mas só visualizar"*. Daqui em diante é a CAD_2.2 que grava.
+
+    ⚠️ SÓ TROCA OS ATIVOS. A tela lista quem está ativo; apagar o vínculo de
+    um inativo porque ele não apareceu na lista seria perder dado por não
+    mostrá-lo. (Desligar já tira a pessoa dos times -- isto é a segunda ponta.)
+    """
+    if not banco.um("SELECT id FROM time WHERE id = %s", (time_id,)):
+        raise DadoInvalido("Time não encontrado.")
+    ids = sorted(set(int(i) for i in ids or []))
+    if ids:
+        achados = banco.varios(
+            "SELECT id FROM atendente WHERE id = ANY(%s) AND ativo", (ids,))
+        if len(achados) != len(ids):
+            raise DadoInvalido("Algum atendente enviado não existe ou está desligado.")
+    # Uma transação só, como em `definir_times`: meio caminho deixaria o time
+    # vazio, e time vazio aceita transferência que não chega a ninguém.
+    with banco.cursor() as cur:
+        cur.execute(
+            """DELETE FROM atendente_time at
+                USING atendente a
+                WHERE a.id = at.atendente_id AND a.ativo AND at.time_id = %s""",
+            (time_id,))
+        for atendente_id in ids:
+            cur.execute(
+                "INSERT INTO atendente_time (atendente_id, time_id) VALUES (%s, %s)",
+                (atendente_id, time_id))
+    return time(time_id)
+
+
 def _hhmm(valor: str, campo: str) -> _hora:
     try:
         horas, minutos = str(valor).strip().split(":")[:2]
@@ -579,6 +640,18 @@ def em_jornada(atendente_id: int, quando) -> bool:
     "ninguém disse quando", e supor 24h é o jeito de criar a transferência
     fantasma que a regra existe para evitar.
     """
+    # 🚨 O FUSO NÃO ERA APLICADO ATÉ 24/09. Quem chama passa `now(utc)`, e a
+    # jornada é gravada na hora LOCAL da pessoa: comparar direto deixava o
+    # "fora do horário" 3 h adiantado (08:00-12:00 virava fora às 09:00 de
+    # Brasília). O comentário da chamada dizia que respeitava o fuso; não
+    # respeitava. Ninguém tinha jornada ainda, então nada foi afetado.
+    pessoa = banco.um("SELECT fuso FROM atendente WHERE id = %s", (atendente_id,))
+    try:
+        fuso = ZoneInfo((pessoa or {}).get("fuso") or "America/Sao_Paulo")
+    except (ZoneInfoNotFoundError, ValueError):
+        fuso = ZoneInfo("America/Sao_Paulo")
+    if quando.tzinfo is not None:
+        quando = quando.astimezone(fuso)
     dia = (quando.weekday() + 1) % 7  # weekday(): 0=segunda; aqui 0=domingo
     linha = banco.um(
         """SELECT 1 AS dentro FROM atendente_jornada

@@ -107,7 +107,10 @@ TELAS = [
         "rota": "/cadastro/atendentes",
         "icone": "bi-people",
         "descricao": "Contas do painel e o que cada uma enxerga.",
-        "permissao": "owner",
+        # 🔵 `equipe` e não `owner` desde 24/09: o `admin` administra a equipe
+        # (ver PERFIS). O que protege o owner DENTRO da tela está em `main.py`,
+        # `_so_owner_mexe_no_owner` -- a permissão da tela não basta.
+        "permissao": "equipe",
         "fase": 1,
     },
     {
@@ -115,8 +118,8 @@ TELAS = [
         "titulo": "Times",
         "rota": "/cadastro/times",
         "icone": "bi-diagram-2",
-        "descricao": "Times que recebem transferência.",
-        "permissao": "owner",
+        "descricao": "Times que recebem transferência, e quem está em cada um.",
+        "permissao": "equipe",
         "fase": 1,
     },
     # ---- CFG: configuração ----
@@ -149,7 +152,7 @@ TELAS = [
         # 🚨 `atendimento` E NÃO `owner` DESDE 22/09, e a casca não concede nada:
         # cada aba continua com a permissão dela, e o `Configuracoes.vue` só
         # desenha as que `sessao.telas` traz. Owner vê as dez; atendente vê
-        # duas -- Minha conta e Atalhos.
+        # uma -- Minha conta (Atalhos passou a `owner` em 24/09).
         #
         # ⚠️ ERA UMA PORTA TRANCADA. `CFG_6.1` e `CFG_10.1` nasceram
         # `atendimento` ("cada um mexe em SI MESMO"), mas têm `aba_de` -- e o
@@ -238,13 +241,23 @@ TELAS = [
         # configurações tela de atalhos e interruptor desligado para eles e
         # permita edição por lá também"*.
         #
-        # ⚠️ `atendimento` e não `owner`: cada pessoa edita o PRÓPRIO teclado.
+        # 🔵 `owner` DESDE 24/09, decisão dele: *"pode exibir a atalhos somente
+        # para o owner tbm"*. Nasceu `atendimento` ("cada pessoa edita o
+        # PRÓPRIO teclado").
+        #
+        # 🚨 O "ENVIAR COM ENTER" NÃO SAIU JUNTO. Ele morava nesta mesma
+        # permissão, e a Caixa de entrada, o Chat interno e o E-mail o leem de
+        # `/api/eu/atalhos`: fechar só a tela devolveria 403 aos atendentes, as
+        # três telas cairiam no desligado em silêncio e a decisão de 22/09
+        # (Enter ligado para todos) morreria sem ninguém ver. Ler as próprias
+        # preferências e gravar o Enter passaram a `get_usuario`, como foto e
+        # estado; ligar atalhos e trocar teclas continuam presos a esta tela.
         "codigo": "CFG_6.1",
         "titulo": "Atalhos de teclado",
         "rota": "/config/atalhos",
         "icone": "bi-keyboard",
         "descricao": "As teclas de cada tela. Nascem desligadas.",
-        "permissao": "atendimento",
+        "permissao": "owner",
         "fase": 1,
         "aba_de": "CFG_0.1",
     },
@@ -282,8 +295,8 @@ TELAS = [
         # o via. A 044 acrescentou o quarto (`offline`) e esta tela é o
         # produto que faltava em cima da coluna.
         #
-        # ⚠️ `atendimento` e não `owner`: cada um mexe em SI MESMO. É a mesma
-        # razão da CFG_6.1, e o contrário do que vale para as telas de
+        # ⚠️ `atendimento` e não `owner`: cada um mexe em SI MESMO. Era a mesma
+        # razão da CFG_6.1 até 24/09, e é o contrário do que vale para as telas de
         # cadastro, onde se edita a ficha dos outros.
         "codigo": "CFG_10.1",
         "titulo": "Minha conta",
@@ -361,8 +374,16 @@ FASE_ATUAL = 1
 # ⚠️ Perfil desconhecido devolve conjunto VAZIO, que é menu vazio. Se sobrasse
 # alguém com `perfil = 'admin'`, ele perderia tudo em silêncio -- por isso a
 # migração recusa rodar se existir linha assim, em vez de converter no escuro.
+#
+# 🔵 `admin` VOLTOU EM 24/09, com alcance novo e decidido por ele: *"o perfil
+# admin deve possuir exibição de telas de atendimento + Times + Atendentes +
+# Configurações > Minha conta, apenas"*. Não é mais o admin de 12/08: agora
+# destrava uma permissão que existe (`equipe`, Times e Atendentes) e nada de
+# `cadastro`. O owner continua único (migração 051). Minha conta já vem com
+# `atendimento`, e as outras abas do /config são `owner`.
 PERFIS = {
     "owner": None,  # None = tudo, inclusive o que é só do owner
+    "admin": {"atendimento", "equipe"},
     "atendimento": {"atendimento"},
     "cadastro": {"cadastro"},
 }

@@ -17,6 +17,7 @@ import { useRouter } from 'vue-router'
 
 import { api, ErroDeApi } from '../api/cliente.js'
 import AjudaDaTela from '../componentes/AjudaDaTela.vue'
+import AvisoDistribuicao from '../componentes/AvisoDistribuicao.vue'
 
 const router = useRouter()
 const grupos = ref([])
@@ -90,6 +91,8 @@ function quem(c) {
         {{ totalEsperando }} esperando
       </span>
     </header>
+
+    <AvisoDistribuicao />
 
     <p v-if="semTriagem && semTriagem.esperando" class="aviso aviso--atencao" role="status">
       <i class="bi bi-signpost-split aviso__icone" aria-hidden="true"></i>

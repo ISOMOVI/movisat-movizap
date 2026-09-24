@@ -246,10 +246,52 @@ class TestPortaDoConfig:
         codigos = {t["codigo"] for t in self._do_perfil("atendimento")}
         assert "CFG_0.1" in codigos
 
-    def test_atendente_ve_exatamente_as_duas_abas_pessoais(self):
+    def test_atendente_ve_so_a_minha_conta(self):
+        """🔵 24/09, decisão dele: Atalhos (CFG_6.1) passou a `owner`."""
         abas = {t["codigo"] for t in self._do_perfil("atendimento")
                 if t["aba_de"] == "CFG_0.1"}
-        assert abas == {"CFG_6.1", "CFG_10.1"}
+        assert abas == {"CFG_10.1"}
+
+    def test_enter_nao_depende_da_tela_de_atalhos(self):
+        """🚨 A Caixa de entrada, o Chat interno e o E-mail leem o
+        `enviar_com_enter` de `/api/eu/atalhos`, e a Minha conta grava em
+        `/api/eu/enviar-com-enter`. Com a CFG_6.1 em `owner`, qualquer uma das
+        duas presa a ela devolveria 403 ao atendente -- e as telas cairiam no
+        Enter desligado sem erro nenhum. Gravar atalhos continua preso.
+        """
+        from fastapi.routing import APIRoute
+        from movizap import auth
+        from movizap.main import app
+
+        def presa_a_tela(metodo, caminho):
+            for r in app.routes:
+                if (isinstance(r, APIRoute) and r.path == caminho
+                        and metodo in r.methods):
+                    deps = [d.call for d in r.dependant.dependencies]
+                    return auth.get_usuario not in deps
+            raise AssertionError(f"rota {metodo} {caminho} não existe")
+
+        assert not presa_a_tela("GET", "/api/eu/atalhos")
+        assert not presa_a_tela("PUT", "/api/eu/enviar-com-enter")
+        assert presa_a_tela("PUT", "/api/eu/atalhos/ligados")
+        assert presa_a_tela("PUT", "/api/eu/atalhos/teclas")
+
+    def test_admin_ve_exatamente_o_que_ele_decidiu(self):
+        """🔵 24/09: *"o perfil admin deve possuir exibição de telas de
+        atendimento + Times + Atendentes + Configurações > Minha conta,
+        apenas"*. Conjunto FECHADO: tela nova de atendimento entra sozinha
+        (é a permissão), e qualquer outra que vazar reprova aqui."""
+        vistas = {t["codigo"] for t in self._do_perfil("admin")}
+        de_atendimento = {t["codigo"] for t in telas.ativas()
+                          if t["permissao"] == "atendimento"
+                          and t.get("aba_de") != "CFG_0.1"}
+        esperado = de_atendimento | {"CAD_2.1", "CAD_2.2", "CFG_10.1"}
+        assert vistas == esperado
+        assert not vistas & {"CAD_1.1", "CAD_1.2", "ATD_3.1", "CFG_6.1"}
+
+    def test_atendente_nao_ve_times_nem_atendentes(self):
+        codigos = {t["codigo"] for t in self._do_perfil("atendimento")}
+        assert not codigos & {"CAD_2.1", "CAD_2.2"}
 
     @pytest.mark.parametrize("perfil", sorted(telas.PERFIS))
     def test_nenhuma_aba_visivel_tem_a_mae_invisivel(self, perfil):

@@ -1378,6 +1378,12 @@ function tamanhoDoArquivo(f) {
     : `${(f.size / 1024 / 1024).toFixed(1)} MB`
 }
 
+const destinoOffline = computed(() => {
+  if (!atendenteEscolhido.value) return false
+  const escolhido = transferiveis.value.find((a) => a.id === Number(atendenteEscolhido.value))
+  return escolhido?.estado === 'offline'
+})
+
 async function transferir() {
   try {
     const paraPessoa = Number(atendenteEscolhido.value) || null
@@ -1997,12 +2003,18 @@ function carregarMidiasDaConversa(c) {
               do WhatsApp, no cadastro, no telefone (pedaço serve:
               <code>6168</code>) e no texto das mensagens, inclusive das notas
               internas.
-              <br /><br />
-              <strong>Atalhos:</strong>
-              <code>j</code> e <code>k</code> passam de conversa ·
-              <code>/</code> vai para a busca ·
-              <code>a</code> assume ·
-              <code>c</code> abre o concluir.
+              <!-- 🚨 24/09 (auditoria): ensinava j/k/a/c SEMPRE. Os atalhos
+                   nascem desligados (28/08) e desde 24/09 só o owner os liga:
+                   para quem atende, a ajuda anunciava teclas que não faziam
+                   nada. E a tecla é a DA PESSOA -- ela pode ter trocado. -->
+              <template v-if="atalhosLigados">
+                <br /><br />
+                <strong>Atalhos:</strong>
+                <code>{{ tecla('proxima') }}</code> e <code>{{ tecla('anterior') }}</code> passam de conversa ·
+                <code>{{ tecla('buscar') }}</code> vai para a busca ·
+                <code>{{ tecla('assumir') }}</code> assume ·
+                <code>{{ tecla('concluir') }}</code> abre o concluir.
+              </template>
             </AjudaDaTela>
             <div v-if="resumo" class="lista__placar">
               <span>{{ resumo.conversas }} abertas</span>
@@ -3641,6 +3653,14 @@ function carregarMidiasDaConversa(c) {
           <span class="campo__ajuda">
             Entrega direto: quem receber já vira dono da conversa.
           </span>
+          <!-- 🔵 24/09, a frase é dele: *"Não é possivel receber conversa se
+               estiver offline, ao transferir, no painel, aparece informação
+               para o atendente"*. A escolha continua possível (é assim que a
+               pessoa LÊ o aviso); o botão é que trava -- e a API também. -->
+          <p v-if="destinoOffline" class="aviso aviso--erro pequeno" role="alert">
+            <i class="bi bi-person-slash aviso__icone" aria-hidden="true"></i>
+            <span>O atendente escolhido está offline e não poderá continuar o atendimento.</span>
+          </p>
         </label>
         <label class="campo">
           <span class="campo__rotulo">…ou um time</span>
@@ -3668,7 +3688,7 @@ function carregarMidiasDaConversa(c) {
             Cancelar
           </button>
           <button class="botao botao--primario" type="button"
-                  :disabled="!timeEscolhido && !atendenteEscolhido"
+                  :disabled="(!timeEscolhido && !atendenteEscolhido) || destinoOffline"
                   :title="(timeEscolhido || atendenteEscolhido)
                     ? '' : 'Escolha uma pessoa ou um time de destino'"
                   @click="transferir">

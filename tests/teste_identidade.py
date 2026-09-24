@@ -120,19 +120,24 @@ class TestOwnerDerivadoDoPerfil:
         assert divergentes == []
 
 
-class TestAdminSaiuDoVocabulario:
-    def test_nenhum_perfil_admin(self):
-        assert "admin" not in telas.PERFIS
+class TestAdminVoltouComOutroAlcance:
+    """🔵 24/09: o `admin` saiu em 12/08 (migração 024) e voltou com alcance
+    decidido por ele -- atendimento + Times + Atendentes + Minha conta. Ele é
+    PERFIL, não permissão: nenhuma tela pede `admin`."""
+
+    def test_admin_e_perfil(self):
+        assert telas.permissoes_do_perfil("admin") == {"atendimento", "equipe"}
 
     def test_nenhuma_tela_usa_permissao_admin(self):
         assert [t["codigo"] for t in telas.TELAS if t["permissao"] == "admin"] == []
 
-    def test_o_banco_recusa_perfil_admin(self):
-        import psycopg
-        with pytest.raises(psycopg.errors.CheckViolation):
-            banco.executar(
-                """INSERT INTO atendente (login, nome, perfil)
-                   VALUES (%s, 'Teste Admin', 'admin')""", (LOGIN + "admin",))
+    def test_o_banco_aceita_perfil_admin_e_ele_nao_e_owner(self, zerado):
+        banco.executar(
+            """INSERT INTO atendente (login, nome, perfil)
+               VALUES (%s, 'Teste Admin', 'admin')""", (LOGIN + "admin",))
+        linha = banco.um("SELECT owner FROM atendente WHERE login = %s",
+                         (LOGIN + "admin",))
+        assert linha["owner"] is False
 
 
 class TestVinculoDeAtendimentoExigeEmail:

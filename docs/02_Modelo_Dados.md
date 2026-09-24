@@ -1520,3 +1520,32 @@ Reusam `editada_em`, `conteudo_original` (o `COALESCE` guarda a primeira
 versão) e `apagada_em` — as mesmas colunas da edição e exclusão feitas pelo
 **cliente**. 🚨 **O que nós apagamos não volta pelo webhook** (provado em
 17/09): a rota marca `apagada_em` ela mesma.
+
+## 24/09 — perfil admin, status por tempo, afastamento, fim de expediente
+
+### `atendente.perfil` volta a aceitar `admin` (051)
+
+🔵 Decisão dele: o admin enxerga atendimento + Times + Atendentes + Minha
+conta. Só o `CHECK` mudou; o alcance mora em `telas.PERFIS` (permissão nova
+`equipe`). O owner continua único.
+
+### Presença do atendente (052)
+
+| Coluna | Para quê |
+|---|---|
+| `atendente.ultima_acao_em` | última AÇÃO DE ATENDIMENTO (enviar, nota, assumir, entrar, transferir, concluir...). Ler não conta: a tela relê a conversa a cada 8 s. NULL = sem ponto de partida, e a regra não derruba quem está NULL |
+| `atendente.estado_automatico` | `true` = o estado foi posto pela regra de tempo, e a próxima ação o desfaz (volta a disponível). Estado escolhido à mão nunca volta sozinho |
+| `atendente.sempre_online` | exclusivo do owner (`ck_sempre_online_so_owner`): dentro da jornada dele, a regra não o toca |
+| `atendente.afastamento_motivo`, `atendente.afastado_ate` | férias, licença... Com motivo preenchido, a pessoa está offline e não recebe. `afastado_ate` é informativo: a volta é um clique |
+| `conversa.fora_expediente_em` | trava de "uma vez a cada 12 h" da mensagem de fim de expediente, no mesmo desenho de `boas_vindas_em` |
+
+As regras ficam em `config` (sem migração): `presenca_regra_ligada`,
+`presenca_minutos_ausente` (15), `presenca_minutos_offline` (60),
+`fora_expediente_ligada`, `fora_expediente_texto`. Nascem desligadas.
+
+### `ux_atendente_email` — e-mail de atendente é único (053)
+
+Achado da auditoria de 24/09: a entrada pelo Google casa por `google_sub` ou
+e-mail, e o e-mail não era único. Com o admin criando contas, dois cadastros
+com o mesmo e-mail deixavam a entrada ambígua e podiam derrubar a do dono.
+Índice único em `lower(email)`, ignorando nulos; nenhum repetido existia.

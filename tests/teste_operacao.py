@@ -167,6 +167,102 @@ def test_times_do_atendente_sao_substituidos_inteiros(um_atendente, um_time):
     assert vazio["times"] == []
 
 
+# ------------------------------------------- membros pela tela de Times (24/09)
+
+def test_membros_do_time_sao_substituidos_inteiros(um_atendente, um_time):
+    """🔵 24/09: a CAD_2.2 grava quem está no time."""
+    cheio = operacao.definir_membros(um_time["id"], [um_atendente["id"]])
+    assert [m["id"] for m in cheio["membros"]] == [um_atendente["id"]]
+    vazio = operacao.definir_membros(um_time["id"], [])
+    assert vazio["membros"] == []
+
+
+def test_membros_nao_apaga_o_vinculo_de_quem_esta_inativo(um_atendente, um_time):
+    """⚠️ A tela só lista ativos. Salvar o time não pode derrubar o vínculo
+    de um inativo só porque ele não apareceu na lista."""
+    operacao.definir_times(um_atendente["id"], [um_time["id"]])
+    banco.executar("UPDATE atendente SET ativo = false WHERE id = %s",
+                   (um_atendente["id"],))
+    operacao.definir_membros(um_time["id"], [])
+    assert banco.um(
+        "SELECT 1 AS ok FROM atendente_time WHERE atendente_id = %s AND time_id = %s",
+        (um_atendente["id"], um_time["id"]))
+
+
+def test_estados_do_cadastro_e_da_minha_conta_sao_os_mesmos():
+    """🚨 24/09: a Minha conta oferecia `offline` e o cadastro não o aceitava --
+    quem se marcasse offline não podia mais ser editado na CAD_2.1."""
+    from movizap.main import ESTADOS_ATENDENTE
+    assert set(operacao.ESTADOS) == set(ESTADOS_ATENDENTE)
+
+
+def test_membros_recusa_atendente_inexistente(um_time):
+    with pytest.raises(operacao.DadoInvalido):
+        operacao.definir_membros(um_time["id"], [-1])
+
+
+# ------------------------------------------------ travas do admin (24/09)
+
+class TestTravasDoAdmin:
+    """🚨 O admin entra em Atendentes, e a permissão da tela não basta: a
+    conta do owner passa de mão trocando o e-mail dela, então editar a linha
+    do owner é virar owner."""
+
+    ADMIN = {"login": "zz_admin", "owner": False}
+    OWNER = {"login": "zz_owner", "owner": True}
+
+    @staticmethod
+    def _id_do_owner():
+        return banco.um("SELECT id FROM atendente WHERE owner LIMIT 1")["id"]
+
+    def test_admin_nao_mexe_no_owner(self):
+        from fastapi import HTTPException
+        from movizap.main import _so_owner_mexe_no_owner
+        with pytest.raises(HTTPException) as e:
+            _so_owner_mexe_no_owner(self.ADMIN, self._id_do_owner())
+        assert e.value.status_code == 403
+
+    def test_admin_mexe_em_quem_nao_e_owner(self, um_atendente):
+        from movizap.main import _so_owner_mexe_no_owner
+        _so_owner_mexe_no_owner(self.ADMIN, um_atendente["id"])
+
+    def test_owner_mexe_nele_mesmo(self):
+        from movizap.main import _so_owner_mexe_no_owner
+        _so_owner_mexe_no_owner(self.OWNER, self._id_do_owner())
+
+    def test_admin_nao_cria_admin(self):
+        from fastapi import HTTPException
+        from movizap.main import _so_owner_da_admin
+        with pytest.raises(HTTPException):
+            _so_owner_da_admin(self.ADMIN, "admin")
+
+    def test_admin_nao_promove_nem_rebaixa(self, um_atendente):
+        from fastapi import HTTPException
+        from movizap.main import _so_owner_da_admin
+        with pytest.raises(HTTPException):
+            _so_owner_da_admin(self.ADMIN, "admin", um_atendente["id"])
+        banco.executar("UPDATE atendente SET perfil = 'admin' WHERE id = %s",
+                       (um_atendente["id"],))
+        with pytest.raises(HTTPException):
+            _so_owner_da_admin(self.ADMIN, "atendimento", um_atendente["id"])
+        # Editar um admin sem mexer no perfil continua livre.
+        _so_owner_da_admin(self.ADMIN, "admin", um_atendente["id"])
+
+    def test_owner_da_e_tira_admin(self, um_atendente):
+        from movizap.main import _so_owner_da_admin
+        _so_owner_da_admin(self.OWNER, "admin")
+        _so_owner_da_admin(self.OWNER, "admin", um_atendente["id"])
+
+    def test_rota_antiga_de_times_do_atendente_saiu(self):
+        """Uma porta só para gravar o vínculo: a da CAD_2.2."""
+        from fastapi.routing import APIRoute
+        from movizap.main import app
+        caminhos = {(r.path, m) for r in app.routes if isinstance(r, APIRoute)
+                    for m in r.methods}
+        assert ("/api/atendentes/{atendente_id}/times", "PUT") not in caminhos
+        assert ("/api/times/{time_id}/membros", "PUT") in caminhos
+
+
 # ----------------------------------------------------------------- jornada
 
 def test_pausa_do_almoco_sao_duas_faixas_no_mesmo_dia(um_atendente):

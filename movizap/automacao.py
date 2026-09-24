@@ -206,3 +206,80 @@ def boas_vindas(conversa_id: int) -> dict:
         conversa_id, regra["boas_vindas_texto"], enviado)
     log.info("boas-vindas enviada na conversa %s (tipo %s)", conversa_id, chave)
     return {"enviou": True, "tipo": chave}
+
+
+# ============================================================================
+# FIM DE EXPEDIENTE — 24/09
+# ============================================================================
+
+# Uma vez por período: quem escreve três vezes à noite recebe o aviso uma vez,
+# e volta a receber no fim do expediente seguinte.
+HORAS_ENTRE_AVISOS = 12
+
+
+def fora_do_expediente(conversa_id: int) -> dict:
+    """Avisa o cliente que o atendente dele encerrou o expediente.
+
+    🔵 Decisão dele em 24/09: *"fim do expediente não transfere, só informará
+    mensagem pronta que pode criar o campo, mas deixar em branco e com flag de
+    'mensagem automatica' 'ativar' ou 'não'"*. Nasce desligada e em branco.
+
+    🟡 QUANDO VALE (desenho meu): a conversa tem DONO, a jornada está ligada
+    (CFG_7.1), o dono tem jornada cadastrada, e agora está FORA dela. Conversa
+    na fila não tem "expediente de alguém" -- não recebe. Sem jornada
+    cadastrada também não: seria "fora do horário" para sempre.
+
+    🚨 MESMAS TRAVAS DA SAUDAÇÃO: nunca em grupo, só canal de atendimento,
+    marca ANTES de enviar e a corrida se resolve no UPDATE.
+    """
+    from datetime import datetime, timezone
+
+    from . import conversas, evolution, operacao, presenca
+
+    cfg = presenca.config()
+    texto = cfg["mensagem_texto"].strip()
+    if not cfg["mensagem_ligada"] or not texto:
+        return {"enviou": False, "motivo": "desligada"}
+
+    linha = banco.um(
+        """SELECT c.id, c.tipo, c.atendente_id, c.telefone_e164,
+                  ca.instancia, ca.tipo AS canal_tipo
+             FROM conversa c JOIN canal ca ON ca.id = c.canal_id
+            WHERE c.id = %s""", (conversa_id,))
+    if not linha:
+        return {"enviou": False, "motivo": "conversa inexistente"}
+    if linha["tipo"] == "grupo":
+        return {"enviou": False, "motivo": "grupo"}
+    if linha["canal_tipo"] != "atendimento" or not linha["instancia"]:
+        return {"enviou": False, "motivo": "canal nao atende"}
+    if not linha["atendente_id"]:
+        return {"enviou": False, "motivo": "sem dono"}
+    if not operacao.jornada_ativa():
+        return {"enviou": False, "motivo": "jornada desligada"}
+    if not banco.um("SELECT 1 AS ok FROM atendente_jornada WHERE atendente_id = %s LIMIT 1",
+                    (linha["atendente_id"],)):
+        return {"enviou": False, "motivo": "dono sem jornada"}
+    if operacao.em_jornada(linha["atendente_id"], datetime.now(timezone.utc)):
+        return {"enviou": False, "motivo": "no expediente"}
+
+    ganhou = banco.executar(
+        """UPDATE conversa SET fora_expediente_em = now()
+            WHERE id = %s
+              AND (fora_expediente_em IS NULL
+                   OR fora_expediente_em < now() - make_interval(hours => %s))""",
+        (conversa_id, HORAS_ENTRE_AVISOS))
+    if not ganhou:
+        return {"enviou": False, "motivo": "ja avisada"}
+
+    try:
+        enviado = evolution.enviar_texto(linha["instancia"], linha["telefone_e164"], texto)
+    except Exception as e:                                    # noqa: BLE001
+        # ⚠️ A marca FICA, pela mesma razão da saudação: repetir é pior do que
+        # faltar.
+        log.warning("fim de expediente falhou na conversa %s (%s)",
+                    conversa_id, e.__class__.__name__)
+        return {"enviou": False, "motivo": "falha no envio"}
+
+    conversas.gravar_saida_automatica(conversa_id, texto, enviado)
+    log.info("fim de expediente avisado na conversa %s", conversa_id)
+    return {"enviou": True}

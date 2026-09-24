@@ -9,6 +9,7 @@ import pathlib
 import secrets
 import time
 from contextlib import asynccontextmanager
+from datetime import date
 
 import psycopg
 import psycopg_pool
@@ -41,6 +42,8 @@ from . import informativos
 from . import midia
 from . import operacao
 from . import preferencia
+from . import distribuicao
+from . import presenca
 from . import prompt as prompt_ia
 from . import ratelimit
 from . import sync as sync_harmonit
@@ -150,11 +153,17 @@ async def ciclo_de_vida(app: FastAPI):
     parar_conversas = asyncio.Event()
     tarefa_conversas = asyncio.create_task(conversas.rodar(parar_conversas))
 
+    # 🔵 24/09: a regra de status por tempo (15 min ausente, 1 h offline) tem
+    # de rodar com ninguém olhando -- é quando ninguém olha que ela importa.
+    parar_presenca = asyncio.Event()
+    tarefa_presenca = asyncio.create_task(presenca.rodar(parar_presenca))
+
     yield
 
     parar_vigia.set()
     parar_conversas.set()
-    for tarefa in (tarefa_vigia, tarefa_conversas):
+    parar_presenca.set()
+    for tarefa in (tarefa_vigia, tarefa_conversas, tarefa_presenca):
         try:
             await asyncio.wait_for(tarefa, timeout=5)
         except asyncio.TimeoutError:
@@ -1699,6 +1708,7 @@ def assumir_conversa(conversa_id: int,
     resultado = conversas.assumir(conversa_id, eu)
     if not resultado["ok"]:
         raise HTTPException(status_code=409, detail=resultado["motivo"])
+    presenca.registrar_acao(eu)
     return resultado
 
 
@@ -1826,6 +1836,12 @@ def _exige_estar_na_conversa(conversa_id: int, usuario: dict) -> int:
             status_code=409,
             detail="Você não está nesta conversa. Use Entrar (ou Assumir, se "
                    "ela estiver sem dono) para poder agir.")
+    # 🔵 24/09: quem passa por aqui ESCREVE na conversa -- é a "ação de
+    # atendimento" da regra de status (resposta dele: *"só ação de
+    # atendimento"*). Abrir/ler NÃO passa por aqui, e é de propósito: a tela
+    # relê a conversa aberta a cada 8 s, e contar leitura manteria online
+    # quem só está com a aba aberta.
+    presenca.registrar_acao(eu)
     return eu
 
 
@@ -1846,6 +1862,7 @@ def entrar_na_conversa(conversa_id: int,
     resultado = conversas.entrar(conversa_id, eu)
     if not resultado["ok"]:
         raise HTTPException(status_code=409, detail=resultado["motivo"])
+    presenca.registrar_acao(eu)
     return resultado
 
 
@@ -2347,8 +2364,44 @@ class SenhaEntrada(BaseModel):
     senha: str = Field(min_length=10, max_length=256)
 
 
-class TimesDoAtendente(BaseModel):
-    times: list[int] = []
+class MembrosDoTime(BaseModel):
+    atendentes: list[int] = []
+
+
+def _so_owner_mexe_no_owner(usuario: dict, atendente_id: int) -> None:
+    """🚨 A CONTA DO OWNER SÓ O OWNER EDITA (24/09).
+
+    Com o `admin` entrando na CAD_2.1, a permissão da tela deixou de bastar.
+    O login é Google, e a conta do owner passa de mão trocando o e-mail DELA
+    (decisão de 12/08): um admin que editasse a linha do owner trocaria o
+    e-mail para o próprio e viraria owner. Vale para dados, senha, jornada e
+    desligar -- toda rota que escreve num atendente pelo id.
+    """
+    if usuario.get("owner"):
+        return
+    alvo = banco.um("SELECT owner FROM atendente WHERE id = %s", (atendente_id,))
+    if alvo and alvo["owner"]:
+        raise HTTPException(
+            status_code=403,
+            detail="A conta do owner só o próprio owner edita.")
+
+
+def _so_owner_da_admin(usuario: dict, perfil_novo: str,
+                       atendente_id: int | None = None) -> None:
+    """🚨 SÓ O OWNER CRIA OU TIRA ADMIN (24/09). Sem isto, um admin criaria
+    outros admins, ou rebaixaria o colega -- administrar a equipe não inclui
+    decidir quem administra."""
+    if usuario.get("owner"):
+        return
+    perfil_atual = None
+    if atendente_id is not None:
+        linha = banco.um("SELECT perfil FROM atendente WHERE id = %s",
+                         (atendente_id,))
+        perfil_atual = linha["perfil"] if linha else None
+    if (perfil_atual == "admin") != (perfil_novo == "admin"):
+        raise HTTPException(
+            status_code=403,
+            detail="Só o owner define quem é admin.")
 
 
 class FaixaJornada(BaseModel):
@@ -2412,6 +2465,16 @@ def atualizar_time(time_id: int, dados: TimeEntrada,
                                    dados.time_transbordo_id, dados.ativo)
 
 
+@app.put("/api/times/{time_id}/membros")
+def definir_membros(time_id: int, dados: MembrosDoTime,
+                    usuario: dict = Depends(auth.requer_tela("CAD_2.2"))):
+    """🔵 24/09: quem está no time se decide AQUI, na tela de Times. A
+    CAD_2.1 passou a só mostrar os times de cada um, e a rota
+    `PUT /api/atendentes/{id}/times` saiu -- duas portas gravando o mesmo
+    vínculo, uma delas escondida, é como uma some sem ninguém ver."""
+    return operacao.definir_membros(time_id, dados.atendentes)
+
+
 @app.get("/api/atendentes")
 def listar_atendentes(incluir_inativos: bool = False,
                       usuario: dict = Depends(auth.requer_tela("CAD_2.1"))):
@@ -2435,6 +2498,7 @@ def criar_atendente(dados: AtendenteEntrada,
     ⚠️ `auth.validar_login` recusa `senha_hash IS NULL` antes do bcrypt, então
     conta criada e esquecida não é porta aberta.
     """
+    _so_owner_da_admin(usuario, dados.perfil)
     return operacao.criar_atendente(
         dados.nome, dados.login, dados.email, dados.perfil, dados.estado,
         dados.max_conversas, dados.fuso)
@@ -2450,6 +2514,7 @@ def desligar_atendente(atendente_id: int,
     dono que nunca mais entra, e elas ficavam invisíveis -- não aparecem em
     "sem dono" porque TÊM dono, e ninguém as vê porque o dono não entra.
     """
+    _so_owner_mexe_no_owner(usuario, atendente_id)
     r = operacao.desligar(atendente_id, quem_edita=usuario.get("login"))
     if not r["ok"]:
         raise HTTPException(status_code=409, detail=r["motivo"])
@@ -2473,16 +2538,19 @@ class AtalhosTeclas(BaseModel):
 
 
 @app.get("/api/eu/atalhos")
-def meus_atalhos(usuario: dict = Depends(auth.requer_tela("CFG_6.1"))):
+def meus_atalhos(usuario: dict = Depends(auth.get_usuario)):
     """Os atalhos DESTA pessoa: se estão ligados, a tecla de cada ação, e o
     catálogo.
 
     🚨 O CATÁLOGO SAI DAQUI, NUNCA ESCRITO NA TELA. Duplicá-lo no navegador
     criaria duas verdades, e a que o operador vê seria a errada.
 
-    ⚠️ A permissão é a da PRÓPRIA TELA (CFG_6.1, `atendimento`): não existe
-    `requer_sessao` neste projeto -- permissão sempre passa por código de tela,
-    e isso é o que faz `teste_router` conseguir comparar registro com roteador.
+    🚨 LEITURA ABERTA A QUEM ESTÁ LOGADO DESDE 24/09, quando a CFG_6.1 passou a
+    `owner`. A Caixa de entrada, o Chat interno e o E-mail leem daqui o
+    `enviar_com_enter` de todo atendente; presa à CFG_6.1, a leitura daria 403
+    e as três telas cairiam no Enter desligado em silêncio. Ler a própria
+    preferência é a pessoa olhando para si, como `/api/eu/perfil`. GRAVAR
+    atalhos continua preso à tela, nas duas rotas abaixo.
     Quem não tem atendente vinculado recebe o catálogo desligado, em vez de
     estourar numa preferência pessoal.
     """
@@ -2518,10 +2586,13 @@ def definir_minhas_teclas(dados: AtalhosTeclas,
 
 @app.put("/api/eu/enviar-com-enter")
 def definir_enviar_com_enter(dados: EnterEnvia,
-                             usuario: dict = Depends(auth.requer_tela("CFG_6.1"))):
-    """🟢 Pedido da Erika (15/09). Mora na CFG_6.1 porque é a mesma pergunta
-    das outras teclas -- criar tela nova para um interruptor faria a pessoa
-    procurar em dois lugares o que o teclado faz por ela.
+                             usuario: dict = Depends(auth.get_usuario)):
+    """🟢 Pedido da Erika (15/09). Nasceu na CFG_6.1 porque é a mesma pergunta
+    das outras teclas; desde 17/09 também está na CFG_10.1 (Minha conta).
+
+    🚨 SEM `requer_tela` DESDE 24/09. A CFG_6.1 passou a `owner`, e o atendente
+    só tem o interruptor na Minha conta -- presa à CFG_6.1, a rota devolveria
+    403 a ele. É a pessoa mexendo nela mesma, como foto e estado.
     """
     atendente_id = _atendente_do_usuario(usuario)
     if not atendente_id:
@@ -2567,11 +2638,38 @@ def meu_perfil(usuario: dict = Depends(auth.get_usuario)):
     linha = banco.um(
         """SELECT a.id, a.nome, a.login, a.email, a.perfil, a.estado,
                   a.foto IS NOT NULL AS tem_foto, a.fuso, a.max_conversas,
-                  a.ativo
+                  a.ativo, a.estado_automatico, a.sempre_online,
+                  a.afastamento_motivo, a.afastado_ate,
+                  EXISTS (SELECT 1 FROM atendente_jornada j
+                           WHERE j.atendente_id = a.id) AS tem_jornada
              FROM atendente a WHERE a.id = %s""", (eu,))
+    linha["regra_de_tempo"] = presenca.config()["regra_ligada"]
     linha["enviar_com_enter"] = preferencia.enviar_com_enter(eu)
     linha["estados_possiveis"] = list(ESTADOS_ATENDENTE)
     return linha
+
+
+class MeuNome(BaseModel):
+    nome: str = Field(min_length=1, max_length=200)
+
+
+@app.put("/api/eu/nome")
+def definir_meu_nome(dados: MeuNome, usuario: dict = Depends(auth.get_usuario)):
+    """🔵 24/09, decisão dele: *"Nome de exibição pode ser alterado por todos
+    os tipos, se quiser"* -- na Minha conta, cada um o próprio.
+
+    ⚠️ SÓ O NOME. Login, e-mail e perfil continuam fora do alcance da pessoa:
+    e-mail é a chave do login Google, perfil é permissão.
+    """
+    eu = _meu_atendente(usuario)
+    nome = " ".join((dados.nome or "").split())
+    if not nome:
+        raise HTTPException(status_code=400, detail="O nome não pode ficar vazio.")
+    banco.executar(
+        "UPDATE atendente SET nome = %s, atualizado_em = now() WHERE id = %s",
+        (nome, eu))
+    # A prova é reler, não o código de retorno.
+    return banco.um("SELECT id, nome FROM atendente WHERE id = %s", (eu,))
 
 
 @app.put("/api/eu/estado")
@@ -2579,8 +2677,11 @@ def definir_meu_estado(dados: MeuEstado,
                        usuario: dict = Depends(auth.get_usuario)):
     """A pessoa diz como está: disponível, em pausa, não perturbe ou fora.
 
-    🚨 ESCOLHIDO, NÃO DEDUZIDO. O painel fica aberto em aba esquecida o dia
-    inteiro; derivar presença de atividade mentiria mais do que informaria.
+    🔵 DESDE 24/09 O SISTEMA TAMBÉM MUDA O ESTADO (regra de tempo, pedido
+    dele) -- a regra de 17/09 *"escolhido, não deduzido"* caiu. O que a pessoa
+    escolhe aqui continua valendo: é estado MANUAL, que a regra não desfaz, e
+    escolher conta como ação (senão "disponível" voltaria a offline no minuto
+    seguinte). Ver `presenca.py`.
 
     ⚠️ A LISTA É CONFERIDA AQUI E NO BANCO. O `CHECK` da 044 é a segunda
     ponta: sem a conferência aqui, o erro chegaria como 500 do Postgres em vez
@@ -2592,11 +2693,30 @@ def definir_meu_estado(dados: MeuEstado,
             status_code=400,
             detail=f"Estado desconhecido. Os que existem: "
                    f"{', '.join(ESTADOS_ATENDENTE)}.")
-    banco.executar(
-        "UPDATE atendente SET estado = %s, atualizado_em = now() WHERE id = %s",
-        (dados.estado, eu))
+    presenca.definir_estado_manual(eu, dados.estado)
     # A prova é reler, não o código de retorno.
     return banco.um("SELECT id, estado FROM atendente WHERE id = %s", (eu,))
+
+
+class SempreOnline(BaseModel):
+    ligado: bool
+
+
+@app.put("/api/eu/sempre-online")
+def definir_meu_sempre_online(dados: SempreOnline,
+                              usuario: dict = Depends(auth.get_usuario)):
+    """🔵 24/09: *"Para o owner, pode ter o status para marcar 'sempre online'
+    - dentro da jornada que o owner tbm terá, mas será exclusivo dele"*.
+
+    ⚠️ A recusa aqui é a mensagem; o CHECK `ck_sempre_online_so_owner` (052) é
+    a outra ponta, para ninguém gravar isso por outro caminho.
+    """
+    if not usuario.get("owner"):
+        raise HTTPException(status_code=403,
+                            detail="\"Sempre online\" é exclusivo do owner.")
+    eu = _meu_atendente(usuario)
+    presenca.definir_sempre_online(eu, dados.ligado)
+    return banco.um("SELECT id, sempre_online FROM atendente WHERE id = %s", (eu,))
 
 
 @app.post("/api/eu/foto")
@@ -2687,9 +2807,91 @@ def definir_jornada_ativa(dados: JornadaAtiva,
     return operacao.definir_jornada_ativa(dados.ligada)
 
 
+class PresencaConfig(BaseModel):
+    regra_ligada: bool
+    minutos_ausente: int
+    minutos_offline: int
+    mensagem_ligada: bool
+    mensagem_texto: str = Field(default="", max_length=presenca.TETO_TEXTO)
+
+
+@app.get("/api/config/presenca")
+def ver_presenca(usuario: dict = Depends(auth.requer_tela("CFG_7.1"))):
+    """🔵 24/09: a regra de status por tempo e a mensagem de fim de
+    expediente. Interruptor do SISTEMA, por isso mora na Geral (CFG_7.1)."""
+    return presenca.config()
+
+
+@app.put("/api/config/presenca")
+def definir_presenca(dados: PresencaConfig,
+                     usuario: dict = Depends(auth.requer_tela("CFG_7.1"))):
+    return presenca.definir_config(
+        dados.regra_ligada, dados.minutos_ausente, dados.minutos_offline,
+        dados.mensagem_ligada, dados.mensagem_texto)
+
+
+class DistribuicaoConfig(BaseModel):
+    ligada: bool
+    primeiro_id: int | None = None
+    reserva_id: int | None = None
+    minutos: int = 10
+
+
+@app.get("/api/config/distribuicao")
+def ver_distribuicao(usuario: dict = Depends(auth.requer_tela("CFG_7.1"))):
+    """🔵 24/09: quem recebe a conversa parada (caixa de seleção, pedido
+    dele), a reserva e o tempo. Interruptor do sistema: mora na Geral."""
+    return distribuicao.config()
+
+
+@app.put("/api/config/distribuicao")
+def definir_distribuicao(dados: DistribuicaoConfig,
+                         usuario: dict = Depends(auth.requer_tela("CFG_7.1"))):
+    return distribuicao.definir_config(dados.ligada, dados.primeiro_id,
+                                       dados.reserva_id, dados.minutos)
+
+
+@app.get("/api/fila/distribuicao")
+def situacao_da_distribuicao(usuario: dict = Depends(auth.requer_tela("ATD_1.1"))):
+    """O aviso da Fila e do Início: para quem está indo, ou que parou."""
+    return distribuicao.situacao()
+
+
+class Afastamento(BaseModel):
+    motivo: str = Field(min_length=1, max_length=60)
+    ate: date | None = None
+    transferir_para: int | None = None
+
+
+@app.post("/api/atendentes/{atendente_id}/afastar")
+def afastar_atendente(atendente_id: int, dados: Afastamento,
+                      usuario: dict = Depends(auth.requer_tela("CAD_2.1"))):
+    """🔵 24/09: férias, licença... *"em caso de conversas em aberto,
+    perguntar para qual usuario transferir elas ... é obrigatório e dai
+    executa"*. O obrigatório vale aqui também: sem destino, 400."""
+    _so_owner_mexe_no_owner(usuario, atendente_id)
+    r = presenca.afastar(atendente_id, dados.motivo, dados.ate, dados.transferir_para)
+    if not r["ok"]:
+        raise HTTPException(
+            status_code=409,
+            detail=f"{r['transferidas']} conversa(s) transferida(s), mas "
+                   f"{len(r['falhas'])} não: {r['falhas'][0]['motivo']} "
+                   "A pessoa NÃO foi afastada.")
+    return r
+
+
+@app.post("/api/atendentes/{atendente_id}/retornar")
+def retornar_atendente(atendente_id: int,
+                       usuario: dict = Depends(auth.requer_tela("CAD_2.1"))):
+    _so_owner_mexe_no_owner(usuario, atendente_id)
+    return presenca.retornar(atendente_id)
+
+
 @app.put("/api/atendentes/{atendente_id}")
 def atualizar_atendente(atendente_id: int, dados: AtendenteEntrada,
                         usuario: dict = Depends(auth.requer_tela("CAD_2.1"))):
+    _so_owner_mexe_no_owner(usuario, atendente_id)
+    _so_owner_da_admin(usuario, dados.perfil, atendente_id)
     return operacao.atualizar_atendente(
         atendente_id, dados.nome, dados.login, dados.email, dados.perfil,
         dados.estado, dados.max_conversas, dados.ativo, dados.fuso,
@@ -2699,19 +2901,15 @@ def atualizar_atendente(atendente_id: int, dados: AtendenteEntrada,
 @app.post("/api/atendentes/{atendente_id}/senha")
 def definir_senha(atendente_id: int, dados: SenhaEntrada,
                   usuario: dict = Depends(auth.requer_tela("CAD_2.1"))):
+    _so_owner_mexe_no_owner(usuario, atendente_id)
     return operacao.definir_senha(atendente_id, dados.senha)
-
-
-@app.put("/api/atendentes/{atendente_id}/times")
-def definir_times(atendente_id: int, dados: TimesDoAtendente,
-                  usuario: dict = Depends(auth.requer_tela("CAD_2.1"))):
-    return operacao.definir_times(atendente_id, dados.times)
 
 
 @app.put("/api/atendentes/{atendente_id}/jornada")
 def definir_jornada(atendente_id: int, dados: JornadaEntrada,
                     usuario: dict = Depends(auth.requer_tela("CAD_2.1"))):
     """🚨 A pausa do almoço é o intervalo ENTRE duas faixas do mesmo dia."""
+    _so_owner_mexe_no_owner(usuario, atendente_id)
     return operacao.definir_jornada(
         atendente_id, [f.model_dump() for f in dados.faixas])
 

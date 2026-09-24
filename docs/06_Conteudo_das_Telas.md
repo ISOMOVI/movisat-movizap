@@ -984,6 +984,46 @@ acionando nada. O aviso na tela fica.
 
 ## CAD_2.1 — atendentes, como controle de RH
 
+🔵 **REPAGINADA EM 24/09, com as regras dele sobre os campos:**
+
+| Campo | Owner | Admin | Atendimento/cadastro (Minha conta) |
+|---|---|---|---|
+| Nome de exibição | edita | edita | edita o próprio (*"pode ser alterado por todos os tipos"*) |
+| E-mail | vê e edita | vê e edita | não vê (*"somente para admin e owner"*) |
+| Login | vê e edita | não vê | não vê (*"oculto a todos menos owner, pois usamos o auth google"*) |
+| Perfil | admin/atendimento/cadastro | atendimento/cadastro | só lê |
+
+- **O Editar abre um modal** (`componentes/ModalEdicao.vue`): clique fora ou
+  Esc, com mudança, pergunta *"Descartar"* / *"Continuar editando"*; no fim,
+  *"Salvar"* / *"Cancelar alterações"*. Sem mudança, fecha direto. Arrastar
+  uma seleção de dentro para fora não conta como clique fora.
+- **Conta nova criada pelo admin nasce com login = e-mail**: o banco exige
+  login e ele não vê o campo. Para ele, o e-mail é obrigatório na criação.
+- **`owner` saiu do seletor de todos**: não se promove ninguém a owner, e a
+  opção só dava erro ao salvar.
+- 🚨 **"SEM SENHA" DEIXOU DE SER AVISO.** A entrada pelo Google casa pelo
+  e-mail, sem senha (`google_auth.py`). A tela dizia *"conta sem senha existe
+  mas não entra no painel"* -- falso para quem tem e-mail (os 11, medido em
+  24/09; 2 deles sem senha). A coluna virou **"Entra por"**: Google, senha ou
+  *não entra*.
+- 🚨 **`offline` NÃO SE SALVAVA AQUI.** A Minha conta oferece quatro estados e
+  o CHECK da 044 aceita quatro, mas `operacao.ESTADOS` tinha três: quem se
+  marcasse *fora do expediente* não podia mais ser editado. Corrigido, e os
+  rótulos agora são os mesmos da Minha conta.
+- ⚠️ **PEDIDO DELE QUE NÃO ENTROU:** *"do Admin permite tem todos menos
+  owner"* -- o admin deveria poder dar admin. A trava `_so_owner_da_admin`
+  (🟡 minha) continua: removê-la foi barrado pelo classificador de permissões
+  da sessão, e **ele decidiu mantê-la** (*"1 mantem, admin não vira owner"*).
+- Resumo no topo (ativos, em aberto, concluídas 7d, sem como entrar), avatar
+  com foto quando existe, times em chips.
+
+🔵 **OS TIMES AQUI SÃO SÓ LEITURA DESDE 24/09** (mesma decisão, ver CAD_2.2):
+chips com os times da pessoa e um link para Times. Desde a mesma data o
+**admin** entra nesta tela, e duas travas 🟡 minhas o seguram: não edita a
+conta do owner (o botão Editar nem aparece na linha dele) e não cria, promove
+nem rebaixa admin — o seletor não oferece `owner` nem `admin` a ele. Para o
+admin, o chip "Jornada" é só leitura: Configurações › Geral é do owner.
+
 ### O teto de conversas simultâneas sai da tela
 
 ```
@@ -1041,6 +1081,19 @@ tela nenhuma.
 ---
 
 ## CAD_2.2 — times
+
+🟡 **REPAGINADA EM 24/09**: a edição abre no mesmo modal da CAD_2.1, com os
+atendentes em cartões marcáveis; o cartão do time ganhou cabeçalho, contador
+da fila em pílula, avatares sobrepostos e sombra ao passar o mouse. O texto
+*"Três dos sete estão assim"* saiu do cabeçalho do arquivo: era do Chatwoot,
+não daqui (corrigido na doc em 25/08, não no código).
+
+🔵 **QUEM ESTÁ NO TIME SE DECIDE AQUI DESDE 24/09.** Decisão dele: *"vamos deixar a tela de times vincular os atendentes e no cadastro do atendentes pode ter os times dos quais são vinculados, mas só visualizar"*. O formulário do time ganhou **"Atendentes neste time"** (caixinhas dos ativos), e grava por
+`PUT /api/times/{id}/membros`. Troca só o vínculo dos **ativos**: um inativo
+que não aparece na lista não perde o vínculo por isso. A rota antiga
+`PUT /api/atendentes/{id}/times` **saiu** — duas portas gravando o mesmo
+vínculo, uma delas sem tela, é como uma some sem ninguém ver.
+Desde a mesma data, a tela é permissão `equipe`: owner e **admin**.
 
 Cartões em vez de tabela: nome, descrição (que é entrada da IA), membros como
 avatares, transbordo como seta. **Cadeia de transbordo desenhada** — hoje é uma
@@ -2093,6 +2146,19 @@ em `rascunho`, e afirma os dois estados do botão.
 Pedido dele: *"crie nas configurações tela de atalhos e interruptor desligado
 para eles e permita edição por lá também"*.
 
+🔵 **SÓ O OWNER VÊ DESDE 24/09**, decisão dele: *"pode exibir a atalhos
+somente para o owner tbm"*. Nasceu `atendimento`. No dia da mudança nenhum
+atendente tinha ligado atalho (a `preferencia_atendente` tinha uma linha só,
+`enviar_com_enter`), então ninguém ficou com tecla ligada sem ter onde desligar.
+
+🚨 **FECHAR SÓ A TELA TERIA DESLIGADO O ENTER DE TODO ATENDENTE, EM SILÊNCIO.**
+A Caixa de entrada, o Chat interno e o E-mail leem `enviar_com_enter` de
+`GET /api/eu/atalhos`, e a Minha conta grava em `PUT /api/eu/enviar-com-enter` —
+as duas presas à `CFG_6.1`. Com ela em `owner`, viria 403, o `catch` das três
+telas cairia no desligado, e a decisão de 22/09 (Enter ligado para todos)
+morreria sem erro na tela. As duas rotas passaram a `get_usuario`, como foto e
+estado; `PUT .../ligados` e `PUT .../teclas` continuam presas à tela.
+
 🚨 **A TELA NASCEU DE UMA PERGUNTA QUE DERRUBOU UM RECURSO MEU.** Ele
 perguntou: *"quem pediu esses atalhos? ou eles já são nativos do WhatsApp?"* —
 e a resposta honesta era **ninguém pediu, e não são**:
@@ -2495,6 +2561,10 @@ em vez de confiar numa amostra ou numa leitura rápida.
 
 ## CFG_10.1 — Minha conta
 
+🔵 **24/09: o nome se edita aqui** (`PUT /api/eu/nome`, sem `requer_tela`,
+como foto e estado), e **e-mail só aparece para owner e admin, login só para o
+owner**. Ver a tabela na CAD_2.1.
+
 🔵 **Pedido dele em 17/09:** *"central de perfil 'minha conta' para foto de
 usuario, dados de perfil, tipo de envio 'entrer ou clique'"*. O status é
 🟢 pedido do Rodrigo, trazido por ele em 15/09.
@@ -2531,7 +2601,9 @@ mentiria mais do que informaria.
 ⚠️ **O TIPO DE ENVIO É ESPELHO, NÃO CÓPIA.** O mesmo interruptor mora na
 CFG_6.1, onde responde *"o que o teclado faz por mim"*; aqui responde *"como
 EU envio"*. Mesma preferência (`enviar_com_enter`), mesma rota — **duas portas
-para o mesmo quarto, nunca dois quartos.**
+para o mesmo quarto, nunca dois quartos.** Desde 24/09 a porta da CFG_6.1 é
+só do owner; para o atendente, **a Minha conta é a única**, e a rota do Enter
+deixou de depender da CFG_6.1 (ver a seção dela).
 
 ⚠️ **NOME, LOGIN, E-MAIL E PERFIL SÃO LEITURA.** Todos entram por Google com
 domínio travado, então nome e e-mail vêm de lá; perfil é **permissão**, e
@@ -2830,3 +2902,91 @@ correta — "Classificar" está pausado por ele desde 31/08.
 lia a coluna `ativa`, que não existe (é `ativo`), e passaria sempre. Pego ao
 medir o banco; o teste passou a criar uma ativa e uma inativa e conferir pelo
 nome.
+
+
+## 24/09 — presença: status por tempo, offline não recebe, afastamento, fim de expediente
+
+🔵 Pedidos dele, com as respostas que ele deu às perguntas:
+
+| # | Pedido | Onde |
+|---|---|---|
+| 1 | *"painel de regra de tempo por status, igual ao MSN = 15min sem interação -Ausente; 1h sem interação Offline"* -- interação = **só ação de atendimento** | Configurações › Geral; `presenca.py` |
+| 2 | *"Não é possivel receber conversa se estiver offline, ao transferir, no painel, aparece informação para o atendente 'O atendente escolhido está offline e não poderá continuar o atendimento'"* | `conversas.transferir` + painel Transferir |
+| 3 | *"Para o owner, pode ter o status para marcar 'sempre online' - dentro da jornada que o owner tbm terá, mas será exclusivo dele"* | Minha conta |
+| 4 | modal obrigatório de transferência *"somente em caso de férias ou algo do tipo"* | Atendentes › Editar › Afastamento |
+| 5 | *"fim do expediente não transfere, só informará mensagem pronta"*, em branco e com *"'ativar' ou 'não'"* | Geral; `automacao.fora_do_expediente` |
+| 6 | jornada: *"copiar para os dias"* e *"mostrar a duração"* | Atendentes › Editar › Jornada |
+
+🟡 **Decisões minhas**, cada uma com o porquê:
+- **Ler não é ação.** A Caixa relê a conversa aberta a cada 8 s; contar leitura
+  manteria online quem só deixou a aba aberta. Contam as rotas que passam por
+  `_exige_estar_na_conversa` (quem ESCREVE) mais assumir e entrar.
+- **O sistema só desfaz o que ele fez** (`estado_automatico`): como o MSN, a
+  próxima ação devolve a "disponível" quem a regra derrubou; o que a pessoa
+  escolheu fica. Escolher estado conta como ação.
+- **A regra nasce desligada**; ligar dá "agora" como ponto de partida a quem
+  nunca agiu. Ligada de cara, os 10 iriam para offline no mesmo minuto.
+- **Mensagem de fim de expediente** só quando a conversa tem dono, a jornada
+  está ligada, o dono tem jornada e está fora dela; uma vez a cada 12 h por
+  conversa; nunca em grupo. Mesmas travas da saudação.
+- **Afastar** exige destino também no backend, transfere uma a uma pelo
+  caminho de sempre (rastro + nota) e só afasta se TODAS passaram. Escolher
+  estado na Minha conta encerra o afastamento.
+- No Transferir, o offline **continua escolhível** (é assim que se lê o aviso);
+  quem trava é o botão, e a API.
+
+🚨 **CAIU A REGRA DE 17/09** (*"offline é escolhido, não deduzido"*), por
+decisão dele. As frases que a afirmavam na Minha conta passaram a depender da
+regra: com ela ligada, a tela diz que o sistema também muda o estado.
+
+🚨 **ACHADO NO CAMINHO — `em_jornada` IGNORAVA O FUSO.** Recebia `now(utc)` e
+comparava com a jornada gravada em hora local: 08:00-12:00 virava "fora" às
+09:00 de Brasília. O comentário de quem chamava dizia que respeitava o fuso.
+Ninguém tinha jornada (medido em 24/09), então nada foi afetado; o teste
+`test_em_jornada_usa_o_fuso_da_pessoa` reprova no código antigo.
+
+
+## 24/09 (tarde) — lote para a Ludmila, auditoria e distribuição automática da fila
+
+### O lote (🔵 *"os que tem mensagem não lida e sem atendimento a mais de 1 dia, pode colocar para ludmilla"*)
+
+Regra lida: conversa direta, sem dono, com a última mensagem sendo do
+cliente e com mais de 1 dia. Medido antes: **43** (8 de 1 a 7 dias, 16 de 7 a
+30, 19 com mais de 30; a mais antiga de 07/08), nenhuma com time. Feito pelo
+caminho de sempre (`conversas.transferir`), registrado em nome do owner e com
+a nota *"Transferida em lote para Ludmila por decisão do owner (24/09)"*.
+**Uma primeiro, conferida relendo o banco; depois as 42.** 43 de 43 certas,
+0 falhas. A Ludmila passou de 13 para 56 conversas abertas.
+
+### A auditoria (pedida por ele) — 8 pontos, 4 achados, todos corrigidos
+
+| # | Ponto | Resultado |
+|---|---|---|
+| 1 | Trava do owner | 6 de 6 rotas OK. 🚨 **Achado:** e-mail não era único e a entrada pelo Google casava por `sub` OU e-mail sem ordem -- um admin criando conta com o e-mail do owner deixava a entrada dele ambígua, podendo derrubá-la. **Migração 053** (e-mail único) + entrada prefere quem já tem o `sub` |
+| 2 | Offline não recebe | 🚨 **Achado:** quando o dono sai, o herdeiro era escolhido sem olhar offline/afastado. Corrigido; o teste reprova no código antigo |
+| 3 | Corrida da regra de tempo | OK |
+| 4 | Afastamento pela metade | Backend OK; a tela passou a reler a lista quando falha |
+| 5 | Fim de expediente | OK (só mensagem do cliente, nunca grupo, nunca duas vezes) |
+| 6 | O que a API dá ao admin | OK; o login vai na resposta (não é segredo; a tela esconde) |
+| 7 | Rota removida | OK, ninguém a chama |
+| 8 | Textos falsos | 🚨 **Achado:** a ajuda da Caixa ensinava j/k/a/c SEMPRE, e os atalhos nascem desligados. Agora só aparece com eles ligados, e mostra a tecla DA PESSOA |
+
+### Distribuição automática da fila (Configurações › Geral)
+
+🔵 Pedido: *"as conversas novas ou que fiquem 10min sem ninguem assumir, vão
+automatiamente para a Ludmilla, coloque em uma caixa de seleção"*. Respostas
+dele: **1a** só entra conversa em que o cliente escrever depois de ligar;
+**2b** nenhuma vai na hora, todas após o tempo; **3** *"se tiver time não vai
+a ela"*; **4a** *"Vão para Erika na mesma regra e depois fila se ambas
+estiverem offline"*, com aviso.
+
+- Caixas de seleção **Quem recebe** e **Se estiver offline, vai para**, e o
+  tempo (10 min). Nasce **desligada**; ligar grava o marco da regra 1a.
+- 🟡 Os minutos contam da **primeira** mensagem do cliente depois da última
+  resposta nossa; grupos ficam de fora; a nota é do **sistema**; motivo
+  `inatividade` (existia no vocabulário e nunca tinha sido usado).
+- 🚨 **A trava da corrida:** `transferir(..., so_se_sem_dono=True)` põe a
+  condição no próprio UPDATE -- quem assumir no mesmo segundo ganha.
+- Fila e Início mostram para onde está indo, que o primeiro está offline, ou
+  que parou (`AvisoDistribuicao.vue`).
+- Roda no laço de 1 min da presença, **depois** da regra de status.
