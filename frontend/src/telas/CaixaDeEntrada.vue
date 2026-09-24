@@ -20,6 +20,7 @@
 import { ref, reactive, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
+import { notificacoes } from '../estado/notificacoes.js'
 import { api, pedirBlob, ErroDeApi, relatarErroDeBotao } from '../api/cliente.js'
 import { codigosPermitidos } from '../estado/sessao.js'
 import { linkificar, marcar, partir } from '../util/destaque.js'
@@ -810,6 +811,12 @@ async function removerParticipante(id) {
 }
 
 let timer = null
+
+function contadorDaAba(valor) {
+  if (valor === 'minhas') return notificacoes.abas.minhas || 0
+  if (valor === 'time') return notificacoes.abas.time || 0
+  return 0
+}
 
 const FILTROS = [
   { valor: 'todas', rotulo: 'Todas' },
@@ -2050,6 +2057,13 @@ function carregarMidiasDaConversa(c) {
                 @click="filtro = f.valor"
               >
                 {{ f.rotulo }}
+                <!-- 🔵 24/09: quantas conversas com não lida, só em Minhas e
+                     Time (*"somente minhas e time, por enquanto"*). O número
+                     vem do Notificador, que já pergunta isso a cada 8 s. -->
+                <span v-if="contadorDaAba(f.valor)" class="abas__contador"
+                      :title="`${contadorDaAba(f.valor)} conversa(s) com mensagem não lida`">
+                  {{ contadorDaAba(f.valor) > 99 ? '99+' : contadorDaAba(f.valor) }}
+                </span>
               </button>
             </div>
 
@@ -4377,6 +4391,21 @@ function carregarMidiasDaConversa(c) {
   font-variant-numeric: tabular-nums;
 }
 .modal__abas { display: flex; gap: var(--e-2); margin-bottom: var(--e-3); }
+
+/* 🔵 24/09: o contador da aba, no mesmo verde da bolinha da conversa.
+   ⚠️ SELO NO CANTO, FORA DO FLUXO: em linha ele alargava a aba e as quatro
+   quebravam em duas linhas ("Sem / dono"), crescendo a barra -- visto na
+   prévia. No canto não ocupa largura nenhuma. */
+.abas__aba { position: relative; }
+.abas__contador {
+  position: absolute; top: -6px; right: -4px;
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 17px; height: 17px; padding: 0 4px;
+  border-radius: var(--r-full); background: #25D366; color: #fff;
+  box-shadow: 0 0 0 2px var(--superficie);
+  font-size: 10px; font-weight: var(--peso-forte); line-height: 1;
+  pointer-events: none;
+}
 
 /* A bolinha de não lidas. Verde do WhatsApp de propósito: é o lugar onde
    quem atende já espera encontrá-la. */

@@ -246,11 +246,12 @@ class TestPortaDoConfig:
         codigos = {t["codigo"] for t in self._do_perfil("atendimento")}
         assert "CFG_0.1" in codigos
 
-    def test_atendente_ve_so_a_minha_conta(self):
-        """🔵 24/09, decisão dele: Atalhos (CFG_6.1) passou a `owner`."""
+    def test_atendente_ve_so_as_abas_pessoais(self):
+        """🔵 24/09: Atalhos (CFG_6.1) passou a `owner`; Notificações
+        (CFG_11.1) nasceu `atendimento` -- cada um ajusta o próprio som."""
         abas = {t["codigo"] for t in self._do_perfil("atendimento")
                 if t["aba_de"] == "CFG_0.1"}
-        assert abas == {"CFG_10.1"}
+        assert abas == {"CFG_10.1", "CFG_11.1"}
 
     def test_enter_nao_depende_da_tela_de_atalhos(self):
         """🚨 A Caixa de entrada, o Chat interno e o E-mail leem o
@@ -285,7 +286,7 @@ class TestPortaDoConfig:
         de_atendimento = {t["codigo"] for t in telas.ativas()
                           if t["permissao"] == "atendimento"
                           and t.get("aba_de") != "CFG_0.1"}
-        esperado = de_atendimento | {"CAD_2.1", "CAD_2.2", "CFG_10.1"}
+        esperado = de_atendimento | {"CAD_2.1", "CAD_2.2", "CFG_10.1", "CFG_11.1"}
         assert vistas == esperado
         assert not vistas & {"CAD_1.1", "CAD_1.2", "ATD_3.1", "CFG_6.1"}
 

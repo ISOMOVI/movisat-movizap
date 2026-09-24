@@ -221,6 +221,12 @@ const rotas = [
     meta: { codigo: 'CFG_10.1', titulo: 'Minha conta' },
   },
   {
+    path: '/config/notificacoes',
+    name: 'CFG_11.1',
+    component: () => import('../telas/Notificacoes.vue'),
+    meta: { codigo: 'CFG_11.1', titulo: 'Notificações' },
+  },
+  {
     path: '/config/telas',
     name: 'CFG_9.1',
     component: Configuracoes,

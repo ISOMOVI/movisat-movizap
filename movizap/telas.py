@@ -308,6 +308,21 @@ TELAS = [
         "aba_de": "CFG_0.1",
     },
     {
+        # 🔵 24/09: *"o sistema de notificações ficara em configuração, cada um
+        # poderá ajustar o seu tom, volume - com minimo de 1 (1 até 5), pisca
+        # aba obrigatoriamente"*. `atendimento` pela razão da Minha conta: cada
+        # um mexe no SEU tom. O liga/desliga por pessoa é do owner e mora na
+        # mesma tela, num bloco que só ele vê -- a trava está na rota.
+        "codigo": "CFG_11.1",
+        "titulo": "Notificações",
+        "rota": "/config/notificacoes",
+        "icone": "bi-bell",
+        "descricao": "O som e o aviso na aba quando chega mensagem numa conversa sua.",
+        "permissao": "atendimento",
+        "fase": 1,
+        "aba_de": "CFG_0.1",
+    },
+    {
         # 🚨 SUBIU PARA FASE 1 EM 07/08. Decisão do usuário: "o informativo é o
         # que vai enviar, sem resposta de cliente". O canal foi pareado no
         # mesmo dia e já entrega (TESTE BOT com DELIVERY_ACK em 2s).

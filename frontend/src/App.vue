@@ -15,6 +15,7 @@ import { useRoute } from 'vue-router'
 
 import MenuLateral from './componentes/MenuLateral.vue'
 import BarraStatus from './componentes/BarraStatus.vue'
+import Notificador from './componentes/Notificador.vue'
 import { autenticado } from './estado/sessao.js'
 
 const rota = useRoute()
@@ -37,6 +38,9 @@ const comCasca = computed(() => autenticado.value && !rota.meta.publica)
       <RouterView />
     </main>
     <BarraStatus />
+    <!-- 🔵 24/09: o som e a aba piscando valem em QUALQUER tela, por isso
+         moram na casca e não na Caixa de entrada. -->
+    <Notificador />
   </div>
 
   <RouterView v-else />

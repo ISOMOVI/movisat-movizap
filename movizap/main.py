@@ -2698,6 +2698,94 @@ def definir_meu_estado(dados: MeuEstado,
     return banco.um("SELECT id, estado FROM atendente WHERE id = %s", (eu,))
 
 
+class MinhaNotificacao(BaseModel):
+    tom: str
+    volume: int
+
+
+@app.get("/api/eu/notificacoes")
+def minhas_notificacoes(usuario: dict = Depends(auth.get_usuario)):
+    """🔵 24/09 -- o que o verificador de notificações (em toda tela) precisa.
+
+    - `abas`: quantas conversas com não lida em **Minhas** e **Time** (*"somente
+      minhas e time, por enquanto"*). Contadas pela MESMA `conversas.listar`
+      da Caixa, com os mesmos filtros -- a bolinha não pode discordar da aba.
+    - `assumidas`: as conversas em que sou o DONO e que têm não lida. Só elas
+      tocam (*"Notificações somente de conversas assumidas"*).
+    - `ativa`, `tom`, `volume`: se desligada pelo owner, a tela não toca nem
+      pisca (*"some tudo"*); o contador continua.
+
+    ⚠️ Sem `requer_tela`: é a pessoa olhando para si, como `/api/eu/perfil`.
+    Medido em 24/09: as duas listas custam 24-183 ms por pessoa.
+    """
+    eu = _atendente_do_usuario(usuario)
+    if not eu:
+        return {"ativa": False, "tom": "classico", "volume": 3,
+                "abas": {"minhas": 0, "time": 0}, "assumidas": []}
+    minhas = conversas.listar(atendente_id=eu, visualizador_id=eu, limite=500)
+    do_time = conversas.listar(do_meu_time=eu, visualizador_id=eu, limite=500)
+    linha = banco.um("SELECT notificacao_ativa FROM atendente WHERE id = %s", (eu,))
+    return {
+        "ativa": bool(linha and linha["notificacao_ativa"]),
+        **preferencia.notificacao(eu),
+        "abas": {
+            "minhas": sum(1 for c in minhas if (c.get("nao_lidas") or 0) > 0),
+            "time": sum(1 for c in do_time if (c.get("nao_lidas") or 0) > 0),
+        },
+        # Todas as que são MINHAS (lidas ou não): é o que separa "uma conversa
+        # minha voltou a ter mensagem" de "chegou uma conversa NOVA para mim"
+        # -- a nova toca mesmo acima do teto de 4 (decisão dele).
+        "donas": [c["id"] for c in minhas if c.get("atendente_id") == eu],
+        "assumidas": [
+            {"id": c["id"], "nao_lidas": c["nao_lidas"],
+             "nome": c.get("contato_nome") or c.get("grupo_nome") or c.get("telefone_e164")}
+            for c in minhas
+            if c.get("atendente_id") == eu and (c.get("nao_lidas") or 0) > 0],
+    }
+
+
+@app.put("/api/eu/notificacao")
+def definir_minha_notificacao(dados: MinhaNotificacao,
+                              usuario: dict = Depends(auth.get_usuario)):
+    eu = _meu_atendente(usuario)
+    r = preferencia.definir_notificacao(eu, dados.tom, dados.volume)
+    if not r["ok"]:
+        raise HTTPException(status_code=400, detail=r["motivo"])
+    return r
+
+
+def _so_owner(usuario: dict) -> None:
+    if not usuario.get("owner"):
+        raise HTTPException(status_code=403,
+                            detail="Ligar ou desligar a notificação de alguém é do owner.")
+
+
+@app.get("/api/notificacoes/equipe")
+def notificacoes_da_equipe(usuario: dict = Depends(auth.requer_tela("CFG_11.1"))):
+    """🔵 *"a opção da notificação estar ativada por usuario ou não, só aparece
+    ao Owner"*. A tela esconde o bloco; a trava é aqui."""
+    _so_owner(usuario)
+    return banco.varios(
+        """SELECT id, nome, perfil, notificacao_ativa FROM atendente
+            WHERE ativo ORDER BY nome""")
+
+
+class NotificacaoAtiva(BaseModel):
+    ativa: bool
+
+
+@app.put("/api/atendentes/{atendente_id}/notificacao")
+def definir_notificacao_de(atendente_id: int, dados: NotificacaoAtiva,
+                           usuario: dict = Depends(auth.requer_tela("CFG_11.1"))):
+    _so_owner(usuario)
+    banco.executar(
+        "UPDATE atendente SET notificacao_ativa = %s, atualizado_em = now() WHERE id = %s",
+        (dados.ativa, atendente_id))
+    # A prova é reler, não o código de retorno.
+    return banco.um("SELECT id, nome, notificacao_ativa FROM atendente WHERE id = %s",
+                    (atendente_id,))
+
+
 class SempreOnline(BaseModel):
     ligado: bool
 

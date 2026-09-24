@@ -2990,3 +2990,52 @@ estiverem offline"*, com aviso.
 - Fila e Início mostram para onde está indo, que o primeiro está offline, ou
   que parou (`AvisoDistribuicao.vue`).
 - Roda no laço de 1 min da presença, **depois** da regra de status.
+
+
+## 24/09 (fim da tarde) — notificações (CFG_11.1) e a regra de status em 30 min
+
+### Notificações
+
+🔵 Pedidos dele, com as respostas às quatro perguntas: contador nas **abas**
+(*"somente minhas e time, por enquanto"*); notificação *"somente de conversas
+assumidas"*; teto de **4**, e *"entrar uma nova, dai toca uma vez só e para,
+assim não some a atenção"*; *"pisca aba obrigatoriamente"*; tom e volume
+*"com minimo de 1 (1 até 5)"* por pessoa; o liga/desliga por pessoa *"só
+aparece ao Owner"*, e desligada *"some tudo"*.
+
+| Peça | Onde |
+|---|---|
+| Verificador (em toda tela, a cada 8 s) | `componentes/Notificador.vue`, montado na casca (`App.vue`) |
+| A regra de quando toca, em função pura | `util/regraToque.js` — testada com 2, 20, "conversa nova" e F5 |
+| Os tons (Clássico, Suave, Sino, Alerta), gerados no navegador | `util/som.js` — sem arquivo; volume 1–5 sem mudo |
+| Rota | `GET /api/eu/notificacoes` (abas, `assumidas`, `donas`, ativa, tom, volume) — conta com a MESMA `conversas.listar` da Caixa |
+| Tela | Configurações › **Notificações** (`CFG_11.1`, `atendimento`) |
+| Liga/desliga do owner | `atendente.notificacao_ativa` (054); `GET /api/notificacoes/equipe` e `PUT /api/atendentes/{id}/notificacao` recusam quem não é owner |
+
+🟡 Decisões minhas: a primeira leitura depois de abrir o painel **nunca toca**
+(senão todo F5 tocaria até 4 vezes); mensagem nova numa conversa que já estava
+não lida não toca de novo; a aba só pisca com o painel em **segundo plano**;
+desligada pelo owner, o **contador fica** (é informativo); o navegador bloqueia
+som antes do primeiro clique, e a tela mostra *"Clique para ativar o som das
+notificações"* em vez de falhar calada.
+
+⚠️ **O contador da aba é selo no canto**, fora do fluxo: em linha ele alargava
+as abas e as quatro quebravam em duas linhas (visto na prévia).
+
+Medido no ar (24/09, 16:14): a rota leva 92–162 ms por pessoa; os 11 nascem
+com notificação ligada. A Ludmila tinha 1 não lida em Minhas numa conversa
+que ela só **acompanha** — não toca, porque não é dona. É a regra.
+
+### A regra de status em 30 min
+
+🔵 *"pode ajustar para 30, mas deve ser ajustada no painel por mim mesmo"*:
+Ausente = **30 min** (era 15), Offline = 60, gravados na `config`. A regra
+**continua desligada** — ele liga na Geral.
+
+### S20 — o script revisado, NÃO aplicado
+
+🔵 *"corrija o script do S20 mas nao implante ainda"*. Dois defeitos corrigidos
+(rodar duas vezes deixava o nginx quebrado no disco; falha no `nginx -t` não
+restaurava) e backups fora de `sites-enabled`. Exercitado em cópia: aplica uma
+vez, na segunda não faz nada, e no caminho de falha restaura idêntico (hash).
+Espera a decisão dele.

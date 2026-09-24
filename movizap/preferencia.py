@@ -205,3 +205,41 @@ def definir_teclas(atendente_id: int, teclas: dict) -> dict:
     _gravar(atendente_id, CHAVE_TECLAS, json.dumps(limpas, ensure_ascii=False))
     log.info("atalhos do atendente %s redefinidos: %s", atendente_id, limpas)
     return {"ok": True, **dos_atalhos(atendente_id)}
+
+
+# ============================================================================
+# NOTIFICAÇÕES — 24/09
+# ============================================================================
+# 🔵 *"cada um poderá ajustar o seu tom, volume - com minimo de 1 (1 até 5)"*.
+# Gosto da pessoa: mora aqui. O liga/desliga é do owner e mora em
+# `atendente.notificacao_ativa` (054).
+
+CHAVE_NOTIF_TOM = "notificacao_tom"
+CHAVE_NOTIF_VOLUME = "notificacao_volume"
+TONS = ("classico", "suave", "sino", "alerta")
+TOM_PADRAO = "classico"
+VOLUME_PADRAO = 3
+
+
+def notificacao(atendente_id: int | None) -> dict:
+    if not atendente_id:
+        return {"tom": TOM_PADRAO, "volume": VOLUME_PADRAO}
+    tom = _ler(atendente_id, CHAVE_NOTIF_TOM)
+    try:
+        volume = int(_ler(atendente_id, CHAVE_NOTIF_VOLUME) or VOLUME_PADRAO)
+    except ValueError:
+        volume = VOLUME_PADRAO
+    return {"tom": tom if tom in TONS else TOM_PADRAO,
+            "volume": min(5, max(1, volume))}
+
+
+def definir_notificacao(atendente_id: int, tom: str, volume: int) -> dict:
+    """⚠️ SEM MUDO: o volume vai de 1 a 5, e o 1 é o mínimo pedido por ele.
+    Quem não deve ouvir é decisão do owner, não de um volume zero."""
+    if tom not in TONS:
+        return {"ok": False, "motivo": f"Tom inválido. Vale: {', '.join(TONS)}."}
+    if not 1 <= int(volume) <= 5:
+        return {"ok": False, "motivo": "O volume vai de 1 a 5."}
+    _gravar(atendente_id, CHAVE_NOTIF_TOM, tom)
+    _gravar(atendente_id, CHAVE_NOTIF_VOLUME, str(int(volume)))
+    return {"ok": True, **notificacao(atendente_id)}

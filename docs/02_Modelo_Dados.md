@@ -1549,3 +1549,11 @@ Achado da auditoria de 24/09: a entrada pelo Google casa por `google_sub` ou
 e-mail, e o e-mail não era único. Com o admin criando contas, dois cadastros
 com o mesmo e-mail deixavam a entrada ambígua e podiam derrubar a do dono.
 Índice único em `lower(email)`, ignorando nulos; nenhum repetido existia.
+
+### `atendente.notificacao_ativa` (054) — o owner liga e desliga a notificação de cada um
+
+🔵 *"a opção da notificação estar ativada por usuario ou não, só aparece ao
+Owner"*. Coluna, e não `preferencia_atendente`: aquela tabela é o GOSTO da
+pessoa (tom e volume moram lá, chaves `notificacao_tom` e
+`notificacao_volume`); isto é decisão do owner SOBRE ela. Nasce ligada.
+Desligada, não toca nem pisca; o contador das abas continua.
