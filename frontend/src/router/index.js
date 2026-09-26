@@ -197,34 +197,48 @@ const rotas = [
   {
     // ⚠️ Dentro de Configurações por `aba_de` no registro do backend: a
     // rota existe, e é a casca que a monta como aba.
+    //
+    // 🚨 ATÉ 25/09 ESTE COMENTÁRIO MENTIA. Nascida em 28/08, esta rota (e as
+    // de Atalhos, Eventos, Minha conta, Notificações e Mensagens rápidas, que
+    // copiaram o padrão) montava a PÁGINA direto, não a casca: clicar na aba
+    // abria a tela sem a barra de abas, e a pessoa ficava presa nela. Achado
+    // pelo owner, que não encontrava as Notificações. Agora todas montam a
+    // casca -- e `config_rotas.teste.js` reprova se uma voltar a montar direto.
     path: '/config/geral',
     name: 'CFG_7.1',
-    component: () => import('../telas/Geral.vue'),
+    component: Configuracoes,
     meta: { codigo: 'CFG_7.1', titulo: 'Geral' },
   },
   {
     path: '/config/atalhos',
     name: 'CFG_6.1',
-    component: () => import('../telas/Atalhos.vue'),
+    component: Configuracoes,
     meta: { codigo: 'CFG_6.1', titulo: 'Atalhos de teclado' },
   },
   {
     path: '/config/eventos',
     name: 'CFG_8.1',
-    component: () => import('../telas/EventosWebhook.vue'),
+    component: Configuracoes,
     meta: { codigo: 'CFG_8.1', titulo: 'Eventos do WhatsApp' },
   },
   {
     path: '/config/minha-conta',
     name: 'CFG_10.1',
-    component: () => import('../telas/MinhaConta.vue'),
+    component: Configuracoes,
     meta: { codigo: 'CFG_10.1', titulo: 'Minha conta' },
   },
   {
     path: '/config/notificacoes',
     name: 'CFG_11.1',
-    component: () => import('../telas/Notificacoes.vue'),
+    component: Configuracoes,
     meta: { codigo: 'CFG_11.1', titulo: 'Notificações' },
+  },
+  {
+    // 🔵 25/09 (Plano 3): Padrões, Minhas notas e Formulários.
+    path: '/config/mensagens-rapidas',
+    name: 'CFG_12.1',
+    component: Configuracoes,
+    meta: { codigo: 'CFG_12.1', titulo: 'Mensagens rápidas' },
   },
   {
     path: '/config/telas',

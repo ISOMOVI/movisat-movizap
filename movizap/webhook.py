@@ -57,7 +57,10 @@ EVENTOS_DE_MENSAGEM = {"messages.upsert", "messages.update", "send.message"}
 # ⚠️ O campo é trocado por um marcador em vez de sumir. Campo ausente e campo
 # omitido de propósito são coisas diferentes na hora de conferir o formato, e
 # a conferência é a razão de esta tabela existir.
-CAMPOS_SIGILOSOS = ("apikey",)
+# 🚨 25/09: e o `destination` -- a URL do webhook, que leva no CAMINHO o
+# segredo que autentica todo evento. Estava guardado em cada linha de
+# `webhook_evento`, e apareceu numa conversa ao imprimir um evento.
+CAMPOS_SIGILOSOS = ("apikey", "destination")
 MARCADOR = "[removido pelo MoviZap -- credencial nao se guarda]"
 
 

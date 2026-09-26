@@ -134,6 +134,37 @@ describe('22 — a aba Time', () => {
     await assentar(w)
     expect(w.text()).toContain('Nenhuma conversa sem dono nos times de que você faz parte')
   })
+
+  /* 🔵 25/09: *"o filtro dele pode ter filtro por times que a pessoa estiver
+     inserida"*. */
+  it('com dois times meus, filtra por um deles e mostra de qual é cada conversa', async () => {
+    respostas['/api/times'] = [
+      { id: 3, nome: 'Financeiro', qtd_membros: 2, sou_membro: true },
+      { id: 4, nome: 'Suporte', qtd_membros: 2, sou_membro: true },
+      { id: 5, nome: 'Vendas', qtd_membros: 2, sou_membro: false },
+    ]
+    respostas['/api/conversas?'] = [{ ...CONVERSA, atendente_id: null, atendente_nome: null, time_nome: 'Suporte' }]
+    const w = mount(CaixaDeEntrada)
+    await assentar(w)
+    await w.findAll('.abas__aba').find((b) => b.text() === 'Time').trigger('click')
+    await assentar(w)
+    const opcoes = w.findAll('.campo--time option').map((o) => o.text())
+    expect(opcoes).toEqual(['Todos os meus times', 'Financeiro', 'Suporte'])
+    expect(w.find('.conversa__marcas').text()).toContain('Suporte')
+    gets = []
+    await w.find('.campo--time select').setValue('4')
+    await assentar(w)
+    expect(gets.some((g) => g.includes('meus_times=true') && g.includes('time_id=4'))).toBe(true)
+  })
+
+  it('com um time só, não há seletor', async () => {
+    respostas['/api/times'] = [{ id: 3, nome: 'Financeiro', qtd_membros: 2, sou_membro: true }]
+    const w = mount(CaixaDeEntrada)
+    await assentar(w)
+    await w.findAll('.abas__aba').find((b) => b.text() === 'Time').trigger('click')
+    await assentar(w)
+    expect(w.find('.campo--time').exists()).toBe(false)
+  })
 })
 
 describe('17 — o estado de quem responde', () => {
@@ -292,5 +323,32 @@ describe('o defeito de 07/08: classificação negada não apaga os times', () =>
     await assentar(w)
     const opcoes = w.findAll('option').map((o) => o.text())
     expect(opcoes.some((t) => t.startsWith('Financeiro')), opcoes.join(' | ')).toBe(true)
+  })
+})
+
+describe('Plano 2 (25/09) — só marca lida o que foi visto', () => {
+  function aba(escondida) {
+    Object.defineProperty(document, 'hidden', { value: escondida, configurable: true })
+  }
+
+  it('com a aba escondida, a releitura de 8 s NÃO marca como lida; ao voltar, marca', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
+    try {
+      aba(false)
+      const w = await aberta()
+      aba(true)
+      gets = []
+      vi.advanceTimersByTime(8000)
+      await assentar(w)
+      expect(gets).toContain('/api/conversas/7?ler=false')
+      gets = []
+      aba(false)
+      document.dispatchEvent(new Event('visibilitychange'))
+      await assentar(w)
+      expect(gets).toContain('/api/conversas/7?ler=true')
+    } finally {
+      aba(false)
+      vi.useRealTimers()
+    }
   })
 })

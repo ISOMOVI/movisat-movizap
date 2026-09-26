@@ -207,7 +207,8 @@ describe('CAD_2.1 — Atendentes', () => {
     await assentar(w)
     await abrirEdicaoDaAna(w)
     expect(w.find('.edicao__corpo').text()).toContain('Suporte')
-    expect(w.findAll('.edicao__corpo input[type="checkbox"]')).toHaveLength(0)
+    // 25/09: o interruptor Ativo/Inativo é `role="switch"`, não caixinha de time.
+    expect(w.findAll('.edicao__corpo input[type="checkbox"]:not([role="switch"])')).toHaveLength(0)
   })
 
   it('conta nova criada pelo admin nasce com o login igual ao e-mail', async () => {

@@ -123,27 +123,94 @@ describe('Jornada — duração e copiar', () => {
   })
 })
 
-describe('Afastamento — transferência obrigatória', () => {
-  it('com conversas em aberto, só afasta depois de escolher quem recebe', async () => {
+/* O dia no fuso do navegador, como a tela calcula. */
+function diaISO(somar = 0) {
+  const d = new Date()
+  d.setDate(d.getDate() + somar)
+  return d.toLocaleDateString('sv-SE')
+}
+
+async function abrirAfastar(w) {
+  await w.findAll('button').find((b) => b.text().includes('Afastar')).trigger('click')
+  await w.vm.$nextTick()
+  return w.findAll('.afastar input[type="date"]')
+}
+
+describe('Afastamento — saída, volta e transferência obrigatória', () => {
+  it('com conversas em aberto, só afasta depois da volta e de quem recebe', async () => {
     const w = await editarAna()
-    await w.findAll('button').find((b) => b.text().includes('Afastar')).trigger('click')
-    await w.vm.$nextTick()
+    const [saida, volta] = await abrirAfastar(w)
+    expect(saida.element.value).toBe(diaISO(0))
     const confirmar = w.findAll('.afastar button').find((b) => b.text().includes('Afastar e transferir 3'))
-    expect(confirmar.attributes('disabled')).toBeDefined()
     await w.find('.recebedor input').setValue(true)
+    expect(confirmar.attributes('disabled')).toBeDefined() // falta a volta
+    await volta.setValue(diaISO(7))
     expect(confirmar.attributes('disabled')).toBeUndefined()
     await confirmar.trigger('click')
     await assentar(w)
     expect(posts[0]).toEqual({ rota: '/api/atendentes/1/afastar',
-      corpo: { motivo: 'Férias', ate: null, transferir_para: 2 } })
+      corpo: { motivo: 'Férias', de: diaISO(0), ate: diaISO(7), transferir_para: 2 } })
   })
 
-  it('quem está offline não aparece para receber', async () => {
+  it('hoje, quem está offline não aparece para receber', async () => {
     const w = await editarAna()
-    await w.findAll('button').find((b) => b.text().includes('Afastar')).trigger('click')
-    await w.vm.$nextTick()
+    await abrirAfastar(w)
     const nomes = w.findAll('.recebedor__nome').map((n) => n.text())
     expect(nomes).toEqual(['Beto'])
+  })
+
+  it('saída futura vira "Marcar afastamento", e offline agora pode ser o substituto', async () => {
+    const w = await editarAna()
+    const [saida, volta] = await abrirAfastar(w)
+    await saida.setValue(diaISO(3))
+    await volta.setValue(diaISO(10))
+    const nomes = w.findAll('.recebedor__nome').map((n) => n.text())
+    expect(nomes).toEqual(['Beto', 'Caio'])
+    expect(w.findAll('.afastar button').some((b) => b.text() === 'Marcar afastamento')).toBe(true)
+  })
+})
+
+describe('Acesso — o interruptor Ativo/Inativo (25/09)', () => {
+  it('inativar com conversa aberta pede quem recebe, e grava pela rota própria', async () => {
+    const w = await editarAna()
+    await w.find('.situacao input').trigger('click')
+    await w.vm.$nextTick()
+    const inativar = w.findAll('.modal button').find((b) => b.text().includes('Inativar e transferir 3'))
+    expect(inativar.attributes('disabled')).toBeDefined()
+    await w.find('input[name="recebedor-inativar"]').setValue(true)
+    await inativar.trigger('click')
+    await assentar(w)
+    expect(puts.find((p) => p.rota === '/api/atendentes/1/ativo').corpo)
+      .toEqual({ ativo: false, transferir_para: 2 })
+  })
+
+  it('reativar é direto', async () => {
+    respostas['/api/atendentes'][1] = pessoa(2, 'Beto', { ativo: false })
+    const w = mount(Atendentes, { attachTo: document.body })
+    await assentar(w)
+    await w.findAll('button').filter((b) => b.text().includes('Editar'))[1].trigger('click')
+    await w.vm.$nextTick()
+    await w.find('.situacao input').trigger('click')
+    await assentar(w)
+    expect(puts.find((p) => p.rota === '/api/atendentes/2/ativo').corpo)
+      .toEqual({ ativo: true, transferir_para: null })
+  })
+
+  it('a própria conta não tem interruptor', async () => {
+    sessaoFalsa.usuario.login = 'ana'
+    const w = await editarAna()
+    expect(w.find('.situacao').exists()).toBe(false)
+    delete sessaoFalsa.usuario.login
+  })
+
+  it('o formulário não manda mais ativo nem teto de conversas', async () => {
+    const w = await editarAna()
+    await w.find('input[maxlength="200"]').setValue('Ana Maria')
+    await w.findAll('button').find((b) => b.text().includes('Salvar')).trigger('click')
+    await assentar(w)
+    const corpo = puts.find((p) => p.rota === '/api/atendentes/1').corpo
+    expect(corpo).not.toHaveProperty('ativo')
+    expect(corpo).not.toHaveProperty('max_conversas')
   })
 })
 
@@ -172,6 +239,25 @@ describe('Minha conta — sempre online', () => {
     const w = mount(MinhaConta)
     await assentar(w)
     expect(w.text()).toContain('Sempre online')
+  })
+
+  it('afastado: os estados ficam travados, e a volta muda pela data', async () => {
+    respostas['/api/eu/perfil'] = { ...respostas['/api/eu/perfil'],
+      afastamento_motivo: 'Férias', afastado_ate: diaISO(5) }
+    const w = mount(MinhaConta)
+    await assentar(w)
+    expect(w.findAll('.conta__estado').every((b) => b.attributes('disabled') !== undefined)).toBe(true)
+    expect(w.text()).not.toContain('encerra o afastamento') // a frase antiga (M12)
+    await w.find('.conta__volta input').setValue(diaISO(-1))
+    await w.find('.conta__volta').trigger('submit')
+    await assentar(w)
+    expect(puts.find((p) => p.rota === '/api/eu/afastamento').corpo).toEqual({ volta: diaISO(-1) })
+  })
+
+  it('não mostra mais o teto de conversas', async () => {
+    const w = mount(MinhaConta)
+    await assentar(w)
+    expect(w.text()).not.toContain('Teto de conversas')
   })
 
   it('não aparece para quem atende, e a frase de "não é deduzido" some com a regra ligada', async () => {

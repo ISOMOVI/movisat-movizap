@@ -152,19 +152,10 @@ def test_perfil_invalido_e_recusado():
         operacao.criar_atendente(f"{PREFIXO}X", f"{PREFIXO}x", perfil="chefe")
 
 
-def test_ninguem_desativa_a_propria_conta(um_atendente):
+def test_ninguem_inativa_a_propria_conta(um_atendente):
     with pytest.raises(operacao.EmUso):
-        operacao.atualizar_atendente(
-            um_atendente["id"], um_atendente["nome"], um_atendente["login"],
-            None, "atendimento", "disponivel", None, ativo=False,
-            quem_edita=um_atendente["login"])
-
-
-def test_times_do_atendente_sao_substituidos_inteiros(um_atendente, um_time):
-    atualizado = operacao.definir_times(um_atendente["id"], [um_time["id"]])
-    assert [t["id"] for t in atualizado["times"]] == [um_time["id"]]
-    vazio = operacao.definir_times(um_atendente["id"], [])
-    assert vazio["times"] == []
+        operacao.definir_ativo(um_atendente["id"], False,
+                               quem_edita=um_atendente["login"])
 
 
 # ------------------------------------------- membros pela tela de Times (24/09)
@@ -180,13 +171,59 @@ def test_membros_do_time_sao_substituidos_inteiros(um_atendente, um_time):
 def test_membros_nao_apaga_o_vinculo_de_quem_esta_inativo(um_atendente, um_time):
     """⚠️ A tela só lista ativos. Salvar o time não pode derrubar o vínculo
     de um inativo só porque ele não apareceu na lista."""
-    operacao.definir_times(um_atendente["id"], [um_time["id"]])
+    operacao.definir_membros(um_time["id"], [um_atendente["id"]])
     banco.executar("UPDATE atendente SET ativo = false WHERE id = %s",
                    (um_atendente["id"],))
     operacao.definir_membros(um_time["id"], [])
     assert banco.um(
         "SELECT 1 AS ok FROM atendente_time WHERE atendente_id = %s AND time_id = %s",
         (um_atendente["id"], um_time["id"]))
+
+
+# ------------------------------------------- owner invisível para o admin (25/09)
+
+def _o_owner():
+    dono = banco.um("SELECT id FROM atendente WHERE owner AND ativo LIMIT 1")
+    if not dono:
+        pytest.skip("nenhum owner ativo na base")
+    return dono["id"]
+
+
+def test_admin_nao_ve_o_owner_na_lista():
+    """🔵 *"owner não deve aparecer para admin, então admin nunca inativará
+    owner"*."""
+    dono = _o_owner()
+    assert dono in [a["id"] for a in operacao.listar_atendentes(ver_owner=True)]
+    assert dono not in [a["id"] for a in operacao.listar_atendentes(ver_owner=False)]
+
+
+def test_admin_nao_ve_o_owner_entre_os_membros(um_time):
+    dono = _o_owner()
+    banco.executar("INSERT INTO atendente_time (atendente_id, time_id) VALUES (%s, %s)",
+                   (dono, um_time["id"]))
+    try:
+        visto = operacao.time(um_time["id"], ocultar_owner=True)
+        assert dono not in [m["id"] for m in visto["membros"]]
+        assert dono in [m["id"] for m in operacao.time(um_time["id"])["membros"]]
+    finally:
+        banco.executar("DELETE FROM atendente_time WHERE atendente_id = %s AND time_id = %s",
+                       (dono, um_time["id"]))
+
+
+def test_salvar_o_time_sem_ver_o_owner_nao_o_tira(um_atendente, um_time):
+    """🚨 O admin nunca manda o owner na lista, porque não o vê. Sem
+    `preservar_owner`, salvar o time Geral o tiraria de lá em silêncio."""
+    dono = _o_owner()
+    banco.executar("INSERT INTO atendente_time (atendente_id, time_id) VALUES (%s, %s)",
+                   (dono, um_time["id"]))
+    try:
+        operacao.definir_membros(um_time["id"], [um_atendente["id"]], preservar_owner=True)
+        assert banco.um(
+            "SELECT 1 AS ok FROM atendente_time WHERE atendente_id = %s AND time_id = %s",
+            (dono, um_time["id"]))
+    finally:
+        banco.executar("DELETE FROM atendente_time WHERE atendente_id = %s AND time_id = %s",
+                       (dono, um_time["id"]))
 
 
 def test_estados_do_cadastro_e_da_minha_conta_sao_os_mesmos():

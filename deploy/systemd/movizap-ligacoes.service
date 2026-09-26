@@ -1,0 +1,12 @@
+[Unit]
+Description=MoviZap Ligacoes - agente do MicroSIP (porta propria, Plano 5.1)
+After=network.target
+
+[Service]
+WorkingDirectory=/home/claude/movizap_painel
+ExecStart=/home/claude/movizap_painel/venv/bin/uvicorn movizap.app_ligacoes:app --host 127.0.0.1 --port 8010 --workers 1
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

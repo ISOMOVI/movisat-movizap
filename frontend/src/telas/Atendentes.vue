@@ -120,24 +120,53 @@ function diasDaJornada(a) {
   return dias.map((d) => DIAS_CURTOS[d]).join(' · ')
 }
 
-/* ---- desligar ------------------------------------------------------------
-   🚨 NÃO EXISTE APAGAR. `conversa`, `transferencia` e `mensagem` apontam para
-   o atendente: apagar faria o histórico mentir sobre quem atendeu. O que
-   existe é desligar -- e desligar SOLTA as conversas dele. */
-const desligando = ref(null)
+/* ---- ativo / inativo (25/09) ----------------------------------------------
+   🔵 *"vamos ligar isso a um status de inativo e ativo no perfil do
+   atendente, um interruptor, inativo não loga a conta permanece lá"*. Tomou o
+   lugar do "Desligar", que apagava senha e times e não tinha volta.
 
-async function confirmarDesligar() {
-  const alvo = desligando.value
+   🚨 NÃO EXISTE APAGAR. `conversa`, `transferencia` e `mensagem` apontam para
+   o atendente. Inativar tira o acesso; as conversas abertas vão para quem a
+   pessoa escolher, obrigatório, como no afastamento. */
+const inativando = ref(null)
+const inativarPara = ref(null)
+const erroInativar = ref('')
+const trocandoAtivo = ref(false)
+
+/* A própria conta não tem interruptor: o backend recusa, e a tela não oferece. */
+const editandoASiMesmo = computed(() =>
+  Boolean(editando.value?.login) &&
+  editando.value.login.toLowerCase() === (sessao.usuario?.login || '').toLowerCase())
+
+function alternarAtivo() {
+  const a = editando.value
+  if (a.ativo) {
+    inativando.value = a
+    inativarPara.value = null
+    erroInativar.value = ''
+    return
+  }
+  gravarAtivo(a, true, null)
+}
+
+async function gravarAtivo(a, ativo, para) {
+  trocandoAtivo.value = true
+  erroInativar.value = ''
   try {
-    const r = await api.post(`/api/atendentes/${alvo.id}/desligar`, {})
-    recado.value = r.conversas_soltas
-      ? `${r.nome} desligado. ${r.conversas_soltas} conversa(s) voltaram para a fila.`
-      : `${r.nome} desligado.`
-    desligando.value = null
+    const r = await api.put(`/api/atendentes/${a.id}/ativo`, { ativo, transferir_para: para })
+    if (ativo) recado.value = `${a.nome} está ativo de novo e entra no painel.`
+    else if (r.transferidas) recado.value = `${a.nome} ficou inativo. ${r.transferidas} conversa(s) transferida(s).`
+    else recado.value = `${a.nome} ficou inativo.`
+    inativando.value = null
+    fechar()
     await carregar()
   } catch (e) {
-    erro.value = e instanceof ErroDeApi ? e.message : 'Não consegui desligar.'
-    desligando.value = null
+    const texto = e instanceof ErroDeApi ? e.message : 'Não consegui mudar a situação.'
+    if (inativando.value) erroInativar.value = texto
+    else erroModal.value = texto
+    await carregar()
+  } finally {
+    trocandoAtivo.value = false
   }
 }
 
@@ -159,8 +188,7 @@ const comUid = (faixa) => ({ ...faixa, uid: proximoUid++ })
 function vazio() {
   return {
     nome: '', login: '', email: '', perfil: 'atendimento',
-    estado: 'disponivel', max_conversas: null, ativo: true,
-    fuso: 'America/Sao_Paulo',
+    estado: 'disponivel', fuso: 'America/Sao_Paulo',
   }
 }
 
@@ -180,8 +208,7 @@ function abrir(a) {
   form.value = a.id
     ? {
         nome: a.nome, login: a.login, email: a.email || '', perfil: a.perfil,
-        estado: a.estado, max_conversas: a.max_conversas, ativo: a.ativo,
-        fuso: a.fuso,
+        estado: a.estado, fuso: a.fuso,
       }
     : vazio()
   jornada.value = (a.jornada || []).map((f) => comUid({
@@ -256,41 +283,77 @@ function aplicarCopia() {
    *"somente em caso de férias ou algo do tipo"*. */
 const MOTIVOS_AFASTAMENTO = ['Férias', 'Licença', 'Atestado', 'Outro']
 const afastando = ref(null)
-const afastamento = ref({ motivo: 'Férias', outro: '', ate: '', para: null })
 const erroAfastamento = ref('')
 const afastandoAgora = ref(false)
 
-/* Quem pode receber: ativo, recebe transferência, não está offline nem
-   afastado, e não é a própria pessoa. É a mesma régua do backend. */
-const recebedores = computed(() => atendentes.value.filter((a) =>
-  a.ativo && a.transferivel && a.estado !== 'offline' && !a.afastamento_motivo
-  && a.id !== afastando.value?.id))
+/* 🔵 25/09: *"um calendário já indica a saída e a volta, daí volta"*. A data
+   é a do navegador, no formato do <input type="date"> (`sv-SE` dá AAAA-MM-DD
+   no fuso local -- `toISOString` daria o dia em UTC, e às 21h já é amanhã). */
+const diaISO = (somar = 0) => {
+  const d = new Date()
+  d.setDate(d.getDate() + somar)
+  return d.toLocaleDateString('sv-SE')
+}
+const afastamentoVazio = () => ({ motivo: 'Férias', outro: '', de: diaISO(0), ate: '', para: null })
+const afastamento = ref(afastamentoVazio())
+const saidaFutura = computed(() => afastamento.value.de > diaISO(0))
+
+/* Quem pode receber. HOJE: ativo, recebe transferência, não está offline nem
+   afastado -- a mesma régua do backend (`pode_receber`). MARCADO: basta estar
+   ativo e receber transferência; offline agora não importa, o que vale é o
+   dia da saída (e, se nesse dia não puder, as conversas vão para a fila). */
+function recebedoresPara(pessoa, futuro = false) {
+  return atendentes.value.filter((a) =>
+    a.ativo && a.transferivel && a.id !== pessoa?.id &&
+    (futuro || (a.estado !== 'offline' && !a.afastamento_motivo)))
+}
+const recebedores = computed(() => recebedoresPara(afastando.value, saidaFutura.value))
+const recebedoresInativar = computed(() => recebedoresPara(inativando.value))
+
+/* O substituto de um afastamento marcado, pelo nome. */
+const nomeDe = (id) => atendentes.value.find((a) => a.id === id)?.nome || 'quem foi escolhido'
 
 function abrirAfastamento() {
   afastando.value = editando.value
-  afastamento.value = { motivo: 'Férias', outro: '', ate: '', para: null }
+  afastamento.value = afastamentoVazio()
   erroAfastamento.value = ''
 }
+
+/* Marcado para o futuro, o substituto é sempre obrigatório: até a saída
+   podem chegar conversas. Hoje, só se houver conversa aberta. */
+const precisaSubstituto = computed(() =>
+  Boolean(afastando.value) && (saidaFutura.value || afastando.value.em_aberto > 0))
 
 async function confirmarAfastamento() {
   const a = afastando.value
   const motivo = afastamento.value.motivo === 'Outro'
     ? afastamento.value.outro.trim() : afastamento.value.motivo
   if (!motivo) { erroAfastamento.value = 'Diga o motivo.'; return }
-  if (a.em_aberto && !afastamento.value.para) {
-    erroAfastamento.value = 'Escolha quem vai receber as conversas em aberto.'
+  if (!afastamento.value.ate) { erroAfastamento.value = 'Escolha o dia da volta.'; return }
+  if (afastamento.value.ate <= afastamento.value.de) {
+    erroAfastamento.value = 'A volta tem de ser depois da saída.'
+    return
+  }
+  if (precisaSubstituto.value && !afastamento.value.para) {
+    erroAfastamento.value = saidaFutura.value
+      ? 'Escolha quem vai receber as conversas no dia da saída.'
+      : 'Escolha quem vai receber as conversas em aberto.'
     return
   }
   afastandoAgora.value = true
   erroAfastamento.value = ''
   try {
     const r = await api.post(`/api/atendentes/${a.id}/afastar`, {
-      motivo, ate: afastamento.value.ate || null,
+      motivo, de: afastamento.value.de, ate: afastamento.value.ate,
       transferir_para: afastamento.value.para,
     })
-    recado.value = r.transferidas
-      ? `${a.nome} afastado (${motivo}). ${r.transferidas} conversa(s) transferida(s).`
-      : `${a.nome} afastado (${motivo}).`
+    if (r.agendado) {
+      recado.value = `Afastamento de ${a.nome} marcado: sai em ${dataCurta(afastamento.value.de)}, volta em ${dataCurta(afastamento.value.ate)}.`
+    } else {
+      recado.value = r.transferidas
+        ? `${a.nome} afastado (${motivo}) até ${dataCurta(afastamento.value.ate)}. ${r.transferidas} conversa(s) transferida(s).`
+        : `${a.nome} afastado (${motivo}) até ${dataCurta(afastamento.value.ate)}.`
+    }
     afastando.value = null
     fechar()
     await carregar()
@@ -307,9 +370,12 @@ async function confirmarAfastamento() {
 }
 
 async function encerrarAfastamento() {
+  const eraMarcado = !editando.value.afastamento_motivo
   try {
     await api.post(`/api/atendentes/${editando.value.id}/retornar`, {})
-    recado.value = `${editando.value.nome} voltou do afastamento e está disponível.`
+    recado.value = eraMarcado
+      ? `O afastamento marcado de ${editando.value.nome} foi cancelado.`
+      : `${editando.value.nome} voltou do afastamento e está disponível.`
     fechar()
     await carregar()
   } catch (e) {
@@ -336,7 +402,7 @@ async function salvar() {
       }
       login = email
     }
-    const corpo = { ...form.value, login, email, max_conversas: null }
+    const corpo = { ...form.value, login, email }
     const alvo = editando.value.id
       ? await api.put(`/api/atendentes/${editando.value.id}`, corpo)
       : await api.post('/api/atendentes', corpo)
@@ -369,7 +435,7 @@ async function salvar() {
       <div class="cabecalho__acoes">
         <label class="linha pequeno fraco">
           <input v-model="incluirInativos" type="checkbox" @change="carregar" />
-          mostrar desligados
+          mostrar inativos
         </label>
         <!-- ⚠️ Para o admin é chip, não link: Configurações › Geral é do
              owner, e o link o levaria a uma tela que ele não abre. -->
@@ -466,7 +532,11 @@ async function salvar() {
                       <i class="bi bi-airplane" aria-hidden="true"></i>
                       {{ a.afastamento_motivo }}<template v-if="a.afastado_ate"> até {{ dataCurta(a.afastado_ate) }}</template>
                     </span>
-                    <span v-if="!a.ativo" class="chip chip--pequeno">desligado</span>
+                    <span v-else-if="a.afasta_em" class="chip chip--pequeno">
+                      <i class="bi bi-calendar-event" aria-hidden="true"></i>
+                      {{ a.afasta_motivo }} de {{ dataCurta(a.afasta_em) }} a {{ dataCurta(a.afasta_ate) }}
+                    </span>
+                    <span v-if="!a.ativo" class="chip chip--pequeno">inativo</span>
                   </div>
                 </div>
               </td>
@@ -492,7 +562,7 @@ async function salvar() {
               </td>
               <!-- Os dois números que fazem esta tela ser de RH, numa coluna só
                    desde 24/09: em duas, a tabela passava da largura e empurrava
-                   o "Desligar" para fora da tela (visto na prévia). -->
+                   a coluna de ações para fora da tela (visto na prévia). -->
               <td class="rh__num conversas">
                 <strong>{{ a.em_aberto }}</strong> <span class="apagado">abertas</span>
                 <br />
@@ -510,17 +580,8 @@ async function salvar() {
                           class="botao botao--pequeno botao--contorno" type="button" @click="abrir(a)">
                     <i class="bi bi-pencil" aria-hidden="true"></i> Editar
                   </button>
-                  <!-- ⚠️ Ação NOMEADA, não uma caixinha "Ativo" perdida no fim
-                       do formulário. Desligar alguém muda o acesso e a fila: a
-                       confirmação diz o que acontece. -->
-                  <button
-                    v-if="a.ativo && !a.owner"
-                    class="botao botao--pequeno botao--perigo"
-                    type="button"
-                    @click="desligando = a"
-                  >
-                    Desligar
-                  </button>
+                  <!-- 🔵 25/09: o "Desligar" daqui virou o interruptor
+                       Ativo/Inativo, dentro do Editar -- decisão dele. -->
                 </div>
               </td>
             </tr>
@@ -530,7 +591,7 @@ async function salvar() {
     </section>
 
     <p class="rodape apagado pequeno">
-      Atendente não é apagado, é desligado: o histórico continua com o nome dele.
+      Atendente não é apagado: inativo, fica sem acesso, e o histórico continua com o nome dele.
       <template v-if="!jornadaAtiva">
         A jornada está <strong>desligada</strong>: liga-se em Configurações › Geral.
       </template>
@@ -584,8 +645,7 @@ async function salvar() {
               </template>
             </select>
             <span class="campo__ajuda">
-              <template v-if="editandoOwner">O owner é único e não muda de perfil.</template>
-              <template v-else-if="perfilTravado">Só o owner muda o perfil de um admin.</template>
+              <template v-if="editandoOwner || perfilTravado">Este perfil não pode ser alterado.</template>
               <template v-else>Define as telas que a pessoa vê.</template>
             </span>
           </label>
@@ -600,6 +660,27 @@ async function salvar() {
           <!-- 🚨 O TETO DE CONVERSAS SAIU DA TELA (25/08): a coluna era gravada
                e LIDA POR NADA. Volta quando houver distribuição que o use. -->
         </div>
+      </section>
+
+      <!-- 🔵 25/09: *"um status de inativo e ativo no perfil do atendente, um
+           interruptor"*. É ação na hora, como o Afastar: não espera o Salvar.
+           Inativar abre a confirmação (e quem recebe as conversas); reativar
+           é direto. A própria conta não tem interruptor. -->
+      <section v-if="editando.id && !editandoASiMesmo" class="secao">
+        <h2 class="secao__titulo">Acesso</h2>
+        <label class="interruptor situacao">
+          <input type="checkbox" role="switch" :checked="editando.ativo"
+                 :disabled="sujo || trocandoAtivo" @click.prevent="alternarAtivo" />
+          <span>
+            <strong>{{ editando.ativo ? 'Ativo' : 'Inativo' }}</strong>
+            <small class="apagado">
+              {{ editando.ativo
+                ? 'Entra no painel e pode receber conversa.'
+                : 'Não entra no painel. A conta, os times e o histórico ficam; religar devolve o acesso.' }}
+            </small>
+          </span>
+        </label>
+        <span v-if="sujo" class="campo__ajuda">Salve ou cancele as alterações antes de mudar o acesso.</span>
       </section>
 
       <!-- 🔵 SÓ LEITURA DESDE 24/09, decisão dele: *"no cadastro do
@@ -677,25 +758,38 @@ async function salvar() {
         </div>
       </section>
 
-      <section v-if="editando.id" class="secao">
+      <section v-if="editando.id && editando.ativo" class="secao">
         <h2 class="secao__titulo">Afastamento</h2>
         <template v-if="editando.afastamento_motivo">
           <p class="aviso aviso--atencao pequeno">
             <i class="bi bi-airplane aviso__icone" aria-hidden="true"></i>
             <span>
               Afastado: <strong>{{ editando.afastamento_motivo }}</strong><template
-              v-if="editando.afastado_ate">, até {{ dataCurta(editando.afastado_ate) }}</template>.
-              Não recebe conversa.
+              v-if="editando.afastado_ate">, volta em {{ dataCurta(editando.afastado_ate) }}</template>.
+              Não recebe conversa. Na volta, o afastamento termina sozinho.
             </span>
           </p>
           <button class="botao botao--contorno" type="button" @click="encerrarAfastamento">
-            Encerrar afastamento
+            Encerrar afastamento agora
+          </button>
+        </template>
+        <template v-else-if="editando.afasta_em">
+          <p class="aviso aviso--info pequeno">
+            <i class="bi bi-calendar-event aviso__icone" aria-hidden="true"></i>
+            <span>
+              Marcado: <strong>{{ editando.afasta_motivo }}</strong>, sai em
+              {{ dataCurta(editando.afasta_em) }} e volta em {{ dataCurta(editando.afasta_ate) }}.
+              Na saída, as conversas abertas vão para {{ nomeDe(editando.afasta_substituto_id) }}.
+            </span>
+          </p>
+          <button class="botao botao--contorno" type="button" @click="encerrarAfastamento">
+            Cancelar afastamento marcado
           </button>
         </template>
         <template v-else>
           <p class="campo__ajuda secao__ajuda">
-            Férias, licença, atestado. A pessoa fica offline e não recebe conversa;
-            as que estiverem abertas vão para quem você escolher.
+            Férias, licença, atestado. Na saída a pessoa fica offline e não recebe
+            conversa; as abertas vão para quem você escolher. Na volta, termina sozinho.
           </p>
           <button class="botao botao--contorno" type="button" :disabled="sujo"
                   @click="abrirAfastamento">
@@ -730,7 +824,9 @@ async function salvar() {
       <div class="modal__caixa afastar__caixa" role="dialog" aria-modal="true"
            :aria-label="`Afastar ${afastando.nome}`">
         <p class="modal__titulo">Afastar {{ afastando.nome }}</p>
-        <p class="modal__texto pequeno">Fica offline e não recebe conversa até o afastamento ser encerrado.</p>
+        <p class="modal__texto pequeno">
+          Na saída, fica offline e não recebe conversa. Na volta, o afastamento termina sozinho.
+        </p>
 
         <div class="grade">
           <label class="campo">
@@ -739,19 +835,29 @@ async function salvar() {
               <option v-for="m in MOTIVOS_AFASTAMENTO" :key="m" :value="m">{{ m }}</option>
             </select>
           </label>
-          <label class="campo">
-            <span class="campo__rotulo">Até (opcional)</span>
-            <input v-model="afastamento.ate" class="campo__entrada" type="date" />
+          <label v-if="afastamento.motivo === 'Outro'" class="campo">
+            <span class="campo__rotulo">Qual?</span>
+            <input v-model="afastamento.outro" class="campo__entrada" maxlength="60" />
           </label>
         </div>
-        <label v-if="afastamento.motivo === 'Outro'" class="campo">
-          <span class="campo__rotulo">Qual?</span>
-          <input v-model="afastamento.outro" class="campo__entrada" maxlength="60" />
-        </label>
+        <!-- 🔵 25/09: *"um calendário já indica a saída e a volta"*. -->
+        <div class="grade">
+          <label class="campo">
+            <span class="campo__rotulo">Saída</span>
+            <input v-model="afastamento.de" class="campo__entrada" type="date" :min="diaISO(0)" />
+          </label>
+          <label class="campo">
+            <span class="campo__rotulo">Volta <span class="obrigatorio">*</span></span>
+            <input v-model="afastamento.ate" class="campo__entrada" type="date"
+                   :min="afastamento.de" />
+          </label>
+        </div>
 
-        <fieldset v-if="afastando.em_aberto" class="bloco">
+        <fieldset v-if="precisaSubstituto" class="bloco">
           <legend class="campo__rotulo">
-            Quem recebe as {{ afastando.em_aberto }} conversa(s) em aberto <span class="obrigatorio">*</span>
+            <template v-if="saidaFutura">Quem recebe as conversas abertas no dia da saída</template>
+            <template v-else>Quem recebe as {{ afastando.em_aberto }} conversa(s) em aberto</template>
+            <span class="obrigatorio">*</span>
           </legend>
           <div class="recebedores">
             <label v-for="r in recebedores" :key="r.id" class="recebedor"
@@ -766,6 +872,9 @@ async function salvar() {
               Ninguém disponível para receber agora (todos offline ou afastados).
             </p>
           </div>
+          <p v-if="saidaFutura" class="campo__ajuda">
+            Se no dia essa pessoa estiver offline, as conversas vão para a fila.
+          </p>
         </fieldset>
         <p v-else class="aviso aviso--info pequeno">
           <i class="bi bi-check2-circle aviso__icone" aria-hidden="true"></i>
@@ -777,28 +886,53 @@ async function salvar() {
         <div class="modal__acoes">
           <button class="botao botao--contorno" type="button" @click="afastando = null">Cancelar</button>
           <button class="botao botao--primario" type="button"
-                  :disabled="afastandoAgora || (afastando.em_aberto > 0 && !afastamento.para)"
+                  :disabled="afastandoAgora || !afastamento.ate || (precisaSubstituto && !afastamento.para)"
                   @click="confirmarAfastamento">
-            {{ afastando.em_aberto ? `Afastar e transferir ${afastando.em_aberto}` : 'Afastar' }}
+            <template v-if="saidaFutura">Marcar afastamento</template>
+            <template v-else>{{ afastando.em_aberto ? `Afastar e transferir ${afastando.em_aberto}` : 'Afastar' }}</template>
           </button>
         </div>
       </div>
     </div>
 
-    <div v-if="desligando" class="modal" @click.self="desligando = null">
-      <div class="modal__caixa" role="dialog" aria-modal="true" aria-label="Desligar">
-        <p class="modal__titulo">Desligar {{ desligando.nome }}?</p>
+    <!-- 🔵 25/09: inativar confirma e pede quem recebe as conversas abertas. -->
+    <div v-if="inativando" class="modal afastar" @click.self="inativando = null">
+      <div class="modal__caixa afastar__caixa" role="dialog" aria-modal="true"
+           :aria-label="`Inativar ${inativando.nome}`">
+        <p class="modal__titulo">Inativar {{ inativando.nome }}?</p>
         <p class="modal__texto">
-          A conta <strong>sai do painel</strong>, sai dos times, e as <strong>conversas dela voltam para a fila</strong>.
+          A pessoa <strong>não entra mais no painel</strong>, e a sessão aberta cai.
+          A conta, os times e o histórico ficam: religar devolve o acesso.
         </p>
-        <p class="modal__texto pequeno">
-          O histórico continua com o nome dela: nada é apagado.
-        </p>
+
+        <fieldset v-if="inativando.em_aberto" class="bloco">
+          <legend class="campo__rotulo">
+            Quem recebe as {{ inativando.em_aberto }} conversa(s) em aberto <span class="obrigatorio">*</span>
+          </legend>
+          <div class="recebedores">
+            <label v-for="r in recebedoresInativar" :key="r.id" class="recebedor"
+                   :class="{ 'recebedor--marcado': inativarPara === r.id }">
+              <input v-model="inativarPara" type="radio" name="recebedor-inativar" :value="r.id" />
+              <span class="avatar avatar--pequeno" :style="{ background: corDaInicial(r.nome) }"
+                    aria-hidden="true">{{ iniciais(r.nome) }}</span>
+              <span class="recebedor__nome">{{ r.nome }}</span>
+              <span class="estado" :class="`estado--${r.estado}`">{{ ROTULO_ESTADO[r.estado] }}</span>
+            </label>
+            <p v-if="!recebedoresInativar.length" class="aviso aviso--erro pequeno">
+              Ninguém disponível para receber agora (todos offline ou afastados).
+            </p>
+          </div>
+        </fieldset>
+
+        <p v-if="erroInativar" class="aviso aviso--erro" role="alert">{{ erroInativar }}</p>
+
         <div class="modal__acoes">
-          <button class="botao botao--contorno" type="button"
-                  @click="desligando = null">Cancelar</button>
+          <button class="botao botao--contorno" type="button" @click="inativando = null">Cancelar</button>
           <button class="botao botao--perigo" type="button"
-                  @click="confirmarDesligar">Desligar</button>
+                  :disabled="trocandoAtivo || (inativando.em_aberto > 0 && !inativarPara)"
+                  @click="gravarAtivo(inativando, false, inativarPara)">
+            {{ inativando.em_aberto ? `Inativar e transferir ${inativando.em_aberto}` : 'Inativar' }}
+          </button>
         </div>
       </div>
     </div>
@@ -970,6 +1104,12 @@ async function salvar() {
 .estado--disponivel::before { background: var(--ok); }
 .estado--ausente::before { background: var(--aviso); }
 .estado--nao_perturbe::before { background: var(--erro); }
+
+/* O interruptor Ativo/Inativo (25/09): mesmo desenho do da Geral. */
+.interruptor { display: flex; align-items: flex-start; gap: var(--e-3); cursor: pointer; }
+.interruptor input { width: 18px; height: 18px; margin-top: 3px; accent-color: var(--acento); flex: none; }
+.interruptor span { display: flex; flex-direction: column; }
+.interruptor small { font-size: var(--txt-sm); }
 
 .afastar { z-index: calc(var(--z-modal) + 1); }
 .afastar__caixa { max-width: 520px; }

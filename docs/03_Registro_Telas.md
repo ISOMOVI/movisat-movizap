@@ -70,6 +70,7 @@ MOD_a.b[.c]
 | `CFG_9.1` | Registro de telas | `/config/telas` | `owner` | 1 |
 | `CFG_10.1` | Minha conta | `/config/minha-conta` | `atendimento` | 1 |
 | `CFG_11.1` | Notificações | `/config/notificacoes` | `atendimento` | 1 |
+| `CFG_12.1` | Mensagens rápidas | `/config/mensagens-rapidas` | `atendimento` | 1 |
 | `CFG_2.2` | IA — analytics | `/config/ia/analytics` | `owner` | 2 |
 | `REL_1.1` | Relatórios | `/relatorios` | `owner` | 3 |
 
@@ -146,6 +147,7 @@ O campo **`icone`** deste registro é o que o menu desenha, e ele é **a fonte
 | `CFG_9.1` Registro de telas | `bi-list-check` | aba |
 | `CFG_10.1` Minha conta | `bi-person-circle` | aba |
 | `CFG_11.1` Notificações | `bi-bell` | aba |
+| `CFG_12.1` Mensagens rápidas | `bi-lightning` | aba |
 
 ### `bi-question-circle` — a ajuda da tela (27/08)
 
@@ -327,8 +329,8 @@ Fixa no rodapé de **toda** tela principal. Modelo mental: barra do Excel / bloc
 | Perfil | Permissões | Telas na prática |
 |---|---|---|
 | `owner` | todas | tudo, inclusive o que é exclusivo do owner |
-| `admin` | `atendimento` `equipe` | as de `atendimento` + `CAD_2.1` `CAD_2.2`; no `/config`, só `CFG_10.1` e `CFG_11.1` |
-| `atendimento` | `atendimento` | `INI_1.1` `ATD_1.*` `ATD_5.1` `ATD_6.1` `EML_1.1` `CFG_0.1` › `CFG_10.1` `CFG_11.1` |
+| `admin` | `atendimento` `equipe` | as de `atendimento` + `CAD_2.1` `CAD_2.2`; no `/config`, só `CFG_10.1`, `CFG_11.1` e `CFG_12.1` (25/09: *"Owner e admin criam"* os Padrões e Formulários) |
+| `atendimento` | `atendimento` | `INI_1.1` `ATD_1.*` `ATD_5.1` `ATD_6.1` `EML_1.1` `CFG_0.1` › `CFG_10.1` `CFG_11.1` `CFG_12.1` |
 | `cadastro` | `cadastro` | `CAD_1.1` `CAD_1.2` |
 
 Perfil é conjunto de **permissões**, e a permissão de cada tela vem do registro.

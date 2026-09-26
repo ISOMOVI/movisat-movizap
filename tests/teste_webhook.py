@@ -49,6 +49,14 @@ class TestChaveDeApiNaoFicaGuardada:
         assert original["apikey"] == "segredo-de-verdade", \
             "mexer no dict recebido faria o chamador perder o dado sem saber"
 
+    def test_o_destination_tambem_vira_marcador(self):
+        """🚨 25/09: a URL do webhook leva o segredo no CAMINHO, e estava em
+        toda linha de `webhook_evento`."""
+        limpo = webhook._sem_segredo({"destination": "https://x/api/webhook/evolution/SEGREDO",
+                                      "event": "x"})
+        assert limpo["destination"] == webhook.MARCADOR
+        assert "SEGREDO" not in str(limpo)
+
     def test_corpo_sem_apikey_passa_intacto(self):
         corpo = {"event": "connection.update"}
         assert webhook._sem_segredo(corpo) is corpo

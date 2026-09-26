@@ -39,6 +39,8 @@ from . import automacao
 from . import ia
 from . import inicio as tela_inicial
 from . import informativos
+from . import ligacoes
+from . import mensagens_rapidas
 from . import midia
 from . import operacao
 from . import preferencia
@@ -1344,6 +1346,7 @@ def resumo_das_conversas(usuario: dict = Depends(auth.requer_tela("ATD_1.1"))):
 def listar_conversas(estado: str | None = None, sem_dono: bool = False,
                      minhas: bool = False, busca: str = "",
                      relacoes: str = "", meus_times: bool = False,
+                     time_id: int | None = None,
                      bloqueados: bool = False,
                      usuario: dict = Depends(auth.requer_tela("ATD_1.1"))):
     """A lista da caixa: conversa direta e grupo juntos, como no WhatsApp.
@@ -1367,6 +1370,9 @@ def listar_conversas(estado: str | None = None, sem_dono: bool = False,
         visualizador_id=_atendente_do_usuario(usuario),
         # 🔵 23/09: a aba "Time" -- sem dono, dos times de que eu sou membro.
         do_meu_time=_atendente_do_usuario(usuario) if meus_times else None,
+        # 🔵 25/09: *"filtro por times que a pessoa estiver inserida"*. Só vale
+        # junto de `meus_times`: um time de que não sou membro devolve vazio.
+        do_meu_time_id=time_id if meus_times else None,
         # 🔵 23/09: o filtro "Bloqueados" -- os números que o painel bloqueou.
         bloqueados=bloqueados)
 
@@ -1559,7 +1565,7 @@ def ver_midia(midia_id: int,
 
 
 @app.get("/api/conversas/{conversa_id}")
-def ver_conversa(conversa_id: int,
+def ver_conversa(conversa_id: int, ler: bool = True,
                  usuario: dict = Depends(auth.requer_tela("ATD_1.2"))):
     achada = conversas.conversa(conversa_id)
     if not achada:
@@ -1568,7 +1574,14 @@ def ver_conversa(conversa_id: int,
     # mesmo gesto do WhatsApp. Fica AQUI e não numa rota própria porque a
     # tela já chama esta a cada abertura, e uma rota a mais seria um segundo
     # caminho para o mesmo fato.
-    conversas.marcar_lida(conversa_id, _atendente_do_usuario(usuario))
+    #
+    # 🔵 25/09 (*"Só marca lida vista"*): a Caixa relê a conversa aberta a
+    # cada 8 s, MESMO COM A ABA ESCONDIDA, e cada releitura marcava como lida
+    # -- a mensagem chegava com a pessoa fora da tela e virava "lida" sem
+    # ninguém ver, sem tocar. A releitura manda `ler=false` quando a aba está
+    # escondida; abrir continua marcando.
+    if ler:
+        conversas.marcar_lida(conversa_id, _atendente_do_usuario(usuario))
     return achada
 
 
@@ -2352,9 +2365,15 @@ class AtendenteEntrada(BaseModel):
     email: str | None = Field(default=None, max_length=200)
     perfil: str = "atendimento"
     estado: str = "disponivel"
-    max_conversas: int | None = None
     fuso: str = "America/Sao_Paulo"
-    ativo: bool = True
+    # 🔵 25/09: `max_conversas` saiu (*"não deve haver máximo de conversas"*)
+    # e `ativo` também -- inativar tem rota própria, com o que ela precisa
+    # fazer (`PUT /api/atendentes/{id}/ativo`). Campo a mais é ignorado.
+
+
+class AtivoEntrada(BaseModel):
+    ativo: bool
+    transferir_para: int | None = None
 
 
 class SenhaEntrada(BaseModel):
@@ -2375,7 +2394,7 @@ def _so_owner_mexe_no_owner(usuario: dict, atendente_id: int) -> None:
     O login é Google, e a conta do owner passa de mão trocando o e-mail DELA
     (decisão de 12/08): um admin que editasse a linha do owner trocaria o
     e-mail para o próprio e viraria owner. Vale para dados, senha, jornada e
-    desligar -- toda rota que escreve num atendente pelo id.
+    ativar/inativar -- toda rota que escreve num atendente pelo id.
     """
     if usuario.get("owner"):
         return
@@ -2383,7 +2402,7 @@ def _so_owner_mexe_no_owner(usuario: dict, atendente_id: int) -> None:
     if alvo and alvo["owner"]:
         raise HTTPException(
             status_code=403,
-            detail="A conta do owner só o próprio owner edita.")
+            detail="Você não tem permissão para esta alteração.")
 
 
 def _so_owner_da_admin(usuario: dict, perfil_novo: str,
@@ -2401,7 +2420,7 @@ def _so_owner_da_admin(usuario: dict, perfil_novo: str,
     if (perfil_atual == "admin") != (perfil_novo == "admin"):
         raise HTTPException(
             status_code=403,
-            detail="Só o owner define quem é admin.")
+            detail="Você não tem permissão para esta alteração.")
 
 
 class FaixaJornada(BaseModel):
@@ -2448,8 +2467,18 @@ def listar_times(incluir_inativos: bool = False,
     ficam sem opção"), e o painel abria vazio para sempre -- achado pelo
     relato da Claudia ("cadê os atendentes?"). CRIAR e EDITAR time continuam
     em CAD_2.2: só listar é ação de quem atende, não de quem administra.
+
+    🔵 25/09: *"owner não deve aparecer para admin"* -- nem entre os membros.
+    E `sou_membro`: a aba Time da Caixa filtra *"por times que a pessoa
+    estiver inserida"*, e a Caixa não sabe o próprio id antes de abrir uma
+    conversa.
     """
-    return operacao.listar_times(incluir_inativos)
+    lista = operacao.listar_times(incluir_inativos,
+                                  ocultar_owner=not usuario.get("owner"))
+    eu = _atendente_do_usuario(usuario)
+    for t in lista:
+        t["sou_membro"] = any(m.get("id") == eu for m in (t.get("membros") or []))
+    return lista
 
 
 @app.post("/api/times", status_code=201)
@@ -2471,21 +2500,28 @@ def definir_membros(time_id: int, dados: MembrosDoTime,
     """🔵 24/09: quem está no time se decide AQUI, na tela de Times. A
     CAD_2.1 passou a só mostrar os times de cada um, e a rota
     `PUT /api/atendentes/{id}/times` saiu -- duas portas gravando o mesmo
-    vínculo, uma delas escondida, é como uma some sem ninguém ver."""
-    return operacao.definir_membros(time_id, dados.atendentes)
+    vínculo, uma delas escondida, é como uma some sem ninguém ver.
+
+    🚨 25/09: quem não vê o owner não o manda na lista -- e sem preservar, o
+    salvar o tiraria do time em silêncio."""
+    return operacao.definir_membros(time_id, dados.atendentes,
+                                    preservar_owner=not usuario.get("owner"))
 
 
 @app.get("/api/atendentes")
 def listar_atendentes(incluir_inativos: bool = False,
                       usuario: dict = Depends(auth.requer_tela("CAD_2.1"))):
-    return operacao.listar_atendentes(incluir_inativos)
+    """🔵 25/09: *"owner não deve aparecer para admin"*."""
+    return operacao.listar_atendentes(incluir_inativos,
+                                      ver_owner=bool(usuario.get("owner")))
 
 
 @app.get("/api/atendentes/{atendente_id}")
 def ver_atendente(atendente_id: int,
                   usuario: dict = Depends(auth.requer_tela("CAD_2.1"))):
     achado = operacao.atendente(atendente_id)
-    if not achado:
+    # O owner é invisível para quem não é owner: 404, como se não existisse.
+    if not achado or (achado["owner"] and not usuario.get("owner")):
         raise HTTPException(status_code=404, detail="Atendente não encontrado.")
     return achado
 
@@ -2501,23 +2537,27 @@ def criar_atendente(dados: AtendenteEntrada,
     _so_owner_da_admin(usuario, dados.perfil)
     return operacao.criar_atendente(
         dados.nome, dados.login, dados.email, dados.perfil, dados.estado,
-        dados.max_conversas, dados.fuso)
+        dados.fuso)
 
 
-@app.post("/api/atendentes/{atendente_id}/desligar")
-def desligar_atendente(atendente_id: int,
-                       usuario: dict = Depends(auth.requer_tela("CAD_2.1"))):
-    """Desliga e SOLTA o que a pessoa estava segurando.
-
-    🚨 O QUE FALTAVA NÃO ERA O BOTÃO, ERA O EFEITO. Desativar gravava
-    `ativo = false` e nada mais: quem saía com 12 conversas abertas deixava
-    dono que nunca mais entra, e elas ficavam invisíveis -- não aparecem em
-    "sem dono" porque TÊM dono, e ninguém as vê porque o dono não entra.
+@app.put("/api/atendentes/{atendente_id}/ativo")
+def definir_ativo(atendente_id: int, dados: AtivoEntrada,
+                  usuario: dict = Depends(auth.requer_tela("CAD_2.1"))):
+    """🔵 25/09: o interruptor Ativo/Inativo, no lugar do "desligar" -- *"inativo
+    não loga a conta permanece lá ... apenas admin e owner podem mexer"*.
+    A CAD_2.1 é de owner e admin; `_so_owner_mexe_no_owner` barra o admin na
+    conta do owner. As conversas abertas vão para quem a tela escolheu.
     """
     _so_owner_mexe_no_owner(usuario, atendente_id)
-    r = operacao.desligar(atendente_id, quem_edita=usuario.get("login"))
+    r = operacao.definir_ativo(atendente_id, dados.ativo,
+                               quem_edita=usuario.get("login"),
+                               transferir_para=dados.transferir_para)
     if not r["ok"]:
-        raise HTTPException(status_code=409, detail=r["motivo"])
+        raise HTTPException(
+            status_code=409,
+            detail=f"{r['transferidas']} conversa(s) transferida(s), mas "
+                   f"{len(r['falhas'])} não: {r['falhas'][0]['motivo']} "
+                   "A pessoa continua ativa.")
     return r
 
 
@@ -2637,9 +2677,10 @@ def meu_perfil(usuario: dict = Depends(auth.get_usuario)):
     eu = _meu_atendente(usuario)
     linha = banco.um(
         """SELECT a.id, a.nome, a.login, a.email, a.perfil, a.estado,
-                  a.foto IS NOT NULL AS tem_foto, a.fuso, a.max_conversas,
+                  a.foto IS NOT NULL AS tem_foto, a.fuso,
                   a.ativo, a.estado_automatico, a.sempre_online,
-                  a.afastamento_motivo, a.afastado_ate,
+                  a.afastamento_motivo, a.afastado_de, a.afastado_ate,
+                  a.afasta_em, a.afasta_ate, a.afasta_motivo,
                   EXISTS (SELECT 1 FROM atendente_jornada j
                            WHERE j.atendente_id = a.id) AS tem_jornada
              FROM atendente a WHERE a.id = %s""", (eu,))
@@ -2716,32 +2757,57 @@ def minhas_notificacoes(usuario: dict = Depends(auth.get_usuario)):
       pisca (*"some tudo"*); o contador continua.
 
     ⚠️ Sem `requer_tela`: é a pessoa olhando para si, como `/api/eu/perfil`.
-    Medido em 24/09: as duas listas custam 24-183 ms por pessoa.
+
+    🟡 25/09 (Plano 2): as duas listas vêm SÓ COM AS NÃO LIDAS
+    (`so_nao_lidas`), pela mesma régua da bolinha, e SEM o teto de 500 que
+    cortava a contagem calado. `donas` passou a ser uma consulta própria:
+    antes saía da lista inteira. E cada item leva o `trecho`, para o balão
+    do Windows (*"nome + trecho"*, decisão dele).
     """
     eu = _atendente_do_usuario(usuario)
     if not eu:
         return {"ativa": False, "tom": "classico", "volume": 3,
-                "abas": {"minhas": 0, "time": 0}, "assumidas": []}
-    minhas = conversas.listar(atendente_id=eu, visualizador_id=eu, limite=500)
-    do_time = conversas.listar(do_meu_time=eu, visualizador_id=eu, limite=500)
+                "abas": {"minhas": 0, "time": 0}, "assumidas": [], "donas": []}
+    minhas = conversas.listar(atendente_id=eu, visualizador_id=eu,
+                              limite=100000, so_nao_lidas=True)
+    do_time = conversas.listar(do_meu_time=eu, visualizador_id=eu,
+                               limite=100000, so_nao_lidas=True)
     linha = banco.um("SELECT notificacao_ativa FROM atendente WHERE id = %s", (eu,))
+    donas = [r["id"] for r in banco.varios(
+        "SELECT id FROM conversa WHERE atendente_id = %s", (eu,))]
     return {
         "ativa": bool(linha and linha["notificacao_ativa"]),
         **preferencia.notificacao(eu),
-        "abas": {
-            "minhas": sum(1 for c in minhas if (c.get("nao_lidas") or 0) > 0),
-            "time": sum(1 for c in do_time if (c.get("nao_lidas") or 0) > 0),
-        },
+        "abas": {"minhas": len(minhas), "time": len(do_time)},
         # Todas as que são MINHAS (lidas ou não): é o que separa "uma conversa
         # minha voltou a ter mensagem" de "chegou uma conversa NOVA para mim"
         # -- a nova toca mesmo acima do teto de 4 (decisão dele).
-        "donas": [c["id"] for c in minhas if c.get("atendente_id") == eu],
+        "donas": donas,
         "assumidas": [
             {"id": c["id"], "nao_lidas": c["nao_lidas"],
-             "nome": c.get("contato_nome") or c.get("grupo_nome") or c.get("telefone_e164")}
-            for c in minhas
-            if c.get("atendente_id") == eu and (c.get("nao_lidas") or 0) > 0],
+             "nome": c.get("contato_nome") or c.get("grupo_nome") or c.get("telefone_e164"),
+             "trecho": _trecho_do_balao(c)}
+            for c in minhas if c.get("atendente_id") == eu],
     }
+
+
+# O que o balão mostra quando a última mensagem não é texto.
+_ROTULO_MIDIA = {"imagem": "Foto", "video": "Vídeo", "audio": "Áudio",
+                 "documento": "Documento", "figurinha": "Figurinha",
+                 "localizacao": "Localização", "contato": "Contato"}
+
+
+def _trecho_do_balao(c: dict, teto: int = 100) -> str:
+    """🔵 25/09: o balão mostra *"nome + trecho"*. Até ~100 caracteres da
+    última mensagem, e mídia vira a palavra (Foto, Áudio...)."""
+    texto = (c.get("ultima_mensagem") or "").strip()
+    rotulo = _ROTULO_MIDIA.get(c.get("ultimo_tipo") or "")
+    if rotulo and not texto:
+        return rotulo
+    if rotulo:
+        texto = f"{rotulo}: {texto}"
+    texto = " ".join(texto.split())
+    return texto if len(texto) <= teto else texto[:teto - 1].rstrip() + "…"
 
 
 @app.put("/api/eu/notificacao")
@@ -2757,7 +2823,7 @@ def definir_minha_notificacao(dados: MinhaNotificacao,
 def _so_owner(usuario: dict) -> None:
     if not usuario.get("owner"):
         raise HTTPException(status_code=403,
-                            detail="Ligar ou desligar a notificação de alguém é do owner.")
+                            detail="Você não tem permissão para esta alteração.")
 
 
 @app.get("/api/notificacoes/equipe")
@@ -2770,6 +2836,105 @@ def notificacoes_da_equipe(usuario: dict = Depends(auth.requer_tela("CFG_11.1"))
             WHERE ativo ORDER BY nome""")
 
 
+class MensagemRapidaEntrada(BaseModel):
+    tipo: str = "nota"
+    apelido: str = Field(min_length=1, max_length=60)
+    conteudo: str = Field(min_length=1, max_length=4000)
+    ativo: bool = True
+
+
+@app.get("/api/mensagens-rapidas")
+def mensagens_rapidas_para_usar(onde: str = "cliente",
+                                usuario: dict = Depends(auth.get_usuario)):
+    """🔵 25/09 (Plano 3): o que o botão redondo da conversa oferece. Todo
+    mundo que atende usa; no Chat interno (`onde=interno`), só Minhas notas e
+    Formulários."""
+    return mensagens_rapidas.para_usar(_atendente_do_usuario(usuario), onde)
+
+
+@app.get("/api/mensagens-rapidas/gestao")
+def mensagens_rapidas_para_gerir(usuario: dict = Depends(auth.requer_tela("CFG_12.1"))):
+    r = mensagens_rapidas.para_gerir(_atendente_do_usuario(usuario))
+    r["pode_equipe"] = mensagens_rapidas.pode_gerir_equipe(usuario)
+    return r
+
+
+@app.post("/api/mensagens-rapidas", status_code=201)
+def criar_mensagem_rapida(dados: MensagemRapidaEntrada,
+                          usuario: dict = Depends(auth.requer_tela("CFG_12.1"))):
+    return mensagens_rapidas.criar(usuario, _atendente_do_usuario(usuario), dados.tipo,
+                                   dados.apelido, dados.conteudo, dados.ativo)
+
+
+@app.put("/api/mensagens-rapidas/{mensagem_id}")
+def atualizar_mensagem_rapida(mensagem_id: int, dados: MensagemRapidaEntrada,
+                              usuario: dict = Depends(auth.requer_tela("CFG_12.1"))):
+    return mensagens_rapidas.atualizar(mensagem_id, usuario, _atendente_do_usuario(usuario),
+                                       dados.apelido, dados.conteudo, dados.ativo)
+
+
+@app.delete("/api/mensagens-rapidas/{mensagem_id}")
+def apagar_mensagem_rapida(mensagem_id: int,
+                           usuario: dict = Depends(auth.requer_tela("CFG_12.1"))):
+    return mensagens_rapidas.apagar(mensagem_id, usuario, _atendente_do_usuario(usuario))
+
+
+# ── Ligações do MicroSIP: o agente de cada PC (Plano 5, 25/09) ──────────────
+#
+# 🔵 *"inicialmente o backup das ligações na VPS"*. Sem login de tela: quem
+# fala é o agente do PC, com a chave do ramal no cabeçalho `X-Agente-Chave`
+# (256 bits; o banco guarda só o hash). Ver `movizap/ligacoes.py`.
+
+class BatimentoEntrada(BaseModel):
+    pc: str | None = Field(default=None, max_length=100)
+    versao: str | None = Field(default=None, max_length=20)
+    pendentes: int | None = None
+    erro: str | None = Field(default=None, max_length=500)
+
+
+def _agente(request: Request) -> dict:
+    try:
+        return ligacoes.agente_da_chave(request.headers.get("X-Agente-Chave"))
+    except ligacoes.ChaveInvalida as e:
+        raise HTTPException(status_code=401, detail=str(e)) from e
+
+
+@app.post("/api/ligacoes/agente/batimento")
+def batimento_do_agente(dados: BatimentoEntrada, request: Request):
+    """Toda passada do agente bate aqui, mesmo sem nada a enviar: é o que
+    prova que o PC está vivo (o alerta de mais de 1 dia sem contato)."""
+    return ligacoes.batimento(_agente(request), dados.pc, dados.versao,
+                              dados.pendentes, dados.erro)
+
+
+@app.post("/api/ligacoes/agente/enviar")
+async def ligacao_do_agente(request: Request, dados: str = Form(...),
+                            arquivo: UploadFile | None = File(None)):
+    """Uma ligação do histórico e, se houver, UMA gravação dela. Idempotente:
+    reenviar devolve "já tinha" e o mesmo hash."""
+    import json
+    agente = _agente(request)
+    try:
+        meta = json.loads(dados)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail="`dados` não é JSON.") from e
+    conteudo = None
+    nome = None
+    if arquivo is not None:
+        pedacos, total = [], 0
+        while True:
+            pedaco = await arquivo.read(256 * 1024)
+            if not pedaco:
+                break
+            total += len(pedaco)
+            if total > ligacoes.TETO:
+                raise HTTPException(status_code=413,
+                                    detail=f"Gravação acima de {ligacoes.TETO_MB} MB.")
+            pedacos.append(pedaco)
+        conteudo, nome = b"".join(pedacos), arquivo.filename
+    return ligacoes.registrar(agente, meta, conteudo, nome, meta.get("pc"))
+
+
 class NotificacaoAtiva(BaseModel):
     ativa: bool
 
@@ -2778,9 +2943,12 @@ class NotificacaoAtiva(BaseModel):
 def definir_notificacao_de(atendente_id: int, dados: NotificacaoAtiva,
                            usuario: dict = Depends(auth.requer_tela("CFG_11.1"))):
     _so_owner(usuario)
-    banco.executar(
+    alterou = banco.executar(
         "UPDATE atendente SET notificacao_ativa = %s, atualizado_em = now() WHERE id = %s",
         (dados.ativa, atendente_id))
+    # 🟡 25/09: id inexistente respondia 200 com corpo vazio.
+    if not alterou:
+        raise HTTPException(status_code=404, detail="Atendente não encontrado.")
     # A prova é reler, não o código de retorno.
     return banco.um("SELECT id, nome, notificacao_ativa FROM atendente WHERE id = %s",
                     (atendente_id,))
@@ -2801,7 +2969,7 @@ def definir_meu_sempre_online(dados: SempreOnline,
     """
     if not usuario.get("owner"):
         raise HTTPException(status_code=403,
-                            detail="\"Sempre online\" é exclusivo do owner.")
+                            detail="Você não tem permissão para esta alteração.")
     eu = _meu_atendente(usuario)
     presenca.definir_sempre_online(eu, dados.ligado)
     return banco.um("SELECT id, sempre_online FROM atendente WHERE id = %s", (eu,))
@@ -2947,8 +3115,15 @@ def situacao_da_distribuicao(usuario: dict = Depends(auth.requer_tela("ATD_1.1")
 
 class Afastamento(BaseModel):
     motivo: str = Field(min_length=1, max_length=60)
+    # 🔵 25/09: saída e volta no calendário. Sem `de`, a saída é hoje; a volta
+    # é obrigatória (`presenca.afastar` recusa sem ela, com a frase).
+    de: date | None = None
     ate: date | None = None
     transferir_para: int | None = None
+
+
+class MinhaVolta(BaseModel):
+    volta: date
 
 
 @app.post("/api/atendentes/{atendente_id}/afastar")
@@ -2958,7 +3133,8 @@ def afastar_atendente(atendente_id: int, dados: Afastamento,
     perguntar para qual usuario transferir elas ... é obrigatório e dai
     executa"*. O obrigatório vale aqui também: sem destino, 400."""
     _so_owner_mexe_no_owner(usuario, atendente_id)
-    r = presenca.afastar(atendente_id, dados.motivo, dados.ate, dados.transferir_para)
+    r = presenca.afastar(atendente_id, dados.motivo, dados.ate, dados.transferir_para,
+                         de=dados.de)
     if not r["ok"]:
         raise HTTPException(
             status_code=409,
@@ -2966,6 +3142,14 @@ def afastar_atendente(atendente_id: int, dados: Afastamento,
                    f"{len(r['falhas'])} não: {r['falhas'][0]['motivo']} "
                    "A pessoa NÃO foi afastada.")
     return r
+
+
+@app.put("/api/eu/afastamento")
+def definir_minha_volta(dados: MinhaVolta, usuario: dict = Depends(auth.get_usuario)):
+    """🔵 25/09: *"ela loga e vai na configuração dela e coloca o dia de
+    ontem"* -- a pessoa muda a própria data de volta; hoje ou antes encerra."""
+    eu = _meu_atendente(usuario)
+    return presenca.definir_minha_volta(eu, dados.volta)
 
 
 @app.post("/api/atendentes/{atendente_id}/retornar")
@@ -2982,8 +3166,7 @@ def atualizar_atendente(atendente_id: int, dados: AtendenteEntrada,
     _so_owner_da_admin(usuario, dados.perfil, atendente_id)
     return operacao.atualizar_atendente(
         atendente_id, dados.nome, dados.login, dados.email, dados.perfil,
-        dados.estado, dados.max_conversas, dados.ativo, dados.fuso,
-        quem_edita=usuario["login"])
+        dados.estado, dados.fuso)
 
 
 @app.post("/api/atendentes/{atendente_id}/senha")

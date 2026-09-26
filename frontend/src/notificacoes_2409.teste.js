@@ -77,7 +77,8 @@ describe('regra do toque', () => {
     const cinco = [1, 2, 3, 4, 5]
     const antes = estado(cinco, cinco)
     const depois = estado([...cinco, 99], [...cinco, 99])
-    expect(decidirToque(antes, depois)).toEqual({ tocar: true, motivo: 'conversa nova acima do teto' })
+    expect(decidirToque(antes, depois))
+      .toEqual({ tocar: true, motivo: 'conversa nova acima do teto', conversas: [99] })
     // e na leitura seguinte ela já é "minha": não toca de novo
     expect(decidirToque(depois, depois).tocar).toBe(false)
   })
@@ -141,6 +142,7 @@ describe('CFG_11.1 — Notificações', () => {
     respostas['/api/eu/notificacoes'].ativa = false
     const w = mount(Notificacoes)
     await assentar(w)
-    expect(w.text()).toContain('desligadas pelo owner')
+    expect(w.text()).toContain('desligadas')
+    expect(w.text()).not.toContain('owner')
   })
 })

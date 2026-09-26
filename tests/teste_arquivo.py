@@ -90,6 +90,32 @@ class TestTipoDeMidia:
         assert evolution.tipo_de_midia(mime) == esperado
 
 
+class TestAudioComTexto:
+    """🔵 25/09 (Plano 3): áudio não tem legenda no WhatsApp. O texto ia como
+    `caption`, o cliente não o via, e o painel o mostrava como enviado."""
+
+    def test_o_texto_sai_numa_mensagem_propria_depois_do_audio(self, cena, monkeypatch):
+        textos = []
+
+        def texto_falso(instancia, e164, texto, citando=None, mencionados=None):
+            textos.append(texto)
+            return {"id_externo": f"TESTE_ARQ_TXT_{len(textos)}", "status": "PENDING"}
+
+        monkeypatch.setattr(evolution, "enviar_texto", texto_falso)
+        r = conversas.responder_com_arquivo(
+            cena["conversa"], b"OggS" + b"\x00" * 64, "audio/ogg", "voz.ogg",
+            "segue o áudio", cena["dono"])
+        assert r["ok"] is True, r.get("motivo")
+        assert cena["enviados"][0]["legenda"] == "", "a legenda iria para o nada"
+        assert textos == ["segue o áudio"]
+        assert r["texto"]["ok"] is True
+
+    def test_imagem_continua_com_legenda(self, cena):
+        conversas.responder_com_arquivo(
+            cena["conversa"], PNG, "image/png", "foto.png", "olha aí", cena["dono"])
+        assert cena["enviados"][0]["legenda"] == "olha aí"
+
+
 class TestEnvioDeArquivo:
     def test_envia_e_grava_a_mensagem(self, cena):
         r = conversas.responder_com_arquivo(

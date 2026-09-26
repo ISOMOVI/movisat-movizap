@@ -61,8 +61,12 @@ def _texto(valor, campo: str, obrigatorio: bool = True, maximo: int = 200) -> st
 # TIMES — CAD_2.2
 # ============================================================================
 
-def listar_times(incluir_inativos: bool = False) -> list[dict]:
+def listar_times(incluir_inativos: bool = False, ocultar_owner: bool = False) -> list[dict]:
     """Os times com quem está dentro de cada um.
+
+    🔵 25/09, `ocultar_owner`: *"owner não deve aparecer para admin"*. Quem
+    não é owner não o vê entre os membros. Contar não muda: o owner não é
+    `transferivel`, e `qtd_membros` já não o contava.
 
     🚨 `qtd_membros` vem junto de propósito: time sem membro aceita a
     transferência e a conversa não chega em ninguém. A tela mostra isso em
@@ -111,18 +115,19 @@ def listar_times(incluir_inativos: bool = False) -> list[dict]:
                                 ORDER BY a.nome) AS membros
                   FROM atendente_time at
                   JOIN atendente a ON a.id = at.atendente_id
-                 WHERE a.ativo
+                 WHERE a.ativo AND NOT (%s AND a.owner)
                  GROUP BY at.time_id
           ) m ON m.time_id = t.id
          WHERE (%s OR t.ativo)
          ORDER BY t.nome
         """,
-        (incluir_inativos,),
+        (ocultar_owner, incluir_inativos),
     )
 
 
-def time(time_id: int) -> dict | None:
-    achados = [t for t in listar_times(incluir_inativos=True) if t["id"] == time_id]
+def time(time_id: int, ocultar_owner: bool = False) -> dict | None:
+    achados = [t for t in listar_times(incluir_inativos=True, ocultar_owner=ocultar_owner)
+               if t["id"] == time_id]
     return achados[0] if achados else None
 
 
@@ -225,22 +230,33 @@ def _times_do(atendente_id: int) -> list[dict]:
     )
 
 
-def listar_atendentes(incluir_inativos: bool = False) -> list[dict]:
+# As colunas que a CAD_2.1 lê, nas duas consultas (lista e uma pessoa).
+# 🔵 25/09: `max_conversas` saiu (*"não deve haver máximo de conversas"*), e
+# entraram as datas do afastamento marcado (`afasta_*`) e do em curso.
+_COLUNAS_ATENDENTE = """
+    id, login, nome, email, ativo, owner, perfil, estado, fuso,
+    origem, criado_em,
+    (senha_hash IS NOT NULL) AS tem_senha,
+    -- A tela desenha a foto (Minha conta, 17/09) no avatar;
+    -- sem isto ela pediria a foto de quem não tem.
+    (foto IS NOT NULL) AS tem_foto,
+    -- 🔵 24/09: quem pode receber (transferência, afastamento) e
+    -- se o estado veio da regra de tempo.
+    transferivel, estado_automatico, sempre_online,
+    afastamento_motivo, afastado_de, afastado_ate,
+    afasta_em, afasta_ate, afasta_motivo, afasta_substituto_id
+"""
+
+
+def listar_atendentes(incluir_inativos: bool = False, ver_owner: bool = True) -> list[dict]:
+    """🔵 25/09, `ver_owner`: *"owner não deve aparecer para admin, então
+    admin nunca inativará owner"*. Quem não é owner recebe a lista sem ele."""
     linhas = banco.varios(
-        """SELECT id, login, nome, email, ativo, owner, perfil, estado, fuso,
-                  max_conversas, origem, criado_em,
-                  (senha_hash IS NOT NULL) AS tem_senha,
-                  -- A tela desenha a foto (Minha conta, 17/09) no avatar;
-                  -- sem isto ela pediria a foto de quem não tem.
-                  (foto IS NOT NULL) AS tem_foto,
-                  -- 🔵 24/09: quem pode receber (transferência, afastamento) e
-                  -- se o estado veio da regra de tempo.
-                  transferivel, estado_automatico, sempre_online,
-                  afastamento_motivo, afastado_ate
+        f"""SELECT {_COLUNAS_ATENDENTE}
              FROM atendente
-            WHERE (%s OR ativo)
+            WHERE (%s OR ativo) AND (%s OR NOT owner)
             ORDER BY nome""",
-        (incluir_inativos,),
+        (incluir_inativos, ver_owner),
     )
     # 🚨 O NÚMERO QUE FAZ A TELA SER DE RH. Sem ele, "Atendentes" é uma lista
     # de logins: quem está no horário agora, quantas conversas carrega e
@@ -277,17 +293,7 @@ def listar_atendentes(incluir_inativos: bool = False) -> list[dict]:
 
 def atendente(atendente_id: int) -> dict | None:
     linha = banco.um(
-        """SELECT id, login, nome, email, ativo, owner, perfil, estado, fuso,
-                  max_conversas, origem, criado_em,
-                  (senha_hash IS NOT NULL) AS tem_senha,
-                  -- A tela desenha a foto (Minha conta, 17/09) no avatar;
-                  -- sem isto ela pediria a foto de quem não tem.
-                  (foto IS NOT NULL) AS tem_foto,
-                  -- 🔵 24/09: quem pode receber (transferência, afastamento) e
-                  -- se o estado veio da regra de tempo.
-                  transferivel, estado_automatico, sempre_online,
-                  afastamento_motivo, afastado_ate
-             FROM atendente WHERE id = %s""",
+        f"SELECT {_COLUNAS_ATENDENTE} FROM atendente WHERE id = %s",
         (atendente_id,),
     )
     if not linha:
@@ -298,7 +304,7 @@ def atendente(atendente_id: int) -> dict | None:
 
 
 def _validar_campos(nome: str, login: str, email: str | None, perfil: str,
-                    estado: str, max_conversas: int | None) -> tuple:
+                    estado: str) -> tuple:
     nome = _texto(nome, "O nome")
     login = _texto(login, "O login", maximo=60)
     if " " in login:
@@ -310,14 +316,11 @@ def _validar_campos(nome: str, login: str, email: str | None, perfil: str,
         raise DadoInvalido(f"Perfil inválido. Vale: {', '.join(PERFIS)}.")
     if estado not in ESTADOS:
         raise DadoInvalido(f"Estado inválido. Vale: {', '.join(ESTADOS)}.")
-    if max_conversas is not None and max_conversas < 1:
-        raise DadoInvalido("O teto de conversas, se preenchido, é pelo menos 1.")
     return nome, login, email
 
 
 def criar_atendente(nome: str, login: str, email: str | None = None,
                     perfil: str = "atendimento", estado: str = "disponivel",
-                    max_conversas: int | None = None,
                     fuso: str = "America/Sao_Paulo",
                     origem: str | None = None) -> dict:
     """Cria a conta SEM SENHA, de propósito.
@@ -330,18 +333,15 @@ def criar_atendente(nome: str, login: str, email: str | None = None,
     🚨 E NÃO NASCE OWNER. Decisão do usuário em 12/08: o owner é único, e a
     conta passa de mão trocando o e-mail DELA, não criando outra.
     """
-    nome, login, email = _validar_campos(nome, login, email, perfil, estado,
-                                         max_conversas)
+    nome, login, email = _validar_campos(nome, login, email, perfil, estado)
     if perfil == "owner":
-        raise DadoInvalido(
-            "Não se cria owner. O owner é único e a conta passa de mão "
-            "trocando o e-mail da linha existente.")
+        raise DadoInvalido("Este perfil não pode ser criado.")
     try:
         linha = banco.um(
             """INSERT INTO atendente (login, nome, email, perfil, estado,
-                                      max_conversas, fuso, origem)
-               VALUES (%s, %s, %s, %s, %s, %s, %s, %s) RETURNING id""",
-            (login, nome, email, perfil, estado, max_conversas, fuso, origem),
+                                      fuso, origem)
+               VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id""",
+            (login, nome, email, perfil, estado, fuso, origem),
         )
     except psycopg.errors.UniqueViolation as e:
         # 🚨 E-MAIL É ÚNICO DESDE 24/09 (053): a entrada pelo Google casa pelo
@@ -355,15 +355,15 @@ def criar_atendente(nome: str, login: str, email: str | None = None,
 
 def atualizar_atendente(atendente_id: int, nome: str, login: str,
                         email: str | None, perfil: str, estado: str,
-                        max_conversas: int | None, ativo: bool,
-                        fuso: str = "America/Sao_Paulo",
-                        quem_edita: str | None = None) -> dict:
+                        fuso: str = "America/Sao_Paulo") -> dict:
+    """Os dados da pessoa. 🚨 `ativo` NÃO ENTRA AQUI desde 25/09: gravado por
+    esta rota, ele pulava tudo o que inativar precisa fazer (conversas presas
+    com dono que não entra -- o defeito de 07/08). É `definir_ativo`."""
     atual = banco.um("SELECT login, owner, email FROM atendente WHERE id = %s",
                      (atendente_id,))
     if not atual:
         raise DadoInvalido("Atendente não encontrado.")
-    nome, login, email = _validar_campos(nome, login, email, perfil, estado,
-                                         max_conversas)
+    nome, login, email = _validar_campos(nome, login, email, perfil, estado)
 
     # 🚨 O PERFIL `owner` NÃO ENTRA NEM SAI POR AQUI. Editar a linha do owner
     # (nome, e-mail, fuso) continua livre -- o que se barra é PROMOVER alguém
@@ -374,19 +374,13 @@ def atualizar_atendente(atendente_id: int, nome: str, login: str,
     # rebaixar tira o acesso do único administrador do sistema -- que é o
     # mesmo estrago de desativar a própria conta, e por um campo que parece
     # inofensivo num formulário.
+    #
+    # ⚠️ 25/09: as duas recusas dizem o que acontece, não quem decide
+    # (*"owner é invisível para operação do Movizap"*).
     if perfil == "owner" and not atual["owner"]:
-        raise DadoInvalido(
-            "Não se promove ninguém a owner. O owner é único e a conta passa "
-            "de mão trocando o e-mail da linha dele.")
+        raise DadoInvalido("Este perfil não pode ser atribuído.")
     if atual["owner"] and perfil != "owner":
-        raise EmUso(
-            "O owner não pode deixar de ser owner: ele é o único administrador "
-            "do sistema e ninguém poderia devolvê-lo ao lugar.")
-
-    # ⚠️ Desativar a própria conta é o tipo de clique que só se percebe depois
-    # de sair. Barrar aqui é barato; recuperar acesso não é.
-    if not ativo and quem_edita and quem_edita.casefold() == atual["login"].casefold():
-        raise EmUso("Você não pode desativar a sua própria conta.")
+        raise EmUso("Este perfil não pode ser alterado.")
 
     # 🚨 TROCAR O E-MAIL É PASSAR A CONTA — e o `google_sub` tem de ir junto.
     # A entrada pelo Google casa por `google_sub OR email`, e o `sub` fica
@@ -405,11 +399,10 @@ def atualizar_atendente(atendente_id: int, nome: str, login: str,
         banco.executar(
             """UPDATE atendente
                   SET nome = %s, login = %s, email = %s, perfil = %s,
-                      estado = %s, max_conversas = %s, ativo = %s, fuso = %s,
+                      estado = %s, fuso = %s,
                       atualizado_em = now()
                 WHERE id = %s""",
-            (nome, login, email, perfil, estado, max_conversas, ativo, fuso,
-             atendente_id),
+            (nome, login, email, perfil, estado, fuso, atendente_id),
         )
     except psycopg.errors.UniqueViolation as e:
         # 🚨 E-MAIL É ÚNICO DESDE 24/09 (053): a entrada pelo Google casa pelo
@@ -420,62 +413,90 @@ def atualizar_atendente(atendente_id: int, nome: str, login: str,
     return atendente(atendente_id)
 
 
-def desligar(atendente_id: int, quem_edita: str | None = None) -> dict:
-    """Desliga um atendente — e solta o que ele estava segurando.
+def definir_ativo(atendente_id: int, ativo: bool, quem_edita: str | None = None,
+                  transferir_para: int | None = None) -> dict:
+    """O interruptor Ativo/Inativo do perfil (25/09), no lugar do "desligar".
+
+    🔵 *"vamos ligar isso a um status de inativo e ativo no perfil do
+    atendente, um interruptor, inativo não loga a conta permanece lá. sem
+    acesso, apenas admin e owner podem mexer ... sistema nunca pode ficar com
+    menos de 1 owner ativo."*
+
+    · INATIVO NÃO ENTRA: `auth.validar_login` e `auth.get_usuario` recusam
+      `ativo = false` a cada chamada, então a sessão aberta cai na seguinte.
+    · A CONTA FICA: senha, `google_sub`, e-mail e times continuam. O antigo
+      desligar apagava os três primeiros e os times, e não tinha volta -- nem
+      recadastrar dava, porque o e-mail é único (053). Reativar devolve tudo.
+    · 🟡 AS CONVERSAS ABERTAS PASSAM PARA ALGUÉM, obrigatório, pelo mesmo
+      caminho do afastamento. O defeito de 07/08 foi exatamente esse: inativo
+      segurando conversa que ninguém vê.
 
     🚨 NÃO EXISTE APAGAR, E NÃO DEVE EXISTIR. `conversa`, `transferencia`,
-    `mensagem` e `chat_mensagem` apontam para o atendente: apagar a linha faria
-    o histórico mentir sobre quem atendeu.
-
-    🚨 O QUE FALTAVA NÃO ERA O BOTÃO, ERA O EFEITO. Desativar gravava
-    `ativo = false` e mais nada: quem saía da empresa com 12 conversas abertas
-    deixava dono que nunca mais entra, e elas ficavam invisíveis na fila -- não
-    aparecem em "sem dono" porque TÊM dono, e ninguém as vê porque o dono não
-    entra. Agora voltam para a fila.
-
-    ⚠️ A senha é revogada e os times são desfeitos no mesmo ato. Conta sem
-    senha não entra no painel (`validar_login` barra antes do bcrypt), então
-    isto é a porta fechando junto com o crachá.
+    `mensagem` e `chat_mensagem` apontam para o atendente.
     """
+    from . import presenca  # tardio: presenca importa este módulo
+
     atual = banco.um(
         "SELECT id, login, nome, ativo, owner FROM atendente WHERE id = %s",
         (atendente_id,))
     if not atual:
-        return {"ok": False, "motivo": "Atendente não encontrado."}
-    if atual["owner"]:
-        return {"ok": False,
-                "motivo": "O owner não pode ser desligado: ele é o único "
-                          "administrador do sistema."}
-    if quem_edita and quem_edita.casefold() == atual["login"].casefold():
-        return {"ok": False, "motivo": "Você não pode desligar a si mesmo."}
-    if not atual["ativo"]:
-        return {"ok": False, "motivo": "Este atendente já está desligado."}
+        raise DadoInvalido("Atendente não encontrado.")
+    ativo = bool(ativo)
+    if ativo == atual["ativo"]:
+        return {"ok": True, "nome": atual["nome"], "ativo": ativo, "transferidas": 0}
 
-    with banco.cursor() as cur:
-        # 🚨 AS CONVERSAS PRIMEIRO. Se o desligamento falhasse depois de
-        # soltar, o pior caso é conversa na fila com a pessoa ainda ativa --
-        # visível e corrigível. Na ordem inversa, o pior caso é conversa presa
-        # com dono que não entra, que é justamente o defeito.
-        cur.execute(
-            """UPDATE conversa SET atendente_id = NULL, estado = 'fila',
-                                   atualizada_em = now()
-                WHERE atendente_id = %s AND estado <> 'resolvida'""",
-            (atendente_id,))
-        soltas = cur.rowcount
-        cur.execute(
-            """UPDATE conversa_participante SET saiu_em = now()
-                WHERE atendente_id = %s AND saiu_em IS NULL""", (atendente_id,))
-        cur.execute("DELETE FROM atendente_time WHERE atendente_id = %s",
-                    (atendente_id,))
-        cur.execute(
+    if ativo:
+        # Volta sem estado de trabalho: offline até a pessoa entrar e escolher.
+        banco.executar(
             """UPDATE atendente
-                  SET ativo = false, senha_hash = NULL, google_sub = NULL,
+                  SET ativo = true, estado = 'offline', estado_automatico = false,
                       atualizado_em = now()
                 WHERE id = %s""", (atendente_id,))
+        log.info("atendente %s reativado", atendente_id)
+        return {"ok": True, "nome": atual["nome"], "ativo": True, "transferidas": 0}
 
-    log.info("atendente %s desligado; %s conversa(s) voltaram para a fila",
-             atendente_id, soltas)
-    return {"ok": True, "nome": atual["nome"], "conversas_soltas": soltas}
+    # ⚠️ Inativar a própria conta é o tipo de clique que só se percebe depois
+    # de sair. Barrar aqui é barato; recuperar acesso não é.
+    if quem_edita and quem_edita.casefold() == atual["login"].casefold():
+        raise EmUso("Você não pode inativar a sua própria conta.")
+    if atual["owner"]:
+        outros = banco.um(
+            "SELECT count(*) AS n FROM atendente WHERE owner AND ativo AND id <> %s",
+            (atendente_id,))
+        if not outros["n"]:
+            raise EmUso("Esta conta não pode ser inativada: o sistema ficaria "
+                        "sem administração.")
+
+    abertas = presenca.conversas_abertas(atendente_id)
+    if abertas:
+        if not transferir_para:
+            raise DadoInvalido(
+                f"{atual['nome']} tem {len(abertas)} conversa(s) em aberto: "
+                "escolha quem vai recebê-las.")
+        if int(transferir_para) == int(atendente_id):
+            raise DadoInvalido("Escolha outra pessoa para receber as conversas.")
+        ok, motivo = presenca.pode_receber(int(transferir_para))
+        if not ok:
+            raise DadoInvalido(motivo)
+
+    # 🚨 AS CONVERSAS PRIMEIRO. Se inativar falhasse depois de transferir, o
+    # pior caso é a pessoa ativa sem conversa -- visível e corrigível. Na
+    # ordem inversa, é conversa presa com dono que não entra.
+    r = presenca.transferir_abertas(atendente_id, transferir_para,
+                                    f"{atual['nome']} ficou inativo.",
+                                    fila_se_falhar=False)
+    if r["falhas"]:
+        return {"ok": False, "nome": atual["nome"],
+                "transferidas": r["abertas"] - len(r["falhas"]), "falhas": r["falhas"]}
+    banco.executar(
+        """UPDATE atendente
+              SET ativo = false, estado = 'offline', estado_automatico = false,
+                  atualizado_em = now()
+            WHERE id = %s""", (atendente_id,))
+    log.info("atendente %s inativado; %d conversa(s) transferida(s)",
+             atendente_id, r["abertas"])
+    return {"ok": True, "nome": atual["nome"], "ativo": False,
+            "transferidas": r["abertas"]}
 
 
 def definir_senha(atendente_id: int, senha: str) -> dict:
@@ -493,58 +514,46 @@ def definir_senha(atendente_id: int, senha: str) -> dict:
     return atendente(atendente_id)
 
 
-def definir_times(atendente_id: int, ids: list[int]) -> dict:
-    if not banco.um("SELECT id FROM atendente WHERE id = %s", (atendente_id,)):
-        raise DadoInvalido("Atendente não encontrado.")
-    ids = sorted(set(int(i) for i in ids or []))
-    if ids:
-        achados = banco.varios("SELECT id FROM time WHERE id = ANY(%s)", (ids,))
-        if len(achados) != len(ids):
-            raise DadoInvalido("Algum time enviado não existe.")
-    # Uma transação só: trocar o conjunto inteiro. Meio caminho aqui deixaria
-    # o atendente fora de todos os times.
-    with banco.cursor() as cur:
-        cur.execute("DELETE FROM atendente_time WHERE atendente_id = %s", (atendente_id,))
-        for time_id in ids:
-            cur.execute(
-                "INSERT INTO atendente_time (atendente_id, time_id) VALUES (%s, %s)",
-                (atendente_id, time_id))
-    return atendente(atendente_id)
-
-
-def definir_membros(time_id: int, ids: list[int]) -> dict:
-    """Troca quem está no time. O mesmo vínculo de `definir_times`, visto
-    pelo outro lado.
+def definir_membros(time_id: int, ids: list[int], preservar_owner: bool = False) -> dict:
+    """Troca quem está no time.
 
     🔵 Decisão dele em 24/09: *"vamos deixar a tela de times vincular os
     atendentes e no cadastro do atendentes pode ter os times dos quais são
-    vinculados, mas só visualizar"*. Daqui em diante é a CAD_2.2 que grava.
+    vinculados, mas só visualizar"*. Só a CAD_2.2 grava este vínculo.
 
     ⚠️ SÓ TROCA OS ATIVOS. A tela lista quem está ativo; apagar o vínculo de
     um inativo porque ele não apareceu na lista seria perder dado por não
-    mostrá-lo. (Desligar já tira a pessoa dos times -- isto é a segunda ponta.)
+    mostrá-lo -- e desde 25/09 reativar devolve os times.
+
+    🚨 `preservar_owner` (25/09): para o admin o owner não aparece, então ele
+    nunca vem na lista enviada. Sem preservar, salvar o time Geral o tiraria
+    de lá em silêncio.
     """
     if not banco.um("SELECT id FROM time WHERE id = %s", (time_id,)):
         raise DadoInvalido("Time não encontrado.")
     ids = sorted(set(int(i) for i in ids or []))
     if ids:
         achados = banco.varios(
-            "SELECT id FROM atendente WHERE id = ANY(%s) AND ativo", (ids,))
+            "SELECT id, owner FROM atendente WHERE id = ANY(%s) AND ativo", (ids,))
         if len(achados) != len(ids):
-            raise DadoInvalido("Algum atendente enviado não existe ou está desligado.")
-    # Uma transação só, como em `definir_times`: meio caminho deixaria o time
-    # vazio, e time vazio aceita transferência que não chega a ninguém.
+            raise DadoInvalido("Algum atendente enviado não existe ou está inativo.")
+        if preservar_owner:
+            ids = [a["id"] for a in achados if not a["owner"]]
+    # Uma transação só: meio caminho deixaria o time vazio, e time vazio
+    # aceita transferência que não chega a ninguém.
     with banco.cursor() as cur:
         cur.execute(
             """DELETE FROM atendente_time at
                 USING atendente a
-                WHERE a.id = at.atendente_id AND a.ativo AND at.time_id = %s""",
-            (time_id,))
+                WHERE a.id = at.atendente_id AND a.ativo AND at.time_id = %s
+                  AND NOT (%s AND a.owner)""",
+            (time_id, preservar_owner))
         for atendente_id in ids:
             cur.execute(
-                "INSERT INTO atendente_time (atendente_id, time_id) VALUES (%s, %s)",
+                """INSERT INTO atendente_time (atendente_id, time_id) VALUES (%s, %s)
+                   ON CONFLICT DO NOTHING""",
                 (atendente_id, time_id))
-    return time(time_id)
+    return time(time_id, ocultar_owner=preservar_owner)
 
 
 def _hhmm(valor: str, campo: str) -> _hora:

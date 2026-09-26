@@ -1146,7 +1146,9 @@ def listar(estado: str | None = None, atendente_id: int | None = None,
            relacoes: list[str] | None = None,
            visualizador_id: int | None = None,
            do_meu_time: int | None = None,
-           bloqueados: bool = False) -> list[dict]:
+           bloqueados: bool = False,
+           do_meu_time_id: int | None = None,
+           so_nao_lidas: bool = False) -> list[dict]:
     """As conversas para a lista da caixa de entrada.
 
     Cada linha traz o que o doc pede: nome (ou telefone, quando não
@@ -1211,6 +1213,12 @@ def listar(estado: str | None = None, atendente_id: int | None = None,
                AND c.time_id IN (SELECT at.time_id FROM atendente_time at
                                   WHERE at.atendente_id = %s)""")
         params.append(do_meu_time)
+        # 🔵 25/09: *"o filtro dele pode ter filtro por times que a pessoa
+        # estiver inserida"*. Um time só, DENTRO dos meus: o IN de cima
+        # continua valendo, então time de que não sou membro devolve vazio.
+        if do_meu_time_id:
+            condicoes.append("c.time_id = %s")
+            params.append(do_meu_time_id)
 
     # ---- filtro por tipo de cadastro (pedido do usuário em 25/08) ----------
     # 🚨 "SEM CADASTRO" E "SEM IDENTIFICAÇÃO" SÃO COISAS DIFERENTES, e o
@@ -1239,6 +1247,12 @@ def listar(estado: str | None = None, atendente_id: int | None = None,
     if onde_busca:
         condicoes.append(onde_busca)
         params.extend(params_busca)
+    # 🟡 25/09 (Plano 2): SÓ AS QUE TÊM NÃO LIDA, pela MESMA régua da bolinha
+    # (`nl.tem`, o LATERAL de baixo). É o que o Notificador pergunta a cada 8 s
+    # -- antes ele trazia a lista inteira (até 500) e contava na mão, e o que
+    # passasse de 500 sumia calado. Sem parâmetro aqui: `nl` já usa os seus.
+    if so_nao_lidas and visualizador_id:
+        condicoes.append("nl.tem")
 
     # ---- a ordem ------------------------------------------------------------
     # 🚨 CONCLUÍDA VAI PARA O FIM DA FILA. A lista é a fila de quem espera, e
@@ -2613,6 +2627,13 @@ def responder_com_arquivo(conversa_id: int, dados: bytes, mime: str,
             (atendente_id, conversa_id))
 
     tipo = evolution.tipo_de_midia(mime)
+    # 🔵 25/09 (Plano 3, *"se não estiver assim hoje, já aproveite revisitar e
+    # ajustar"*): ÁUDIO NÃO TEM LEGENDA NO WHATSAPP. O texto ia como
+    # `caption`, o cliente não o via, e o painel o mostrava como enviado. Com
+    # áudio, o texto sai numa mensagem própria, logo depois.
+    texto_depois = ""
+    if tipo == "audio" and legenda:
+        texto_depois, legenda = legenda, ""
     try:
         enviado = evolution.enviar_midia(
             conversa_atual["instancia"], conversa_atual["destino"],
@@ -2647,10 +2668,18 @@ def responder_com_arquivo(conversa_id: int, dados: bytes, mime: str,
                           EXTRACT(EPOCH FROM (now() - criada_em))::int)
                 WHERE id = %s""", (conversa_id,))
 
-    return {"ok": True, "conversa_id": conversa_id,
-            "mensagem_id": nova["id"] if nova else None,
-            "midia_id": midia_id,
-            "id_externo": enviado["id_externo"]}
+    resultado = {"ok": True, "conversa_id": conversa_id,
+                 "mensagem_id": nova["id"] if nova else None,
+                 "midia_id": midia_id,
+                 "id_externo": enviado["id_externo"]}
+    if texto_depois:
+        # O áudio já foi: se o texto falhar, a resposta diz, e o áudio fica.
+        r = responder(conversa_id, texto_depois, atendente_id, assumir=False)
+        resultado["texto"] = r
+        if not r.get("ok"):
+            resultado["aviso"] = ("O áudio foi, mas o texto não: "
+                                  f"{r.get('motivo') or 'o WhatsApp recusou'}")
+    return resultado
 
 
 def anotar_com_arquivo(conversa_id: int, dados: bytes, mime: str,

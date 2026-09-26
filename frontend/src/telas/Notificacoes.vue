@@ -16,7 +16,15 @@ import { api, ErroDeApi } from '../api/cliente.js'
 import { sessao } from '../estado/sessao.js'
 import { notificacoes } from '../estado/notificacoes.js'
 import { TONS, tocar, somBloqueado } from '../util/som.js'
+import { pedirPermissao, permissao } from '../util/balao.js'
 import AjudaDaTela from '../componentes/AjudaDaTela.vue'
+
+/* 🔵 25/09: o balão do Windows (*"igual do MSN"*). O estado é do navegador,
+   não do servidor: cada computador responde por si. */
+notificacoes.permissaoBalao = permissao()
+async function ativarBalao() {
+  notificacoes.permissaoBalao = await pedirPermissao()
+}
 
 const souOwner = computed(() => Boolean(sessao.usuario?.owner))
 const minha = ref(null)
@@ -72,7 +80,7 @@ async function alternarPessoa(p) {
       <div>
         <h1>Notificações</h1>
         <AjudaDaTela>
-          O som e o aviso na aba quando chega mensagem numa conversa sua.
+          O som, a aba piscando e o aviso no canto da tela quando chega mensagem numa conversa sua.
         </AjudaDaTela>
       </div>
     </header>
@@ -83,7 +91,7 @@ async function alternarPessoa(p) {
     <template v-if="minha">
       <p v-if="!minha.ativa" class="aviso aviso--atencao" role="status">
         <i class="bi bi-bell-slash aviso__icone" aria-hidden="true"></i>
-        <span>As suas notificações estão <strong>desligadas pelo owner</strong>: nada toca
+        <span>As suas notificações estão <strong>desligadas</strong>: nada toca
         nem pisca. O número nas abas continua aparecendo.</span>
       </p>
 
@@ -103,6 +111,38 @@ async function alternarPessoa(p) {
               <small class="apagado">quando o painel está em segundo plano e há conversa sua não lida. Sempre ligado.</small>
             </span>
           </label>
+
+          <div class="balao">
+            <span class="balao__texto">
+              <strong>Aviso no canto da tela</strong>
+              <small class="apagado">
+                Nome do cliente e o começo da mensagem, como no MSN. Aparece com o painel
+                minimizado ou atrás de outra janela; clicar abre a conversa.
+              </small>
+            </span>
+            <template v-if="notificacoes.permissaoBalao === 'granted'">
+              <span class="chip chip--ok"><i class="bi bi-check2" aria-hidden="true"></i> Ativado neste computador</span>
+            </template>
+            <template v-else-if="notificacoes.permissaoBalao === 'default'">
+              <button class="botao botao--primario" type="button" @click="ativarBalao">
+                Ativar neste computador
+              </button>
+            </template>
+            <template v-else-if="notificacoes.permissaoBalao === 'denied'">
+              <span class="chip chip--aviso">Bloqueado no navegador</span>
+            </template>
+            <template v-else>
+              <span class="chip">Este navegador não mostra avisos</span>
+            </template>
+          </div>
+          <p v-if="notificacoes.permissaoBalao === 'denied'" class="aviso aviso--info pequeno">
+            <i class="bi bi-info-circle aviso__icone" aria-hidden="true"></i>
+            <span>Para liberar: clique no cadeado ao lado do endereço, em
+            <strong>Notificações</strong> escolha <strong>Permitir</strong>, e recarregue a página.</span>
+          </p>
+          <p class="apagado pequeno">
+            Só avisa com uma aba do MoviZap aberta, e o "Não perturbe" do Windows cala o aviso.
+          </p>
         </div>
       </section>
 
@@ -131,7 +171,7 @@ async function alternarPessoa(p) {
                       :aria-pressed="minha.volume === n" :disabled="salvando"
                       @click="gravar(minha.tom, n)">{{ n }}</button>
             </div>
-            <span class="campo__ajuda">De 1 a 5. Não há mudo: quem não deve ouvir, o owner desliga.</span>
+            <span class="campo__ajuda">De 1 a 5.</span>
           </div>
 
           <div class="linha">
@@ -148,7 +188,7 @@ async function alternarPessoa(p) {
       <!-- 🔵 "só aparece ao Owner". A rota também recusa quem não é. -->
       <section v-if="souOwner" class="cartao tela__bloco">
         <div class="cartao__corpo pilha">
-          <h2 class="cartao__titulo">Quem recebe notificação <span class="chip chip--pequeno">só o owner vê</span></h2>
+          <h2 class="cartao__titulo">Quem recebe notificação</h2>
           <p class="apagado pequeno">Desligada, a pessoa não ouve som nem vê a aba piscar. O número nas abas continua.</p>
           <ul class="equipe">
             <li v-for="p in equipe" :key="p.id" class="equipe__pessoa">
@@ -178,6 +218,11 @@ async function alternarPessoa(p) {
         border: 1px dashed var(--borda-forte); border-radius: var(--r-md); }
 .fixo input { width: 18px; height: 18px; margin-top: 2px; accent-color: var(--acento); }
 .fixo span { display: flex; flex-direction: column; gap: 2px; }
+
+.balao { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap;
+          gap: var(--e-3); padding: var(--e-3); border: var(--borda-fina) solid var(--borda);
+          border-radius: var(--r-md); }
+.balao__texto { display: flex; flex-direction: column; gap: 2px; flex: 1 1 260px; }
 
 .tons { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 180px), 1fr)); gap: var(--e-2); }
 .tom {

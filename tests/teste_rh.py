@@ -1,4 +1,4 @@
-"""Atendentes como controle de RH e o desligamento que solta as conversas.
+"""Atendentes como controle de RH e o interruptor Ativo/Inativo (25/09).
 
 🚨 O QUE FALTAVA NÃO ERA O BOTÃO, ERA O EFEITO. Desativar gravava
 `ativo = false` e nada mais: quem saía da empresa com conversas abertas
@@ -67,7 +67,9 @@ def cena():
            VALUES ('Teste RH', %s, %s, 'hash-falso', 'atendimento', true)
            RETURNING id""",
         (LOGIN + "sai", f"{LOGIN}sai@movisat.com.br"))["id"]
-    um_time = banco.um("SELECT id FROM time LIMIT 1")["id"]
+    # ⚠️ ATIVO E COM ORDEM (25/09): `LIMIT 1` sem ordem devolveu o time 7,
+    # inativo, e a listagem padrão (só ativos) não o achava.
+    um_time = banco.um("SELECT id FROM time WHERE ativo ORDER BY id LIMIT 1")["id"]
     banco.executar(
         "INSERT INTO atendente_time (atendente_id, time_id) VALUES (%s, %s)",
         (quem, um_time))
@@ -79,71 +81,115 @@ def cena():
     limpar()
 
 
-class TestDesligarSoltaOQueEstavaPreso:
-    def test_a_conversa_volta_para_a_fila(self, cena):
-        """🚨 O DEFEITO QUE ISTO CONSERTA. Sem soltar, a conversa fica com dono
-        que nunca mais entra -- e não aparece em "sem dono" porque TEM dono."""
-        r = operacao.desligar(cena["quem"])
-        assert r["ok"] is True
-        assert r["conversas_soltas"] == 1
-        linha = banco.um("SELECT atendente_id, estado FROM conversa WHERE id = %s",
-                         (cena["conversa"],))
-        assert linha["atendente_id"] is None
-        assert linha["estado"] == "fila"
+def colega_disponivel():
+    """Quem recebe as conversas de quem fica inativo."""
+    return banco.um(
+        """INSERT INTO atendente (nome, login, email, perfil, ativo, estado)
+           VALUES ('Teste RH Colega', %s, %s, 'atendimento', true, 'disponivel')
+           RETURNING id""",
+        (LOGIN + "colega", f"{LOGIN}colega@movisat.com.br"))["id"]
 
-    def test_a_conversa_solta_APARECE_em_sem_dono(self, cena):
-        operacao.desligar(cena["quem"])
-        achadas = [c["id"] for c in conversas.listar(sem_dono=True, limite=500)]
-        assert cena["conversa"] in achadas
 
-    def test_a_senha_e_revogada(self, cena):
-        """Conta sem senha não entra: `validar_login` barra antes do bcrypt.
-        É a porta fechando junto com o crachá."""
-        operacao.desligar(cena["quem"])
+class TestInativarPassaAsConversas:
+    """🔵 25/09: o interruptor Ativo/Inativo no lugar do "desligar" --
+    *"inativo não loga a conta permanece lá"*."""
+
+    def test_com_conversa_aberta_exige_quem_recebe(self, cena):
+        """🚨 O DEFEITO DE 07/08: inativo segurando conversa que ninguém vê."""
+        with pytest.raises(operacao.DadoInvalido, match="receb"):
+            operacao.definir_ativo(cena["quem"], False)
+        assert banco.um("SELECT ativo FROM atendente WHERE id = %s",
+                        (cena["quem"],))["ativo"] is True
+
+    def test_a_conversa_vai_para_quem_foi_escolhido(self, cena):
+        colega = colega_disponivel()
+        r = operacao.definir_ativo(cena["quem"], False, transferir_para=colega)
+        assert r["ok"] is True and r["transferidas"] == 1
+        assert banco.um("SELECT atendente_id FROM conversa WHERE id = %s",
+                        (cena["conversa"],))["atendente_id"] == colega
+
+    def test_a_conta_fica_como_estava(self, cena):
+        """O antigo desligar apagava senha, `google_sub` e times, e não tinha
+        volta. Agora a conta fica, e reativar devolve tudo."""
+        banco.executar("UPDATE atendente SET google_sub = 'sub-rh' WHERE id = %s",
+                       (cena["quem"],))
+        operacao.definir_ativo(cena["quem"], False, transferir_para=colega_disponivel())
         linha = banco.um(
-            "SELECT senha_hash, google_sub, ativo FROM atendente WHERE id = %s",
+            "SELECT senha_hash, google_sub, email, ativo FROM atendente WHERE id = %s",
             (cena["quem"],))
-        assert linha["senha_hash"] is None
-        assert linha["google_sub"] is None
         assert linha["ativo"] is False
+        assert linha["senha_hash"] == "hash-falso" and linha["google_sub"] == "sub-rh"
+        assert linha["email"] == f"{LOGIN}sai@movisat.com.br"
+        assert banco.um("SELECT count(*) n FROM atendente_time WHERE atendente_id = %s",
+                        (cena["quem"],))["n"] == 1
 
-    def test_sai_dos_times(self, cena):
-        operacao.desligar(cena["quem"])
-        assert banco.um(
-            "SELECT count(*) n FROM atendente_time WHERE atendente_id = %s",
-            (cena["quem"],))["n"] == 0
+    def test_reativar_devolve_a_conta_offline(self, cena):
+        operacao.definir_ativo(cena["quem"], False, transferir_para=colega_disponivel())
+        r = operacao.definir_ativo(cena["quem"], True)
+        assert r["ativo"] is True
+        linha = banco.um("SELECT ativo, estado FROM atendente WHERE id = %s", (cena["quem"],))
+        assert linha["ativo"] is True and linha["estado"] == "offline"
+
+    def test_inativo_nao_entra_e_a_sessao_cai(self, cena):
+        """A sessão aberta cai na chamada seguinte: `get_usuario` relê `ativo`."""
+        from fastapi import HTTPException
+        from fastapi.security import HTTPAuthorizationCredentials
+        from movizap import auth
+        token = auth.criar_token(LOGIN + "sai")
+        operacao.definir_ativo(cena["quem"], False, transferir_para=colega_disponivel())
+        with pytest.raises(HTTPException) as e:
+            auth.get_usuario(HTTPAuthorizationCredentials(scheme="Bearer", credentials=token))
+        assert e.value.status_code == 401
 
     def test_conversa_CONCLUIDA_nao_e_mexida(self, cena):
-        """Ela já não tem dono e já saiu da fila: soltar de novo mudaria o
-        histórico sem motivo."""
         conversas.encerrar(cena["conversa"], atendente_id=cena["quem"])
-        r = operacao.desligar(cena["quem"])
-        assert r["conversas_soltas"] == 0
+        r = operacao.definir_ativo(cena["quem"], False)
+        assert r["ok"] is True and r["transferidas"] == 0
 
     def test_o_historico_continua_com_o_nome(self, cena):
         """🚨 NADA É APAGADO. `conversa`, `transferencia` e `mensagem` apontam
         para o atendente."""
         conversas.encerrar(cena["conversa"], atendente_id=cena["quem"])
-        operacao.desligar(cena["quem"])
+        operacao.definir_ativo(cena["quem"], False)
         achada = [c for c in conversas.historico(busca=FONE)
                   if c["id"] == cena["conversa"]]
         assert achada[0]["atendente_nome"] == "Teste RH"
 
 
-class TestOQueNaoSeDesliga:
-    def test_o_owner_nao_e_desligado(self, cena):
-        dono = banco.um("SELECT id FROM atendente WHERE owner AND ativo LIMIT 1")
-        r = operacao.desligar(dono["id"])
-        assert r["ok"] is False
-        assert "owner" in r["motivo"].lower()
+class TestAsTravasDoInterruptor:
+    def test_ninguem_inativa_a_si_mesmo(self, cena):
+        with pytest.raises(operacao.EmUso):
+            operacao.definir_ativo(cena["quem"], False, quem_edita=LOGIN + "sai")
 
-    def test_ninguem_desliga_a_si_mesmo(self, cena):
-        r = operacao.desligar(cena["quem"], quem_edita=LOGIN + "sai")
-        assert r["ok"] is False
+    def test_repetir_o_mesmo_estado_nao_faz_nada(self, cena):
+        conversas.encerrar(cena["conversa"], atendente_id=cena["quem"])
+        operacao.definir_ativo(cena["quem"], False)
+        assert operacao.definir_ativo(cena["quem"], False)["transferidas"] == 0
 
-    def test_desligar_duas_vezes_e_recusado(self, cena):
-        operacao.desligar(cena["quem"])
-        assert operacao.desligar(cena["quem"])["ok"] is False
+    def test_o_ultimo_owner_ativo_nao_e_inativado(self):
+        """🔵 *"sistema nunca pode ficar com menos de 1 owner ativo"*.
+
+        🚨 RODA CONTRA O OWNER DE VERDADE (a suíte está em produção). Só roda
+        com exatamente um owner ativo -- é aí que a trava tem de segurar -- e,
+        se ela falhar, o `finally` devolve a conta na hora."""
+        donos = banco.varios("SELECT id FROM atendente WHERE owner AND ativo")
+        if len(donos) != 1:
+            pytest.skip("o teste só faz sentido com um owner ativo")
+        dono = donos[0]["id"]
+        try:
+            with pytest.raises(operacao.EmUso):
+                operacao.definir_ativo(dono, False)
+        finally:
+            banco.executar("UPDATE atendente SET ativo = true WHERE id = %s", (dono,))
+        assert banco.um("SELECT ativo FROM atendente WHERE id = %s", (dono,))["ativo"] is True
+
+    def test_a_edicao_nao_mexe_em_ativo(self):
+        """🚨 Pela edição, `ativo = false` pulava tudo o que inativar faz."""
+        import inspect
+        from movizap.main import AtendenteEntrada
+        assert "ativo" not in inspect.signature(operacao.atualizar_atendente).parameters
+        assert "ativo" not in AtendenteEntrada.model_fields
+        assert "max_conversas" not in AtendenteEntrada.model_fields
 
 
 class TestONumeroDeRH:

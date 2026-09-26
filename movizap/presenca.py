@@ -149,17 +149,23 @@ def definir_estado_manual(atendente_id: int, estado: str) -> None:
     """A pessoa escolheu o estado. Conta como ação (senão, quem escolhe
     "disponível" depois de 2 h parado voltaria a offline no minuto seguinte).
 
-    🟡 Escolher qualquer estado que não seja offline encerra um afastamento:
-    é a pessoa dizendo que voltou.
+    🔵 25/09: AFASTADO NÃO MUDA O ESTADO POR AQUI. Até então, escolher um
+    estado apagava o afastamento sem aviso. Agora a barra fica travada, e o
+    caminho de volta é o dele: *"ela loga e vai na configuração dela e coloca
+    o dia de ontem"* (`definir_minha_volta`).
     """
+    linha = banco.um("SELECT afastamento_motivo, afastado_ate FROM atendente "
+                     "WHERE id = %s", (atendente_id,))
+    if linha and linha["afastamento_motivo"]:
+        ate = (f" até {linha['afastado_ate']:%d/%m}" if linha["afastado_ate"] else "")
+        raise DadoInvalido(
+            f"Você está afastado{ate}. Para voltar antes, mude a data de volta "
+            "na Minha conta.")
     banco.executar(
         """UPDATE atendente
               SET estado = %s, estado_automatico = false,
-                  ultima_acao_em = now(), atualizado_em = now(),
-                  afastamento_motivo = CASE WHEN %s = 'offline'
-                                            THEN afastamento_motivo END,
-                  afastado_ate = CASE WHEN %s = 'offline' THEN afastado_ate END
-            WHERE id = %s""", (estado, estado, estado, atendente_id))
+                  ultima_acao_em = now(), atualizado_em = now()
+            WHERE id = %s""", (estado, atendente_id))
 
 
 def definir_sempre_online(atendente_id: int, ligado: bool) -> None:
@@ -229,6 +235,12 @@ async def rodar(parar: asyncio.Event) -> None:
     importa."""
     log.info("presença ativa (a cada %ds)", INTERVALO_SEG)
     while not parar.is_set():
+        # 🔵 25/09: as datas do afastamento vêm PRIMEIRO -- quem sai hoje fica
+        # offline antes da regra de status e da distribuição olharem.
+        try:
+            await asyncio.to_thread(aplicar_afastamentos)
+        except Exception:                                     # noqa: BLE001
+            log.exception("afastamentos falharam -- segue tentando")
         try:
             await asyncio.to_thread(aplicar_regra)
         except Exception:                                     # noqa: BLE001
@@ -261,7 +273,7 @@ def pode_receber(atendente_id: int) -> tuple[bool, str]:
         """SELECT ativo, transferivel, estado, afastamento_motivo
              FROM atendente WHERE id = %s""", (atendente_id,))
     if not linha or not linha["ativo"]:
-        return False, "Atendente inexistente ou desligado."
+        return False, "Atendente inexistente ou inativo."
     if not linha["transferivel"]:
         return False, "Esta pessoa não recebe transferência."
     if linha["afastamento_motivo"] or linha["estado"] == "offline":
@@ -269,30 +281,138 @@ def pode_receber(atendente_id: int) -> tuple[bool, str]:
     return True, ""
 
 
-def afastar(atendente_id: int, motivo: str, ate: date | None,
-            transferir_para: int | None) -> dict:
-    """Férias, licença... Transfere as conversas abertas e deixa offline.
+def _hoje_de(atendente_id: int) -> date:
+    """O dia de HOJE no fuso da pessoa. 🚨 Não é `date.today()`: o servidor
+    roda em UTC, e às 21h de Brasília já é amanhã lá -- o mesmo erro de 3 h que
+    `em_jornada` tinha em 24/09."""
+    linha = banco.um(
+        """SELECT (now() AT TIME ZONE COALESCE(fuso, 'America/Sao_Paulo'))::date AS hoje
+             FROM atendente WHERE id = %s""", (atendente_id,))
+    return linha["hoje"]
 
-    🔵 *"em caso de conversas em aberto, perguntar para qual usuario transferir
-    elas 'abre modal de lista de usuarios', é obrigatório e dai executa"*.
-    Obrigatório aqui também, não só na tela: sem destino, nada acontece.
+
+def _pode_substituir(substituto_id: int, atendente_id: int) -> None:
+    """O substituto de um afastamento MARCADO: ativo, recebe transferência e
+    não é a própria pessoa. Offline hoje não impede -- o que vale é o dia da
+    saída, e nesse dia, se ele não puder receber, as conversas vão para a fila.
+    """
+    if int(substituto_id) == int(atendente_id):
+        raise DadoInvalido("Escolha outra pessoa para receber as conversas.")
+    linha = banco.um("SELECT ativo, transferivel FROM atendente WHERE id = %s",
+                     (substituto_id,))
+    if not linha or not linha["ativo"]:
+        raise DadoInvalido("Quem vai receber as conversas está inativo ou não existe.")
+    if not linha["transferivel"]:
+        raise DadoInvalido("Esta pessoa não recebe transferência.")
+
+
+def _para_a_fila(cur, conversa_id: int, atendente_id: int, texto: str) -> None:
+    """Solta a conversa para a fila, com nota do sistema dizendo por quê.
+    Mesmo efeito que o antigo "desligar" tinha, uma conversa por vez."""
+    cur.execute(
+        """UPDATE conversa SET atendente_id = NULL, estado = 'fila',
+                               atualizada_em = now()
+            WHERE id = %s AND atendente_id = %s AND estado <> 'resolvida'""",
+        (conversa_id, atendente_id))
+    if not cur.rowcount:
+        return  # alguém já a pegou, ou foi concluída no meio do caminho
+    cur.execute(
+        """UPDATE conversa_participante SET saiu_em = now()
+            WHERE conversa_id = %s AND atendente_id = %s AND saiu_em IS NULL""",
+        (conversa_id, atendente_id))
+    cur.execute(
+        """INSERT INTO mensagem (conversa_id, direcao, autor, tipo, conteudo, criada_em)
+           VALUES (%s, 'interna', 'sistema', 'nota', %s, now())""",
+        (conversa_id, texto))
+
+
+def transferir_abertas(atendente_id: int, substituto_id: int | None,
+                       texto_resumo: str, fila_se_falhar: bool) -> dict:
+    """Passa as conversas abertas da pessoa para o substituto.
 
     ⚠️ CADA CONVERSA É UMA TRANSFERÊNCIA PRÓPRIA, pelo caminho de sempre
-    (`conversas.transferir`), com rastro e nota. Se uma falhar, as outras
-    seguem e a resposta diz quais ficaram -- e a pessoa NÃO é afastada, para
-    ninguém ficar offline segurando conversa.
+    (`conversas.transferir`), com rastro e nota. Com `fila_se_falhar` (o laço
+    no dia da saída, e o inativar sem ninguém para receber), a que não puder
+    ir ao substituto vai para a fila. Sem ele (quem clica na tela escolheu um
+    substituto), a falha volta para a tela decidir.
     """
     from . import conversas  # tardio: conversas importa módulos que importam este
 
+    abertas = conversas_abertas(atendente_id)
+    pode = bool(substituto_id) and pode_receber(int(substituto_id))[0]
+    falhas, para_fila = [], []
+    for conversa_id in abertas:
+        r = (conversas.transferir(conversa_id, None, int(substituto_id), "manual",
+                                  de_atendente_id=atendente_id,
+                                  texto_resumo=texto_resumo)
+             if pode else {"ok": False, "motivo": MENSAGEM_OFFLINE})
+        if r.get("ok"):
+            continue
+        if fila_se_falhar:
+            para_fila.append(conversa_id)
+        else:
+            falhas.append({"conversa_id": conversa_id, "motivo": r.get("motivo")})
+    if para_fila:
+        with banco.cursor() as cur:
+            for conversa_id in para_fila:
+                _para_a_fila(cur, conversa_id, atendente_id,
+                             f"Voltou para a fila: {texto_resumo}")
+    return {"abertas": len(abertas), "falhas": falhas, "na_fila": len(para_fila)}
+
+
+def afastar(atendente_id: int, motivo: str, ate: date | None,
+            transferir_para: int | None, de: date | None = None) -> dict:
+    """Férias, licença... com o dia da SAÍDA e o da VOLTA.
+
+    🔵 25/09: *"ao definir o motivo, um calendário já indica a saída e a volta,
+    daí volta"*. A volta é obrigatória -- é ela que encerra sozinha.
+
+    · Saída HOJE: transfere agora e deixa offline, como sempre foi. 🔵 24/09:
+      *"em caso de conversas em aberto, perguntar para qual usuario transferir
+      elas ... é obrigatório e dai executa"* -- e, se uma transferência falhar,
+      a pessoa NÃO é afastada, para ninguém ficar offline segurando conversa.
+    · Saída FUTURA: só marca (`afasta_*`). 🔵 *"No dia da saída"* o laço
+      transfere para o substituto escolhido aqui -- obrigatório também, porque
+      até lá podem chegar conversas.
+    """
     motivo = (motivo or "").strip()
     if not motivo:
         raise DadoInvalido("Diga o motivo do afastamento (férias, licença...).")
     if len(motivo) > 60:
         raise DadoInvalido("O motivo passa de 60 caracteres.")
-    alvo = banco.um("SELECT id, nome, ativo FROM atendente WHERE id = %s",
-                    (atendente_id,))
+    alvo = banco.um(
+        """SELECT id, nome, ativo, afastamento_motivo, afasta_em
+             FROM atendente WHERE id = %s""", (atendente_id,))
     if not alvo or not alvo["ativo"]:
-        raise DadoInvalido("Atendente inexistente ou desligado.")
+        raise DadoInvalido("Atendente inexistente ou inativo.")
+    if alvo["afastamento_motivo"]:
+        raise DadoInvalido(f"{alvo['nome']} já está afastado. Encerre o afastamento atual antes.")
+    if alvo["afasta_em"]:
+        raise DadoInvalido(
+            f"{alvo['nome']} já tem afastamento marcado para {alvo['afasta_em']:%d/%m}. "
+            "Cancele o marcado antes.")
+
+    hoje = _hoje_de(atendente_id)
+    de = de or hoje
+    if de < hoje:
+        raise DadoInvalido("A saída não pode ser num dia que já passou.")
+    if not ate:
+        raise DadoInvalido("Escolha o dia da volta.")
+    if ate <= de:
+        raise DadoInvalido("A volta tem de ser depois da saída.")
+
+    if de > hoje:
+        if not transferir_para:
+            raise DadoInvalido("Escolha quem vai receber as conversas no dia da saída.")
+        _pode_substituir(transferir_para, atendente_id)
+        banco.executar(
+            """UPDATE atendente
+                  SET afasta_em = %s, afasta_ate = %s, afasta_motivo = %s,
+                      afasta_substituto_id = %s, atualizado_em = now()
+                WHERE id = %s""", (de, ate, motivo, int(transferir_para), atendente_id))
+        log.info("atendente %s: afastamento marcado de %s a %s (%s)",
+                 atendente_id, de, ate, motivo)
+        return {"ok": True, "agendado": True, "transferidas": 0}
 
     abertas = conversas_abertas(atendente_id)
     if abertas:
@@ -306,35 +426,120 @@ def afastar(atendente_id: int, motivo: str, ate: date | None,
         if not ok:
             raise DadoInvalido(motivo_recusa)
 
-    falhas = []
-    for conversa_id in abertas:
-        r = conversas.transferir(
-            conversa_id, None, int(transferir_para), "manual",
-            de_atendente_id=atendente_id,
-            texto_resumo=f"{alvo['nome']} entrou em afastamento ({motivo}).")
-        if not r.get("ok"):
-            falhas.append({"conversa_id": conversa_id, "motivo": r.get("motivo")})
-    if falhas:
-        return {"ok": False, "transferidas": len(abertas) - len(falhas),
-                "falhas": falhas}
+    r = transferir_abertas(atendente_id, transferir_para,
+                           f"{alvo['nome']} entrou em afastamento ({motivo}).",
+                           fila_se_falhar=False)
+    if r["falhas"]:
+        return {"ok": False, "transferidas": r["abertas"] - len(r["falhas"]),
+                "falhas": r["falhas"]}
+    _comecar(atendente_id, motivo, de, ate)
+    log.info("atendente %s afastado (%s) até %s; %d conversa(s) transferida(s)",
+             atendente_id, motivo, ate, r["abertas"])
+    return {"ok": True, "agendado": False, "transferidas": r["abertas"]}
 
+
+def _comecar(atendente_id: int, motivo: str, de: date, ate: date) -> None:
     banco.executar(
         """UPDATE atendente
               SET estado = 'offline', estado_automatico = false,
-                  afastamento_motivo = %s, afastado_ate = %s,
+                  afastamento_motivo = %s, afastado_de = %s, afastado_ate = %s,
+                  afasta_em = NULL, afasta_ate = NULL, afasta_motivo = NULL,
+                  afasta_substituto_id = NULL,
                   atualizado_em = now()
-            WHERE id = %s""", (motivo, ate, atendente_id))
-    log.info("atendente %s afastado (%s); %d conversa(s) transferida(s)",
-             atendente_id, motivo, len(abertas))
-    return {"ok": True, "transferidas": len(abertas)}
+            WHERE id = %s""", (motivo, de, ate, atendente_id))
+
+
+def aplicar_afastamentos(somente: list[int] | None = None) -> dict:
+    """O laço do minuto: começa os marcados para hoje e encerra os que chegaram
+    ao dia da volta. Roda sempre -- não depende da regra de status.
+
+    ⚠️ `somente` EXISTE PARA O TESTE: a suíte roda no banco de produção.
+
+    🟡 Na volta automática a pessoa volta OFFLINE: à meia-noite ela não está
+    diante da tela, e "disponível" faria chegar transferência a quem ainda não
+    entrou. O estado se acerta quando ela escolhe na barra.
+    """
+    iniciados = []
+    for linha in banco.varios(
+            """SELECT id, nome, afasta_em, afasta_ate, afasta_motivo,
+                      afasta_substituto_id
+                 FROM atendente
+                WHERE ativo AND afasta_em IS NOT NULL
+                  AND afasta_em <= (now() AT TIME ZONE COALESCE(fuso, 'America/Sao_Paulo'))::date
+                  AND (%s::bigint[] IS NULL OR id = ANY(%s::bigint[]))""",
+            (somente, somente)):
+        r = transferir_abertas(
+            linha["id"], linha["afasta_substituto_id"],
+            f"{linha['nome']} entrou em afastamento ({linha['afasta_motivo']}).",
+            fila_se_falhar=True)
+        _comecar(linha["id"], linha["afasta_motivo"], linha["afasta_em"], linha["afasta_ate"])
+        log.info("afastamento marcado começou: atendente %s (%d transferida(s), %d na fila)",
+                 linha["id"], r["abertas"] - r["na_fila"], r["na_fila"])
+        iniciados.append(linha["id"])
+
+    encerrados = [r["id"] for r in banco.varios(
+        """UPDATE atendente
+              SET afastamento_motivo = NULL, afastado_de = NULL, afastado_ate = NULL,
+                  estado = 'offline', estado_automatico = false,
+                  ultima_acao_em = now(), atualizado_em = now()
+            WHERE afastamento_motivo IS NOT NULL AND afastado_ate IS NOT NULL
+              AND afastado_ate <= (now() AT TIME ZONE COALESCE(fuso, 'America/Sao_Paulo'))::date
+              AND (%s::bigint[] IS NULL OR id = ANY(%s::bigint[]))
+        RETURNING id""", (somente, somente))]
+    if encerrados:
+        log.info("afastamento encerrado pela data de volta: %s", encerrados)
+    return {"iniciados": iniciados, "encerrados": encerrados}
 
 
 def retornar(atendente_id: int) -> dict:
-    """Fim do afastamento: volta disponível, e o relógio começa agora."""
+    """Encerrar, por quem administra: tira o afastamento em curso (a pessoa
+    volta disponível, e o relógio começa agora) e cancela o marcado."""
     banco.executar(
         """UPDATE atendente
-              SET afastamento_motivo = NULL, afastado_ate = NULL,
-                  estado = 'disponivel', estado_automatico = false,
+              SET estado = CASE WHEN afastamento_motivo IS NOT NULL
+                                THEN 'disponivel' ELSE estado END,
+                  afastamento_motivo = NULL, afastado_de = NULL, afastado_ate = NULL,
+                  afasta_em = NULL, afasta_ate = NULL, afasta_motivo = NULL,
+                  afasta_substituto_id = NULL,
+                  estado_automatico = false,
                   ultima_acao_em = now(), atualizado_em = now()
             WHERE id = %s""", (atendente_id,))
     return {"ok": True}
+
+
+def definir_minha_volta(atendente_id: int, volta: date) -> dict:
+    """🔵 25/09: *"ela loga e vai na configuração dela e coloca o dia de
+    ontem"*. A pessoa muda a própria data de volta; hoje ou antes encerra.
+
+    · Afastamento em curso: volta <= hoje encerra agora, e ela fica
+      disponível (está diante da tela); depois de hoje, só muda a data.
+    · Afastamento marcado: volta <= hoje cancela; senão muda a volta, que
+      tem de ser depois da saída.
+    """
+    linha = banco.um(
+        """SELECT afastamento_motivo, afasta_em
+             FROM atendente WHERE id = %s""", (atendente_id,))
+    if not linha:
+        raise DadoInvalido("Atendente não encontrado.")
+    hoje = _hoje_de(atendente_id)
+
+    if linha["afastamento_motivo"]:
+        if volta <= hoje:
+            retornar(atendente_id)
+            return {"ok": True, "encerrado": True}
+        banco.executar("UPDATE atendente SET afastado_ate = %s, atualizado_em = now() "
+                       "WHERE id = %s", (volta, atendente_id))
+        return {"ok": True, "encerrado": False, "volta": volta.isoformat()}
+
+    if linha["afasta_em"]:
+        if volta <= hoje:
+            retornar(atendente_id)
+            return {"ok": True, "encerrado": True}
+        if volta <= linha["afasta_em"]:
+            raise DadoInvalido(
+                f"A volta tem de ser depois da saída ({linha['afasta_em']:%d/%m}).")
+        banco.executar("UPDATE atendente SET afasta_ate = %s, atualizado_em = now() "
+                       "WHERE id = %s", (volta, atendente_id))
+        return {"ok": True, "encerrado": False, "volta": volta.isoformat()}
+
+    raise DadoInvalido("Você não está afastado.")

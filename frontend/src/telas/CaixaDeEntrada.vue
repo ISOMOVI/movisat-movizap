@@ -27,6 +27,7 @@ import { linkificar, marcar, partir } from '../util/destaque.js'
 import { corDaInicial, iniciais } from '../util/avatar.js'
 import { corDoEstado, rotuloDoEstado } from '../util/estado.js'
 import AjudaDaTela from '../componentes/AjudaDaTela.vue'
+import BotaoMensagensRapidas from '../componentes/BotaoMensagensRapidas.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -34,6 +35,16 @@ const router = useRouter()
 const lista = ref([])
 const resumo = ref(null)
 const aberta = ref(null)
+/* 🔵 25/09, celular: *"verifique a compatibilidade ... via navegador mobile,
+   os mesmos recursos, porém somente os chats"*. Abaixo de 860 px a tela é
+   UMA COISA POR VEZ -- lista OU conversa (o CSS lê `painel--com-conversa`).
+   `acoesCelular` abre a barra de ações, que no celular fica recolhida atrás
+   de um botão; `balaoTocado` é o balão cujas ações o toque mostrou -- em
+   tela de toque não existe "passar o mouse". */
+const acoesCelular = ref(false)
+const balaoTocado = ref(null)
+const semMouse = typeof window !== 'undefined' && window.matchMedia
+  ? window.matchMedia('(hover: none)') : { matches: false }
 const carregando = ref(true)
 const erro = ref('')
 const recado = ref('')
@@ -199,7 +210,12 @@ async function enviarGravacao() {
   await pronto
   pararRelogio()
 
-  const blob = new Blob(pedacos, { type: 'audio/ogg; codecs=opus' })
+  /* 🔵 25/09, celular: o iPhone (Safari) grava MP4/AAC, não Opus. O rótulo
+     passa a dizer a verdade SÓ nesse caso; o Chrome do computador continua
+     como sempre foi. A Evolution converte para voz do WhatsApp de qualquer
+     jeito -- a prova é um áudio real mandado do iPhone. */
+  const doIphone = (gravador.mimeType || '').includes('mp4')
+  const blob = new Blob(pedacos, { type: doIphone ? 'audio/mp4' : 'audio/ogg; codecs=opus' })
   gravador = null
   pedacos = []
   if (!blob.size) return
@@ -207,7 +223,7 @@ async function enviarGravacao() {
   enviando.value = true
   try {
     const dados = new FormData()
-    dados.append('arquivo', blob, 'audio.ogg')
+    dados.append('arquivo', blob, doIphone ? 'audio.m4a' : 'audio.ogg')
     const r = await fetch(`/api/conversas/${aberta.value.id}/audio`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${localStorage.getItem('movizap.token')}` },
@@ -828,6 +844,13 @@ const FILTROS = [
   { valor: 'time', rotulo: 'Time' },
 ]
 
+/* 🔵 25/09: *"o filtro dele pode ter filtro por times que a pessoa estiver
+   inserida. Pois podem ter conversas do mesmo cliente com o time que ela
+   esteja, daí saber de qual é pode ser bom."* O seletor só aparece para quem
+   está em mais de um time -- com um só, não há o que escolher. Vazio = todos. */
+const meusTimes = computed(() => times.value.filter((t) => t.sou_membro))
+const timeDaAba = ref('')
+
 /* ---- filtro por tipo de cadastro (pedido do usuário em 25/08) -----------
    🚨 "SEM CADASTRO" E "SEM IDENTIFICAÇÃO" SÃO COISAS DIFERENTES, e a ordem
    aqui reflete isso: `sem_cadastro` é a conversa que não tem contato nenhum
@@ -865,6 +888,7 @@ function parametros() {
   if (filtro.value === 'sem_dono') p.set('sem_dono', 'true')
   if (filtro.value === 'minhas') p.set('minhas', 'true')
   if (filtro.value === 'time') p.set('meus_times', 'true')
+  if (filtro.value === 'time' && timeDaAba.value) p.set('time_id', timeDaAba.value)
   if (filtro.value === 'bloqueados') p.set('bloqueados', 'true')
   if (busca.value.trim()) p.set('busca', busca.value.trim())
   if (tiposMarcados.value.length) p.set('relacoes', tiposMarcados.value.join(','))
@@ -1032,9 +1056,15 @@ async function abrir(id) {
     carregarFoto(aberta.value)
     rolarParaOFim()
     recado.value = ''
+    /* ⚠️ Da LISTA para a conversa é `push`: no celular, o "voltar" do aparelho
+       tem de trazer de volta à lista, não sair da tela. Entre conversas
+       continua `replace`, para o histórico não virar uma fila de conversas. */
     if (route.params.id !== String(id)) {
-      router.replace({ path: `/atendimento/${id}` })
+      if (route.params.id) router.replace({ path: `/atendimento/${id}` })
+      else router.push({ path: `/atendimento/${id}` })
     }
+    acoesCelular.value = false
+    balaoTocado.value = null
   } catch (e) {
     erro.value = e instanceof ErroDeApi ? e.message : 'Falha ao abrir a conversa.'
   }
@@ -1058,7 +1088,11 @@ async function abrir(id) {
 async function atualizarMensagens() {
   if (!aberta.value) return
   try {
-    const r = await api.get(`/api/conversas/${aberta.value.id}`)
+    /* 🔵 25/09 (*"Só marca lida vista"*): com a aba escondida, reler NÃO marca
+       como lida. Antes marcava, e a mensagem que chegava com a pessoa fora da
+       tela virava "lida" em até 8 s -- sem tocar, sem bolinha. */
+    const ler = document.hidden ? 'false' : 'true'
+    const r = await api.get(`/api/conversas/${aberta.value.id}?ler=${ler}`)
     aberta.value.estado = r.estado
     aberta.value.atendente_id = r.atendente_id
     aberta.value.atendente_nome = r.atendente_nome
@@ -1201,6 +1235,25 @@ async function enviar(interna = false) {
    telefone: desde que o WhatsApp passou a usar LID nos grupos, TODOS os
    remetentes que gravamos estão nesse formato. */
 const campoResposta = ref(null)
+
+/* 🔵 25/09 (Plano 3): a mensagem rápida entra NO CURSOR, e o que já estava
+   escrito fica. `{cliente}` é a empresa; `{contato}`, a pessoa -- sem nome
+   no cadastro, vale o nome do WhatsApp. */
+const dadosDaConversa = computed(() => ({
+  cliente: aberta.value?.cliente_nome || '',
+  contato: aberta.value?.contato_nome || aberta.value?.nome_whatsapp || '',
+}))
+function inserirNoCampo(texto) {
+  const el = campoResposta.value
+  const atual = resposta.value || ''
+  const ini = el?.selectionStart ?? atual.length
+  const fim = el?.selectionEnd ?? atual.length
+  resposta.value = atual.slice(0, ini) + texto + atual.slice(fim)
+  nextTick(() => {
+    el?.focus()
+    el?.setSelectionRange(ini + texto.length, ini + texto.length)
+  })
+}
 const mencionados = ref([])
 const listaArroba = ref([])
 const arrobaEscolhido = ref(0)
@@ -1643,6 +1696,56 @@ onUnmounted(() => {
 })
 
 watch(filtro, () => carregar())
+watch(timeDaAba, () => { if (filtro.value === 'time') carregar() })
+
+/* 🔵 25/09: o Notificador precisa saber qual conversa está aberta -- com a
+   tela à vista, ela não toca. */
+watch(() => aberta.value?.id ?? null, (id) => { notificacoes.conversaAberta = id })
+
+/* O clique no balão do Windows leva a `/atendimento/<id>`. Com a Caixa já
+   aberta o componente é o mesmo e não remonta: sem isto, a URL mudava e a
+   conversa não. */
+watch(() => route.params.id, (id) => {
+  if (id && String(aberta.value?.id) !== String(id)) abrir(id)
+  // Sem id (o "voltar" do celular, ou o menu): fecha a conversa e mostra a lista.
+  if (!id && aberta.value) fecharConversa()
+})
+
+/* 🔵 25/09, celular: o "Voltar" do cabeçalho. Fecha como a troca de conversa
+   fecha (solta mídia, modal, citação), e a URL volta para a lista. */
+function fecharConversa() {
+  soltarMidias()
+  painelAcao.value = ''
+  confirmacao.value = null
+  citando.value = null
+  editando.value = null
+  acoesCelular.value = false
+  balaoTocado.value = null
+  aberta.value = null
+}
+function voltarParaLista() {
+  if (route.params.id) router.push({ path: '/atendimento' })
+  else fecharConversa()
+}
+
+/* Tela de toque não tem hover: tocar no balão mostra as ações dele (reagir,
+   citar, editar...). Toque em link, botão, foto ou player continua sendo
+   daquilo -- só o "fundo" do balão alterna. */
+function tocarBalao(m, evento) {
+  if (!semMouse.matches) return
+  if (evento.target.closest('a, button, img, audio, video, input, textarea')) return
+  balaoTocado.value = balaoTocado.value === m.id ? null : m.id
+}
+
+/* Voltou para a aba: relê já, e aí sim marca como lida (ela está à vista). */
+function aoVoltarParaAAba() {
+  if (!document.hidden && aberta.value) atualizarMensagens()
+}
+document.addEventListener('visibilitychange', aoVoltarParaAAba)
+onUnmounted(() => {
+  document.removeEventListener('visibilitychange', aoVoltarParaAAba)
+  notificacoes.conversaAberta = null
+})
 
 const filaParada = computed(
   () => resumo.value && resumo.value.eventos_pendentes > 50,
@@ -1997,7 +2100,7 @@ function carregarMidiasDaConversa(c) {
       <span>{{ recado }}</span>
     </p>
 
-    <div class="painel">
+    <div class="painel" :class="{ 'painel--com-conversa': aberta }">
       <!-- ---------------------------------------------------------- LISTA -->
       <section class="cartao coluna">
         <header class="cartao__cabecalho lista__topo">
@@ -2080,6 +2183,14 @@ function carregarMidiasDaConversa(c) {
               <i class="bi bi-plus-lg" aria-hidden="true"></i>
             </button>
           </div>
+
+          <label v-if="filtro === 'time' && meusTimes.length > 1" class="campo campo--time">
+            <span class="campo__rotulo">Filtrar por time</span>
+            <select v-model="timeDaAba" class="campo__entrada">
+              <option value="">Todos os meus times</option>
+              <option v-for="t in meusTimes" :key="t.id" :value="String(t.id)">{{ t.nome }}</option>
+            </select>
+          </label>
 
         </header>
 
@@ -2272,6 +2383,12 @@ function carregarMidiasDaConversa(c) {
                 <span v-if="c.estado === 'resolvida'" class="chip chip--ok chip--pequeno">
                   concluída
                 </span>
+                <!-- 🔵 25/09: na aba Time, de qual time é -- o mesmo cliente
+                     pode estar em dois. -->
+                <span v-if="filtro === 'time' && c.time_nome" class="chip chip--pequeno">
+                  <i class="bi bi-people" aria-hidden="true"></i>
+                  {{ c.time_nome }}
+                </span>
                 <!-- 🔵 23/09: a bolinha diz se quem responde está DISPONÍVEL -- a
                      conversa de alguém fora do expediente não anda. Mesma régua
                      do Chat interno (`util/estado.js`). -->
@@ -2311,8 +2428,18 @@ function carregarMidiasDaConversa(c) {
         </div>
 
         <template v-else>
-          <header class="cartao__cabecalho">
-            <div>
+          <header class="cartao__cabecalho conversa__cabecalho">
+            <!-- 🔵 25/09, celular: sem a lista ao lado, o caminho de volta é
+                 este botão (e o "voltar" do aparelho). Some no computador. -->
+            <button
+              class="botao botao--fantasma botao--icone so-celular conversa__voltar"
+              type="button"
+              aria-label="Voltar para a lista de conversas"
+              @click="voltarParaLista"
+            >
+              <i class="bi bi-arrow-left" aria-hidden="true"></i>
+            </button>
+            <div class="conversa__quem">
               <strong>
                 <!-- 🟢 Erika (15/09): a foto de perfil de quem escreve.
                      🚨 SÓ NA CONVERSA ABERTA, NUNCA NA LISTA. Na lista seriam
@@ -2373,7 +2500,7 @@ function carregarMidiasDaConversa(c) {
                 </template>
                 <template v-else>Ficha · vincular</template>
               </button>
-              <p class="apagado pequeno mono">
+              <p class="apagado pequeno mono conversa__detalhe">
                 {{ aberta.telefone_e164 }}
                 <span v-if="aberta.nome_whatsapp && aberta.contato_nome">
                   · cadastro: {{ aberta.contato_nome }}
@@ -2382,6 +2509,20 @@ function carregarMidiasDaConversa(c) {
                 · {{ aberta.estado }}
               </p>
             </div>
+            <!-- 🔵 25/09, celular: a barra de ações (Transferir, Convidar,
+                 Devolver, Sair, Bloquear, Concluir) ocupava metade da altura.
+                 No celular ela fica atrás deste botão; no computador, sempre
+                 à vista como antes. -->
+            <button
+              v-if="aberta.estado !== 'resolvida'"
+              class="botao botao--contorno botao--pequeno so-celular"
+              type="button"
+              :aria-expanded="acoesCelular"
+              @click="acoesCelular = !acoesCelular"
+            >
+              <i class="bi" :class="acoesCelular ? 'bi-x-lg' : 'bi-three-dots'" aria-hidden="true"></i>
+              {{ acoesCelular ? 'Fechar' : 'Ações' }}
+            </button>
             <!-- Encerrada TEM dono (quem fechou), então o `!atendente_id` de
                  antes escondia o botão justo onde ele é mais necessário. -->
             <button
@@ -2430,7 +2571,8 @@ function carregarMidiasDaConversa(c) {
                coisas diferentes e têm setas parecidas. *Encerrar* mantém o
                texto — é o fim do atendimento, e é o único que não deve
                depender de reconhecer desenho. -->
-          <div v-if="aberta.estado !== 'resolvida'" class="acoes cartao__corpo">
+          <div v-if="aberta.estado !== 'resolvida'" class="acoes cartao__corpo"
+               :class="{ 'acoes--aberta-celular': acoesCelular }">
             <!-- DE FORA: só dá para ler. A rota recusa com 409 de qualquer
                  jeito; aqui a tela para de oferecer o que seria negado. -->
             <div v-if="!posso" class="linha linha--quebra">
@@ -2883,8 +3025,10 @@ function carregarMidiasDaConversa(c) {
               :class="[`balao--${m.direcao}`, {
                 'balao--casa': casaNaConversa(m),
                 'balao--atual': m.id === idAchado,
+                'balao--tocado': m.id === balaoTocado,
               }]"
               :data-mensagem="m.id"
+              @click="tocarBalao(m, $event)"
             >
               <!-- A mensagem que esta está respondendo. Sem isto, uma foto
                    seguida de "esse aqui" fica ininteligível. -->
@@ -3250,7 +3394,12 @@ function carregarMidiasDaConversa(c) {
                 </button>
               </template>
 
-              <button v-else class="botao botao--contorno botao--icone"
+              <!-- 🔵 25/09: *"no canto inferior das conversas, pode ter o botão
+                   redondinho onde abre um menu dos tipos"*. -->
+              <BotaoMensagensRapidas v-if="!gravando" onde="cliente" :dados="dadosDaConversa"
+                                     @inserir="inserirNoCampo" />
+
+              <button v-if="!gravando" class="botao botao--contorno botao--icone"
                       type="button" title="Gravar áudio" aria-label="Gravar áudio"
                       @click="comecarGravacao">
                 <i class="bi bi-mic" aria-hidden="true"></i>
@@ -4026,7 +4175,48 @@ function carregarMidiasDaConversa(c) {
   align-items: stretch;
 }
 @media (max-width: 1100px) { .painel { grid-template-columns: 300px 1fr; } }
-@media (max-width: 860px)  { .painel { grid-template-columns: 1fr; } }
+/* ══ CELULAR (🔵 25/09) ═════════════════════════════════════════════════
+   *"os mesmos recursos, porém somente os chats"*. Antes disto, a 390 px a
+   lista e a conversa ficavam EMPILHADAS na mesma altura e as mensagens
+   sobravam numa faixa de ~30 px (medido na prévia de 25/09).
+   Agora é UMA COISA POR VEZ: sem conversa, a lista; com conversa, só ela --
+   e o "Voltar" do cabeçalho (ou o do aparelho) traz a lista de volta.
+   ⚠️ Nada daqui vale acima de 860 px: o computador fica como estava. */
+@media (max-width: 860px) {
+  .painel { grid-template-columns: 1fr; grid-template-rows: minmax(0, 1fr); }
+  .painel--com-conversa > .coluna:not(.coluna--larga) { display: none; }
+  .painel:not(.painel--com-conversa) > .coluna--larga { display: none; }
+
+  .conversa__cabecalho { flex-wrap: nowrap; gap: var(--e-2); align-items: center; }
+  .conversa__quem { min-width: 0; flex: 1 1 auto; }
+  .conversa__quem > strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* O telefone fica; canal, cadastro e estado saem da faixa (estão na ficha). */
+  .conversa__detalhe > span { display: none; }
+  .conversa__cabecalho .chip { display: none; }
+  .conversa__voltar { flex: none; margin-left: calc(-1 * var(--e-2)); }
+
+  /* A barra de ações só aparece quando o botão "Ações" pede. */
+  .acoes { display: none; }
+  .acoes.acoes--aberta-celular { display: block; }
+
+  /* A ficha vira a tela da conversa por cima, e não uma faixa de 42% dela. */
+  .coluna--larga > .gaveta { max-height: 60vh; }
+
+  /* Alvos de toque: nada abaixo de 44 px nas duas colunas. */
+  .coluna .botao--icone,
+  .coluna .botao--pequeno,
+  .coluna :deep(.mr__botao) { min-height: 44px; min-width: 44px; }
+  .coluna .botao { min-height: 44px; }
+  /* As abas (Todas, Sem dono, Minhas, Time) também são alvo de dedo. */
+  .coluna .abas__aba { min-height: 44px; }
+}
+
+/* Tela de toque (celular, tablet): as ações do balão aparecem pelo toque
+   (`balao--tocado`), e cada uma ganha tamanho de dedo. */
+@media (hover: none) {
+  .balao--tocado .balao__acoes { opacity: 1; pointer-events: auto; transform: none; }
+  .balao__acao { min-width: 40px; min-height: 40px; }
+}
 
 /* As colunas perdem a casca de cartão: sem raio, sem sombra, divididas por
    uma linha de 1px -- é o que faz a tela parecer contínua. */
@@ -4465,6 +4655,8 @@ function carregarMidiasDaConversa(c) {
 .busca { display: flex; align-items: center; gap: var(--e-2); }
 .busca .campo__entrada { flex: 1 1 auto; min-width: 0; }
 .campo--busca { margin-bottom: var(--e-2); }
+/* O seletor de time da aba Time (25/09): logo abaixo das abas. */
+.campo--time { margin: var(--e-2) 0 0; max-width: 280px; }
 
 /* ---- placar do cabeçalho -------------------------------------------------
    Número grande + rótulo pequeno: dois números com hierarquia leem-se de

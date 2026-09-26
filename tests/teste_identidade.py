@@ -59,7 +59,8 @@ class TestOwnerEUnico:
             operacao.criar_atendente(
                 nome="Teste Owner Novo", login=LOGIN + "novo",
                 email="zz@movisat.com.br", perfil="owner")
-        assert "owner" in str(e.value).lower()
+        # 25/09: a recusa diz o que acontece, sem citar quem decide.
+        assert "owner" not in str(e.value).lower()
         assert banco.um("SELECT id FROM atendente WHERE login = %s",
                         (LOGIN + "novo",)) is None
 
@@ -73,7 +74,7 @@ class TestOwnerEUnico:
             operacao.atualizar_atendente(
                 novo["id"], nome="Teste Comum", login=LOGIN + "comum",
                 email="zzcomum@movisat.com.br", perfil="owner",
-                estado="disponivel", max_conversas=None, ativo=True)
+                estado="disponivel")
         lido = banco.um("SELECT perfil, owner FROM atendente WHERE id = %s",
                         (novo["id"],))
         assert lido["perfil"] == "atendimento"
@@ -89,7 +90,7 @@ class TestOwnerEUnico:
             operacao.atualizar_atendente(
                 dono["id"], nome=dono["nome"], login=dono["login"],
                 email=dono["email"], perfil="atendimento",
-                estado="disponivel", max_conversas=None, ativo=True)
+                estado="disponivel")
         assert banco.um("SELECT owner FROM atendente WHERE id = %s",
                         (dono["id"],))["owner"] is True
 
@@ -194,7 +195,7 @@ class TestTrocarEmailPassaAConta:
         operacao.atualizar_atendente(
             novo["id"], nome="Teste Passa", login=LOGIN + "passa",
             email="zznovo@movisat.com.br", perfil="atendimento",
-            estado="disponivel", max_conversas=None, ativo=True)
+            estado="disponivel")
 
         lido = banco.um("SELECT email, google_sub FROM atendente WHERE id = %s",
                         (novo["id"],))
@@ -211,7 +212,7 @@ class TestTrocarEmailPassaAConta:
         operacao.atualizar_atendente(
             novo["id"], nome="Outro Nome", login=LOGIN + "mantem",
             email="zzmantem@movisat.com.br", perfil="atendimento",
-            estado="ausente", max_conversas=None, ativo=True)
+            estado="ausente")
         assert banco.um("SELECT google_sub FROM atendente WHERE id = %s",
                         (novo["id"],))["google_sub"] == "sub-que-fica"
 

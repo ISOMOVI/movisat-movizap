@@ -210,9 +210,7 @@ onMounted(carregar)
           </div>
           <p class="aviso aviso--info pequeno">
             <i class="bi bi-info-circle aviso__icone" aria-hidden="true"></i>
-            <span>Quem está <strong>offline não recebe transferência</strong>. O owner
-            pode marcar "Sempre online" na Minha conta, e aí, dentro da jornada dele,
-            a regra não o muda.</span>
+            <span>Quem está <strong>offline não recebe transferência</strong>.</span>
           </p>
         </div>
       </section>

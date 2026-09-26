@@ -10,15 +10,34 @@
    conversa" e vive dentro dela; isto responde "falar sobre qualquer coisa".
    ============================================================================ */
 import { ref, reactive, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 
 import { api, pedirBlob, ErroDeApi } from '../api/cliente.js'
 import { corDaInicial, iniciais } from '../util/avatar.js'
 import { partesDoTexto } from '../util/mencao.js'
 import { corDoEstado, rotuloDoEstado } from '../util/estado.js'
+import BotaoMensagensRapidas from '../componentes/BotaoMensagensRapidas.vue'
 
 const salas = ref([])
 const contatos = ref([])
 const sala = ref(null)
+const route = useRoute()
+const router = useRouter()
+
+/* 🔵 25/09, celular: sem a lista ao lado, o "Voltar" do cabeçalho (ou o do
+   aparelho, que tira o `?sala=` da URL) fecha a sala e mostra a lista. */
+function fecharSala() {
+  sala.value = null
+  mensagens.value = []
+}
+function voltarParaLista() {
+  if (route.query.sala) router.push({ path: '/chat' })
+  else fecharSala()
+}
+watch(() => route.query.sala, (s) => {
+  if (s && String(sala.value?.id) !== String(s)) abrir(Number(s))
+  if (!s && sala.value) fecharSala()
+})
 const mensagens = ref([])
 const texto = ref('')
 const carregando = ref(true)
@@ -185,6 +204,15 @@ async function abrir(salaId, { silencioso = false, recarregarLista = true } = {}
     if (!silencioso) {
       mostrandoMembros.value = false
       rolarParaOFim()
+      /* 🔵 25/09, celular: a sala aberta vai para a URL (`/chat?sala=11`).
+         Da lista para a sala é `push`, para o "voltar" do aparelho trazer a
+         lista de volta; entre salas, `replace`. O ciclo de 5 s é silencioso
+         e NÃO passa por aqui -- não mexe no histórico. */
+      if (String(route.query.sala || '') !== String(salaId)) {
+        const destino = { path: '/chat', query: { sala: String(salaId) } }
+        if (route.query.sala) router.replace(destino)
+        else router.push(destino)
+      }
     }
     // Abrir zera o não lido desta sala: o servidor já marcou, a lista precisa
     // refletir sem esperar o próximo ciclo.
@@ -268,8 +296,9 @@ async function sairDoGrupo() {
   try {
     await api.post(`/api/chat/salas/${sala.value.id}/sair`)
     recado.value = 'Você saiu do grupo.'
-    sala.value = null
-    mensagens.value = []
+    // A URL sai da sala junto: recarregar a página não pode reabrir o que saiu.
+    if (route.query.sala) router.replace({ path: '/chat' })
+    fecharSala()
     await carregar()
   } catch (e) {
     erro.value = e instanceof ErroDeApi ? e.message : 'Não consegui sair.'
@@ -293,8 +322,9 @@ async function esconderConversa() {
   try {
     await api.post(`/api/chat/salas/${sala.value.id}/esconder`)
     recado.value = 'Conversa fora da sua lista. Ela volta se alguém escrever.'
-    sala.value = null
-    mensagens.value = []
+    // A URL sai da sala junto: recarregar a página não pode reabrir o que saiu.
+    if (route.query.sala) router.replace({ path: '/chat' })
+    fecharSala()
     await carregar()
   } catch (e) {
     erro.value = e instanceof ErroDeApi ? e.message : 'Não consegui esconder.'
@@ -329,6 +359,20 @@ async function falarCom(atendenteId) {
    histórico ilegível fora desta tela — e o texto do chat é lido em log e em
    busca. O que se guarda é o texto como a pessoa escreveu, e a lista à parte. */
 const campoTexto = ref(null)
+
+/* 🔵 25/09 (Plano 3): no Chat interno, *"Minhas notas e Formulários"*. Entra
+   no cursor; o que já estava escrito fica. */
+function inserirNoTexto(trecho) {
+  const el = campoTexto.value
+  const atual = texto.value || ''
+  const ini = el?.selectionStart ?? atual.length
+  const fim = el?.selectionEnd ?? atual.length
+  texto.value = atual.slice(0, ini) + trecho + atual.slice(fim)
+  nextTick(() => {
+    el?.focus()
+    el?.setSelectionRange(ini + trecho.length, ini + trecho.length)
+  })
+}
 const mencionados = ref([])      // [{id, nome}] já escolhidos
 const listaArroba = ref([])      // o que a lista está oferecendo agora
 const arrobaEscolhido = ref(0)
@@ -593,7 +637,11 @@ async function enviarGravacao() {
   await pronto
   pararRelogio()
 
-  const blob = new Blob(pedacosAudio, { type: 'audio/ogg; codecs=opus' })
+  /* 🔵 25/09, celular: o iPhone grava MP4/AAC. Com rótulo "ogg", quem abre
+     no computador recebe um arquivo que diz ser uma coisa e é outra. Só o
+     caso do iPhone muda; o resto continua como sempre foi. */
+  const doIphone = (gravador.mimeType || '').includes('mp4')
+  const blob = new Blob(pedacosAudio, { type: doIphone ? 'audio/mp4' : 'audio/ogg; codecs=opus' })
   gravador = null
   pedacosAudio = []
   if (!blob.size) return
@@ -602,7 +650,7 @@ async function enviarGravacao() {
   erro.value = ''
   try {
     const carimbo = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')
-    await subirArquivo(blob, `voz-${carimbo}.ogg`)
+    await subirArquivo(blob, `voz-${carimbo}.${doIphone ? 'm4a' : 'ogg'}`)
     texto.value = ''
     mencionados.value = []
     await abrir(sala.value.id)
@@ -679,6 +727,8 @@ onMounted(async () => {
   document.addEventListener('click', fecharEmojiSeForaDele)
   await carregarPreferencia()
   await carregar()
+  // Entrou direto por `/chat?sala=11` (ou recarregou a página com a sala aberta).
+  if (route.query.sala) await abrir(Number(route.query.sala))
   /* 🚨 UMA BUSCA DA LISTA POR VOLTA (23/09). Antes: lista, sala, e a lista de
      NOVO no fim do `abrir`. Agora a sala vem PRIMEIRO -- é ela que marca a
      leitura -- e a lista depois, uma vez, já com o não lido zerado. A ordem
@@ -746,7 +796,7 @@ function quando(iso) {
 </script>
 
 <template>
-  <div class="tela">
+  <div class="tela" :class="{ 'tela--com-sala': sala }">
     <!-- 🚨 A BARRA ALTA (27/08, pedido dele: *"design replicado de caixa de
          entrada do zap, porém com barra alta evidente para distinção"*).
 
@@ -778,7 +828,7 @@ function quando(iso) {
     <p v-if="erro" class="aviso aviso--erro" role="alert">{{ erro }}</p>
     <p v-if="recado" class="aviso aviso--ok" role="status">{{ recado }}</p>
 
-    <div class="colunas">
+    <div class="colunas" :class="{ 'colunas--com-sala': sala }">
       <!-- ─────────────────────────────────────────── pessoas e grupos -->
       <section class="cartao coluna">
         <div class="cartao__corpo ci__topo">
@@ -953,6 +1003,12 @@ function quando(iso) {
 
         <template v-else>
           <header class="cartao__cabecalho">
+            <!-- 🔵 25/09, celular: sem a lista ao lado, o caminho de volta é este
+                 botão (e o "voltar" do aparelho). Some no computador. -->
+            <button class="botao botao--fantasma botao--icone so-celular" type="button"
+                    aria-label="Voltar para a lista de conversas" @click="voltarParaLista">
+              <i class="bi bi-arrow-left" aria-hidden="true"></i>
+            </button>
             <strong>
               <i v-if="ehGrupo" class="bi bi-people" aria-hidden="true"></i>
               {{ sala.com || sala.nome || 'Conversa' }}
@@ -1162,7 +1218,7 @@ function quando(iso) {
               </button>
             </p>
 
-            <div class="linha">
+            <div class="linha ci__envio">
               <!-- Grade própria de emoji: ~4 KB e nenhuma dependência. -->
               <div class="emoji">
                 <button
@@ -1190,6 +1246,8 @@ function quando(iso) {
                   </div>
                 </div>
               </div>
+
+              <BotaoMensagensRapidas onde="interno" @inserir="inserirNoTexto" />
 
               <!-- 🚨 BOTÃO COM RÓTULO, não só ícone. `title` não é rótulo: o
                    balão do navegador demora cerca de um segundo e não existe
@@ -1414,6 +1472,42 @@ function quando(iso) {
 .colunas { display: flex; gap: var(--e-4); align-items: flex-start; }
 .coluna { flex: 1 1 300px; min-width: 0; }
 .coluna--larga { flex: 2 1 520px; }
+
+/* ══ CELULAR (🔵 25/09) ═════════════════════════════════════════════════
+   *"os mesmos recursos, porém somente os chats"*. A 390 px as duas colunas
+   ficavam lado a lado com 103 e 177 px, sem nome nas conversas (medido na
+   prévia de 25/09). Agora é UMA COISA POR VEZ: sem sala, a lista; com sala,
+   só ela, ocupando a altura toda, e o "Voltar" (ou o do aparelho) traz a
+   lista de volta.
+   ⚠️ A BARRA "Conversa interna." FICA, também no celular: é ela que impede
+   escrever para o colega achando que é o cliente (27/08). Só fica mais baixa.
+   ⚠️ Nada daqui vale acima de 860 px: o computador fica como estava. */
+@media (max-width: 860px) {
+  .tela { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+  .tela > .colunas { flex: 1 1 auto; min-height: 0; }
+  .colunas { flex-direction: column; align-items: stretch; gap: 0; }
+  .colunas--com-sala > .coluna:not(.coluna--larga) { display: none; }
+  .colunas:not(.colunas--com-sala) > .coluna--larga { display: none; }
+  .coluna { flex: 1 1 auto; }
+  .tela--com-sala .tela__cabecalho { display: none; }
+  .barra-interna { padding-top: var(--e-2); padding-bottom: var(--e-2); }
+
+  /* Com a sala aberta, as mensagens ficam com toda a altura que sobra e o
+     campo de escrever fica sempre no rodapé. */
+  .coluna--larga { display: flex; flex-direction: column; min-height: 0; }
+  .coluna--larga > * { flex: none; }
+  .coluna--larga > .baloes { flex: 1 1 auto; min-height: 0; max-height: none; }
+  .salas { max-height: none; }
+  /* A fileira de envio (emoji, rápidas, Anexar, Gravar, Enviar) quebra
+     linha: numa só, o Enviar saía da tela (medido na prévia de 25/09). */
+  .ci__envio { flex-wrap: wrap; }
+
+  /* Alvos de toque: nada abaixo de 44 px. */
+  .coluna .botao--icone,
+  .coluna .botao--pequeno,
+  .coluna :deep(.mr__botao) { min-height: 44px; min-width: 44px; }
+  .coluna .botao { min-height: 44px; }
+}
 
 .salas { list-style: none; margin: 0; padding: 0; max-height: 45vh; overflow-y: auto; }
 .sala {

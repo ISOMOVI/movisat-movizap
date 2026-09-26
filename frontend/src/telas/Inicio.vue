@@ -317,7 +317,6 @@ onUnmounted(() => clearInterval(relogio))
         <section v-if="dados.canais" class="cartao inicio__bloco">
           <h2 class="inicio__titulo">
             Canais
-            <span class="chip chip--pequeno chip--acento">owner</span>
           </h2>
           <ul class="inicio__canais">
             <li v-for="c in dados.canais" :key="c.id" class="linha pequeno">

@@ -317,7 +317,23 @@ TELAS = [
         "titulo": "Notificações",
         "rota": "/config/notificacoes",
         "icone": "bi-bell",
-        "descricao": "O som e o aviso na aba quando chega mensagem numa conversa sua.",
+        "descricao": "O som, a aba piscando e o aviso no canto da tela quando chega mensagem numa conversa sua.",
+        "permissao": "atendimento",
+        "fase": 1,
+        "aba_de": "CFG_0.1",
+    },
+    {
+        # 🔵 25/09 (Plano 3): *"pode criar uma aba disso nas configurações ...
+        # Owner e admin criam as do tipo 'Padrões'; outra aba é 'Minhas Notas'
+        # onde ela pode criar as notas dela"*, e *"Formulários"* (links).
+        # `atendimento` pela razão da Minha conta: cada um mexe nas SUAS notas
+        # -- e sem isso seria a porta trancada de 28/08. Quem escreve Padrões e
+        # Formulários (owner e admin) é conferido na rota.
+        "codigo": "CFG_12.1",
+        "titulo": "Mensagens rápidas",
+        "rota": "/config/mensagens-rapidas",
+        "icone": "bi-lightning",
+        "descricao": "Textos prontos para a conversa: padrões da equipe, suas notas e formulários.",
         "permissao": "atendimento",
         "fase": 1,
         "aba_de": "CFG_0.1",

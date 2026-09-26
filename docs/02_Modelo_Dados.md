@@ -289,7 +289,7 @@ datado com hardlink às 02:50, retenção 14 dias.
 | `convite_token` / `convite_expira_em` | NULL |
 | 🆕 `estado` | enum(`disponivel`,`ausente`,`nao_perturbe`) |
 | 🆕 `fuso` | text default `America/Sao_Paulo` |
-| 🆕 `max_conversas` | int NULL — teto de simultâneas; NULL = sem teto |
+| ~~`max_conversas`~~ | **saiu na 056 (25/09)**: *"não deve haver máximo de conversas"*. Estava vazia em 11 de 11 e nada a lia |
 
 ### 🆕 `atendente_jornada`
 `id · atendente_id · dia_semana (0-6) · inicio time · fim time`
@@ -1536,7 +1536,7 @@ conta. Só o `CHECK` mudou; o alcance mora em `telas.PERFIS` (permissão nova
 | `atendente.ultima_acao_em` | última AÇÃO DE ATENDIMENTO (enviar, nota, assumir, entrar, transferir, concluir...). Ler não conta: a tela relê a conversa a cada 8 s. NULL = sem ponto de partida, e a regra não derruba quem está NULL |
 | `atendente.estado_automatico` | `true` = o estado foi posto pela regra de tempo, e a próxima ação o desfaz (volta a disponível). Estado escolhido à mão nunca volta sozinho |
 | `atendente.sempre_online` | exclusivo do owner (`ck_sempre_online_so_owner`): dentro da jornada dele, a regra não o toca |
-| `atendente.afastamento_motivo`, `atendente.afastado_ate` | férias, licença... Com motivo preenchido, a pessoa está offline e não recebe. `afastado_ate` é informativo: a volta é um clique |
+| `atendente.afastamento_motivo`, `atendente.afastado_ate` | férias, licença... Com motivo preenchido, a pessoa está offline e não recebe. Desde a 055, `afastado_ate` é o **dia da volta** e vale: nesse dia o laço encerra sozinho |
 | `conversa.fora_expediente_em` | trava de "uma vez a cada 12 h" da mensagem de fim de expediente, no mesmo desenho de `boas_vindas_em` |
 
 As regras ficam em `config` (sem migração): `presenca_regra_ligada`,
@@ -1557,3 +1557,92 @@ Owner"*. Coluna, e não `preferencia_atendente`: aquela tabela é o GOSTO da
 pessoa (tom e volume moram lá, chaves `notificacao_tom` e
 `notificacao_volume`); isto é decisão do owner SOBRE ela. Nasce ligada.
 Desligada, não toca nem pisca; o contador das abas continua.
+
+## 25/09 — interruptor Ativo/Inativo, afastamento com datas, sem teto
+
+### Afastamento marcado (055)
+
+🔵 *"ao definir o motivo, um calendário já indica a saída e a volta, daí
+volta"*; as conversas passam ao substituto *"no dia da saída"*.
+
+| Coluna | Para quê |
+|---|---|
+| `atendente.afastado_de` | o dia em que o afastamento EM CURSO começou (só para mostrar) |
+| `atendente.afasta_em` | dia da saída de um afastamento MARCADO |
+| `atendente.afasta_ate` | dia da volta do marcado (`ck_afasta_volta_depois`: depois da saída) |
+| `atendente.afasta_motivo` | o motivo do marcado |
+| `atendente.afasta_substituto_id` | quem recebe as conversas abertas no dia da saída (FK, `ON DELETE SET NULL`) |
+
+🚨 **POR QUE COLUNAS PRÓPRIAS PARA O MARCADO.** `afastamento_motivo`
+preenchido quer dizer "afastado AGORA" em seis lugares (`pode_receber`,
+`transferir`, a lista de quem recebe...). Gravar ali um afastamento da semana
+que vem afastaria a pessoa hoje. `ck_afasta_completo`: tudo ou nada.
+
+O laço de 60 s de `presenca` (`aplicar_afastamentos`) roda **sempre**, antes
+da regra de status: começa o marcado no dia da saída (transfere; se o
+substituto não puder receber, a conversa vai para a fila com nota do
+sistema) e encerra o em curso no dia da volta, deixando a pessoa **offline**.
+"Hoje" é no fuso da pessoa (`atendente.fuso`), nunca `date.today()` do
+servidor, que está em UTC.
+
+### `max_conversas` sai (056)
+
+🔵 *"não deve haver máximo de conversas para a pessoa ou para receber
+conversas"*. Medido em 25/09: 0 de 11 com valor, e nenhuma consulta a lia.
+Aplicada **depois** do backend novo no ar: o antigo a selecionava.
+
+### Ativo/Inativo, sem migração
+
+O antigo "desligar" apagava `senha_hash`, `google_sub` e os times, e não
+tinha volta (o e-mail único da 053 impedia até recadastrar). Agora
+`atendente.ativo` é um interruptor nos dois sentidos, por rota própria
+(`PUT /api/atendentes/{id}/ativo`); a edição comum não grava mais `ativo`.
+Inativo não entra (`auth` recusa a cada chamada) e a conta fica inteira.
+Nunca menos de um owner ativo.
+
+### `mensagem_rapida` — mensagens rápidas (057, Plano 3)
+
+🔵 Três tipos, cada um uma aba da CFG_12.1: **Padrões** (owner e admin),
+**Minhas notas** (cada um as suas), **Formulários** (*"serão links"*; owner e
+admin). *"Apelido curto ... e ele quem aparecerá na lista da conversa"*.
+
+```sql
+mensagem_rapida (
+    id, tipo ('padrao'|'nota'|'formulario'), apelido (1-60), conteudo (1-4000),
+    atendente_id  -- só a nota tem dono (ck_mensagem_rapida_dono)
+    ativo, ordem, criada_em, atualizada_em
+)
+```
+
+- `ux_mensagem_rapida_apelido`: apelido único por tipo e dono, sem diferenciar
+  maiúscula: é por ele que se escolhe na conversa.
+- As variáveis (`{cliente}`, `{contato}`, `{saudacao}`) ficam no texto como
+  escritas e são preenchidas **na tela**, ao inserir, com os dados da conversa
+  aberta; nada disso passa pelo banco.
+- Apagar é seguro: o que já foi enviado é texto na conversa, sem vínculo.
+
+### Ligações do MicroSIP (059, Plano 5)
+
+🔵 *"inicialmente o backup das ligações na VPS de uma forma bem inteligente"*.
+Cada operador usa o MicroSIP (central Intelbras WideVoice); um agente no PC
+(`movizap-ligacoes.ps1`) sobe o histórico e as gravações 2x por dia.
+
+| Tabela / coluna | Para quê |
+|---|---|
+| `atendente.ramal` | o ramal da central (único) |
+| `agente_ligacao` | a chave do agente de cada ramal (**só o hash**, `chave_sha256`), `ultimo_contato_em`, `ultimo_pc`, `ultima_versao`, `ultimo_erro`, `pendentes`, `revogado_em`. Gerar chave nova revoga a anterior do ramal |
+| `ligacao` | uma linha por ligação do histórico, com ou sem gravação: `agente_id`, `atendente_id`, `ramal`, `call_id`, `numero_bruto`, `telefone_e164`, `sentido` (feita/recebida/perdida), `situacao`, `inicio`, `duracao_s`, `pc`, `recebida_em`. Única por `(ramal, call_id)` |
+| `ligacao_gravacao` | as gravações de cada ligação: `ligacao_id`, `nome_original`, `arquivo_sha256` (único), `arquivo_bytes`, `caminho`, `inicio`, `recebida_em` |
+
+- **Uma ligação pode ter várias gravações:** quando a gravação recomeça, o
+  MicroSIP abre outro arquivo (medido em 10/08 13:27 e 18/09 17:34). Por isso
+  a gravação tem tabela própria, e não colunas em `ligacao`.
+- **O arquivo mora em disco**, em `/home/claude/movizap_ligacoes/AAAA/MM/<sha256>.mp3`
+  (0640), fora da pasta de mídia do WhatsApp, para entrar sozinho no backup
+  noturno (`empacotar movizap_ligacoes`).
+- **Idempotente pelo banco:** o agente reenvia sem duplicar. A resposta
+  devolve o SHA-256 relido do disco, e o agente só marca como salvo quando ele
+  bate com o do PC.
+- **Alerta:** `ligacoes.agentes_mudos()` lista quem está sem contato há mais
+  de 24 h (ou nunca falou); `scripts/agentes_mudos.py` roda no gancho
+  `SessionStart` do Claude Code dele e não imprime nada quando está tudo em dia.

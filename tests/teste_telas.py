@@ -251,7 +251,9 @@ class TestPortaDoConfig:
         (CFG_11.1) nasceu `atendimento` -- cada um ajusta o próprio som."""
         abas = {t["codigo"] for t in self._do_perfil("atendimento")
                 if t["aba_de"] == "CFG_0.1"}
-        assert abas == {"CFG_10.1", "CFG_11.1"}
+        # 🔵 25/09: Mensagens rápidas (CFG_12.1) -- *"'Minhas Notas' onde ela
+        # pode criar as notas dela"*.
+        assert abas == {"CFG_10.1", "CFG_11.1", "CFG_12.1"}
 
     def test_enter_nao_depende_da_tela_de_atalhos(self):
         """🚨 A Caixa de entrada, o Chat interno e o E-mail leem o
@@ -286,7 +288,10 @@ class TestPortaDoConfig:
         de_atendimento = {t["codigo"] for t in telas.ativas()
                           if t["permissao"] == "atendimento"
                           and t.get("aba_de") != "CFG_0.1"}
-        esperado = de_atendimento | {"CAD_2.1", "CAD_2.2", "CFG_10.1", "CFG_11.1"}
+        # 🔵 25/09: e a CFG_12.1 -- *"Owner e admin criam as do tipo
+        # 'Padrões'"* (e os Formulários), o que exige ver a aba.
+        esperado = de_atendimento | {"CAD_2.1", "CAD_2.2", "CFG_10.1", "CFG_11.1",
+                                     "CFG_12.1"}
         assert vistas == esperado
         assert not vistas & {"CAD_1.1", "CAD_1.2", "ATD_3.1", "CFG_6.1"}
 

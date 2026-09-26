@@ -15,6 +15,7 @@ import { useRoute } from 'vue-router'
 
 import MenuLateral from './componentes/MenuLateral.vue'
 import BarraStatus from './componentes/BarraStatus.vue'
+import BarraCelular from './componentes/BarraCelular.vue'
 import Notificador from './componentes/Notificador.vue'
 import { autenticado } from './estado/sessao.js'
 
@@ -24,7 +25,10 @@ const comCasca = computed(() => autenticado.value && !rota.meta.publica)
 
 <template>
   <div v-if="comCasca" class="painel">
-    <MenuLateral />
+    <!-- 🔵 25/09, celular: abaixo de 860 px o menu lateral e a barra de
+         status saem, e a BarraCelular (só os dois chats + Sair) ocupa o
+         rodapé. No computador, nada muda. -->
+    <MenuLateral class="so-computador" />
     <!-- 🚨 `meta.cheio` (27/08): a Caixa de entrada e um APP DE CONVERSA, nao
          uma pagina com cartoes. Ela precisa da altura toda e sem respiro em
          volta -- foi o que o usuario apontou comparando com o mockup que
@@ -37,7 +41,8 @@ const comCasca = computed(() => autenticado.value && !rota.meta.publica)
           :class="{ 'painel__conteudo--cheio': rota.meta.cheio }">
       <RouterView />
     </main>
-    <BarraStatus />
+    <BarraStatus class="so-computador" />
+    <BarraCelular />
     <!-- 🔵 24/09: o som e a aba piscando valem em QUALQUER tela, por isso
          moram na casca e não na Caixa de entrada. -->
     <Notificador />
@@ -69,5 +74,13 @@ const comCasca = computed(() => autenticado.value && !rota.meta.publica)
 
 @media (max-width: 860px) {
   .painel__conteudo { padding: var(--e-4); }
+  /* Celular: sem coluna de menu; o rodapé é a BarraCelular. */
+  .painel {
+    grid-template-areas:
+      "conteudo"
+      "barra";
+    grid-template-columns: 1fr;
+  }
+  .painel__conteudo--cheio { padding: 0; }
 }
 </style>

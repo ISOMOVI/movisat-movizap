@@ -3039,3 +3039,123 @@ Ausente = **30 min** (era 15), Offline = 60, gravados na `config`. A regra
 restaurava) e backups fora de `sites-enabled`. Exercitado em cópia: aplica uma
 vez, na segunda não faz nada, e no caminho de falha restaura idêntico (hash).
 Espera a decisão dele.
+
+
+## 25/09 — o owner sai dos textos, e o Plano 1 (Atendentes e Times)
+
+### O owner é invisível para a operação
+
+🔵 *"owner é invisível para operação do Movizap, não pode ficar sendo usado como
+justificativa ou explicação."* Texto de tela diz o que acontece, não quem
+decidiu. No ar às 09:28: 9 textos trocados (Notificações, Minha conta, Geral,
+Atendentes, Início) e as 4 recusas da API viraram *"Você não tem permissão
+para esta alteração."*. Os 43 resumos do lote de 24/09 (*"por decisão do
+owner"*) foram reescritos no banco para *"Cliente esperando há mais de 1 dia,
+sem atendimento."*, 43 de 43 relidos.
+
+**🚨 Configurações: seis abas abriam sem a barra de abas (corrigido 25/09, 11:27).**
+Geral e Atalhos (28/08), depois Eventos, Minha conta (22/09), Notificações
+(24/09) e Mensagens rápidas (25/09) montavam a página direto em vez da casca:
+clicar na aba sumia com a barra e a pessoa ficava presa. O comentário do
+roteador dizia o contrário. Achado pelo owner (*"não encontrei nas minhas
+configurações como owner"*). Agora todas montam a casca, e
+`config_rotas.teste.js` reprova se uma voltar a montar direto. Detalhe: a
+lista de abas é lida ao abrir o painel -- aba nova só aparece depois de
+recarregar.
+
+**Plano 1 no ar em 25/09, 10:47** (restart → build → migração 056; a 055 entrou
+às 10:31). Suíte completa 1.231 verde antes; conferido depois em produção:
+11 ativos, owner fora da lista do admin, laço de afastamentos sem erro.
+
+### Atendentes (CAD_2.1)
+
+| O quê | Como ficou | Origem |
+|---|---|---|
+| Ativo/Inativo | interruptor na seção **Acesso** do Editar, no lugar do botão "Desligar". Inativar confirma e pede quem recebe as conversas abertas (obrigatório); reativar é direto. A própria conta não tem interruptor. Inativo não entra e a sessão cai; conta, times e histórico ficam | 🔵 *"um interruptor, inativo não loga a conta permanece lá"* |
+| Owner para o admin | some da lista, do detalhe (404) e dos membros dos times; salvar um time sem vê-lo não o tira de lá | 🔵 *"owner não deve aparecer para admin"* |
+| Teto de conversas | saiu da tela, da API e da Minha conta | 🔵 *"não deve haver máximo de conversas"* |
+| Afastar | **Saída** (hoje por padrão) e **Volta** (obrigatória). Saída hoje: transfere já. Saída futura: "Marcar afastamento", substituto obrigatório (offline agora pode ser escolhido; se no dia não puder receber, as conversas vão para a fila). A lista mostra "Férias de dd/mm a dd/mm"; o Editar tem "Cancelar afastamento marcado" | 🔵 *"um calendário já indica a saída e a volta, daí volta"* |
+| Volta | automática no dia; a pessoa volta **offline** | 🔵 a volta; 🟡 o offline |
+| "mostrar desligados" | virou "mostrar inativos"; o chip, "inativo" | 🟡 |
+
+### Minha conta (CFG_10.1)
+
+Afastado ou com afastamento marcado, aparece o campo **Dia da volta**: hoje ou
+antes encerra (ou cancela o marcado). 🔵 *"ela loga e vai na configuração
+dela e coloca o dia de ontem"*. Os quatro estados ficam **travados** (e com
+cara de travados) enquanto está afastada; o backend recusa também. A frase
+antiga, *"Escolher um estado abaixo encerra o afastamento"*, saiu (M12).
+
+### Caixa de entrada › aba Time
+
+🔵 *"o filtro dele pode ter filtro por times que a pessoa estiver inserida"*.
+Quem está em dois ou mais times ganha **Filtrar por time** ("Todos os meus
+times" ou um deles); com um time só, não aparece. Cada conversa da aba mostra
+o selo do time. `/api/times` passou a trazer `sou_membro`.
+
+### Achado lateral, sem mexer
+
+Na Caixa em largura de celular (390 px) a lista já aperta: nomes cortados em
+"J..." e as marcas de uma conversa passam por baixo do painel vazio. É
+anterior a 25/09.
+
+## 25/09 — Plano 2: notificações
+
+**No ar em 25/09, 10:57** (restart → build; sem migração). Suíte completa
+1.236 verde antes.
+
+| O quê | Como ficou | Origem |
+|---|---|---|
+| Só marca lida o que foi visto | a Caixa relê a conversa aberta a cada 8 s com `?ler=false` quando a aba está escondida; ao voltar para a aba, relê já e marca. Abrir a conversa continua marcando (regra da Erika, 15/09). Antes, a mensagem que chegava com a pessoa fora da tela virava "lida" em até 8 s, sem tocar | 🔵 *"Só marca lida vista"* |
+| A conversa à vista não toca | a Caixa avisa ao Notificador qual está aberta (`notificacoes.conversaAberta`); com a aba à vista, ela não toca (e continua contando para o teto de 4) | 🔵 mesma resposta |
+| Aviso no canto da tela ("igual do MSN") | balão do navegador com **nome + trecho** (até ~100 caracteres; mídia vira "Foto", "Áudio"...), só com o painel fora de foco, um por conversa (`tag`); clicar abre a conversa. Permissão pedida em contexto: convite no canto ("Ativar avisos na tela" / "Agora não", que some por 7 dias) e linha na CFG_11.1 com o estado (ativado / ativar / bloqueado, com o passo a passo) | 🔵 *"igual do MSN?"*, *"considere UX/UI"*, *"Nome + trecho"*; 🟡 o desenho |
+| Contagem das abas | `listar(so_nao_lidas=True)` pela mesma régua da bolinha, sem o teto de 500 que cortava calado; medida em 25/09: de 71–131 ms para 29–45 ms por pessoa a cada 8 s, e o mesmo resultado da lista antiga para os 3 atendentes com mais conversas | 🟡 |
+| Ligar/desligar de id inexistente | 404 (era 200 vazio) | 🟡 |
+
+**Fica de fora, com o motivo:** várias abas (medido: ~1 aba por IP, sem dado
+por pessoa) · conversa sem dono não toca (a distribuição para a Ludmila existe
+e toca pelo fluxo normal, mas **está desligada e sem ninguém escolhido** --
+quem liga é ele, na Geral) · Chat interno e E-mail (*"somente minhas e time,
+por enquanto"*).
+
+**Limites que a tela diz:** o aviso só sai com uma aba do MoviZap aberta, e o
+"Não perturbe" do Windows o cala. Clicar no aviso com a Caixa já aberta agora
+abre a conversa (antes a URL mudava e a conversa não: faltava o `watch` no id
+da rota).
+
+## 25/09 — Plano 3: mensagens rápidas (CFG_12.1)
+
+**No ar em 25/09, 11:12** (migração 057 às 11:01 → restart → build). Testes
+direcionados verdes (214 Python, 207 JS); a suíte completa já tinha rodado
+duas vezes na sessão, o teto combinado.
+
+### Configurações › Mensagens rápidas
+
+| O quê | Como ficou | Origem |
+|---|---|---|
+| Três abas | **Padrões** (owner e admin criam; quem atende vê só para leitura), **Minhas notas** (cada um as suas; só a pessoa vê), **Formulários** (links; owner e admin) | 🔵 *"Serão em tipos: pode criar uma aba disso nas configurações"*, *"Owner e admin criam as do tipo 'Padrões'"*, *"O formulario serão links"* |
+| Apelido | obrigatório, até 60; é o que aparece na lista da conversa. Único por tipo (e por dono, nas notas) | 🔵 *"apelido curto como 'Mensagem de encerramento'"* |
+| Variáveis | três botões inserem no cursor: **Cliente** `{cliente}` (a empresa), **Nome do contato** `{contato}` (a pessoa; sem cadastro, o nome do WhatsApp), **Saudação do horário** `{saudacao}` (Bom dia até 12h, Boa tarde até 18h, Boa noite). Prévia com "Pastelaria Velasco" e "João" | 🔵 as três e *"Empresa × pessoa"*; 🟡 os cortes, os botões, a prévia, o nome do WhatsApp como reserva |
+| Formulário | campo de link; recusa o que não começa com `https://` | 🔵 links; 🟡 a validação |
+| Desativar e apagar | "Aparece na conversa" desliga sem apagar; apagar pede confirmação e não mexe no que já foi enviado | 🟡 |
+
+### O botão na conversa
+
+Botão **redondo** com o raio, ao lado do microfone, na Caixa de entrada e no
+Chat interno. Abre o menu **Mensagens rápidas** com as abas dos tipos, busca
+pelo apelido e teclado (setas, Enter, Esc). Escolher preenche as variáveis com
+a conversa aberta e põe o texto **no cursor** do campo, **ainda editável**;
+variável sem dado fica em branco e aparece o aviso *"Sem dado para Cliente:
+ficou em branco. Confira antes de enviar."* No Chat interno aparecem só
+**Minhas notas e Formulários**. No celular, o menu vira folha fixa com 16 px
+de margem.
+🔵 *"no canto inferior das conversas, pode ter o botão redondinho"*, *"Só o
+botão"*, *"Minhas notas e Formulários"* (interno); 🟡 busca, teclado e aviso.
+
+### Anexo com texto, e o áudio
+
+O texto do campo já ia junto do anexo (é a legenda). 🔵 *"se não estiver
+assim hoje, já aproveite revisitar e ajustar"*: com **áudio**, o WhatsApp não
+mostra legenda, e o cliente não recebia o texto. Agora, com áudio, o texto sai
+**numa mensagem própria, logo depois**; imagem, vídeo e documento continuam
+com legenda. Falta provar num envio real.

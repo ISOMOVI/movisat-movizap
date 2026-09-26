@@ -125,3 +125,56 @@ def test_so_o_owner_liga_e_desliga_a_de_alguem():
         main._so_owner({"login": "x", "owner": False})
     assert e.value.status_code == 403
     main._so_owner({"login": "x", "owner": True})
+
+
+# ------------------------------------------------ Plano 2 (25/09)
+
+def test_o_item_leva_o_trecho_para_o_balao(monkeypatch):
+    """🔵 O balão mostra *"nome + trecho"*."""
+    aid = pessoa()
+    conversa(aid)
+    r = rota_como(monkeypatch, aid)
+    assert r["assumidas"][0]["trecho"] == "oi"
+
+
+def test_trecho_de_midia_vira_palavra_e_texto_longo_e_cortado():
+    assert main._trecho_do_balao({"ultima_mensagem": "", "ultimo_tipo": "audio"}) == "Áudio"
+    longo = main._trecho_do_balao({"ultima_mensagem": "a" * 300, "ultimo_tipo": "texto"})
+    assert len(longo) == 100 and longo.endswith("…")
+
+
+def test_a_contagem_nova_bate_com_a_lista_antiga():
+    """🟡 A contagem passou a pedir só as não lidas (`so_nao_lidas`). Tem de
+    dar o MESMO número que a lista inteira dava -- a bolinha não pode
+    discordar da aba. Comparado para quem tem conversa de verdade."""
+    from movizap import conversas
+    donos = [r["atendente_id"] for r in banco.varios(
+        """SELECT atendente_id FROM conversa WHERE atendente_id IS NOT NULL
+            GROUP BY atendente_id ORDER BY count(*) DESC LIMIT 3""")]
+    if not donos:
+        pytest.skip("sem conversa com dono na base")
+    for eu in donos:
+        antiga = [c["id"] for c in conversas.listar(atendente_id=eu, visualizador_id=eu, limite=100000)
+                  if (c.get("nao_lidas") or 0) > 0]
+        nova = [c["id"] for c in conversas.listar(atendente_id=eu, visualizador_id=eu,
+                                                   limite=100000, so_nao_lidas=True)]
+        assert sorted(antiga) == sorted(nova), eu
+
+
+def test_reler_com_ler_falso_nao_marca_como_lida(monkeypatch):
+    """🔵 *"Só marca lida vista"*: a releitura da aba escondida manda
+    `ler=false`."""
+    aid = pessoa()
+    cid = conversa(aid)
+    monkeypatch.setattr(main, "_atendente_do_usuario", lambda u: aid)
+    main.ver_conversa(cid, ler=False, usuario={"login": "x", "owner": False})
+    assert rota_como(monkeypatch, aid)["assumidas"], "virou lida sem ninguém ver"
+    main.ver_conversa(cid, ler=True, usuario={"login": "x", "owner": False})
+    assert rota_como(monkeypatch, aid)["assumidas"] == []
+
+
+def test_ligar_de_alguem_que_nao_existe_e_404():
+    with pytest.raises(HTTPException) as e:
+        main.definir_notificacao_de(-1, main.NotificacaoAtiva(ativa=True),
+                                    usuario={"login": "x", "owner": True})
+    assert e.value.status_code == 404

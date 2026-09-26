@@ -8,6 +8,12 @@
 *::after { box-sizing: border-box; }
 
 html, body, #app { height: 100%; }
+/* 🔵 25/09, celular: no navegador do celular, `100%`/`100vh` conta a altura
+   SEM a barra de endereço -- o rodapé (campo de escrever) ficava escondido
+   atrás dela. `dvh` acompanha a barra aparecendo e sumindo. */
+@supports (height: 100dvh) {
+  html, body, #app { height: 100dvh; }
+}
 
 body {
   margin: 0;
@@ -71,6 +77,15 @@ hr { border: 0; border-top: var(--borda-fina) solid var(--borda); margin: var(--
 }
 
 [hidden] { display: none !important; }
+
+/* 🔵 25/09, celular: o que só existe numa das formas. O ponto de corte é o
+   MESMO do resto do painel (860 px) -- dois cortes diferentes deixariam uma
+   faixa de largura em que as duas coisas aparecem, ou nenhuma. */
+.so-celular { display: none !important; }
+@media (max-width: 860px) {
+  .so-celular { display: inline-flex !important; }
+  .so-computador { display: none !important; }
+}
 
 /* Só para leitor de tela. */
 .so-leitor {

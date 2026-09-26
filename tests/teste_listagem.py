@@ -401,6 +401,31 @@ class TestAbaDoTime:
         assert cena["dele"] not in vistas, "apareceu conversa de time que não é meu"
         assert cena["minha"] not in vistas, "conversa com dono não é fila de time"
 
+    def test_filtrar_por_um_dos_meus_times(self, cena):
+        """🔵 25/09: *"o filtro dele pode ter filtro por times que a pessoa
+        estiver inserida"* -- e um time de que ela não é membro devolve vazio,
+        porque o filtro vale DENTRO dos times dela."""
+        meu, outro_meu = self._dois_times()
+        banco.executar("INSERT INTO atendente_time (atendente_id, time_id) VALUES (%s, %s), (%s, %s)",
+                       (cena["eu"], meu, cena["eu"], outro_meu))
+        conversas.transferir(cena["orfa"], meu, None)
+        conversas.transferir(cena["dele"], outro_meu, None)
+        so_um = ids(conversas.listar(limite=5000, do_meu_time=cena["eu"], do_meu_time_id=meu))
+        assert cena["orfa"] in so_um and cena["dele"] not in so_um
+        assert conversas.listar(limite=5000, do_meu_time=cena["outro"],
+                                do_meu_time_id=meu) == []
+
+    def test_a_lista_traz_o_nome_do_time(self, cena):
+        """O selo de cada conversa na aba: o mesmo cliente pode estar em dois
+        times, e o nome diz de qual é."""
+        meu, _ = self._dois_times()
+        banco.executar("INSERT INTO atendente_time (atendente_id, time_id) VALUES (%s, %s)",
+                       (cena["eu"], meu))
+        conversas.transferir(cena["orfa"], meu, None)
+        linha = next(x for x in conversas.listar(limite=5000, do_meu_time=cena["eu"])
+                     if x["id"] == cena["orfa"])
+        assert linha["time_nome"]
+
     def test_quem_nao_e_de_time_nenhum_ve_vazio(self, cena):
         meu, _ = self._dois_times()
         conversas.transferir(cena["orfa"], meu, None)

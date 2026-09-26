@@ -186,20 +186,25 @@ class TestOfflineNaoRecebe:
 
 # ------------------------------------------------------------ afastamento
 
+def dias(aid, n):
+    """Hoje + n no fuso da pessoa -- a mesma régua que `presenca` usa."""
+    return presenca._hoje_de(aid) + timedelta(days=n)
+
+
 class TestAfastamento:
     def test_com_conversa_aberta_exige_destino(self):
         aid = novo_atendente()
         nova_conversa(aid)
         with pytest.raises(operacao.DadoInvalido):
-            presenca.afastar(aid, "Férias", None, None)
+            presenca.afastar(aid, "Férias", dias(aid, 1), None)
         assert estado_de(aid)["estado"] == "disponivel"
 
     def test_afastar_transfere_tudo_e_deixa_offline(self):
         aid = novo_atendente()
         colega = novo_atendente()
         c1, c2 = nova_conversa(aid), nova_conversa(aid)
-        r = presenca.afastar(aid, "Férias", None, colega)
-        assert r == {"ok": True, "transferidas": 2}
+        r = presenca.afastar(aid, "Férias", dias(aid, 1), colega)
+        assert r == {"ok": True, "agendado": False, "transferidas": 2}
         donos = {x["atendente_id"] for x in banco.varios(
             "SELECT atendente_id FROM conversa WHERE id = ANY(%s)", ([c1, c2],))}
         assert donos == {colega}
@@ -211,14 +216,129 @@ class TestAfastamento:
         fora = novo_atendente(estado="offline")
         nova_conversa(aid)
         with pytest.raises(operacao.DadoInvalido):
-            presenca.afastar(aid, "Licença", None, fora)
+            presenca.afastar(aid, "Licença", dias(aid, 1), fora)
 
     def test_retornar_volta_disponivel(self):
         aid = novo_atendente()
-        presenca.afastar(aid, "Férias", None, None)
+        presenca.afastar(aid, "Férias", dias(aid, 1), None)
         presenca.retornar(aid)
         e = estado_de(aid)
         assert e["estado"] == "disponivel" and e["afastamento_motivo"] is None
+
+    # 🔵 25/09: *"um calendário já indica a saída e a volta, daí volta"*.
+    def test_a_volta_e_obrigatoria(self):
+        aid = novo_atendente()
+        with pytest.raises(operacao.DadoInvalido, match="volta"):
+            presenca.afastar(aid, "Férias", None, None)
+
+    def test_a_volta_vem_depois_da_saida(self):
+        aid = novo_atendente()
+        with pytest.raises(operacao.DadoInvalido, match="depois"):
+            presenca.afastar(aid, "Férias", dias(aid, 0), None)
+
+    def test_saida_no_passado_e_recusada(self):
+        aid = novo_atendente()
+        with pytest.raises(operacao.DadoInvalido):
+            presenca.afastar(aid, "Férias", dias(aid, 3), None, de=dias(aid, -1))
+
+
+class TestAfastamentoMarcado:
+    """🔵 25/09: as conversas passam ao substituto *"no dia da saída"*."""
+
+    def test_marcar_nao_afasta_hoje(self):
+        """🚨 O PORQUÊ DAS COLUNAS `afasta_*`: gravado em `afastamento_motivo`,
+        o afastamento da semana que vem afastaria a pessoa agora."""
+        aid, colega = novo_atendente(), novo_atendente()
+        r = presenca.afastar(aid, "Férias", dias(aid, 5), colega, de=dias(aid, 2))
+        assert r["agendado"] is True
+        e = estado_de(aid)
+        assert e["estado"] == "disponivel" and e["afastamento_motivo"] is None
+        assert presenca.pode_receber(aid) == (True, "")
+        assert banco.um("SELECT afasta_em FROM atendente WHERE id = %s",
+                        (aid,))["afasta_em"] == dias(aid, 2)
+
+    def test_marcar_exige_substituto(self):
+        aid = novo_atendente()
+        with pytest.raises(operacao.DadoInvalido, match="receber"):
+            presenca.afastar(aid, "Férias", dias(aid, 5), None, de=dias(aid, 2))
+
+    def _chegou_o_dia(self, aid):
+        banco.executar("UPDATE atendente SET afasta_em = %s WHERE id = %s",
+                       (dias(aid, 0), aid))
+        return presenca.aplicar_afastamentos(somente=[aid])
+
+    def test_no_dia_da_saida_transfere_ao_substituto(self):
+        aid, colega = novo_atendente(), novo_atendente()
+        presenca.afastar(aid, "Férias", dias(aid, 5), colega, de=dias(aid, 2))
+        cid = nova_conversa(aid)
+        r = self._chegou_o_dia(aid)
+        assert r["iniciados"] == [aid]
+        assert banco.um("SELECT atendente_id FROM conversa WHERE id = %s",
+                        (cid,))["atendente_id"] == colega
+        linha = banco.um("SELECT estado, afastamento_motivo, afastado_ate, afasta_em "
+                         "FROM atendente WHERE id = %s", (aid,))
+        assert linha["estado"] == "offline" and linha["afastamento_motivo"] == "Férias"
+        assert linha["afastado_ate"] == dias(aid, 5) and linha["afasta_em"] is None
+
+    def test_substituto_offline_no_dia_manda_para_a_fila(self):
+        aid, colega = novo_atendente(), novo_atendente()
+        presenca.afastar(aid, "Férias", dias(aid, 5), colega, de=dias(aid, 2))
+        cid = nova_conversa(aid)
+        banco.executar("UPDATE atendente SET estado = 'offline' WHERE id = %s", (colega,))
+        self._chegou_o_dia(aid)
+        conversa = banco.um("SELECT atendente_id, estado FROM conversa WHERE id = %s", (cid,))
+        assert conversa["atendente_id"] is None and conversa["estado"] == "fila"
+        nota = banco.um("SELECT conteudo FROM mensagem WHERE conversa_id = %s "
+                        "AND tipo = 'nota' AND autor = 'sistema'", (cid,))
+        assert nota and "afastamento" in nota["conteudo"]
+
+    def test_no_dia_da_volta_encerra_e_fica_offline(self):
+        aid = novo_atendente()
+        presenca.afastar(aid, "Férias", dias(aid, 1), None)
+        banco.executar("UPDATE atendente SET afastado_ate = %s WHERE id = %s",
+                       (dias(aid, 0), aid))
+        r = presenca.aplicar_afastamentos(somente=[aid])
+        assert r["encerrados"] == [aid]
+        e = estado_de(aid)
+        assert e["afastamento_motivo"] is None and e["estado"] == "offline"
+
+
+class TestAfastadoNaBarra:
+    """🔵 25/09: barra travada; a volta é pela Minha conta."""
+
+    def test_afastado_nao_escolhe_estado(self):
+        aid = novo_atendente()
+        presenca.afastar(aid, "Férias", dias(aid, 3), None)
+        with pytest.raises(operacao.DadoInvalido, match="Minha conta"):
+            presenca.definir_estado_manual(aid, "disponivel")
+        assert estado_de(aid)["afastamento_motivo"] == "Férias"
+
+    def test_volta_para_ontem_encerra(self):
+        """*"ela loga e vai na configuração dela e coloca o dia de ontem"*."""
+        aid = novo_atendente()
+        presenca.afastar(aid, "Férias", dias(aid, 3), None)
+        assert presenca.definir_minha_volta(aid, dias(aid, -1))["encerrado"] is True
+        e = estado_de(aid)
+        assert e["afastamento_motivo"] is None and e["estado"] == "disponivel"
+
+    def test_volta_mais_tarde_so_muda_a_data(self):
+        aid = novo_atendente()
+        presenca.afastar(aid, "Férias", dias(aid, 3), None)
+        presenca.definir_minha_volta(aid, dias(aid, 10))
+        assert banco.um("SELECT afastado_ate FROM atendente WHERE id = %s",
+                        (aid,))["afastado_ate"] == dias(aid, 10)
+
+    def test_marcado_com_volta_hoje_e_cancelado(self):
+        aid, colega = novo_atendente(), novo_atendente()
+        presenca.afastar(aid, "Férias", dias(aid, 5), colega, de=dias(aid, 2))
+        presenca.definir_minha_volta(aid, dias(aid, 0))
+        assert banco.um("SELECT afasta_em FROM atendente WHERE id = %s",
+                        (aid,))["afasta_em"] is None
+
+    def test_quem_nao_esta_afastado_e_recusado(self):
+        aid = novo_atendente()
+        with pytest.raises(operacao.DadoInvalido):
+            presenca.definir_minha_volta(aid, dias(aid, 1))
 
 
 # ------------------------------------------------------------ fim de expediente

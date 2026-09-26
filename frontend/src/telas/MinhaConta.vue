@@ -95,6 +95,7 @@ async function carregar () {
   try {
     perfil.value = await api.get('/api/eu/perfil')
     nomeNovo.value = perfil.value.nome
+    voltaNova.value = perfil.value.afastado_ate || perfil.value.afasta_ate || ''
   } catch (e) {
     erro.value = e instanceof ErroDeApi ? e.message : 'Não consegui carregar seus dados.'
   } finally {
@@ -120,8 +121,36 @@ async function alternarSempreOnline (evento) {
   }
 }
 
+/* ---- afastamento (25/09) ----------------------------------------------------
+   🔵 *"ela loga e vai na configuração dela e coloca o dia de ontem"*. Enquanto
+   está afastada, os estados ficam travados (o backend também recusa); o
+   caminho de volta é a data. Hoje ou antes encerra; um marcado, cancela. */
+const afastado = computed(() => Boolean(perfil.value?.afastamento_motivo))
+const marcado = computed(() => Boolean(perfil.value?.afasta_em))
+const voltaNova = ref('')
+const dataBR = (iso) => (iso ? new Date(iso + 'T12:00').toLocaleDateString('pt-BR') : '')
+
+async function mudarVolta () {
+  if (!voltaNova.value || salvando.value) return
+  const eraAfastado = afastado.value
+  salvando.value = true
+  erro.value = ''
+  recado.value = ''
+  try {
+    const r = await api.put('/api/eu/afastamento', { volta: voltaNova.value })
+    await carregar()
+    if (!r.encerrado) recado.value = `Volta mudada para ${dataBR(voltaNova.value)}.`
+    else if (eraAfastado) recado.value = 'Afastamento encerrado: você está Disponível.'
+    else recado.value = 'O afastamento marcado foi cancelado.'
+  } catch (e) {
+    erro.value = e instanceof ErroDeApi ? e.message : 'Não consegui mudar a data de volta.'
+  } finally {
+    salvando.value = false
+  }
+}
+
 async function definirEstado (valor) {
-  if (salvando.value || perfil.value?.estado === valor) return
+  if (salvando.value || afastado.value || perfil.value?.estado === valor) return
   salvando.value = true
   erro.value = ''
   recado.value = ''
@@ -243,14 +272,36 @@ onMounted(carregar)
             <i class="bi bi-clock-history aviso__icone" aria-hidden="true"></i>
             <span>Este estado foi posto pelo sistema, por tempo sem atender.</span>
           </p>
-          <p v-if="perfil.afastamento_motivo" class="aviso aviso--atencao pequeno">
+          <!-- 🔵 25/09: a frase dizia "Escolher um estado abaixo encerra o
+               afastamento" -- deixou de ser verdade (M12). Agora a volta é
+               pela data, e os estados ficam travados. -->
+          <div v-if="afastado || marcado" class="aviso aviso--atencao pequeno conta__afastamento">
             <i class="bi bi-airplane aviso__icone" aria-hidden="true"></i>
-            <span>
-              Você está afastado ({{ perfil.afastamento_motivo }}<template
-              v-if="perfil.afastado_ate">, até {{ new Date(perfil.afastado_ate + 'T12:00').toLocaleDateString('pt-BR') }}</template>)
-              e não recebe conversa. Escolher um estado abaixo encerra o afastamento.
-            </span>
-          </p>
+            <div class="pilha">
+              <span v-if="afastado">
+                Você está afastado ({{ perfil.afastamento_motivo }})<template
+                v-if="perfil.afastado_ate"> até {{ dataBR(perfil.afastado_ate) }}</template>
+                e não recebe conversa. Os estados abaixo ficam travados até a volta.
+              </span>
+              <span v-else>
+                Você tem um afastamento marcado ({{ perfil.afasta_motivo }}): sai em
+                {{ dataBR(perfil.afasta_em) }} e volta em {{ dataBR(perfil.afasta_ate) }}.
+              </span>
+              <form class="conta__volta" @submit.prevent="mudarVolta">
+                <label class="campo">
+                  <span class="campo__rotulo">Dia da volta</span>
+                  <input v-model="voltaNova" class="campo__entrada" type="date" />
+                </label>
+                <button class="botao botao--contorno" type="submit"
+                        :disabled="!voltaNova || salvando">Mudar a volta</button>
+              </form>
+              <small class="apagado">
+                {{ afastado
+                  ? 'Para voltar agora, escolha hoje ou um dia anterior.'
+                  : 'Escolher hoje ou um dia anterior cancela o afastamento marcado.' }}
+              </small>
+            </div>
+          </div>
           <div class="conta__estados">
             <button
               v-for="e in ESTADOS"
@@ -258,7 +309,7 @@ onMounted(carregar)
               type="button"
               class="conta__estado"
               :class="{ 'conta__estado--ativo': perfil.estado === e.valor }"
-              :disabled="salvando"
+              :disabled="salvando || afastado"
               :aria-pressed="perfil.estado === e.valor"
               @click="definirEstado(e.valor)"
             >
@@ -280,7 +331,7 @@ onMounted(carregar)
             <span>
               <strong>Sempre online</strong>
               <small class="apagado">
-                Só para o owner. Dentro da sua jornada, a regra de tempo não muda o
+                Dentro da sua jornada, a regra de tempo não muda o
                 seu estado.
                 <template v-if="!perfil.tem_jornada">
                   Você ainda não tem jornada: monte a sua em Atendentes.
@@ -360,14 +411,11 @@ onMounted(carregar)
             <div v-if="veLogin"><dt>Login</dt><dd>{{ perfil.login }}</dd></div>
             <div v-if="veEmail"><dt>E-mail</dt><dd>{{ perfil.email || '—' }}</dd></div>
             <div><dt>Perfil</dt><dd>{{ perfil.perfil }}</dd></div>
-            <div>
-              <dt>Teto de conversas</dt>
-              <dd>{{ perfil.max_conversas ?? 'sem teto' }}</dd>
-            </div>
+            <!-- 🔵 25/09: "Teto de conversas" saiu -- *"não deve haver máximo
+                 de conversas"*, e o campo nunca foi lido por nada. -->
           </dl>
           <p class="apagado pequeno">
-            O nome é seu para mudar. Os outros campos são da sua ficha de
-            atendente, e quem os altera é o owner ou um admin, em Atendentes.
+            O nome é seu para mudar. Os outros campos são alterados em Atendentes.
           </p>
         </div>
       </section>
@@ -379,6 +427,13 @@ onMounted(carregar)
 .conta__nome { display: flex; flex-direction: column; align-items: flex-start; gap: var(--e-2); }
 .conta__nome .campo { width: 100%; max-width: 420px; margin-bottom: 0; }
 .conta__estados { display: grid; gap: var(--e-2); }
+.conta__afastamento { align-items: flex-start; }
+/* Travado tem de PARECER travado (visto na prévia de 25/09): desabilitado sem
+   mudança visual convida ao clique que não faz nada. */
+.conta__estado:disabled { opacity: .55; cursor: not-allowed; }
+.conta__estado:disabled:hover { border-color: var(--borda); }
+.conta__volta { display: flex; align-items: flex-end; flex-wrap: wrap; gap: var(--e-2); }
+.conta__volta .campo { margin-bottom: 0; }
 .conta__sempre { display: flex; align-items: flex-start; gap: var(--e-3); padding: var(--e-3); border: 1px dashed var(--borda-forte); border-radius: var(--r-md); cursor: pointer; }
 .conta__sempre input { width: 18px; height: 18px; margin-top: 2px; accent-color: var(--acento); }
 .conta__sempre span { display: flex; flex-direction: column; gap: 2px; }

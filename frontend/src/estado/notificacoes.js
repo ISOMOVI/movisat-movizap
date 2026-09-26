@@ -14,4 +14,10 @@ export const notificacoes = reactive({
   volume: 3,
   abas: { minhas: 0, time: 0 },
   assumidasNaoLidas: 0,
+  /* 🔵 25/09: a conversa aberta na Caixa agora. Com a tela à vista, ela não
+     toca (`decidirToque`); a Caixa escreve, o Notificador lê. */
+  conversaAberta: null,
+  /* A permissão do balão do Windows, reativa para o convite e a CFG_11.1
+     mudarem juntos quando a pessoa aceita num dos dois. */
+  permissaoBalao: 'default',
 })

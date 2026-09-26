@@ -14,18 +14,39 @@
    que um cliente espera. Somado ao caminho WhatsApp -> painel (medido em
    28/08), a demora fica em ~10-15 s.
    ============================================================================ */
-import { onMounted, onUnmounted } from 'vue'
+import { onMounted, onUnmounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 
 import { api } from '../api/cliente.js'
 import { notificacoes } from '../estado/notificacoes.js'
 import { decidirToque } from '../util/regraToque.js'
 import { somBloqueado, tocar } from '../util/som.js'
+import {
+  adiarConvite, conviteAdiado, foraDeFoco, mostrarBalao, pedirPermissao, permissao,
+} from '../util/balao.js'
 
 const INTERVALO_MS = 8000
+const router = useRouter()
 let antes = null
 let relogio = null
 let pisca = null
 let tituloBase = ''
+
+/* 🔵 25/09: o balão do Windows. O convite aparece só enquanto a permissão
+   nunca foi respondida e a pessoa não disse "Agora não" nesta semana. */
+notificacoes.permissaoBalao = permissao()
+const adiado = ref(conviteAdiado())
+
+async function ativarBalao() {
+  notificacoes.permissaoBalao = await pedirPermissao()
+}
+function agoraNao() {
+  adiarConvite()
+  adiado.value = true
+}
+function abrirConversa(id) {
+  router.push(`/atendimento/${id}`)
+}
 
 function pararDePiscar() {
   if (pisca) {
@@ -66,13 +87,25 @@ async function ler() {
   notificacoes.abas = r.abas || { minhas: 0, time: 0 }
   notificacoes.assumidasNaoLidas = (r.assumidas || []).length
 
-  const decisao = decidirToque(antes, r)
+  // 🔵 25/09: a conversa aberta com a tela à vista não toca.
+  const aVista = document.hidden ? null : notificacoes.conversaAberta
+  const decisao = decidirToque(antes, r, aVista)
   antes = { donas: r.donas || [], assumidas: r.assumidas || [] }
   if (!notificacoes.ativa) {
     pararDePiscar()
     return
   }
-  if (decisao.tocar) await tocar(notificacoes.tom, notificacoes.volume)
+  if (decisao.tocar) {
+    // O balão sai antes do som: o som pode estar bloqueado (F5 sem clique), o
+    // balão não depende disso.
+    if (foraDeFoco()) {
+      for (const id of decisao.conversas.slice(0, 4)) {
+        const c = (r.assumidas || []).find((x) => x.id === id)
+        if (c) mostrarBalao(c, abrirConversa)
+      }
+    }
+    await tocar(notificacoes.tom, notificacoes.volume)
+  }
   piscar(notificacoes.assumidasNaoLidas)
 }
 
@@ -102,6 +135,20 @@ onUnmounted(() => {
     <i class="bi bi-volume-mute" aria-hidden="true"></i>
     Clique para ativar o som das notificações
   </button>
+  <!-- 🔵 25/09: o convite do balão, no mesmo canto. Pede permissão só com o
+       clique da pessoa -- pedir ao abrir o painel é o jeito certo de ouvir
+       "bloquear" para sempre. -->
+  <div v-else-if="notificacoes.ativa && notificacoes.permissaoBalao === 'default' && !adiado"
+       class="destravar convite" role="region" aria-label="Avisos na tela">
+    <i class="bi bi-window-stack" aria-hidden="true"></i>
+    <span>Avisar no canto da tela quando chegar mensagem?</span>
+    <button type="button" class="botao botao--pequeno botao--primario" @click="ativarBalao">
+      Ativar avisos na tela
+    </button>
+    <button type="button" class="botao botao--pequeno botao--fantasma" @click="agoraNao">
+      Agora não
+    </button>
+  </div>
 </template>
 
 <style scoped>
@@ -122,5 +169,13 @@ onUnmounted(() => {
   font-size: var(--txt-sm);
   box-shadow: var(--sombra-2);
   cursor: pointer;
+}
+.convite {
+  flex-wrap: wrap;
+  max-width: min(520px, calc(100vw - 2 * var(--e-4)));
+  border-radius: var(--r-lg);
+  border-color: var(--acento-borda);
+  background: var(--superficie);
+  cursor: default;
 }
 </style>
