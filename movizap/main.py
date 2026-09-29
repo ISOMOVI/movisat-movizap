@@ -2191,6 +2191,28 @@ def apagar_mensagem_enviada(conversa_id: int, dados: MensagemAlvo,
     return r
 
 
+@app.post("/api/conversas/{conversa_id}/nota/editar")
+def editar_nota_interna(conversa_id: int, dados: EdicaoEntrada,
+                        usuario: dict = Depends(auth.requer_tela("ATD_1.2"))):
+    """🔵 28/09: edita uma nota interna que EU escrevi. Sem janela de tempo."""
+    eu = _exige_estar_na_conversa(conversa_id, usuario)
+    r = conversas.editar_nota(conversa_id, dados.mensagem_id, dados.texto, eu)
+    if not r["ok"]:
+        raise HTTPException(status_code=409, detail=r["motivo"])
+    return r
+
+
+@app.post("/api/conversas/{conversa_id}/nota/apagar")
+def apagar_nota_interna(conversa_id: int, dados: MensagemAlvo,
+                        usuario: dict = Depends(auth.requer_tela("ATD_1.2"))):
+    """🔵 28/09: apaga uma nota interna que EU escrevi. Sem janela de tempo."""
+    eu = _exige_estar_na_conversa(conversa_id, usuario)
+    r = conversas.apagar_nota(conversa_id, dados.mensagem_id, eu)
+    if not r["ok"]:
+        raise HTTPException(status_code=409, detail=r["motivo"])
+    return r
+
+
 @app.post("/api/conversas/{conversa_id}/bloquear")
 def bloquear_numero(conversa_id: int,
                     usuario: dict = Depends(auth.requer_tela("ATD_1.2"))):
@@ -3240,6 +3262,10 @@ class ChatTexto(BaseModel):
     mencionados: list[int] = Field(default_factory=list)
 
 
+class ChatEdicao(BaseModel):
+    texto: str = Field(max_length=4000)
+
+
 class ChatAbrir(BaseModel):
     atendente_id: int
 
@@ -3439,6 +3465,28 @@ async def chat_arquivo(sala_id: int,
     if not resultado["ok"]:
         raise HTTPException(status_code=409, detail=resultado["motivo"])
     return resultado
+
+
+@app.post("/api/chat/salas/{sala_id}/mensagens/{mensagem_id}/editar")
+def chat_editar_mensagem(sala_id: int, mensagem_id: int, dados: ChatEdicao,
+                         usuario: dict = Depends(auth.requer_tela("ATD_6.1"))):
+    """🔵 25/09: edito, por até 15 min, uma mensagem que EU escrevi no chat."""
+    eu = _minha_sala(sala_id, usuario)
+    r = chat.editar_propria(sala_id, mensagem_id, eu, dados.texto)
+    if not r["ok"]:
+        raise HTTPException(status_code=409, detail=r["motivo"])
+    return r
+
+
+@app.post("/api/chat/salas/{sala_id}/mensagens/{mensagem_id}/apagar")
+def chat_apagar_mensagem(sala_id: int, mensagem_id: int,
+                         usuario: dict = Depends(auth.requer_tela("ATD_6.1"))):
+    """🔵 25/09: apago, por até 48 h, uma mensagem que EU escrevi no chat."""
+    eu = _minha_sala(sala_id, usuario)
+    r = chat.apagar_propria(sala_id, mensagem_id, eu)
+    if not r["ok"]:
+        raise HTTPException(status_code=409, detail=r["motivo"])
+    return r
 
 
 def _atendente_do_usuario(usuario: dict) -> int | None:

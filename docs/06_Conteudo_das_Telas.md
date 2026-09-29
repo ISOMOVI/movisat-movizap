@@ -3159,3 +3159,71 @@ assim hoje, já aproveite revisitar e ajustar"*: com **áudio**, o WhatsApp não
 mostra legenda, e o cliente não recebia o texto. Agora, com áudio, o texto sai
 **numa mensagem própria, logo depois**; imagem, vídeo e documento continuam
 com legenda. Falta provar num envio real.
+
+## 25/09 — modo celular (Caixa e Chat interno)
+
+🔵 *"verifique a compatibilidade do movizap somente para chat interno e
+externo via navegador mobile, os mesmos recursos, porém somente os chats"*.
+No ar às 17:22, com a palavra dele (*"pode sim"*); o computador não mudou.
+
+**Como foi medido antes de construir:** prévia Playwright em 390×844 com
+toque (Chromium), frontend copiado em `/tmp`, API simulada. Achou que
+**nenhuma das duas telas era usável no celular**: lista e conversa
+empilhadas na mesma tela, mensagens somem numa faixa de ~30 px entre
+cabeçalho e campo de escrever, ações do balão só apareciam no hover (0
+visíveis no toque), menu lateral ocupava 62 px dos 390, alvos de toque
+abaixo de 40 px.
+
+| O quê | Como ficou |
+|---|---|
+| `BarraCelular.vue` | Caixa, Chat interno, Sair — nasce só em largura de celular |
+| Navegação | lista **ou** conversa, nunca as duas juntas; botão Voltar e o voltar do aparelho funcionam |
+| Ações do balão | viram acessíveis por toque (antes só apareciam com o mouse em cima) |
+| URL | `/chat?sala=`, para abrir direto numa sala |
+| Alvos de toque | 44 px, o piso já usado no resto do painel |
+| Altura da tela | `dvh` no lugar de `vh` — o teclado do celular não empurra o layout |
+| Áudio do iPhone | rótulo `audio/mp4` em vez de `audio/ogg` (o iPhone grava MP4/AAC, não Ogg) |
+
+**Provado na prévia:** fluxo inteiro em 390 px, 0 erros de JavaScript, 209
+testes JS verdes, computador idêntico em 1280 px. **Falta ele:** testar no
+celular real, inclusive o áudio pelo iPhone para `+5518998116168`, e o
+celular deitado.
+
+## 28/09 — Plano 4: nota editável, Chat interno com a cara da Caixa, anexos em lote
+
+**No ar em 28/09** (migração 061 → restart → build). Suíte completa
+1269/1272 antes de publicar (as 3 falhas são de antes desta sessão, sem
+relação — dois testes de layout e a documentação da migração 060).
+Detalhe técnico em `docs/02_Modelo_Dados.md`.
+
+### Nota interna (Caixa de entrada)
+
+🔵 *"nota interna editável/apagável por quem escreveu, com 'editada por X,
+em…' e ícone da versão anterior"*. Mesmo botão de editar/apagar que a
+mensagem enviada já tinha, agora também no balão de nota (`.balao--interna`).
+**Sem janela de tempo** (decisão dele, 28/09) — é registro interno, nunca
+sai para o cliente. Reaproveita as colunas que a Caixa já tinha desde 17/09;
+não precisou de tabela nova.
+
+### Chat interno: editar, apagar e o visual da Caixa
+
+🔵 *"editar (15 min) e apagar (48h) a própria mensagem, como na Caixa"* +
+*"ajustar o painel interno visualmente igual ao do externo e as
+confirmações de envio e leitura tbm"*. O balão do Chat interno passou a
+usar o mesmo desenho da Caixa — cor, bico, tique — no lugar da cor de
+acento genérica de antes. Tique de leitura: em conversa de duas pessoas,
+mostra ✓✓ azul quando o outro leu; em grupo, só quando **todos** leram
+(decisão dele). Não existe "entregue" aqui — é tudo local, sem WhatsApp
+envolvido.
+
+### Até 10 anexos por envio
+
+🔵 *"até 10 anexos por envio, texto na 1ª mensagem, 25 MB cada"* — Caixa e
+Chat interno. Seleciona vários de uma vez; cada um vira um balão, o texto
+digitado vai só no primeiro. Se um arquivo do meio falhar, para e avisa
+quantos já foram enviados.
+
+**Fica de fora, registrado, não pedido:** o Chat interno ainda marca como
+lida mesmo com a aba em segundo plano (a Caixa só marca com a aba visível,
+desde o Plano 2) · decifrar a edição cifrada de cliente em grupo (achado de
+25/09, é criptografia real, não virou código).

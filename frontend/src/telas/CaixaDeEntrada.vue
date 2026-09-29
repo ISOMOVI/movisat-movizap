@@ -596,14 +596,22 @@ function minhaEnviada(m) {
   return m.direcao === 'saida' && m.tipo !== 'nota' && !m.apagada_em &&
     meuId.value != null && m.atendente_id === meuId.value
 }
+/* 🔵 28/09: nota interna editável/apagável por quem escreveu, SEM janela de
+   tempo (decisão dele) -- é registro interno, nunca sai para o cliente. */
+function minhaNota(m) {
+  return m.tipo === 'nota' && !m.apagada_em &&
+    meuId.value != null && m.atendente_id === meuId.value
+}
 function podeEditar(m) {
+  if (m.tipo === 'nota') return minhaNota(m)
   return minhaEnviada(m) && m.tipo === 'texto' && idadeMin(m) <= JANELA_EDITAR_MIN
 }
 function podeApagar(m) {
+  if (m.tipo === 'nota') return minhaNota(m)
   return minhaEnviada(m) && idadeMin(m) <= JANELA_APAGAR_MIN
 }
 function abrirEdicao(m) {
-  editando.value = { id: m.id, texto: m.conteudo || '' }
+  editando.value = { id: m.id, texto: m.conteudo || '', nota: m.tipo === 'nota' }
 }
 async function salvarEdicao() {
   const e = editando.value
@@ -611,10 +619,12 @@ async function salvarEdicao() {
   mexendo.value = true
   erro.value = ''
   try {
-    await api.post(`/api/conversas/${aberta.value.id}/editar`,
+    const rota = e.nota ? 'nota/editar' : 'editar'
+    await api.post(`/api/conversas/${aberta.value.id}/${rota}`,
                    { mensagem_id: e.id, texto: e.texto })
     editando.value = null
-    recado.value = 'Mensagem editada — o cliente vê a versão nova, marcada como editada.'
+    recado.value = e.nota ? 'Nota editada.'
+      : 'Mensagem editada — o cliente vê a versão nova, marcada como editada.'
     await abrir(aberta.value.id)
   } catch (x) {
     erro.value = x instanceof ErroDeApi ? x.message : 'Não consegui editar.'
@@ -624,13 +634,16 @@ async function salvarEdicao() {
   }
 }
 function pedirParaApagar(m) {
-  perguntar('Apagar para todos?',
-    'A mensagem some do WhatsApp do cliente. Aqui ela continua registrada, marcada como apagada.',
-    'Apagar para todos',
+  const nota = m.tipo === 'nota'
+  perguntar(nota ? 'Apagar esta nota?' : 'Apagar para todos?',
+    nota ? 'A nota some da conversa para a equipe. Continua registrada, marcada como apagada.'
+         : 'A mensagem some do WhatsApp do cliente. Aqui ela continua registrada, marcada como apagada.',
+    nota ? 'Apagar nota' : 'Apagar para todos',
     async () => {
       try {
-        await api.post(`/api/conversas/${aberta.value.id}/apagar`, { mensagem_id: m.id })
-        recado.value = 'Mensagem apagada para todos.'
+        const rota = nota ? 'nota/apagar' : 'apagar'
+        await api.post(`/api/conversas/${aberta.value.id}/${rota}`, { mensagem_id: m.id })
+        recado.value = nota ? 'Nota apagada.' : 'Mensagem apagada para todos.'
         await abrir(aberta.value.id)
       } catch (x) {
         erro.value = x instanceof ErroDeApi ? x.message : 'Não consegui apagar.'
@@ -1184,7 +1197,7 @@ const exigeComentario = computed(() => {
    um seletor invisível que o usuário não conseguia entender -- e com razão. */
 const ocupado = computed(() => enviando.value || enviandoArquivo.value)
 const temAlgoParaEnviar = computed(
-  () => Boolean(arquivo.value) || Boolean(resposta.value.trim()),
+  () => arquivos.value.length > 0 || Boolean(resposta.value.trim()),
 )
 
 async function enviar(interna = false) {
@@ -1355,7 +1368,9 @@ function tirarMencionado(jid) {
 /* 25 MB é decisão do usuário (12/08). Eu tinha posto 16 por conta própria, e
    teto é decisão dele -- regra que ele já tinha dado no dia anterior. */
 const TETO_ARQUIVO_MB = 25
-const arquivo = ref(null)
+/* 🔵 25/09: até 10 anexos por envio, texto só na primeira mensagem. */
+const TETO_ANEXOS = 10
+const arquivos = ref([])   // File[], até TETO_ANEXOS
 const enviandoArquivo = ref(false)
 
 /* ---- colar print (Ctrl+V) ------------------------------------------------
@@ -1368,64 +1383,109 @@ function colar(evento) {
   if (!imagem) return          // colar texto continua sendo colar texto
   const arq = imagem.getAsFile()
   if (!arq) return
+  if (arquivos.value.length >= TETO_ANEXOS) {
+    erro.value = `Já tem ${TETO_ANEXOS} arquivos — o máximo por envio.`
+    return
+  }
   evento.preventDefault()
   /* Nome com hora: "image.png" três vezes na conversa não distingue nada. */
   const carimbo = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')
-  arquivo.value = new File([arq], `print-${carimbo}.png`, { type: arq.type })
+  arquivos.value = [...arquivos.value,
+    new File([arq], `print-${carimbo}.png`, { type: arq.type })]
 }
 
+/* 🔵 25/09: até 10 anexos por envio. O backend não trava anexo por
+   mensagem (cada `POST .../arquivo` já é independente) -- então isto é
+   mudança só de frontend, com um laço sequencial no envio. */
 function escolherArquivo(evento) {
-  const f = evento.target.files?.[0] || null
+  const novos = Array.from(evento.target.files || [])
   erro.value = ''
-  if (f && f.size > TETO_ARQUIVO_MB * 1024 * 1024) {
-    // Barra aqui também, além do servidor: subir 40 MB para levar 413 no fim
-    // é desperdício de tempo de quem está atendendo.
-    erro.value = `O arquivo tem ${(f.size / 1024 / 1024).toFixed(1)} MB e o `
-      + `teto é ${TETO_ARQUIVO_MB} MB.`
-    evento.target.value = ''
-    arquivo.value = null
-    return
+  const cabem = TETO_ANEXOS - arquivos.value.length
+  if (novos.length > cabem) {
+    erro.value = cabem > 0
+      ? `Dá para mandar no máximo ${TETO_ANEXOS} arquivos por envio — cabem mais ${cabem}.`
+      : `Já tem ${TETO_ANEXOS} arquivos — o máximo por envio.`
   }
-  arquivo.value = f
+  const aceitos = []
+  for (const f of novos.slice(0, Math.max(cabem, 0))) {
+    if (f.size > TETO_ARQUIVO_MB * 1024 * 1024) {
+      // Barra aqui também, além do servidor: subir 40 MB para levar 413 no
+      // fim é desperdício de tempo de quem está atendendo.
+      // 🚨 SEM O NOME DO ARQUIVO NO AVISO: ele não deve aparecer em lugar
+      // nenhum da tela para um arquivo que foi recusado e não entrou.
+      erro.value = `O arquivo tem ${(f.size / 1024 / 1024).toFixed(1)} MB e o `
+        + `teto é ${TETO_ARQUIVO_MB} MB.`
+      continue
+    }
+    aceitos.push(f)
+  }
+  arquivos.value = [...arquivos.value, ...aceitos]
+  evento.target.value = ''   // deixa escolher o mesmo arquivo de novo depois
 }
 
-function limparArquivo() {
-  arquivo.value = null
+function limparArquivo(indice) {
+  arquivos.value = arquivos.value.filter((_, i) => i !== indice)
+}
+
+function limparArquivos() {
+  arquivos.value = []
   const campo = document.getElementById('campo-arquivo')
   if (campo) campo.value = ''
 }
 
+async function enviarUmArquivo(arq, legenda, interna) {
+  const forma = new FormData()
+  forma.append('arquivo', arq)
+  forma.append('legenda', legenda)
+  // Anexo vale nos dois destinos: como nota, o arquivo é guardado na
+  // conversa e não sai para o cliente.
+  forma.append('interna', interna ? 'true' : 'false')
+  const r = await fetch(`/api/conversas/${aberta.value.id}/arquivo`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${localStorage.getItem('movizap.token')}` },
+    body: forma,
+  })
+  // 🚨 Não confiar no código: ler o corpo e decidir por ele.
+  const texto = await r.text()
+  let corpo = null
+  try { corpo = JSON.parse(texto) } catch { corpo = null }
+  if (!r.ok) {
+    throw new Error((corpo && corpo.detail) || `Falha ao enviar (${r.status}).`)
+  }
+}
+
 async function enviarArquivo(interna = false) {
-  if (!arquivo.value || ocupado.value) return
+  if (!arquivos.value.length || ocupado.value) return
   enviandoArquivo.value = true
   erro.value = ''
   recado.value = ''
+  const total = arquivos.value.length
+  let enviados = 0
   try {
-    const forma = new FormData()
-    forma.append('arquivo', arquivo.value)
-    forma.append('legenda', resposta.value.trim())
-    // Anexo vale nos dois destinos: como nota, o arquivo é guardado na
-    // conversa e não sai para o cliente.
-    forma.append('interna', interna ? 'true' : 'false')
-    const r = await fetch(`/api/conversas/${aberta.value.id}/arquivo`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${localStorage.getItem('movizap.token')}` },
-      body: forma,
-    })
-    // 🚨 Não confiar no código: ler o corpo e decidir por ele.
-    const texto = await r.text()
-    let corpo = null
-    try { corpo = JSON.parse(texto) } catch { corpo = null }
-    if (!r.ok) {
-      throw new Error((corpo && corpo.detail) || `Falha ao enviar (${r.status}).`)
+    // 🔵 25/09: texto só na 1ª mensagem, os demais anexos vão sem legenda.
+    // Sequencial, não em paralelo -- preserva a ordem dos balões e não
+    // estoura conexão simultânea com a Evolution.
+    for (const arq of arquivos.value) {
+      await enviarUmArquivo(arq, enviados === 0 ? resposta.value.trim() : '', interna)
+      enviados++
     }
-    limparArquivo()
+    limparArquivos()
     resposta.value = ''
-    recado.value = 'Arquivo enviado.'
+    recado.value = total > 1 ? `${enviados} arquivos enviados.` : 'Arquivo enviado.'
     await Promise.all([abrir(aberta.value.id), carregar({ silencioso: true })])
   } catch (e) {
-    erro.value = e.message || 'Não consegui enviar o arquivo.'
+    // 🔵 28/09 (minha decisão de engenharia, documentada no plano): se um
+    // arquivo do meio falhar, PARA -- não desfaz o que já chegou ao
+    // cliente, nem segue tentando os demais sem avisar.
+    arquivos.value = arquivos.value.slice(enviados)
+    erro.value = (enviados > 0
+        ? `${enviados} de ${total} enviados; parei no que falhou: `
+        : '') + (e.message || 'Não consegui enviar o arquivo.')
     relatarErroDeBotao('enviar_arquivo', e, aberta.value?.id)
+    if (enviados > 0) {
+      resposta.value = ''
+      await Promise.all([abrir(aberta.value.id), carregar({ silencioso: true })])
+    }
   } finally {
     enviandoArquivo.value = false
   }
@@ -3161,6 +3221,7 @@ function carregarMidiasDaConversa(c) {
                    não para o outro" (27/08). -->
               <p v-if="m.editada_em && m.conteudo_original && originalAberto.has(m.id)"
                  class="balao__original pequeno">
+                <template v-if="m.tipo === 'nota'">editada por {{ m.atendente_nome || 'quem escreveu' }}, em {{ hora(m.editada_em) }} · </template>
                 antes: {{ m.conteudo_original }}
               </p>
 
@@ -3214,31 +3275,36 @@ function carregarMidiasDaConversa(c) {
               <!-- ⚠️ AS AÇÕES APARECEM NO HOVER, não sempre. Três botões fixos
                    em cada balão transformam o fio numa grade de botões, e o
                    que se lê é a conversa. -->
-              <div v-if="posso && m.tipo !== 'nota'" class="balao__acoes">
-                <button class="balao__acao" type="button" title="Responder citando"
+              <div v-if="posso && (m.tipo !== 'nota' || minhaNota(m))" class="balao__acoes">
+                <button v-if="m.tipo !== 'nota'" class="balao__acao" type="button"
+                        title="Responder citando"
                         aria-label="Responder citando" @click="citar(m)">
                   <i class="bi bi-reply" aria-hidden="true"></i>
                 </button>
-                <button class="balao__acao" type="button" title="Reagir"
-                        aria-label="Reagir"
+                <button v-if="m.tipo !== 'nota'" class="balao__acao" type="button"
+                        title="Reagir" aria-label="Reagir"
                         @click="reagindoEm = reagindoEm === m.id ? null : m.id">
                   <i class="bi bi-emoji-smile" aria-hidden="true"></i>
                 </button>
-                <button v-if="m.conteudo && !m.midia_id" class="balao__acao"
+                <button v-if="m.tipo !== 'nota' && m.conteudo && !m.midia_id"
+                        class="balao__acao"
                         type="button" title="Encaminhar" aria-label="Encaminhar"
                         @click="abrirEncaminhar(m)">
                   <i class="bi bi-arrow-right" aria-hidden="true"></i>
                 </button>
                 <!-- 🔵 23/09: só na MINHA mensagem, e dentro da janela do
-                     WhatsApp (15 min para editar, 48 h para apagar). -->
+                     WhatsApp (15 min para editar, 48 h para apagar).
+                     🔵 28/09: a nota é minha, editável/apagável sem janela. -->
                 <button v-if="podeEditar(m)" class="balao__acao" type="button"
-                        title="Editar (até 15 minutos depois de enviar)"
-                        aria-label="Editar mensagem" @click="abrirEdicao(m)">
+                        :title="m.tipo === 'nota' ? 'Editar nota' : 'Editar (até 15 minutos depois de enviar)'"
+                        :aria-label="m.tipo === 'nota' ? 'Editar nota' : 'Editar mensagem'"
+                        @click="abrirEdicao(m)">
                   <i class="bi bi-pencil" aria-hidden="true"></i>
                 </button>
                 <button v-if="podeApagar(m)" class="balao__acao" type="button"
-                        title="Apagar para todos"
-                        aria-label="Apagar para todos" @click="pedirParaApagar(m)">
+                        :title="m.tipo === 'nota' ? 'Apagar nota' : 'Apagar para todos'"
+                        :aria-label="m.tipo === 'nota' ? 'Apagar nota' : 'Apagar para todos'"
+                        @click="pedirParaApagar(m)">
                   <i class="bi bi-trash" aria-hidden="true"></i>
                 </button>
 
@@ -3363,17 +3429,27 @@ function carregarMidiasDaConversa(c) {
             <!-- ANEXO nos DOIS modos (decisão do usuário, 12/08). No modo
                  nota o arquivo é guardado na conversa e NÃO sai para o
                  cliente -- é o print do erro, o PDF que chegou por outro
-                 canal, o comprovante que se quer deixar registrado. -->
-            <div v-if="arquivo" class="anexo">
-              <i class="bi bi-paperclip" aria-hidden="true"></i>
-              <span class="anexo__nome">{{ arquivo.name }}</span>
-              <span class="apagado pequeno">{{ tamanhoDoArquivo(arquivo) }}</span>
+                 canal, o comprovante que se quer deixar registrado.
+                 🔵 25/09: até 10 por envio -- cada um vira um balão, o texto
+                 escrito acima vai só no primeiro. -->
+            <div v-if="arquivos.length" class="anexo anexo--lista">
+              <div v-for="(a, i) in arquivos" :key="i" class="anexo__item">
+                <i class="bi bi-paperclip" aria-hidden="true"></i>
+                <span class="anexo__nome">{{ a.name }}</span>
+                <span class="apagado pequeno">{{ tamanhoDoArquivo(a) }}</span>
+                <button
+                  class="botao botao--pequeno botao--fantasma"
+                  type="button"
+                  title="Tirar este anexo"
+                  @click="limparArquivo(i)"
+                >×</button>
+              </div>
               <button
+                v-if="arquivos.length > 1"
                 class="botao botao--pequeno botao--fantasma"
                 type="button"
-                title="Tirar o anexo"
-                @click="limparArquivo"
-              >×</button>
+                @click="limparArquivos"
+              >Tirar todos</button>
             </div>
 
             <div class="linha linha--quebra">
@@ -3405,13 +3481,15 @@ function carregarMidiasDaConversa(c) {
                 <i class="bi bi-mic" aria-hidden="true"></i>
               </button>
 
-              <label v-if="!gravando" class="botao botao--contorno botao--icone" title="Anexar arquivo">
+              <label v-if="!gravando" class="botao botao--contorno botao--icone"
+                     :title="`Anexar arquivo (até ${TETO_ANEXOS})`">
                 <i class="bi bi-paperclip" aria-hidden="true"></i>
                 <span class="so-leitor">Anexar arquivo</span>
                 <input
                   id="campo-arquivo"
                   class="so-leitor"
                   type="file"
+                  multiple
                   @change="escolherArquivo"
                 />
               </label>
@@ -3423,11 +3501,12 @@ function carregarMidiasDaConversa(c) {
                 type="button"
                 :disabled="ocupado || !temAlgoParaEnviar"
                 :title="temAlgoParaEnviar ? '' : 'Escreva algo ou anexe um arquivo'"
-                @click="arquivo ? enviarArquivo(false) : enviar(false)"
+                @click="arquivos.length ? enviarArquivo(false) : enviar(false)"
               >
                 <span v-if="ocupado" class="girando"></span>
                 <i v-else class="bi bi-whatsapp" aria-hidden="true"></i>
-                {{ arquivo ? 'Enviar arquivo ao cliente' : 'Enviar ao cliente' }}
+                {{ arquivos.length > 1 ? `Enviar ${arquivos.length} arquivos ao cliente`
+                  : arquivos.length === 1 ? 'Enviar arquivo ao cliente' : 'Enviar ao cliente' }}
               </button>
 
               <button
@@ -3435,14 +3514,15 @@ function carregarMidiasDaConversa(c) {
                 type="button"
                 :disabled="ocupado || !temAlgoParaEnviar"
                 :title="temAlgoParaEnviar ? '' : 'Escreva algo ou anexe um arquivo'"
-                @click="arquivo ? enviarArquivo(true) : enviar(true)"
+                @click="arquivos.length ? enviarArquivo(true) : enviar(true)"
               >
                 <i class="bi bi-sticky" aria-hidden="true"></i>
-                {{ arquivo ? 'Guardar como nota' : 'Salvar nota' }}
+                {{ arquivos.length > 1 ? `Guardar ${arquivos.length} como nota`
+                  : arquivos.length === 1 ? 'Guardar como nota' : 'Salvar nota' }}
               </button>
 
-              <span v-if="arquivo" class="apagado pequeno">
-                O texto acima vai junto com o arquivo.
+              <span v-if="arquivos.length" class="apagado pequeno">
+                O texto acima vai só no primeiro arquivo.
               </span>
             </div>
           </div>
@@ -3622,13 +3702,15 @@ function carregarMidiasDaConversa(c) {
     </div>
 
     <!-- CONVIDAR — vários de uma vez, por caixa de seleção -->
-    <!-- 🔵 23/09: EDITAR A MINHA MENSAGEM -->
+    <!-- 🔵 23/09: EDITAR A MINHA MENSAGEM. 🔵 28/09: mesmo modal serve a nota. -->
     <div v-if="editando && aberta" class="modal" @click.self="editando = null">
-      <div class="modal__caixa" role="dialog" aria-modal="true" aria-label="Editar mensagem">
-        <p class="modal__titulo">Editar mensagem</p>
+      <div class="modal__caixa" role="dialog" aria-modal="true"
+           :aria-label="editando.nota ? 'Editar nota' : 'Editar mensagem'">
+        <p class="modal__titulo">{{ editando.nota ? 'Editar nota' : 'Editar mensagem' }}</p>
         <p class="modal__texto pequeno">
-          O cliente vê a versão nova, marcada como editada. Dá para editar por
-          15 minutos depois de enviar.
+          {{ editando.nota
+            ? 'A nota é só para a equipe, nunca vai para o cliente. Sem prazo para editar.'
+            : 'O cliente vê a versão nova, marcada como editada. Dá para editar por 15 minutos depois de enviar.' }}
         </p>
         <textarea v-model="editando.texto" class="campo__entrada" rows="4"
                   maxlength="4096"></textarea>
@@ -5071,6 +5153,10 @@ function carregarMidiasDaConversa(c) {
   background: var(--superficie-2);
 }
 .anexo__nome { overflow-wrap: anywhere; font-weight: var(--peso-medio); }
+/* 🔵 25/09: até 10 anexos por envio -- a lista empilha, cada linha com o
+   mesmo layout que o anexo único já tinha. */
+.anexo--lista { flex-direction: column; align-items: stretch; gap: var(--e-1); }
+.anexo__item { display: flex; align-items: center; gap: var(--e-2); }
 
 /* O botão de nota é amarelo porque a nota é amarela em toda a tela. A cor diz
    para onde vai a mensagem ANTES do clique — que é justamente o que o seletor

@@ -12,6 +12,7 @@ lugares é defeito esperando data.
 para isso — este módulo não conhece o `evolution`.
 """
 import logging
+from datetime import datetime, timezone
 
 from . import banco
 from . import midia as midia_mod
@@ -335,7 +336,14 @@ def mensagens(sala_id: int, eu: int, limite: int = 500) -> list[dict]:
                SELECT c.id, c.texto, c.criada_em, c.atendente_id,
                       a.nome AS autor, (c.atendente_id = %s) AS minha,
                       c.midia_id, md.mime AS midia_mime,
-                      md.nome_original AS midia_nome, md.tamanho AS midia_tamanho
+                      md.nome_original AS midia_nome, md.tamanho AS midia_tamanho,
+                      c.editada_em, c.conteudo_original, c.apagada_em,
+                      COALESCE((
+                          SELECT MIN(COALESCE(cm.lido_ate, 0))
+                            FROM chat_membro cm
+                           WHERE cm.sala_id = c.sala_id
+                             AND cm.atendente_id != c.atendente_id
+                      ), 0) >= c.id AS lida
                  FROM chat_mensagem c
                  JOIN atendente a ON a.id = c.atendente_id
                  LEFT JOIN midia md ON md.id = c.midia_id
@@ -496,6 +504,79 @@ def dono_da_midia(midia_id: int) -> dict | None:
     """
     return banco.um(
         "SELECT id, conversa_id, sala_id FROM midia WHERE id = %s", (midia_id,))
+
+
+# ── Editar/apagar a própria mensagem (25/09, item B) ─────────────────────────
+#
+# 🔵 Demanda dele: "Chat interno: editar (15 min) e apagar (48 h) a própria
+# mensagem, como na Caixa". Mesmo padrão de `conversas.editar_enviada`/
+# `apagar_enviada`, sem chamar o `evolution` -- é mensagem interna, nunca vai
+# ao WhatsApp.
+
+JANELA_EDITAR_MIN = 15
+JANELA_APAGAR_HORAS = 48
+
+
+def _minha_mensagem(sala_id: int, mensagem_id: int, eu: int):
+    """(linha, motivo). A mensagem do chat, se ela for MINHA."""
+    m = banco.um(
+        """SELECT id, sala_id, atendente_id, texto, criada_em, apagada_em
+             FROM chat_mensagem WHERE id = %s""", (mensagem_id,))
+    if not m or m["sala_id"] != sala_id:
+        return None, "Mensagem não encontrada nesta sala."
+    if m["atendente_id"] != eu:
+        return None, "Só quem escreveu a mensagem pode editar ou apagar."
+    if m["apagada_em"]:
+        return None, "Esta mensagem já foi apagada."
+    return m, None
+
+
+def _idade_minutos(m: dict) -> float:
+    return (datetime.now(timezone.utc) - m["criada_em"]).total_seconds() / 60
+
+
+def editar_propria(sala_id: int, mensagem_id: int, eu: int, texto: str) -> dict:
+    """Edita, por até 15 min, uma mensagem que eu mesmo escrevi."""
+    texto = (texto or "").strip()
+    if not texto:
+        return {"ok": False, "motivo": "O texto novo está vazio."}
+    if len(texto) > TETO_TEXTO:
+        return {"ok": False,
+                "motivo": f"Mensagem passa de {TETO_TEXTO} caracteres."}
+    m, motivo = _minha_mensagem(sala_id, mensagem_id, eu)
+    if not m:
+        return {"ok": False, "motivo": motivo}
+    if texto == (m["texto"] or "").strip():
+        return {"ok": False, "motivo": "O texto não mudou."}
+    if _idade_minutos(m) > JANELA_EDITAR_MIN:
+        return {"ok": False, "motivo": f"Só dá para editar por "
+                                       f"{JANELA_EDITAR_MIN} minutos depois de enviar."}
+    banco.executar(
+        """UPDATE chat_mensagem
+              SET conteudo_original = COALESCE(conteudo_original, texto),
+                  texto = %s, editada_em = now()
+            WHERE id = %s""", (texto, mensagem_id))
+    log.info("mensagem de chat %s editada pelo atendente %s", mensagem_id, eu)
+    return {"ok": True, "mensagem_id": mensagem_id}
+
+
+def apagar_propria(sala_id: int, mensagem_id: int, eu: int) -> dict:
+    """Apaga, por até 48h, uma mensagem que eu mesmo escrevi.
+
+    ⚠️ O TEXTO NÃO É DESTRUÍDO -- mesma regra da Caixa (045): o registro diz
+    o que foi dito, a exibição é que muda.
+    """
+    m, motivo = _minha_mensagem(sala_id, mensagem_id, eu)
+    if not m:
+        return {"ok": False, "motivo": motivo}
+    if _idade_minutos(m) > JANELA_APAGAR_HORAS * 60:
+        return {"ok": False, "motivo": f"Só dá para apagar por cerca de "
+                                       f"{JANELA_APAGAR_HORAS} horas depois de enviar."}
+    banco.executar(
+        "UPDATE chat_mensagem SET apagada_em = now() WHERE id = %s AND apagada_em IS NULL",
+        (mensagem_id,))
+    log.info("mensagem de chat %s apagada pelo atendente %s", mensagem_id, eu)
+    return {"ok": True, "mensagem_id": mensagem_id}
 
 
 def _conferir_mencionados(sala_id: int, mencionados: list[int] | None):

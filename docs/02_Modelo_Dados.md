@@ -1056,6 +1056,23 @@ esqueceu esta metade e quem achou foi o teste**: eu li que `texto` é `NOT NULL`
 no `information_schema.columns` e concluí que vazio passaria — `CHECK` mora em
 `pg_constraint`, que é outra consulta. É o `M15`.
 
+### Até 10 anexos por envio, sem migração (25/09, item C)
+
+🔵 Demanda dele: até 10 anexos por envio, texto só na primeira mensagem, 25 MB
+cada — na Caixa e no Chat interno.
+
+🟡 **SÓ FRONTEND.** O backend já era stateless por chamada: cada
+`POST .../arquivo` (tanto `/api/conversas/{id}/arquivo` quanto
+`/api/chat/salas/{id}/arquivo`) sempre tratou 1 arquivo por requisição,
+criando 1 balão independente — não havia trava de "1 anexo por mensagem"
+para tirar. A tela passou a aceitar `multiple` no `<input type=file>` e
+manda um laço sequencial de `POST`, legenda só na primeira chamada.
+
+⚠️ **SE UM ARQUIVO DO MEIO FALHAR, O LAÇO PARA** — decisão de engenharia
+(28/09, documentada no plano de execução): não desfaz o que já chegou ao
+cliente, nem segue tentando os que faltam sem avisar. A tela mostra quantos
+de quantos foram, e o que falhou.
+
 ### `chat_membro.oculta_ate_id` — esconder uma conversa interna (038)
 
 Pedido dele em 27/08: *"Canal interno -> botão de excluir conversa"*.
@@ -1436,6 +1453,67 @@ não perde informação e respeita a intenção de quem apagou. **Mudar é troca
 ⚠️ **REENTREGA NÃO REMARCA.** O `UPDATE` tem `AND apagada_em IS NULL`: sem
 isso, uma reentrega do Evolution moveria a hora do apagamento para a hora da
 reentrega.
+
+### Nota interna editável/apagável, sem migração nova (28/09)
+
+🔵 Demanda dele, 25/09: nota interna editável/apagável por quem escreveu, com
+"editada por X, em ..." e ícone da versão anterior.
+
+🟡 **REAPROVEITA AS MESMAS COLUNAS DA 043/045**, em vez de criar a tabela
+`mensagem_versao` que o plano original previa. A nota é uma linha de
+`mensagem` (`tipo='nota'`), e `editada_em`/`conteudo_original`/`apagada_em`
+já existem ali, genéricas — não são específicas de WhatsApp. Editar/apagar
+nota vira `UPDATE` local, sem chamar o `evolution` (que a função nem
+importa).
+
+**Diferença de regra em relação à mensagem para o cliente:** SEM janela de
+tempo — decisão dele (28/09), porque é registro interno, nunca sai daqui.
+`conversas.editar_nota`/`apagar_nota` conferem só que `atendente_id` é quem
+escreveu, nunca a idade da mensagem.
+
+Rotas: `POST /api/conversas/{id}/nota/editar` e `.../nota/apagar`, corpo
+igual ao de editar/apagar mensagem enviada (`EdicaoEntrada`/`MensagemAlvo`).
+
+### `chat_mensagem.editada_em`, `.conteudo_original`, `.apagada_em` (061)
+
+🔵 Demanda dele, 25/09 (Plano 4, item B): "Chat interno: editar (15 min) e
+apagar (48 h) a própria mensagem, como na Caixa".
+
+Mesmo padrão da 043/045, agora em `chat_mensagem`. Sem chamada ao
+`evolution` — é mensagem interna, nunca vai ao WhatsApp. Funções em
+`chat.py`: `editar_propria`/`apagar_propria`, mesmas janelas
+(`JANELA_EDITAR_MIN=15`, `JANELA_APAGAR_HORAS=48`) e mesmo formato de
+`UPDATE` (`conteudo_original = COALESCE(conteudo_original, texto)`).
+
+Rotas: `POST /api/chat/salas/{sala_id}/mensagens/{mensagem_id}/editar` e
+`.../apagar`.
+
+### Item G (25/09): tique de leitura no Chat interno, sem coluna nova
+
+🔵 Demanda dele: *"ajustar o painel interno visualmente igual ao do externo
+e as confirmações de envio e leitura tbm"*.
+
+🟡 **NÃO PRECISOU DE MIGRAÇÃO.** O dado já existia em `chat_membro.lido_ate`
+(watermark por sala/membro, da 026). `chat.mensagens()` ganhou uma coluna
+calculada `lida`, comparando o `id` da mensagem com o `lido_ate` de quem
+não é o autor:
+
+- sala `direta` (2 pessoas): `lida` = o outro membro já leu até este id;
+- sala `grupo`: por decisão dele (28/09), `lida` só quando **TODOS** os
+  outros membros já leram — `MIN(COALESCE(lido_ate, 0))` entre eles.
+
+Só 2 estados no tique (`enviada`/`lida`, `TIQUE_CHAT` no Vue) — não existe
+"entregue" aqui, é tudo local, sem gateway externo que confirme entrega.
+
+⚠️ **NÃO ENTROU:** a Caixa só marca como lida com a aba visível
+(`document.hidden`); o Chat interno continua marcando sempre que a sala é
+aberta. Achado da exploração, não pedido — registrado como pendência
+separada, não implementado sozinho.
+
+⚠️ **O visual (cor, bico) passou a usar os tokens `--conversa-*`**, os
+mesmos da Caixa. Isto reverte uma decisão de 22/09 que evitava de propósito
+a cor do WhatsApp no chat interno (*"o chat interno não é WhatsApp"*) — a
+demanda de 25/09 é posterior e explícita, e prevalece.
 
 ### O achado paralelo: a edição em conversa direta chega cifrada
 

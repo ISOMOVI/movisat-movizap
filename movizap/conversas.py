@@ -2746,6 +2746,69 @@ def anotar(conversa_id: int, texto: str, atendente_id: int | None) -> dict:
     return {"ok": True, "conversa_id": conversa_id, "mensagem_id": linha["id"]}
 
 
+# ── Editar/apagar a própria nota interna (28/09) ─────────────────────────────
+#
+# 🔵 Demanda dele, 25/09: nota editável/apagável por quem escreveu, com
+# "editada por X, em ..." e ícone da versão anterior.
+#
+# 🟡 Achado que simplificou o plano original: a nota já é uma linha de
+# `mensagem` (tipo='nota'), e as colunas `editada_em`/`conteudo_original`
+# (043) e `apagada_em` (045) já existem na tabela -- não são específicas de
+# WhatsApp. Reaproveita o MESMO padrão de `editar_enviada`/`apagar_enviada`
+# acima, sem migração nova e sem chamar o `evolution` (nota nunca sai daqui).
+#
+# ⚠️ SEM JANELA DE TEMPO -- decisão dele (28/09): é registro interno, baixo
+# risco, e travar por tempo só atrapalharia corrigir uma nota antiga.
+
+def _minha_nota(conversa_id: int, mensagem_id: int, atendente_id: int | None):
+    """(linha, motivo). A mensagem, se ela for uma nota MINHA."""
+    m = banco.um(
+        """SELECT id, conversa_id, tipo, conteudo, atendente_id, apagada_em
+             FROM mensagem WHERE id = %s""", (mensagem_id,))
+    if not m or m["conversa_id"] != conversa_id:
+        return None, "Nota não encontrada nesta conversa."
+    if m["tipo"] != "nota":
+        return None, "Só nota interna pode ser editada ou apagada por aqui."
+    if not atendente_id or m["atendente_id"] != atendente_id:
+        return None, "Só quem escreveu a nota pode editá-la ou apagá-la."
+    if m["apagada_em"]:
+        return None, "Esta nota já foi apagada."
+    return m, None
+
+
+def editar_nota(conversa_id: int, mensagem_id: int, texto: str,
+                atendente_id: int | None) -> dict:
+    """Edita uma nota interna que eu mesmo escrevi. Sem janela de tempo."""
+    texto = (texto or "").strip()
+    if not texto:
+        return {"ok": False, "motivo": "O texto novo está vazio."}
+    m, motivo = _minha_nota(conversa_id, mensagem_id, atendente_id)
+    if not m:
+        return {"ok": False, "motivo": motivo}
+    if texto == (m["conteudo"] or "").strip():
+        return {"ok": False, "motivo": "O texto não mudou."}
+    banco.executar(
+        """UPDATE mensagem
+              SET conteudo_original = COALESCE(conteudo_original, conteudo),
+                  conteudo = %s, editada_em = now()
+            WHERE id = %s""", (texto, mensagem_id))
+    log.info("nota %s editada pelo atendente %s", mensagem_id, atendente_id)
+    return {"ok": True, "mensagem_id": mensagem_id}
+
+
+def apagar_nota(conversa_id: int, mensagem_id: int,
+                atendente_id: int | None) -> dict:
+    """Apaga uma nota interna que eu mesmo escrevi. Sem janela de tempo."""
+    m, motivo = _minha_nota(conversa_id, mensagem_id, atendente_id)
+    if not m:
+        return {"ok": False, "motivo": motivo}
+    banco.executar(
+        "UPDATE mensagem SET apagada_em = now() WHERE id = %s AND apagada_em IS NULL",
+        (mensagem_id,))
+    log.info("nota %s apagada pelo atendente %s", mensagem_id, atendente_id)
+    return {"ok": True, "mensagem_id": mensagem_id}
+
+
 def fila() -> list[dict]:
     """As conversas sem dono, agrupadas por time e ordenadas por ESPERA.
 

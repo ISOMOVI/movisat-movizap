@@ -47,6 +47,27 @@ const abrindo = ref(false)
 const baloes = ref(null)
 let timer = null
 
+/* 🔵 25/09: editar (15 min) e apagar (48 h) a própria mensagem, como na Caixa. */
+const JANELA_EDITAR_MIN = 15
+const JANELA_APAGAR_MIN = 48 * 60
+const editando = ref(null)   // { id, texto }
+const salvandoEdicao = ref(false)
+
+// Quais mensagens editadas estão com o texto ANTERIOR aberto. Mesmo padrão
+// da Caixa: por id, só nesta sessão, sem guardar em lugar nenhum.
+const originalAberto = ref(new Set())
+function alternarOriginal(id) {
+  const s = new Set(originalAberto.value)
+  s.has(id) ? s.delete(id) : s.add(id)
+  originalAberto.value = s
+}
+
+/* 🔵 25/09 (item G): tiques de envio/leitura, igual à Caixa. Só 2 estados --
+   não há "entregue" aqui, é tudo local (sem gateway externo). Em grupo, por
+   decisão dele, "lida" só quando TODOS os outros membros leram (o backend já
+   calcula isso em `m.lida`, agregando o `lido_ate` de todo mundo). */
+const TIQUE_CHAT = { enviada: '✓', lida: '✓✓' }
+
 /* ---- anexo (22/09) --------------------------------------------------------
    🔵 Pedido dele: *"sobre envio de anexos no chat interno, igual no aberto"*,
    com o áudio junto e teto de 25 MB, decididos por ele no mesmo dia.
@@ -59,7 +80,10 @@ let timer = null
    para levar 413 no fim é desperdício do tempo de quem está atendendo. O
    servidor continua sendo quem decide. */
 const TETO_ARQUIVO_MB = 25
-const arquivo = ref(null)
+/* 🔵 25/09: até 10 anexos por envio, texto só na primeira mensagem -- igual
+   à Caixa de entrada. */
+const TETO_ANEXOS = 10
+const arquivos = ref([])   // File[], até TETO_ANEXOS
 const enviandoArquivo = ref(false)
 
 /* 🚨 A IMAGEM NÃO PODE IR POR `<img src="/api/...">`: a tag não manda o
@@ -520,26 +544,48 @@ function colar(evento) {
   if (!imagem) return          // colar texto continua sendo colar texto
   const arq = imagem.getAsFile()
   if (!arq) return
-  evento.preventDefault()
-  const carimbo = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')
-  arquivo.value = new File([arq], `print-${carimbo}.png`, { type: arq.type })
-}
-
-function escolherArquivo(evento) {
-  const f = evento.target.files?.[0] || null
-  erro.value = ''
-  if (f && f.size > TETO_ARQUIVO_MB * 1024 * 1024) {
-    erro.value = `O arquivo tem ${(f.size / 1024 / 1024).toFixed(1)} MB e o `
-      + `teto é ${TETO_ARQUIVO_MB} MB.`
-    evento.target.value = ''
-    arquivo.value = null
+  if (arquivos.value.length >= TETO_ANEXOS) {
+    erro.value = `Já tem ${TETO_ANEXOS} arquivos — o máximo por envio.`
     return
   }
-  arquivo.value = f
+  evento.preventDefault()
+  const carimbo = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')
+  arquivos.value = [...arquivos.value,
+    new File([arq], `print-${carimbo}.png`, { type: arq.type })]
 }
 
-function limparArquivo() {
-  arquivo.value = null
+/* 🔵 25/09: até 10 anexos por envio -- mudança só de frontend, o backend já
+   trata cada `POST .../arquivo` como independente. */
+function escolherArquivo(evento) {
+  const novos = Array.from(evento.target.files || [])
+  erro.value = ''
+  const cabem = TETO_ANEXOS - arquivos.value.length
+  if (novos.length > cabem) {
+    erro.value = cabem > 0
+      ? `Dá para mandar no máximo ${TETO_ANEXOS} arquivos por envio — cabem mais ${cabem}.`
+      : `Já tem ${TETO_ANEXOS} arquivos — o máximo por envio.`
+  }
+  const aceitos = []
+  for (const f of novos.slice(0, Math.max(cabem, 0))) {
+    if (f.size > TETO_ARQUIVO_MB * 1024 * 1024) {
+      // 🚨 SEM O NOME DO ARQUIVO: ele não deve aparecer na tela para um
+      // arquivo que foi recusado e não entrou.
+      erro.value = `O arquivo tem ${(f.size / 1024 / 1024).toFixed(1)} MB e o `
+        + `teto é ${TETO_ARQUIVO_MB} MB.`
+      continue
+    }
+    aceitos.push(f)
+  }
+  arquivos.value = [...arquivos.value, ...aceitos]
+  evento.target.value = ''
+}
+
+function limparArquivo(indice) {
+  arquivos.value = arquivos.value.filter((_, i) => i !== indice)
+}
+
+function limparArquivos() {
+  arquivos.value = []
   const campo = document.getElementById('chat-campo-arquivo')
   if (campo) campo.value = ''
 }
@@ -548,10 +594,10 @@ function limparArquivo() {
    `FormData`, e aí o navegador monta o `Content-Type` com o boundary sozinho
    -- definir o cabeçalho na mão quebra o upload EM SILÊNCIO, com o servidor
    recebendo corpo vazio. */
-async function subirArquivo(blob, nome) {
+async function subirArquivo(blob, nome, legenda) {
   const dados = new FormData()
   dados.append('arquivo', blob, nome)
-  dados.append('legenda', texto.value.trim())
+  dados.append('legenda', legenda)
   const vivos = mencionados.value.filter((p) => texto.value.includes('@' + p.nome))
   dados.append('mencionados', vivos.map((p) => p.id).join(','))
   const r = await fetch(`/api/chat/salas/${sala.value.id}/arquivo`, {
@@ -567,18 +613,33 @@ async function subirArquivo(blob, nome) {
 }
 
 async function enviarArquivo() {
-  if (!arquivo.value || enviando.value || !sala.value) return
+  if (!arquivos.value.length || enviando.value || !sala.value) return
   enviandoArquivo.value = true
   erro.value = ''
+  const total = arquivos.value.length
+  let enviados = 0
   try {
-    await subirArquivo(arquivo.value, arquivo.value.name)
+    // Sequencial, texto só no primeiro -- mesmo padrão da Caixa de entrada.
+    for (const arq of arquivos.value) {
+      await subirArquivo(arq, arq.name, enviados === 0 ? texto.value.trim() : '')
+      enviados++
+    }
     texto.value = ''
     mencionados.value = []
     listaArroba.value = []
-    limparArquivo()
+    limparArquivos()
     await abrir(sala.value.id)
   } catch (e) {
-    erro.value = e.message || 'Não consegui enviar o arquivo.'
+    // 🔵 28/09: se um do meio falhar, PARA e mostra quantos já foram --
+    // mesma decisão da Caixa, documentada no plano.
+    arquivos.value = arquivos.value.slice(enviados)
+    erro.value = (enviados > 0
+        ? `${enviados} de ${total} enviados; parei no que falhou: `
+        : '') + (e.message || 'Não consegui enviar o arquivo.')
+    if (enviados > 0) {
+      texto.value = ''
+      await abrir(sala.value.id)
+    }
   } finally {
     enviandoArquivo.value = false
   }
@@ -650,7 +711,7 @@ async function enviarGravacao() {
   erro.value = ''
   try {
     const carimbo = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')
-    await subirArquivo(blob, `voz-${carimbo}.${doIphone ? 'm4a' : 'ogg'}`)
+    await subirArquivo(blob, `voz-${carimbo}.${doIphone ? 'm4a' : 'ogg'}`, texto.value.trim())
     texto.value = ''
     mencionados.value = []
     await abrir(sala.value.id)
@@ -668,7 +729,7 @@ function minutos(s) {
 async function enviar() {
   // Com arquivo escolhido, Enter manda O ARQUIVO com o texto de legenda --
   // senão a legenda iria numa mensagem e o arquivo em outra.
-  if (arquivo.value) return enviarArquivo()
+  if (arquivos.value.length) return enviarArquivo()
   const t = texto.value.trim()
   if (!t || enviando.value || !sala.value) return
   enviando.value = true
@@ -689,6 +750,49 @@ async function enviar() {
     erro.value = e instanceof ErroDeApi ? e.message : 'Não consegui enviar.'
   } finally {
     enviando.value = false
+  }
+}
+
+/* ---- editar/apagar a própria mensagem (25/09, item B) --------------------
+   🔵 Pedido dele: "editar (15 min) e apagar (48 h) a própria mensagem, como
+   na Caixa". Mesma janela, mesmo padrão -- só que aqui é tudo local, sem
+   chamada ao WhatsApp: a rota já cuida disso, a tela só confere de novo para
+   não oferecer um botão que o servidor vai recusar. */
+function idadeMin(m) {
+  return (Date.now() - new Date(m.criada_em).getTime()) / 60000
+}
+function podeEditarChat(m) {
+  return m.minha && !m.apagada_em && idadeMin(m) <= JANELA_EDITAR_MIN
+}
+function podeApagarChat(m) {
+  return m.minha && !m.apagada_em && idadeMin(m) <= JANELA_APAGAR_MIN
+}
+function abrirEdicaoChat(m) {
+  editando.value = { id: m.id, texto: m.texto || '' }
+}
+async function salvarEdicaoChat() {
+  const e = editando.value
+  if (!e || !e.texto.trim() || salvandoEdicao.value || !sala.value) return
+  salvandoEdicao.value = true
+  erro.value = ''
+  try {
+    await api.post(`/api/chat/salas/${sala.value.id}/mensagens/${e.id}/editar`,
+                   { texto: e.texto })
+    editando.value = null
+    await abrir(sala.value.id)
+  } catch (x) {
+    erro.value = x instanceof ErroDeApi ? x.message : 'Não consegui editar.'
+  } finally {
+    salvandoEdicao.value = false
+  }
+}
+async function apagarMensagemChat(m) {
+  if (!confirm('Apagar esta mensagem? Ela some para todos na sala, mas continua registrada, marcada como apagada.')) return
+  try {
+    await api.post(`/api/chat/salas/${sala.value.id}/mensagens/${m.id}/apagar`)
+    await abrir(sala.value.id)
+  } catch (x) {
+    erro.value = x instanceof ErroDeApi ? x.message : 'Não consegui apagar.'
   }
 }
 
@@ -776,7 +880,7 @@ watch(() => sala.value?.id, (novo, velho) => {
   listaArroba.value = []
   // O anexo escolhido e ainda não enviado é rascunho como o texto: ele era
   // para AQUELA conversa. E a gravação em curso para junto.
-  limparArquivo()
+  limparArquivos()
   cancelarGravacao()
 })
 
@@ -1088,43 +1192,93 @@ function quando(iso) {
                      balão; o resto vira uma linha com nome, tamanho e o botão
                      de baixar. Quem decide o que é o arquivo é o MIME, nunca
                      a extensão do nome, que qualquer um renomeia. -->
-                <template v-if="m.midia_id">
-                  <img
-                    v-if="tipoDaMidia(m) === 'imagem' && midias[m.midia_id]"
-                    :src="midias[m.midia_id]"
-                    class="balao__imagem"
-                    :alt="m.midia_nome || 'Imagem enviada'"
-                  />
-                  <audio
-                    v-else-if="tipoDaMidia(m) === 'audio' && midias[m.midia_id]"
-                    :src="midias[m.midia_id]" controls class="balao__audio"
-                  ></audio>
-                  <video
-                    v-else-if="tipoDaMidia(m) === 'video' && midias[m.midia_id]"
-                    :src="midias[m.midia_id]" controls class="balao__imagem"
-                  ></video>
-                  <!-- ⚠️ `midias[id] === ''` é "buscando"; `null` é "não deu".
-                       Nos dois casos sobra esta linha, que é a que sempre
-                       funciona -- anexo que não abre ainda pode ser baixado. -->
-                  <a
-                    v-if="tipoDaMidia(m) === 'documento' || midias[m.midia_id] === null"
-                    class="balao__arquivo"
-                    :href="`/api/midia/${m.midia_id}`"
-                    @click.prevent="baixar(m)"
-                  >
-                    <i class="bi bi-paperclip" aria-hidden="true"></i>
-                    <span>{{ m.midia_nome || 'arquivo' }}</span>
-                    <span class="apagado pequeno">{{ tamanhoLegivel(m.midia_tamanho) }}</span>
-                  </a>
-                </template>
-                <p v-if="m.texto" class="balao__texto">
-                  <template v-for="(p, k) in partesDoTexto(m)" :key="k">
-                    <mark v-if="p.mencao" class="mencao"
-                          :class="{ 'mencao--eu': p.eu }">{{ p.texto }}</mark>
-                    <template v-else>{{ p.texto }}</template>
+                <!-- 🔵 25/09: apagada por quem escreveu -- mesmo padrão da
+                     Caixa, atrás de um clique, nunca destruída. -->
+                <template v-if="!m.apagada_em || originalAberto.has(m.id)">
+                  <template v-if="m.midia_id">
+                    <img
+                      v-if="tipoDaMidia(m) === 'imagem' && midias[m.midia_id]"
+                      :src="midias[m.midia_id]"
+                      class="balao__imagem"
+                      :alt="m.midia_nome || 'Imagem enviada'"
+                    />
+                    <audio
+                      v-else-if="tipoDaMidia(m) === 'audio' && midias[m.midia_id]"
+                      :src="midias[m.midia_id]" controls class="balao__audio"
+                    ></audio>
+                    <video
+                      v-else-if="tipoDaMidia(m) === 'video' && midias[m.midia_id]"
+                      :src="midias[m.midia_id]" controls class="balao__imagem"
+                    ></video>
+                    <!-- ⚠️ `midias[id] === ''` é "buscando"; `null` é "não deu".
+                         Nos dois casos sobra esta linha, que é a que sempre
+                         funciona -- anexo que não abre ainda pode ser baixado. -->
+                    <a
+                      v-if="tipoDaMidia(m) === 'documento' || midias[m.midia_id] === null"
+                      class="balao__arquivo"
+                      :href="`/api/midia/${m.midia_id}`"
+                      @click.prevent="baixar(m)"
+                    >
+                      <i class="bi bi-paperclip" aria-hidden="true"></i>
+                      <span>{{ m.midia_nome || 'arquivo' }}</span>
+                      <span class="apagado pequeno">{{ tamanhoLegivel(m.midia_tamanho) }}</span>
+                    </a>
                   </template>
+                  <p v-if="m.texto" class="balao__texto">
+                    <template v-for="(p, k) in partesDoTexto(m)" :key="k">
+                      <mark v-if="p.mencao" class="mencao"
+                            :class="{ 'mencao--eu': p.eu }">{{ p.texto }}</mark>
+                      <template v-else>{{ p.texto }}</template>
+                    </template>
+                  </p>
+                </template>
+                <p v-if="m.apagada_em && !originalAberto.has(m.id)"
+                   class="balao__texto balao__apagada">
+                  <i class="bi bi-slash-circle" aria-hidden="true"></i>
+                  mensagem apagada
+                  <button v-if="m.texto || m.midia_id" type="button" class="balao__revelar"
+                          @click="alternarOriginal(m.id)">ver o que dizia</button>
                 </p>
-                <p class="balao__rodape apagado pequeno">{{ hora(m.criada_em) }}</p>
+                <p v-if="m.apagada_em && originalAberto.has(m.id)"
+                   class="balao__marca pequeno">
+                  <i class="bi bi-slash-circle" aria-hidden="true"></i>
+                  apagada ·
+                  <button type="button" class="balao__revelar"
+                          @click="alternarOriginal(m.id)">esconder</button>
+                </p>
+                <p v-if="m.editada_em && m.conteudo_original && originalAberto.has(m.id)"
+                   class="balao__original pequeno">
+                  antes: {{ m.conteudo_original }}
+                </p>
+                <p class="balao__rodape apagado pequeno">
+                  {{ hora(m.criada_em) }}
+                  <button v-if="m.editada_em" type="button" class="balao__editada"
+                          :aria-expanded="originalAberto.has(m.id)"
+                          :title="m.conteudo_original ? 'ver o texto anterior' : ''"
+                          @click="alternarOriginal(m.id)">
+                    · editada
+                  </button>
+                  <span v-if="m.minha && !m.apagada_em && TIQUE_CHAT[m.lida ? 'lida' : 'enviada']"
+                        class="balao__tique"
+                        :class="{ 'balao__lida': m.lida }"
+                        :title="m.lida ? 'lida' : 'enviada'">{{ TIQUE_CHAT[m.lida ? 'lida' : 'enviada'] }}</span>
+                </p>
+
+                <!-- 🔵 25/09: editar (15 min) / apagar (48 h) a própria
+                     mensagem, só na minha e dentro da janela -- igual à
+                     Caixa, sem chamar o WhatsApp (é tudo local). -->
+                <div v-if="podeEditarChat(m) || podeApagarChat(m)" class="balao__acoes">
+                  <button v-if="podeEditarChat(m)" class="balao__acao" type="button"
+                          title="Editar (até 15 minutos depois de enviar)"
+                          aria-label="Editar mensagem" @click="abrirEdicaoChat(m)">
+                    <i class="bi bi-pencil" aria-hidden="true"></i>
+                  </button>
+                  <button v-if="podeApagarChat(m)" class="balao__acao" type="button"
+                          title="Apagar"
+                          aria-label="Apagar mensagem" @click="apagarMensagemChat(m)">
+                    <i class="bi bi-trash" aria-hidden="true"></i>
+                  </button>
+                </div>
               </div>
             </template>
           </div>
@@ -1193,15 +1347,21 @@ function quando(iso) {
             </p>
             <!-- 🚨 O ANEXO ESCOLHIDO APARECE ANTES DE IR (22/09). Sem esta
                  linha, quem cola um print não vê nada acontecer e cola de
-                 novo — e manda dois. -->
-            <p v-if="arquivo" class="linha pequeno anexo-escolhido">
+                 novo — e manda dois.
+                 🔵 25/09: até 10 por envio, cada um vira um balão. -->
+            <p v-for="(a, i) in arquivos" :key="i" class="linha pequeno anexo-escolhido">
               <i class="bi bi-paperclip" aria-hidden="true"></i>
-              <span>{{ arquivo.name }}</span>
-              <span class="apagado">{{ tamanhoLegivel(arquivo.size) }}</span>
+              <span>{{ a.name }}</span>
+              <span class="apagado">{{ tamanhoLegivel(a.size) }}</span>
               <button class="botao botao--pequeno botao--contorno" type="button"
-                      title="Tirar o anexo" @click="limparArquivo">
+                      title="Tirar este anexo" @click="limparArquivo(i)">
                 Tirar
               </button>
+            </p>
+            <p v-if="arquivos.length > 1" class="linha pequeno apagado">
+              O texto vai só no primeiro.
+              <button class="botao botao--pequeno botao--contorno" type="button"
+                      @click="limparArquivos">Tirar todos</button>
             </p>
 
             <!-- 🚨 A GRAVAÇÃO TEM SAÍDA. Gravar sem poder desistir faz a
@@ -1253,13 +1413,15 @@ function quando(iso) {
                    balão do navegador demora cerca de um segundo e não existe
                    em toque. Foi esse o erro de 25/08 que escondeu o "Criar
                    grupo" desta mesma tela. -->
-              <label class="botao botao--contorno" :class="{ 'botao--ocupado': enviandoArquivo }">
+              <label class="botao botao--contorno" :class="{ 'botao--ocupado': enviandoArquivo }"
+                     :title="`Anexar (até ${TETO_ANEXOS})`">
                 <i class="bi bi-paperclip" aria-hidden="true"></i>
                 Anexar
                 <input
                   id="chat-campo-arquivo"
                   class="so-leitor"
                   type="file"
+                  multiple
                   :disabled="enviandoArquivo || gravando"
                   @change="escolherArquivo"
                 />
@@ -1279,7 +1441,7 @@ function quando(iso) {
               <button
                 class="botao botao--primario"
                 type="button"
-                :disabled="enviando || enviandoArquivo || (!texto.trim() && !arquivo)"
+                :disabled="enviando || enviandoArquivo || (!texto.trim() && !arquivos.length)"
                 @click="enviar"
               >
                 <span v-if="enviando || enviandoArquivo" class="girando"></span>
@@ -1297,6 +1459,30 @@ function quando(iso) {
           </div>
         </template>
       </section>
+    </div>
+
+    <!-- 🔵 25/09: EDITAR A MINHA MENSAGEM (até 15 min). Classes `.modal`
+         globais, definidas em `estilo/componentes.css` -- mesma UI da Caixa. -->
+    <div v-if="editando" class="modal" @click.self="editando = null">
+      <div class="modal__caixa" role="dialog" aria-modal="true" aria-label="Editar mensagem">
+        <p class="modal__titulo">Editar mensagem</p>
+        <p class="modal__texto pequeno">
+          Dá para editar por {{ JANELA_EDITAR_MIN }} minutos depois de enviar.
+        </p>
+        <textarea v-model="editando.texto" class="campo__entrada" rows="4"
+                  maxlength="4000"></textarea>
+        <div class="modal__acoes">
+          <button class="botao botao--contorno" type="button" @click="editando = null">
+            Cancelar
+          </button>
+          <button class="botao botao--primario" type="button"
+                  :disabled="!editando.texto.trim() || salvandoEdicao"
+                  @click="salvarEdicaoChat">
+            <span v-if="salvandoEdicao" class="girando"></span>
+            Salvar
+          </button>
+        </div>
+      </div>
     </div>
   </div>
 </template>
@@ -1538,14 +1724,130 @@ function quando(iso) {
   max-height: 52vh;
   overflow-y: auto;
 }
+/* 🔵 25/09 (item G): visual igual ao da Caixa de entrada, pedido dele --
+   "ajustar o painel interno visualmente igual ao do externo e as
+   confirmações de envio e leitura tbm". Isto substitui a cor de acento
+   genérica que havia antes (a nota de 22/09 dizia que verde era "cor do
+   WhatsApp, e o chat interno não é WhatsApp" -- decisão anterior, revista
+   agora por pedido dele, posterior e explícito). Mesmos tokens `--conversa-*`
+   da Caixa, definidos em `estilo/tokens.css`. */
 .balao {
-  max-width: 72%;
-  padding: var(--e-2) var(--e-3);
-  border-radius: var(--r-md);
-  background: var(--superficie-2);
+  position: relative;
+  max-width: min(72%, 520px);
+  padding: 7px 11px 6px;
+  border-radius: var(--conversa-raio);
+  background: var(--conversa-balao);
+  box-shadow: var(--sombra-1);
+  line-height: 1.5;
 }
-/* ⚠️ Verde é a cor do WhatsApp nesta casa, e o chat interno NÃO é WhatsApp.
-   Usar o acento do painel é o que impede a confusão de "mandei para quem?". */
+.balao--dele {
+  align-self: flex-start;
+  border-top-left-radius: 0;
+}
+.balao--dele::before {
+  content: "";
+  position: absolute;
+  left: calc(var(--conversa-bico) * -1);
+  top: 0;
+  border: var(--conversa-bico) solid transparent;
+  border-left: 0;
+  border-right-color: var(--conversa-balao);
+  border-top-color: var(--conversa-balao);
+}
+.balao--minha {
+  align-self: flex-end;
+  background: var(--conversa-saida);
+  border-top-right-radius: 0;
+}
+.balao--minha::before {
+  content: "";
+  position: absolute;
+  right: calc(var(--conversa-bico) * -1);
+  top: 0;
+  border: var(--conversa-bico) solid transparent;
+  border-right: 0;
+  border-left-color: var(--conversa-saida);
+  border-top-color: var(--conversa-saida);
+}
+.balao__rodape {
+  margin: 2px 0 0;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.balao__tique { margin-left: 3px; letter-spacing: -2px; }
+.balao__lida { color: var(--conversa-lida); font-weight: var(--peso-forte); }
+.balao__editada {
+  background: none;
+  border: 0;
+  padding: 0;
+  margin-left: 3px;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  text-decoration: underline dotted;
+}
+.balao__editada:hover { text-decoration: underline; }
+.balao__apagada {
+  color: var(--texto-apagado);
+  font-style: italic;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.balao__revelar {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+}
+.balao__revelar:hover { text-decoration: underline; }
+.balao__marca { color: var(--texto-apagado); display: flex; gap: 4px; align-items: center; }
+.balao__original {
+  margin-top: var(--e-1);
+  padding-left: var(--e-2);
+  border-left: 2px solid var(--borda);
+  color: var(--texto-apagado);
+  white-space: pre-wrap;
+}
+.balao__acoes {
+  position: absolute;
+  top: -11px;
+  right: var(--e-2);
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  background: var(--superficie);
+  border: var(--borda-fina) solid var(--borda);
+  border-radius: var(--r-full);
+  box-shadow: var(--sombra-2);
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(3px);
+  transition: opacity var(--tempo) var(--curva),
+              transform var(--tempo) var(--curva);
+}
+.balao:hover .balao__acoes,
+.balao:focus-within .balao__acoes {
+  opacity: 1;
+  pointer-events: auto;
+  transform: none;
+}
+.balao__acao {
+  border: 0;
+  background: none;
+  cursor: pointer;
+  padding: 3px 6px;
+  border-radius: var(--r-full);
+  color: var(--texto-fraco);
+  line-height: 1;
+}
+.balao__acao:hover { background: var(--superficie-2); color: var(--texto); }
+
 /* ---- chamar alguém com @ (27/08) ----------------------------------------
    ⚠️ Duas intensidades, e a diferença é de significado, não de gosto: a
    menção a OUTRA pessoa é informação ("chamaram a Erika"); a menção a MIM é
@@ -1616,11 +1918,8 @@ function quando(iso) {
   cursor: pointer;
 }
 
-.balao--minha { align-self: flex-end; background: var(--acento-suave); }
-.balao--dele { align-self: flex-start; }
 .balao__autor { margin: 0 0 2px; color: var(--texto-fraco); font-weight: var(--peso-forte); }
 .balao__texto { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
-.balao__rodape { margin: var(--e-1) 0 0; }
 
 /* ---- anexo (22/09) --------------------------------------------------------
    ⚠️ `max-width: 100%` e `height: auto` juntos: sem os dois, um print de
