@@ -68,6 +68,37 @@ function alternarOriginal(id) {
    calcula isso em `m.lida`, agregando o `lido_ate` de todo mundo). */
 const TIQUE_CHAT = { enviada: '✓', lida: '✓✓' }
 
+/* ---- responder citando (29/09) --------------------------------------------
+   🔵 Pedido dele: "no chat interno também", igual ao gesto da Caixa. Aqui não
+   existe `evolution` nem `stanzaId` -- citar é só um FK para outra
+   `chat_mensagem` da MESMA sala, conferido no backend (`chat._conferir_citada`).
+*/
+const citando = ref(null)
+function citar(m) {
+  citando.value = m
+  nextTick(() => campoTexto.value?.focus())
+}
+
+/* Clicar na citação dentro do balão rola até a mensagem original e a destaca
+   por um instante. Sem paginação aqui (a sala já carrega até 500 mensagens
+   de uma vez, ver `abrir`), então basta achar o elemento na tela -- se a
+   citação for mais antiga que a janela carregada, o clique não acha nada e
+   não faz nada, mesmo silêncio que a Caixa já tem para o caso equivalente. */
+const balaoRealcado = ref(null)
+function irParaMensagem(id) {
+  if (!id || !baloes.value) return
+  const el = baloes.value.querySelector(`[data-mensagem="${id}"]`)
+  if (!el) return
+  el.scrollIntoView({ block: 'center', behavior: 'smooth' })
+  balaoRealcado.value = id
+  setTimeout(() => {
+    if (balaoRealcado.value === id) balaoRealcado.value = null
+  }, 2000)
+}
+
+/* Mesmo destaque, para abrir imagem/vídeo em tela cheia (como na Caixa). */
+const emTelaCheia = ref(null)
+
 /* ---- anexo (22/09) --------------------------------------------------------
    🔵 Pedido dele: *"sobre envio de anexos no chat interno, igual no aberto"*,
    com o áudio junto e teto de 25 MB, decididos por ele no mesmo dia.
@@ -739,10 +770,12 @@ async function enviar() {
     // tem de desfazer a menção, senão a pessoa é chamada sem aparecer nada.
     const vivos = mencionados.value.filter((p) => t.includes('@' + p.nome))
     await api.post(`/api/chat/salas/${sala.value.id}/escrever`,
-                   { texto: t, mencionados: vivos.map((p) => p.id) })
+                   { texto: t, mencionados: vivos.map((p) => p.id),
+                     citando_id: citando.value?.id ?? null })
     texto.value = ''
     mencionados.value = []
     listaArroba.value = []
+    citando.value = null
     // 🚨 Relê em vez de empurrar o balão na mão: o que vale é o que o banco
     // gravou, não o que a tela supõe ter acontecido.
     await abrir(sala.value.id)
@@ -882,6 +915,10 @@ watch(() => sala.value?.id, (novo, velho) => {
   // para AQUELA conversa. E a gravação em curso para junto.
   limparArquivos()
   cancelarGravacao()
+  // A citação também era desta sala -- citar em outra citaria mensagem que
+  // o backend recusa (`chat._conferir_citada`), e o balão ficaria pendurado
+  // no compositor sem explicação.
+  citando.value = null
 })
 
 function hora(iso) {
@@ -1180,10 +1217,23 @@ function quando(iso) {
               <div
                 class="balao"
                 :class="[m.minha ? 'balao--minha' : 'balao--dele',
-                         { 'balao--seguida': mesmoAutor(m, i) }]"
+                         { 'balao--seguida': mesmoAutor(m, i),
+                           'balao--realcado': m.id === balaoRealcado }]"
+                :data-mensagem="m.id"
               >
                 <p v-if="!m.minha && !mesmoAutor(m, i)" class="balao__autor pequeno">
                   {{ m.autor }}
+                </p>
+                <!-- A mensagem que esta está respondendo (29/09). Clicar rola
+                     até ela e a destaca -- mesmo gesto da Caixa de entrada. -->
+                <p v-if="m.citada_id" class="balao__citada pequeno"
+                   @click="irParaMensagem(m.citada_id)">
+                  <i class="bi bi-reply" aria-hidden="true"></i>
+                  <span class="fraco">{{ m.citada_autor || '(apagada)' }}:</span>
+                  {{ m.citada_texto
+                     || (m.citada_midia_mime
+                         ? `(${tipoDaMidia({ midia_mime: m.citada_midia_mime })})`
+                         : '(mensagem)') }}
                 </p>
                 <!-- 🚨 O DESTAQUE VEM DE `mencionados`, NÃO DE PROCURAR "@" NO
                      TEXTO. Quem foi chamado está gravado; caçar arroba no texto
@@ -1196,11 +1246,15 @@ function quando(iso) {
                      Caixa, atrás de um clique, nunca destruída. -->
                 <template v-if="!m.apagada_em || originalAberto.has(m.id)">
                   <template v-if="m.midia_id">
+                    <!-- 🚨 CLICAR ABRE EM TELA CHEIA (29/09), igual à Caixa:
+                         imagem dentro do balão só "aparecia", sem jeito de
+                         ampliar -- pedido dele. -->
                     <img
                       v-if="tipoDaMidia(m) === 'imagem' && midias[m.midia_id]"
                       :src="midias[m.midia_id]"
-                      class="balao__imagem"
+                      class="balao__imagem balao__imagem--clicavel"
                       :alt="m.midia_nome || 'Imagem enviada'"
+                      @click="emTelaCheia = midias[m.midia_id]"
                     />
                     <audio
                       v-else-if="tipoDaMidia(m) === 'audio' && midias[m.midia_id]"
@@ -1266,8 +1320,16 @@ function quando(iso) {
 
                 <!-- 🔵 25/09: editar (15 min) / apagar (48 h) a própria
                      mensagem, só na minha e dentro da janela -- igual à
-                     Caixa, sem chamar o WhatsApp (é tudo local). -->
-                <div v-if="podeEditarChat(m) || podeApagarChat(m)" class="balao__acoes">
+                     Caixa, sem chamar o WhatsApp (é tudo local).
+                     🔵 29/09: citar vale em qualquer mensagem não apagada,
+                     de qualquer autor -- não depende de editar/apagar. -->
+                <div v-if="!m.apagada_em || podeEditarChat(m) || podeApagarChat(m)"
+                     class="balao__acoes">
+                  <button v-if="!m.apagada_em" class="balao__acao" type="button"
+                          title="Responder citando"
+                          aria-label="Responder citando" @click="citar(m)">
+                    <i class="bi bi-reply" aria-hidden="true"></i>
+                  </button>
                   <button v-if="podeEditarChat(m)" class="balao__acao" type="button"
                           title="Editar (até 15 minutos depois de enviar)"
                           aria-label="Editar mensagem" @click="abrirEdicaoChat(m)">
@@ -1284,6 +1346,18 @@ function quando(iso) {
           </div>
 
           <div class="cartao__corpo pilha">
+            <!-- A mensagem que está sendo citada, com um X para desistir
+                 (29/09, mesmo padrão da Caixa). -->
+            <div v-if="citando" class="citando">
+              <i class="bi bi-reply" aria-hidden="true"></i>
+              <span class="citando__texto">
+                {{ citando.texto || (citando.midia_id
+                    ? `(${tipoDaMidia(citando)})` : '(mensagem)') }}
+              </span>
+              <button class="botao botao--pequeno botao--fantasma" type="button"
+                      title="Não citar" @click="citando = null">×</button>
+            </div>
+
             <!-- `position: relative` porque a lista do `@` se ancora aqui. -->
             <label class="campo campo--arroba">
               <span class="so-leitor">Mensagem</span>
@@ -1483,6 +1557,15 @@ function quando(iso) {
           </button>
         </div>
       </div>
+    </div>
+
+    <!-- TELA CHEIA (29/09) — clique em qualquer lugar fecha, mesmo padrão da
+         Caixa de entrada. -->
+    <div v-if="emTelaCheia" class="cheia" @click="emTelaCheia = null">
+      <img :src="emTelaCheia" class="cheia__img" alt="imagem da conversa" />
+      <button class="cheia__fechar" type="button" aria-label="Fechar">
+        <i class="bi bi-x-lg" aria-hidden="true"></i>
+      </button>
     </div>
   </div>
 </template>
@@ -1847,6 +1930,63 @@ function quando(iso) {
   line-height: 1;
 }
 .balao__acao:hover { background: var(--superficie-2); color: var(--texto); }
+
+/* ---- responder citando (29/09), mesmo padrão da Caixa de entrada -------- */
+.balao__citada {
+  border-left: 3px solid var(--acento-borda);
+  padding: var(--e-1) var(--e-2);
+  margin-bottom: var(--e-2);
+  background: var(--superficie-2);
+  border-radius: var(--r-sm);
+  color: var(--texto-fraco);
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+.balao--realcado { outline: 2px solid var(--acento); }
+.citando {
+  display: flex;
+  align-items: center;
+  gap: var(--e-2);
+  padding: var(--e-2);
+  border-left: 3px solid var(--acento);
+  background: var(--acento-suave);
+  border-radius: var(--r-sm);
+}
+.citando__texto {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--txt-sm);
+  color: var(--texto-fraco);
+}
+
+/* ---- imagem em tela cheia (29/09), mesmo padrão da Caixa de entrada ----- */
+.balao__imagem--clicavel { cursor: zoom-in; }
+.cheia {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-modal);
+  background: rgba(0, 0, 0, .85);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: zoom-out;
+}
+.cheia__img { max-width: 92vw; max-height: 92vh; object-fit: contain; }
+.cheia__fechar {
+  position: absolute;
+  top: var(--e-4);
+  right: var(--e-4);
+  border: 0;
+  background: rgba(255, 255, 255, .15);
+  color: #fff;
+  width: 40px;
+  height: 40px;
+  border-radius: var(--r-full);
+  cursor: pointer;
+}
 
 /* ---- chamar alguém com @ (27/08) ----------------------------------------
    ⚠️ Duas intensidades, e a diferença é de significado, não de gosto: a

@@ -3260,6 +3260,10 @@ class ChatTexto(BaseModel):
     # sabe quem a pessoa escolheu na lista do `@` é a tela; o backend CONFERE
     # que cada um é membro da sala e recusa com o nome de quem não está.
     mencionados: list[int] = Field(default_factory=list)
+    # 🔵 29/09: "responder citando", como na Caixa -- mas sem `evolution`, é
+    # só o id de outra mensagem desta sala. O `chat.escrever` confere que é
+    # da mesma sala e recusa senão.
+    citando_id: int | None = None
 
 
 class ChatEdicao(BaseModel):
@@ -3411,7 +3415,8 @@ def chat_mencoes(usuario: dict = Depends(auth.requer_tela("ATD_6.1"))):
 def chat_escrever(sala_id: int, dados: ChatTexto,
                   usuario: dict = Depends(auth.requer_tela("ATD_6.1"))):
     eu = _minha_sala(sala_id, usuario)
-    resultado = chat.escrever(sala_id, eu, dados.texto, dados.mencionados)
+    resultado = chat.escrever(sala_id, eu, dados.texto, dados.mencionados,
+                              dados.citando_id)
     if not resultado["ok"]:
         raise HTTPException(status_code=409, detail=resultado["motivo"])
     return resultado

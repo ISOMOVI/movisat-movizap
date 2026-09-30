@@ -43,6 +43,10 @@ const aberta = ref(null)
    tela de toque não existe "passar o mouse". */
 const acoesCelular = ref(false)
 const balaoTocado = ref(null)
+/* Destaque transiente de "clicar na citação vai até a original" (29/09) --
+   ver `irParaMensagem`. Não é `balao--atual` (preso ao estado da busca). */
+const balaoRealcado = ref(null)
+let realceBalaoTimer = null
 const semMouse = typeof window !== 'undefined' && window.matchMedia
   ? window.matchMedia('(hover: none)') : { matches: false }
 const carregando = ref(true)
@@ -459,15 +463,22 @@ async function irParaAchado(passo) {
 }
 
 async function rolarAteAchado() {
+  await irParaMensagem(idAchado.value)
+}
+
+/* Acha e rola até QUALQUER mensagem da conversa, carregando para trás se
+   preciso -- extraído da busca (27/08) para servir também ao clique na
+   citação dentro do balão (29/09): "clicar na citação vai até a original".
+
+   🚨 O ALVO PODE ESTAR ACIMA DO QUE ESTÁ CARREGADO. Sem isto, a tela não
+   teria para onde rolar -- a busca diria "3/7" e nada se mexeria, e a
+   citação simplesmente não abriria nada. Carrega para trás até o balão
+   existir, com um limite de voltas para nunca virar laço infinito numa
+   conversa gigante. */
+async function irParaMensagem(alvo) {
   await nextTick()
-  const alvo = idAchado.value
   if (!alvo || !baloes.value) return
 
-  /* 🚨 O ACERTO PODE ESTAR ACIMA DO QUE ESTÁ CARREGADO. Sem isto, a busca
-     acharia (o servidor vê a conversa inteira) e a tela não teria para onde
-     rolar -- o contador diria "3/7" e nada se mexeria, que é pior do que não
-     achar. Carrega para trás até o balão existir, com um limite de voltas
-     para nunca virar laço infinito numa conversa gigante. */
   let voltas = 0
   while (!baloes.value.querySelector(`[data-mensagem="${alvo}"]`)
          && aberta.value?.tem_anteriores && voltas < 25) {
@@ -477,7 +488,17 @@ async function rolarAteAchado() {
   }
 
   const el = baloes.value.querySelector(`[data-mensagem="${alvo}"]`)
-  if (el) el.scrollIntoView({ block: 'center', behavior: 'smooth' })
+  if (!el) return
+  el.scrollIntoView({ block: 'center', behavior: 'smooth' })
+
+  /* Destaque transiente (não é `balao--atual`, que fica preso ao estado da
+     busca): pisca e some, só para o olho achar o balão que acabou de rolar
+     para a tela. */
+  balaoRealcado.value = alvo
+  clearTimeout(realceBalaoTimer)
+  realceBalaoTimer = setTimeout(() => {
+    if (balaoRealcado.value === alvo) balaoRealcado.value = null
+  }, 2000)
 }
 
 /* ⚠️ Espera a digitação parar: uma rota por tecla faria uma consulta ao banco
@@ -3086,13 +3107,15 @@ function carregarMidiasDaConversa(c) {
                 'balao--casa': casaNaConversa(m),
                 'balao--atual': m.id === idAchado,
                 'balao--tocado': m.id === balaoTocado,
+                'balao--realcado': m.id === balaoRealcado,
               }]"
               :data-mensagem="m.id"
               @click="tocarBalao(m, $event)"
             >
-              <!-- A mensagem que esta está respondendo. Sem isto, uma foto
-                   seguida de "esse aqui" fica ininteligível. -->
-              <p v-if="m.citada_id" class="balao__citada pequeno">
+              <!-- A mensagem que esta está respondendo. Clicar rola até ela e
+                   a destaca (29/09) -- o mesmo gesto do WhatsApp. -->
+              <p v-if="m.citada_id" class="balao__citada pequeno"
+                 @click.stop="irParaMensagem(m.citada_id)">
                 <i class="bi bi-reply" aria-hidden="true"></i>
                 <span class="fraco">{{ m.citada_autor === 'cliente' ? 'cliente' : 'nós' }}:</span>
                 {{ m.citada_conteudo || `(${m.citada_tipo})` }}
@@ -4176,6 +4199,8 @@ function carregarMidiasDaConversa(c) {
   border-radius: var(--r-sm);
   color: var(--texto-fraco);
   overflow-wrap: anywhere;
+  /* Clicar vai até a mensagem original (29/09). */
+  cursor: pointer;
 }
 .tela { max-width: 1280px; }
 
@@ -5183,6 +5208,10 @@ function carregarMidiasDaConversa(c) {
    pegou este aqui em 27/08, junto com as tres cores do balao. */
 .balao--casa { outline: 1px solid var(--aviso-borda); }
 .balao--atual { outline: 2px solid var(--acento); }
+/* Destaque de "clicar na citação vai até a original" (29/09) -- transiente,
+   por isso é uma classe própria e não reaproveita `balao--atual` (que fica
+   preso ao estado da busca). */
+.balao--realcado { outline: 2px solid var(--acento); }
 
 .acoes { border-top: 1px solid var(--borda, rgba(128, 128, 128, .25)); }
 

@@ -338,6 +338,9 @@ def mensagens(sala_id: int, eu: int, limite: int = 500) -> list[dict]:
                       c.midia_id, md.mime AS midia_mime,
                       md.nome_original AS midia_nome, md.tamanho AS midia_tamanho,
                       c.editada_em, c.conteudo_original, c.apagada_em,
+                      c.citada_id, q.texto AS citada_texto,
+                      q.midia_id AS citada_midia_id, qmd.mime AS citada_midia_mime,
+                      qa.nome AS citada_autor,
                       COALESCE((
                           SELECT MIN(COALESCE(cm.lido_ate, 0))
                             FROM chat_membro cm
@@ -347,6 +350,9 @@ def mensagens(sala_id: int, eu: int, limite: int = 500) -> list[dict]:
                  FROM chat_mensagem c
                  JOIN atendente a ON a.id = c.atendente_id
                  LEFT JOIN midia md ON md.id = c.midia_id
+                 LEFT JOIN chat_mensagem q ON q.id = c.citada_id
+                 LEFT JOIN atendente qa ON qa.id = q.atendente_id
+                 LEFT JOIN midia qmd ON qmd.id = q.midia_id
                 WHERE c.sala_id = %s
                 ORDER BY c.id DESC LIMIT %s
            ) recentes ORDER BY id""", (eu, sala_id, limite))
@@ -382,8 +388,26 @@ def _juntar_mencoes(linhas: list[dict], eu: int) -> None:
         linha["me_chamou"] = any(c["id"] == eu for c in chamados)
 
 
+def _conferir_citada(sala_id: int, citando_id: int | None) -> dict | None:
+    """Confere que a mensagem citada é DESTA sala. `None` = pode gravar.
+
+    ⚠️ CITAR MENSAGEM DE OUTRA SALA NÃO EXISTE, mesmo espírito da recusa em
+    `conversas.responder` — mas aqui não há `evolution` nem `stanzaId` para
+    resolver: citar é só um FK para `chat_mensagem`, então a checagem é
+    direta no banco.
+    """
+    if not citando_id:
+        return None
+    dona = banco.um("SELECT sala_id FROM chat_mensagem WHERE id = %s",
+                     (citando_id,))
+    if not dona or dona["sala_id"] != sala_id:
+        return {"ok": False, "motivo": "Só dá para citar mensagem desta conversa."}
+    return None
+
+
 def escrever(sala_id: int, eu: int, texto: str,
-             mencionados: list[int] | None = None) -> dict:
+             mencionados: list[int] | None = None,
+             citando_id: int | None = None) -> dict:
     """Grava a mensagem e, com ela, quem foi chamado por `@`.
 
     🚨 QUEM RESOLVE O `@` É QUEM ESCREVE. O compositor manda os IDS que a
@@ -410,15 +434,19 @@ def escrever(sala_id: int, eu: int, texto: str,
     if not e_membro(sala_id, eu):
         return {"ok": False, "motivo": "Você não está nesta conversa."}
 
+    recusa = _conferir_citada(sala_id, citando_id)
+    if recusa:
+        return recusa
+
     chamados = _conferir_mencionados(sala_id, mencionados)
     if isinstance(chamados, dict):          # veio recusa, não lista
         return chamados
 
     with banco.cursor() as cur:
         cur.execute(
-            """INSERT INTO chat_mensagem (sala_id, atendente_id, texto)
-               VALUES (%s, %s, %s) RETURNING id, criada_em""",
-            (sala_id, eu, texto))
+            """INSERT INTO chat_mensagem (sala_id, atendente_id, texto, citada_id)
+               VALUES (%s, %s, %s, %s) RETURNING id, criada_em""",
+            (sala_id, eu, texto, citando_id))
         linha = cur.fetchone()
         for quem in chamados:
             cur.execute(
@@ -434,7 +462,8 @@ def escrever(sala_id: int, eu: int, texto: str,
 
 def escrever_com_arquivo(sala_id: int, eu: int, dados: bytes, mime: str,
                          nome_arquivo: str, texto: str,
-                         mencionados: list[int] | None = None) -> dict:
+                         mencionados: list[int] | None = None,
+                         citando_id: int | None = None) -> dict:
     """Mensagem da sala COM anexo. 🔵 Pedido dele em 22/09.
 
     🚨 O ARQUIVO NÃO SAI DA CASA, e a garantia é estrutural: este módulo não
@@ -464,6 +493,10 @@ def escrever_com_arquivo(sala_id: int, eu: int, dados: bytes, mime: str,
     if not e_membro(sala_id, eu):
         return {"ok": False, "motivo": "Você não está nesta conversa."}
 
+    recusa = _conferir_citada(sala_id, citando_id)
+    if recusa:
+        return recusa
+
     chamados = _conferir_mencionados(sala_id, mencionados)
     if isinstance(chamados, dict):          # veio recusa, não lista
         return chamados
@@ -478,9 +511,9 @@ def escrever_com_arquivo(sala_id: int, eu: int, dados: bytes, mime: str,
             "nome_original": nome_arquivo,
         }, sala_id=sala_id)
         cur.execute(
-            """INSERT INTO chat_mensagem (sala_id, atendente_id, texto, midia_id)
-               VALUES (%s, %s, %s, %s) RETURNING id, criada_em""",
-            (sala_id, eu, texto, midia_id))
+            """INSERT INTO chat_mensagem (sala_id, atendente_id, texto, midia_id, citada_id)
+               VALUES (%s, %s, %s, %s, %s) RETURNING id, criada_em""",
+            (sala_id, eu, texto, midia_id, citando_id))
         linha = cur.fetchone()
         for quem in chamados:
             cur.execute(
