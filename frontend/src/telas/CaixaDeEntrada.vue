@@ -902,6 +902,78 @@ const TIPOS = [
 const tiposMarcados = ref([])
 const filtroAberto = ref(false)
 
+/* 🔵 30/09, pedido dele: *"no botão filtro pode ter abas de opção como
+   Contato; Grupos // Se é na conversa ou nome // e os tipos em um grupo de
+   'Tipos' no filtro mesmo"*.
+
+   🚨 É CHIP DE FILTRO, NÃO ABA. A migração 027 criou uma aba separada de grupo
+   e a 028 desfez -- a decisão registrada no backend é "grupo e conversa direta
+   na mesma lista, como no WhatsApp". Um chip estreita quando se pede; uma aba
+   dividiria a lista por padrão e reabriria aquilo.
+
+   ⚠️ `emMensagens` NASCE DESLIGADO (decisão dele em 30/09). O conteúdo das
+   mensagens entrava SEMPRE, e era ele que trazia volume sem relação com o
+   termo: "weso" devolvia 10, sendo 4 os grupos e 6 conversas que só
+   mencionavam a palavra. */
+const emNome = ref(true)
+const emMensagens = ref(false)
+const ESCOPOS = [
+  { valor: 'tudo', rotulo: 'Tudo' },
+  { valor: 'contatos', rotulo: 'Contatos' },
+  { valor: 'grupos', rotulo: 'Grupos' },
+]
+const escopo = ref('tudo')
+
+/* 🚨 OS DOIS NÃO PODEM FICAR DESLIGADOS. O backend cai no nome nesse caso,
+   mas deixar a pessoa nesse estado é oferecer um botão que não faz nada:
+   desmarcar o último religa o outro. */
+function alternarOnde(qual) {
+  if (qual === 'nome') emNome.value = !emNome.value
+  else emMensagens.value = !emMensagens.value
+  if (!emNome.value && !emMensagens.value) {
+    if (qual === 'nome') emMensagens.value = true
+    else emNome.value = true
+  }
+  carregar()
+}
+
+function trocarEscopo(valor) {
+  escopo.value = valor
+  carregar()
+}
+
+/* Quantos filtros estão desviando do padrão -- é o número no ícone. Função e
+   não `computed` para não depender de import novo neste arquivo. */
+function contaFiltros() {
+  let n = tiposMarcados.value.length
+  if (escopo.value !== 'tudo') n += 1
+  if (emMensagens.value) n += 1
+  if (!emNome.value) n += 1
+  return n
+}
+
+/* O texto embaixo do campo: o ícone diz QUE há filtro, esta linha diz QUAL. */
+function resumoFiltros() {
+  const partes = []
+  if (escopo.value !== 'tudo') {
+    partes.push(ESCOPOS.find((e) => e.valor === escopo.value).rotulo)
+  }
+  if (!emNome.value) partes.push('sem nome')
+  if (emMensagens.value) partes.push('nas mensagens')
+  for (const t of TIPOS) {
+    if (tiposMarcados.value.includes(t.valor)) partes.push(t.rotulo)
+  }
+  return partes.join(' · ')
+}
+
+function limparFiltros() {
+  tiposMarcados.value = []
+  escopo.value = 'tudo'
+  emNome.value = true
+  emMensagens.value = false
+  carregar()
+}
+
 /* ⚠️ FECHA AO CLICAR FORA. Popover que só fecha no próprio botão fica aberto
    por cima da lista enquanto a pessoa tenta clicar numa conversa -- e ela
    clica duas vezes achando que a tela travou. */
@@ -926,6 +998,10 @@ function parametros() {
   if (filtro.value === 'bloqueados') p.set('bloqueados', 'true')
   if (busca.value.trim()) p.set('busca', busca.value.trim())
   if (tiposMarcados.value.length) p.set('relacoes', tiposMarcados.value.join(','))
+  /* 🔵 30/09: só vai o que DESVIA do padrão -- URL limpa diz o que foi pedido. */
+  if (!emNome.value) p.set('em_nome', 'false')
+  if (emMensagens.value) p.set('em_mensagens', 'true')
+  if (escopo.value !== 'tudo') p.set('escopo', escopo.value)
   return p.toString()
 }
 
@@ -2283,7 +2359,7 @@ function carregarMidiasDaConversa(c) {
                 v-model="busca"
                 class="campo__entrada"
                 type="search"
-                placeholder="nome, telefone ou o que foi dito"
+                placeholder="nome, telefone ou empresa"
                 @keyup.enter="carregar()"
               />
               <!-- 🚨 O FILTRO MORA NO CAMPO DE BUSCA, não numa fileira de
@@ -2295,20 +2371,54 @@ function carregarMidiasDaConversa(c) {
                 <button
                   class="botao botao--contorno botao--icone"
                   type="button"
-                  :class="{ 'botao--filtrando': tiposMarcados.length }"
+                  :class="{ 'botao--filtrando': contaFiltros() }"
                   :aria-expanded="filtroAberto"
-                  title="Filtrar por tipo de cadastro"
-                  aria-label="Filtrar por tipo de cadastro"
+                  title="Filtrar: onde buscar, contato ou grupo, e tipo de cadastro"
+                  aria-label="Filtrar: onde buscar, contato ou grupo, e tipo de cadastro"
                   @click.prevent="filtroAberto = !filtroAberto"
                 >
                   <i class="bi bi-funnel" aria-hidden="true"></i>
-                  <span v-if="tiposMarcados.length" class="filtro__conta">
-                    {{ tiposMarcados.length }}
+                  <span v-if="contaFiltros()" class="filtro__conta">
+                    {{ contaFiltros() }}
                   </span>
                 </button>
 
                 <div v-if="filtroAberto" class="filtro__caixa">
-                  <p class="filtro__titulo">Tipo de cadastro</p>
+                  <!-- 🔵 30/09: ONDE PROCURAR. Vem primeiro porque é o que mais
+                       muda o resultado: com "o que foi dito" ligado, a busca
+                       devolve toda conversa que mencionou a palavra. -->
+                  <p class="filtro__titulo">Buscar em</p>
+                  <label class="filtro__linha">
+                    <input
+                      type="checkbox"
+                      :checked="emNome"
+                      @change="alternarOnde('nome')"
+                    />
+                    <span>Nome, telefone e empresa</span>
+                  </label>
+                  <label class="filtro__linha">
+                    <input
+                      type="checkbox"
+                      :checked="emMensagens"
+                      @change="alternarOnde('mensagens')"
+                    />
+                    <span>O que foi dito na conversa</span>
+                  </label>
+
+                  <!-- 🔵 30/09: contato ou grupo. Filtro, não aba. -->
+                  <p class="filtro__titulo">Onde</p>
+                  <label v-for="e in ESCOPOS" :key="e.valor" class="filtro__linha">
+                    <input
+                      type="radio"
+                      name="escopo-da-conversa"
+                      :value="e.valor"
+                      :checked="escopo === e.valor"
+                      @change="trocarEscopo(e.valor)"
+                    />
+                    <span>{{ e.rotulo }}</span>
+                  </label>
+
+                  <p class="filtro__titulo">Tipos</p>
                   <label v-for="t in TIPOS" :key="t.valor" class="filtro__linha">
                     <input
                       type="checkbox"
@@ -2318,10 +2428,10 @@ function carregarMidiasDaConversa(c) {
                     <span>{{ t.rotulo }}</span>
                   </label>
                   <button
-                    v-if="tiposMarcados.length"
+                    v-if="contaFiltros()"
                     class="botao botao--pequeno botao--fantasma filtro__limpar"
                     type="button"
-                    @click.prevent="tiposMarcados = []; carregar()"
+                    @click.prevent="limparFiltros()"
                   >
                     limpar filtro
                   </button>
@@ -2341,10 +2451,9 @@ function carregarMidiasDaConversa(c) {
 
             <!-- O que está filtrado aparece EMBAIXO do campo, em texto: o
                  ícone diz que há filtro, esta linha diz qual. -->
-            <span v-if="tiposMarcados.length" class="filtro__resumo pequeno">
+            <span v-if="contaFiltros()" class="filtro__resumo pequeno">
               <i class="bi bi-funnel-fill" aria-hidden="true"></i>
-              {{ TIPOS.filter((t) => tiposMarcados.includes(t.valor))
-                      .map((t) => t.rotulo).join(' · ') }}
+              {{ resumoFiltros() }}
             </span>
             <!-- 🚨 A EXPLICAÇÃO DA BUSCA SUBIU PARA O ÍCONE DE AJUDA (28/08).
                  Ela era uma faixa fixa embaixo do campo, na coluna de 348px:

@@ -1348,6 +1348,9 @@ def listar_conversas(estado: str | None = None, sem_dono: bool = False,
                      relacoes: str = "", meus_times: bool = False,
                      time_id: int | None = None,
                      bloqueados: bool = False,
+                     em_nome: bool = True,
+                     em_mensagens: bool = False,
+                     escopo: str = "tudo",
                      usuario: dict = Depends(auth.requer_tela("ATD_1.1"))):
     """A lista da caixa: conversa direta e grupo juntos, como no WhatsApp.
 
@@ -1374,7 +1377,12 @@ def listar_conversas(estado: str | None = None, sem_dono: bool = False,
         # junto de `meus_times`: um time de que não sou membro devolve vazio.
         do_meu_time_id=time_id if meus_times else None,
         # 🔵 23/09: o filtro "Bloqueados" -- os números que o painel bloqueou.
-        bloqueados=bloqueados)
+        bloqueados=bloqueados,
+        # 🔵 30/09: onde procurar e em que escopo. `em_mensagens` nasce
+        # DESLIGADO aqui (decisão dele): o conteúdo das mensagens entrava
+        # sempre e era o que trazia volume sem relação com o que se procurava.
+        em_nome=em_nome, em_mensagens=em_mensagens,
+        escopo=escopo if escopo in ("tudo", "contatos", "grupos") else "tudo")
 
 
 class ConversaNova(BaseModel):

@@ -1032,7 +1032,8 @@ async def rodar(parar: asyncio.Event) -> None:
 # LEITURA — o que a ATD_1.1 e a ATD_1.2 mostram
 # ============================================================================
 
-def _condicao_busca(termo: str) -> tuple[str, list]:
+def _condicao_busca(termo: str, em_nome: bool = True,
+                    em_mensagens: bool = True) -> tuple[str, list]:
     """O `WHERE` da busca de conversa — UM só, para a caixa e o Histórico.
 
     🚨 EXISTIA COMO DOIS TRECHOS COPIADOS, E ELES DIVERGIRAM. A caixa procurava
@@ -1058,36 +1059,84 @@ def _condicao_busca(termo: str) -> tuple[str, list]:
 
     ⚠️ O `%` VAI COMO PARÂMETRO. Montar `ILIKE '%IAGO%'` dentro da string SQL
     faz o psycopg ler `%I` como placeholder -- aconteceu duas vezes em 11/08.
+
+    🚨 `grupo_nome` FALTAVA, E NENHUM GRUPO ERA ENCONTRÁVEL PELO PRÓPRIO NOME.
+    Medido em 30/09: das 15 conversas de grupo, **14 têm `grupo_nome` e ZERO
+    têm `nome_whatsapp`** -- e só `nome_whatsapp` era olhado. Buscar
+    "Tecnofrota" devolvia **0** existindo 2 grupos com esse nome, e buscar
+    "x3tech" devolvia 3 linhas que vinham TODAS de conteúdo de mensagem,
+    nenhuma sendo o grupo. É a mesma família do defeito do `assumir`, corrigido
+    no mesmo dia: coluna de grupo esquecida em código escrito para conversa
+    direta.
+
+    🔵 30/09: ONDE PROCURAR É ESCOLHA DE QUEM BUSCA (*"Se é na conversa ou
+    nome"*). Antes o conteúdo das mensagens entrava SEMPRE, num `OR` achatado
+    com os nomes -- e era ele que trazia o volume: "weso" devolvia 9, sendo 4
+    os grupos e 5 conversas diretas que só mencionavam a palavra.
+
+    ⚠️ O PADRÃO DAQUI CONTINUA `em_mensagens=True`, porque esta função é
+    COMPARTILHADA com o Histórico e mudar o padrão mudaria aquela tela em
+    silêncio. Quem nasce com mensagens desligado é a Caixa, em `listar`.
     """
     termo = (termo or "").strip()
     if not termo:
         return "", []
 
+    # 🚨 OS DOIS DESLIGADOS NÃO PODEM DEVOLVER `""`. String vazia aqui quer
+    # dizer "sem condição de busca", e a lista voltaria INTEIRA para quem
+    # digitou um termo -- o pior resultado possível, e calado. Sem lugar onde
+    # procurar, procura no nome.
+    if not em_nome and not em_mensagens:
+        em_nome = True
+
     curinga = f"%{termo}%"
-    partes = ["c.nome_whatsapp ILIKE %s", "ct.nome ILIKE %s", "cl.nome ILIKE %s"]
-    params: list = [curinga, curinga, curinga]
+    partes: list[str] = []
+    params: list = []
 
-    # ---- telefone -----------------------------------------------------------
-    # Dois caminhos, somados: o número inteiro (com as variantes do nono
-    # dígito, como manda a metodologia §2) e o PEDAÇO -- "6168" tem de achar o
-    # celular, e para isso não existe normalização possível.
-    digitos = "".join(ch for ch in termo if ch.isdigit())
-    if digitos:
-        analise = tel.normalizar(termo)
-        if analise:
-            partes.append("c.telefone_e164 = ANY(%s)")
-            params.append(sorted(tel.variantes(analise)))
-        partes.append("c.telefone_e164 LIKE %s")
-        params.append(f"%{digitos}%")
+    if em_nome:
+        # 🚨 PROCURA ONDE A TELA MOSTRA, e a lista mostra `grupo_nome` nas
+        # conversas de grupo. Ver a nota do cabeçalho: sem ele, grupo nenhum
+        # se acha pelo nome.
+        partes += ["c.nome_whatsapp ILIKE %s", "c.grupo_nome ILIKE %s",
+                   "ct.nome ILIKE %s", "cl.nome ILIKE %s"]
+        params += [curinga, curinga, curinga, curinga]
 
-    # ---- conteúdo -----------------------------------------------------------
-    # 🚨 `EXISTS`, não JOIN: com JOIN, a conversa em que o termo aparece em oito
-    # mensagens voltaria oito vezes na lista, e o DISTINCT não resolveria --
-    # as linhas seriam diferentes por causa das colunas da mensagem.
-    partes.append(
-        "EXISTS (SELECT 1 FROM mensagem m "
-        "         WHERE m.conversa_id = c.id AND m.conteudo ILIKE %s)")
-    params.append(curinga)
+        # ---- telefone -------------------------------------------------------
+        # Dois caminhos, somados: o número inteiro (com as variantes do nono
+        # dígito, como manda a metodologia §2) e o PEDAÇO -- "6168" tem de achar
+        # o celular, e para isso não existe normalização possível.
+        #
+        # ⚠️ TELEFONE VAI COM O NOME, não com o conteúdo: ele é como se
+        # IDENTIFICA a linha, não o que foi dito nela.
+        #
+        # 🚨 O PEDAÇO SÓ VALE QUANDO O TERMO É UM NÚMERO, e não valia: qualquer
+        # dígito perdido no meio de letras virava `telefone_e164 LIKE '%d%'`,
+        # que casa com quase toda a base. Medido em 30/09: **"x3tech" devolvia
+        # 100 conversas** -- o teto da lista -- porque o "3" casava com quase
+        # todo telefone. Era isto que fazia a busca parecer que não fazia nada:
+        # ela respondia com a base inteira cortada no limite, e não com o que
+        # se procurou. Telefone não tem letra, então a presença de letra é o
+        # que decide; e 3 dígitos é o piso para "1" não arrastar tudo de novo.
+        digitos = "".join(ch for ch in termo if ch.isdigit())
+        tem_letra = any(ch.isalpha() for ch in termo)
+        if digitos and not tem_letra and len(digitos) >= 3:
+            analise = tel.normalizar(termo)
+            if analise:
+                partes.append("c.telefone_e164 = ANY(%s)")
+                params.append(sorted(tel.variantes(analise)))
+            partes.append("c.telefone_e164 LIKE %s")
+            params.append(f"%{digitos}%")
+
+    if em_mensagens:
+        # ---- conteúdo -------------------------------------------------------
+        # 🚨 `EXISTS`, não JOIN: com JOIN, a conversa em que o termo aparece em
+        # oito mensagens voltaria oito vezes na lista, e o DISTINCT não
+        # resolveria -- as linhas seriam diferentes por causa das colunas da
+        # mensagem.
+        partes.append(
+            "EXISTS (SELECT 1 FROM mensagem m "
+            "         WHERE m.conversa_id = c.id AND m.conteudo ILIKE %s)")
+        params.append(curinga)
 
     return "(" + " OR ".join(partes) + ")", params
 
@@ -1148,7 +1197,10 @@ def listar(estado: str | None = None, atendente_id: int | None = None,
            do_meu_time: int | None = None,
            bloqueados: bool = False,
            do_meu_time_id: int | None = None,
-           so_nao_lidas: bool = False) -> list[dict]:
+           so_nao_lidas: bool = False,
+           em_nome: bool = True,
+           em_mensagens: bool = False,
+           escopo: str = "tudo") -> list[dict]:
     """As conversas para a lista da caixa de entrada.
 
     Cada linha traz o que o doc pede: nome (ou telefone, quando não
@@ -1243,7 +1295,19 @@ def listar(estado: str | None = None, atendente_id: int | None = None,
         if partes:
             condicoes.append("(" + " OR ".join(partes) + ")")
             params.extend(params_rel)
-    onde_busca, params_busca = _condicao_busca(busca)
+    # 🔵 30/09: O ESCOPO -- *"pode ter abas de opção como Contato; Grupos"*.
+    # É CHIP DE FILTRO, NÃO ABA, de propósito: a migração 027 criou uma aba
+    # separada de grupo e a 028 desfez, e a decisão registrada logo acima é
+    # "grupo e conversa direta na mesma lista, como no WhatsApp". Um chip
+    # estreita quando se pede e não divide a lista por padrão -- uma aba
+    # reabriria aquilo.
+    if escopo == "grupos":
+        condicoes.append("c.grupo_jid IS NOT NULL")
+    elif escopo == "contatos":
+        condicoes.append("c.grupo_jid IS NULL")
+
+    onde_busca, params_busca = _condicao_busca(
+        busca, em_nome=em_nome, em_mensagens=em_mensagens)
     if onde_busca:
         condicoes.append(onde_busca)
         params.extend(params_busca)
@@ -1912,11 +1976,12 @@ def assumir(conversa_id: int, atendente_id: int) -> dict:
     jeito de voltar a falar era o cliente escrever primeiro.
 
     🚨 REABRIR ESBARRA NO `ux_conversa_aberta` — índice único em
-    `(canal_id, telefone_e164) WHERE estado <> 'resolvida'`, que é o que faz o
-    cliente que volta reabrir em vez de duplicar. Se ele já escreveu depois do
-    encerramento, existe OUTRA conversa aberta com este número e reabrir esta
-    estouraria o índice. Nesse caso não se força: devolve qual é a conversa
-    viva, porque é nela que a pessoa tem de falar.
+    `(canal_id, COALESCE(grupo_jid, telefone_e164)) WHERE estado <> 'resolvida'`,
+    que é o que faz o cliente que volta reabrir em vez de duplicar. Se ele já
+    escreveu depois do encerramento, existe OUTRA conversa aberta com este
+    número — ou com este GRUPO, que é o caso que a trava deixava passar até
+    30/09 — e reabrir esta estouraria o índice. Nesse caso não se força:
+    devolve qual é a conversa viva, porque é nela que a pessoa tem de falar.
     """
     # Caminho comum: conversa aberta e sem dono.
     linha = banco.um(
@@ -1929,7 +1994,7 @@ def assumir(conversa_id: int, atendente_id: int) -> dict:
 
     atual = banco.um(
         """SELECT c.id, c.estado, c.canal_id, c.telefone_e164, c.atendente_id,
-                  a.nome AS dono_nome
+                  c.grupo_jid, a.nome AS dono_nome
              FROM conversa c LEFT JOIN atendente a ON a.id = c.atendente_id
             WHERE c.id = %s""", (conversa_id,))
     if not atual:
@@ -1940,13 +2005,22 @@ def assumir(conversa_id: int, atendente_id: int) -> dict:
                 "motivo": f"A conversa já foi assumida por "
                           f"{atual['dono_nome'] or 'outra pessoa'}."}
 
+    # 🚨 A COMPARAÇÃO TEM DE SER A DO ÍNDICE, `COALESCE(grupo_jid,
+    # telefone_e164)`. Comparar só `telefone_e164` deixava GRUPO de fora: em
+    # grupo ele é NULL, `telefone_e164 = NULL` nunca é verdade, a trava passava
+    # batido e o UPDATE abaixo estourava o índice com 500 na cara do atendente
+    # (medido em 30/09 no "Suporte Movisat -> Weso", 4 conversas em risco).
     viva = banco.um(
         """SELECT id FROM conversa
-            WHERE canal_id = %s AND telefone_e164 = %s AND estado <> 'resolvida'
-            LIMIT 1""", (atual["canal_id"], atual["telefone_e164"]))
+            WHERE canal_id = %s
+              AND COALESCE(grupo_jid, telefone_e164) = %s
+              AND estado <> 'resolvida'
+            LIMIT 1""",
+        (atual["canal_id"], atual["grupo_jid"] or atual["telefone_e164"]))
     if viva:
+        alvo = "Este grupo" if atual["grupo_jid"] else "Este número"
         return {"ok": False, "conversa_aberta_id": viva["id"],
-                "motivo": f"Este número já tem uma conversa aberta "
+                "motivo": f"{alvo} já tem uma conversa aberta "
                           f"(#{viva['id']}). É nela que a resposta chega."}
 
     # ⚠️ `resolvida_em` e `segundos_total` são métricas CONGELADAS no

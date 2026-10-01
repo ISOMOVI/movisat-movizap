@@ -77,22 +77,54 @@ nome · há quanto tempo · prévia · selos · **[Assumir]** quando cabe.
 
 ### 🔍 Buscar conversa
 
-Um campo só, e ele procura em **tudo que identifica a conversa**:
+Um campo só, e o **filtro ao lado dele decide onde procurar** (30/09). No
+padrão ele procura em quem a conversa é:
 
-| Onde | Exemplo |
-|---|---|
-| apelido do WhatsApp | `ago` acha Iago, Thiago, Tiago, Yago |
-| nome do contato e do **cliente** | `keeva` |
-| telefone, **em pedaço** | `6168`, `998116168` (sem DDD), `(18) 99811-6168` |
-| texto das mensagens, **inclusive notas internas** | `rastreador`, `boleto` |
+| Onde | Exemplo | No padrão |
+|---|---|---|
+| apelido do WhatsApp | `ago` acha Iago, Thiago, Tiago, Yago | sim |
+| **nome do grupo** | `Tecnofrota`, `x3tech` | sim |
+| nome do contato e do **cliente** | `keeva` | sim |
+| telefone, **em pedaço** | `6168`, `998116168` (sem DDD), `(18) 99811-6168` | sim |
+| texto das mensagens, **inclusive notas internas** | `rastreador`, `boleto` | **não — precisa ligar** |
 
 🚨 **É `OR` em tudo, não escolha por formato.** Até 12/08 o código decidia
 entre telefone *ou* nome pelo que tinha sido digitado: `998116168` não
 normalizava (falta DDD), caía no ramo de nome e devolvia **vazio, sem dizer
 por quê**. Escolher o campo pelo formato do que a pessoa digitou é adivinhar.
 
-⚠️ **A nota interna entra na busca** — decisão do usuário em 12/08: *"a nota,
-uma vez dentro da conversa, faz parte da conversa"*.
+⚠️ **A nota interna continua na busca** — decisão do usuário em 12/08: *"a
+nota, uma vez dentro da conversa, faz parte da conversa"*. O que mudou em 30/09
+é que ela entra com o interruptor **"O que foi dito na conversa"** ligado, não
+por padrão. A capacidade não saiu; o padrão saiu.
+
+#### 🚨 Os dois defeitos achados em 30/09
+
+**1. `grupo_nome` não estava na busca, e nenhum grupo era encontrável pelo
+próprio nome.** Medido: das 15 conversas de grupo, **14 têm `grupo_nome` e
+ZERO têm `nome_whatsapp`** — e só `nome_whatsapp` era olhado. Buscar
+`Tecnofrota` devolvia **0** existindo dois grupos com esse nome. É a mesma
+família do defeito do `assumir`, corrigido no mesmo dia: coluna de grupo
+esquecida em código escrito para conversa direta.
+
+**2. Um dígito solto no meio de letras arrastava a base inteira.** `x3tech`
+tem o `3`, e o código montava `telefone_e164 LIKE '%3%'` — que casa com quase
+todo telefone. A busca devolvia **100 conversas**, o teto da lista, e parecia
+não fazer nada: ela respondia com a base cortada no limite, não com o que se
+procurou. Era **isto** que o usuário estava vendo ao relatar *"quando busco por
+x3tech, por exemplo, não muda muita coisa"*.
+
+A regra nova: pedaço de telefone só quando o termo **não tem letra** (telefone
+não tem) e traz ao menos 3 dígitos. `6168` continua achando o celular.
+
+Efeito medido antes e depois:
+
+| termo | antes | depois |
+|---|---|---|
+| `x3tech` | 100 (o teto) | **2** — os dois grupos |
+| `Tecnofrota` | 0 | **2** |
+| `weso` | 10, sendo 6 só menções | **4** — os grupos |
+| `6168` | achava | achava |
 
 ⚠️ **O girando só aparece depois de 3 s.** O normal é responder entre 5 e 30
 ms; piscar indicador a cada tecla cansa mais do que espera nenhuma. Passando
@@ -137,10 +169,31 @@ só de ida: `responder` recusa conversa resolvida e a tela escondia a barra
 inteira, então só o cliente escrevendo de novo trazia a conversa de volta.
 
 🚨 **Reabrir esbarra no `ux_conversa_aberta`** — único em
-`(canal_id, telefone_e164)` para conversa não resolvida, que é o que faz o
-cliente que volta reabrir em vez de duplicar. Se ele já escreveu depois do
-encerramento, existe outra conversa aberta: o sistema **não força**, avisa qual
-é a conversa viva e manda falar nela.
+`(canal_id, COALESCE(grupo_jid, telefone_e164))` para conversa não resolvida,
+que é o que faz o cliente que volta reabrir em vez de duplicar. Se ele já
+escreveu depois do encerramento, existe outra conversa aberta: o sistema **não
+força**, avisa qual é a conversa viva e manda falar nela.
+
+🚨 **ESTA LINHA DIZIA `(canal_id, telefone_e164)`, SEM O `COALESCE`, E ESTAVA
+ERRADA — e foi essa descrição que guiou o defeito.** Até 30/09 a guarda do
+`assumir` comparava só `telefone_e164`, que é **NULL em conversa de grupo**:
+`telefone_e164 = NULL` nunca é verdade em SQL, a trava passava batido, o
+`UPDATE` seguia e estourava o índice com **500 Internal Server Error** na cara
+do atendente. **4 conversas de grupo** estavam nesse estado. O código seguiu o
+comentário em vez do índice, e o comentário era este.
+
+🔵 **E a ação oferecida ainda não é a certa.** Observação dele em 30/09: *"Se o
+grupo já está aberto e com alguém, não deve ter reabrir e assumir, deveria
+entrar pelo botão de entrar pois está em andamento"*. O mecanismo existe —
+`conversa_participante`, migração 021, o "acompanhar" — e funciona: em 30/09
+10:24:32 ele entrou na #55760 como participante e o dono (Thiago) continuou.
+Mas **a tela só oferece "assumir"**, que em conversa com dono responde *"já foi
+assumida por X"*: beco sem saída quando o caminho certo existe. 🔴 Pendente.
+
+⚠️ **E a lista mostra várias linhas do mesmo grupo sem dizer qual é a viva.**
+*"porque parece que tem duas conversas então?"* — porque `conversa` é **uma
+linha por atendimento**, não por contato. O grupo "Suporte Movisat -> Weso" tem
+3 encerradas e 1 aberta, nome idêntico nas quatro. 🔴 Pendente.
 
 ⚠️ Reabrir limpa `resolvida_em` e `segundos_total`, que são métricas congeladas
 no fechamento. Deixá-las preenchidas faria a `ATD_5.1` listar como encerrada
@@ -821,12 +874,42 @@ direta × grupo**. É o fichário que o usuário pediu. "Não identificado" e
 "concluída" continuam como chip — duas leituras na mesma faixa é a faixa não
 querer dizer nada.
 
-### Filtro por tipo de cadastro
+### Filtro: onde buscar, contato ou grupo, e tipo
 
-Chips de `relacao` acima da lista, combináveis com Todas / Sem dono / Minhas,
-entrando como mais uma condição no `listar()`. A busca de hoje já varre nome do
-WhatsApp, nome do contato, nome do cliente, telefone inteiro e em pedaço, e o
-texto das mensagens inclusive notas — nada disso muda.
+Chips de `relacao` combináveis com Todas / Sem dono / Minhas / Time /
+Bloqueados, entrando como mais uma condição no `listar()`.
+
+🔵 **30/09 — três seções no painel do filtro**, pedido dele: *"no botão filtro
+pode ter abas de opção como Contato; Grupos // Se é na conversa ou nome // e os
+tipos em um grupo de 'Tipos' no filtro mesmo"*.
+
+| Seção | O que oferece | Padrão |
+|---|---|---|
+| **Buscar em** | `Nome, telefone e empresa` · `O que foi dito na conversa` | só o primeiro |
+| **Onde** | `Tudo` · `Contatos` · `Grupos` | Tudo |
+| **Tipos** | os chips de `relacao` que já existiam | nenhum |
+
+🚨 **"Onde" é FILTRO, NÃO ABA, de propósito.** A migração 027 criou uma aba
+separada de grupo e a **028 desfez** — a decisão registrada é *"grupo e
+conversa direta na mesma lista, como no WhatsApp"*. Um chip estreita quando se
+pede; uma aba dividiria a lista por padrão e reabriria aquilo.
+
+🚨 **Os dois interruptores de "Buscar em" não podem ficar desligados.**
+Condição de busca vazia quer dizer "sem filtro", e a lista voltaria **inteira**
+para quem digitou um termo — o pior resultado possível, e calado. A tela religa
+o outro ao desmarcar o último; o backend, por garantia, cai no nome.
+
+⚠️ **O padrão de `_condicao_busca` continua com mensagens LIGADAS**, porque a
+função é compartilhada com o **Histórico** e mudar o padrão dela mudaria aquela
+tela em silêncio. Quem nasce com mensagens desligado é a Caixa, em `listar`.
+
+⚠️ **O placeholder do campo mudou junto**: era *"nome, telefone ou o que foi
+dito"* e virou *"nome, telefone ou empresa"*. Com o conteúdo desligado por
+padrão, o texto antigo prometia o que a tela deixou de fazer — o M12 outra vez.
+
+🟡 **O que NÃO entrou, por decisão dele:** o selo de "por que esta linha casou"
+(`no nome` / `na mensagem` / `no telefone`) e a contagem por escopo no topo do
+resultado. Ficaram para depois.
 
 ### Ver ficha
 

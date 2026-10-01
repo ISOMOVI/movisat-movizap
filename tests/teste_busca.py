@@ -121,14 +121,30 @@ class TestOsDefeitosDe1208:
         assert achou("IAGO DO TESTE") == achou("iago do teste")
 
 
+def achou_no_conteudo(termo):
+    """A busca COM o interruptor "o que foi dito na conversa" ligado.
+
+    🔵 30/09: o conteúdo das mensagens deixou de entrar na busca da Caixa por
+    PADRÃO (pedido dele: *"Se é na conversa ou nome"*). Ele entrava sempre,
+    num `OR` achatado com os nomes, e era o que trazia volume sem relação com
+    o termo -- "weso" devolvia 10, sendo 4 os grupos e 6 conversas que só
+    mencionavam a palavra.
+
+    ⚠️ A CAPACIDADE NÃO MORREU, o padrão mudou. Por isso estes testes passaram
+    a pedir o interruptor em vez de serem apagados: o que eles provam --
+    inclusive a nota interna, decisão dele em 12/08 -- continua valendo.
+    """
+    return [c["id"] for c in conversas.listar(busca=termo, em_mensagens=True)]
+
+
 class TestBuscaPorConteudo:
     def test_acha_pelo_texto_da_mensagem(self, cena):
-        assert cena["conversa"] in achou(SEGREDO)
+        assert cena["conversa"] in achou_no_conteudo(SEGREDO)
 
     def test_acha_pelo_texto_da_NOTA_INTERNA(self, cena):
         """Decisão do usuário em 12/08: "a nota, uma vez dentro da conversa,
-        faz parte da conversa"."""
-        assert cena["conversa"] in achou(NA_NOTA)
+        faz parte da conversa". Segue valendo -- com o interruptor ligado."""
+        assert cena["conversa"] in achou_no_conteudo(NA_NOTA)
 
     def test_conversa_aparece_UMA_vez_mesmo_com_varias_mensagens(self, cena):
         """🚨 Por isso é `EXISTS` e não JOIN: com JOIN a conversa em que o
@@ -139,19 +155,133 @@ class TestBuscaPorConteudo:
                                          conteudo, criada_em)
                    VALUES (%s, 'entrada', 'cliente', 'texto', %s, now())""",
                 (cena["conversa"], f"de novo {SEGREDO}"))
-        assert achou(SEGREDO).count(cena["conversa"]) == 1
+        assert achou_no_conteudo(SEGREDO).count(cena["conversa"]) == 1
+
+
+class TestOPadraoDaCaixaNaoOlhaMensagem:
+    """🔵 30/09: o padrão novo, travado. Sem isto, voltar o conteúdo ao padrão
+    passaria calado -- e era ele que fazia a busca parecer não funcionar."""
+
+    def test_conteudo_NAO_vem_no_padrao(self, cena):
+        assert cena["conversa"] not in achou(SEGREDO)
+
+    def test_nota_interna_NAO_vem_no_padrao(self, cena):
+        assert cena["conversa"] not in achou(NA_NOTA)
+
+    def test_o_interruptor_liga_de_volta(self, cena):
+        assert cena["conversa"] in achou_no_conteudo(SEGREDO)
+
+    def test_nome_continua_achando_no_padrao(self, cena):
+        """O padrão não é "não achar nada" -- é achar por quem a conversa é."""
+        assert cena["conversa"] in achou("Iago Do Teste")
+
+    def test_os_dois_desligados_NAO_devolvem_a_lista_inteira(self, cena):
+        """🚨 Condição vazia quer dizer "sem filtro", e a lista voltaria
+        INTEIRA para quem digitou um termo. Sem onde procurar, procura no
+        nome."""
+        onde, _ = conversas._condicao_busca(
+            "zznaoexisteemlugarnenhum", em_nome=False, em_mensagens=False)
+        assert onde, "condição vazia devolveria a base inteira"
+        assert conversas.listar(busca="zznaoexisteemlugarnenhum",
+                                em_nome=False, em_mensagens=False) == []
+
+
+class TestGrupoEhEncontravelPeloNome:
+    """🚨 O DEFEITO DE 30/09: `grupo_nome` não estava na busca, e nenhuma
+    conversa de grupo era encontrável pelo próprio nome.
+
+    Medido na base real: das 15 conversas de grupo, **14 têm `grupo_nome` e
+    ZERO têm `nome_whatsapp`** -- e só `nome_whatsapp` era olhado. Buscar
+    "Tecnofrota" devolvia 0 existindo 2 grupos com esse nome. Mesma família do
+    defeito do `assumir`, corrigido no mesmo dia: coluna de grupo esquecida em
+    código escrito para conversa direta.
+    """
+
+    def test_a_condicao_olha_grupo_nome(self):
+        onde, _ = conversas._condicao_busca("qualquer")
+        assert "c.grupo_nome" in onde, (
+            "grupo_nome saiu da busca -- todo grupo volta a ser inencontrável "
+            "pelo próprio nome")
+
+    def test_olha_tambem_onde_ja_olhava(self):
+        """A correção não podia trocar uma coluna por outra."""
+        onde, _ = conversas._condicao_busca("qualquer")
+        for coluna in ("c.nome_whatsapp", "ct.nome", "cl.nome"):
+            assert coluna in onde, f"{coluna} saiu da busca"
+
+
+class TestPedacoDeTelefoneNaoArrastaABase:
+    """🚨 O SEGUNDO DEFEITO DE 30/09, e o que o usuário estava vendo: um dígito
+    perdido no meio de letras virava `telefone_e164 LIKE '%d%'`, que casa com
+    quase toda a base.
+
+    "x3tech" devolvia **100 conversas** -- o teto da lista -- porque o "3"
+    casava com quase todo telefone. A busca respondia com a base cortada no
+    limite, e não com o que se procurou.
+    """
+
+    def test_termo_com_letra_nao_vira_busca_de_telefone(self):
+        onde, _ = conversas._condicao_busca("x3tech")
+        assert "telefone_e164" not in onde, (
+            "termo com letra voltou a virar busca de telefone -- um dígito "
+            "solto arrasta a base inteira")
+
+    def test_numero_continua_sendo_telefone(self):
+        for termo in ("6168", "944440000", "(99) 94444-0000"):
+            onde, _ = conversas._condicao_busca(termo)
+            assert "telefone_e164" in onde, f"{termo!r} deixou de buscar telefone"
+
+    def test_um_digito_so_nao_basta(self):
+        """Piso de 3 dígitos: "1" casaria com quase tudo do mesmo jeito."""
+        onde, _ = conversas._condicao_busca("1")
+        assert "telefone_e164" not in onde
+
+    def test_pedaco_de_telefone_segue_achando(self, cena):
+        """O requisito de 12/08 -- "6168 mostra o cel" -- não pode ter morrido."""
+        assert cena["conversa"] in achou("4440000")
+        assert cena["conversa"] in achou("0000")
+
+
+class TestEscopoContatoOuGrupo:
+    """🔵 30/09, pedido dele: *"pode ter abas de opção como Contato; Grupos"*.
+
+    ⚠️ É FILTRO, NÃO ABA: a migração 027 criou aba separada de grupo e a 028
+    desfez. Um escopo estreita quando se pede; a lista segue unificada por
+    padrão.
+    """
+
+    def test_contatos_exclui_grupo(self, cena):
+        assert all(c.get("tipo") != "grupo"
+                   for c in conversas.listar(escopo="contatos"))
+
+    def test_grupos_traz_so_grupo(self, cena):
+        assert all(c.get("tipo") == "grupo"
+                   for c in conversas.listar(escopo="grupos"))
+
+    def test_tudo_e_o_padrao(self, cena):
+        assert (len(conversas.listar())
+                == len(conversas.listar(escopo="tudo")))
+
+    def test_escopo_desconhecido_nao_esconde_conversa(self, cena):
+        """Valor estranho não pode virar filtro silencioso."""
+        assert (len(conversas.listar(escopo="banana"))
+                == len(conversas.listar()))
 
 
 class TestOTrechoNaPrevia:
-    def _linha(self, termo, conversa_id):
-        for c in conversas.listar(busca=termo):
+    def _linha(self, termo, conversa_id, em_mensagens=False):
+        for c in conversas.listar(busca=termo, em_mensagens=em_mensagens):
             if c["id"] == conversa_id:
                 return c
         return None
 
     def test_casou_por_texto_traz_o_trecho(self, cena):
-        """Sem isto a conversa aparece na lista sem nada visível batendo."""
-        linha = self._linha(SEGREDO, cena["conversa"])
+        """Sem isto a conversa aparece na lista sem nada visível batendo.
+
+        ⚠️ Pede `em_mensagens=True` desde 30/09: sem o interruptor não existe
+        "casou por texto" na Caixa, porque o conteúdo não entra no padrão.
+        """
+        linha = self._linha(SEGREDO, cena["conversa"], em_mensagens=True)
         assert linha is not None
         assert linha["trecho"] and SEGREDO in linha["trecho"]
 

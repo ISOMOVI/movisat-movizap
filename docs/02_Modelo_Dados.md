@@ -1708,7 +1708,7 @@ Cada operador usa o MicroSIP (central Intelbras WideVoice); um agente no PC
 | Tabela / coluna | Para quê |
 |---|---|
 | `atendente.ramal` | o ramal da central (único) |
-| `agente_ligacao` | a chave do agente de cada ramal (**só o hash**, `chave_sha256`), `ultimo_contato_em`, `ultimo_pc`, `ultima_versao`, `ultimo_erro`, `pendentes`, `revogado_em`. Gerar chave nova revoga a anterior do ramal |
+| `agente_ligacao` | a chave do agente de cada ramal (**só o hash**, `chave_sha256`), `ultimo_contato_em`, `ultimo_pc`, `ultima_versao`, `ultimo_erro`, `pendentes`, `revogado_em`. Gerar chave nova revoga a anterior do ramal. **Migração 060 (25/09, mTLS):** `cert_sha256` e `cert_validade` (o certificado do mesmo agente, conferido junto da chave na porta própria), `ultimo_ip` e `ultimo_aviso` (o que o alerta de PC mudo e de certificado vencendo já mostrou, para não repetir) |
 | `ligacao` | uma linha por ligação do histórico, com ou sem gravação: `agente_id`, `atendente_id`, `ramal`, `call_id`, `numero_bruto`, `telefone_e164`, `sentido` (feita/recebida/perdida), `situacao`, `inicio`, `duracao_s`, `pc`, `recebida_em`. Única por `(ramal, call_id)` |
 | `ligacao_gravacao` | as gravações de cada ligação: `ligacao_id`, `nome_original`, `arquivo_sha256` (único), `arquivo_bytes`, `caminho`, `inicio`, `recebida_em` |
 
