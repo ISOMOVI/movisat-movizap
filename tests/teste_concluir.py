@@ -213,30 +213,34 @@ class TestOwnerNaTelaInicial:
         assert config["ve_a_fila_inteira"] is True
 
 
-class TestConcluidaVaiParaOFimDaFila:
-    """🚨 A LISTA É A FILA DE QUEM ESPERA. Ordenar só por
-    `ultima_atividade_em` punha a conversa concluída logo após a última
-    mensagem do cliente no TOPO de "Sem dono", acima de quem ainda espera --
-    porque concluir não toca nesse campo, e nem deve: ele mede atividade do
-    cliente, não do atendente.
+class TestConcluidaSaiDaFilaDeSemDono:
+    """🔵 02/10 (regra nova dele): "conversas respondidas... não é sem dono".
+    A concluída, que antes aparecia no FIM da fila de "Sem dono" para reabrir,
+    agora SAI da fila de vez -- foi respondida. A ordenação "concluída no fim"
+    continua valendo na lista "Todas" (ver `TestOrdem` em teste_listagem), não
+    aqui. `encerrar` zera o `atendente_id`, então era ele que puxava a
+    concluída para a fila; o filtro novo exclui `estado = 'resolvida'`.
     """
 
-    def test_concluida_fica_abaixo_de_uma_aberta_mais_antiga(self, cena):
+    def test_concluida_sai_da_fila_e_a_aberta_que_espera_fica(self, cena):
         canal = banco.um("SELECT canal_id FROM conversa WHERE id = %s",
                          (cena["conversa"],))["canal_id"]
-        # A aberta é MAIS VELHA de propósito: pela data, ela perderia.
+        # Uma aberta com cliente esperando: ESTA é "sem dono".
         antiga = banco.um(
             """INSERT INTO conversa (canal_id, telefone_e164, estado,
                                      ultima_atividade_em)
                VALUES (%s, %s, 'nova', now() - interval '3 days')
                RETURNING id""", (canal, FONE.replace("0000", "0001")))["id"]
         banco.executar(
-            "UPDATE conversa SET ultima_atividade_em = now() WHERE id = %s",
-            (cena["conversa"],))
+            """INSERT INTO mensagem (conversa_id, id_externo, direcao, autor,
+                                     tipo, conteudo, criada_em)
+               VALUES (%s, %s, 'entrada', 'cliente', 'texto', 'oi', now())""",
+            (antiga, FONE + "ant"))
         conversas.encerrar(cena["conversa"], atendente_id=cena["dono"])
 
-        ordem = [c["id"] for c in conversas.listar(sem_dono=True, limite=500)]
-        assert ordem.index(antiga) < ordem.index(cena["conversa"])
+        fila = {c["id"] for c in conversas.listar(sem_dono=True, limite=500)}
+        assert antiga in fila, "a aberta com cliente esperando tem de estar na fila"
+        assert cena["conversa"] not in fila, "concluída não é mais 'sem dono'"
         banco.executar("DELETE FROM conversa WHERE id = %s", (antiga,))
 
     def test_na_BUSCA_a_concluida_nao_e_empurrada(self, cena):

@@ -25,7 +25,7 @@ partida.
 """
 import asyncio
 import logging
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from . import banco
 
@@ -38,6 +38,8 @@ CHAVE_MIN_AUSENTE = "presenca_minutos_ausente"
 CHAVE_MIN_OFFLINE = "presenca_minutos_offline"
 CHAVE_MSG_LIGADA = "fora_expediente_ligada"
 CHAVE_MSG_TEXTO = "fora_expediente_texto"
+CHAVE_JORNADA = "jornada_controla_estado"
+CHAVE_CARIMBO = "carimbo_nome_ligado"
 
 PADRAO_AUSENTE = 15
 PADRAO_OFFLINE = 60
@@ -83,7 +85,35 @@ def config() -> dict:
         "minutos_offline": _inteiro(_ler(CHAVE_MIN_OFFLINE), PADRAO_OFFLINE),
         "mensagem_ligada": _ler(CHAVE_MSG_LIGADA) == "true",
         "mensagem_texto": _ler(CHAVE_MSG_TEXTO) or "",
+        "jornada_controla_estado": _ler(CHAVE_JORNADA) == "true",
+        # 🔵 05/10: o carimbo do nome na mensagem ao cliente NASCE LIGADO
+        # (ausente = ligado); só o owner muda, na Geral.
+        "carimbo_nome_ligado": _ler(CHAVE_CARIMBO) != "false",
     }
+
+
+def definir_carimbo_nome(ligada: bool) -> dict:
+    """Liga/desliga o carimbo `*Nome:*` nas mensagens ao cliente. Nasce ligado;
+    só o owner muda (a rota é CFG_7.1)."""
+    with banco.cursor() as cur:
+        _gravar(cur, CHAVE_CARIMBO, "true" if ligada else "false",
+                "Carimbo do nome do atendente na mensagem ao cliente. Nasce ligado.")
+    log.info("presença: carimbo do nome -> %s", "ligado" if ligada else "desligado")
+    return config()
+
+
+def definir_jornada_controla_estado(ligada: bool) -> dict:
+    """Liga/desliga a regra que põe o estado pelas BORDAS da jornada --
+    disponível no início do turno, offline no fim. Nasce desligada, como toda
+    régua. Setter próprio para não alargar a assinatura de `definir_config`,
+    que a tela e a suíte chamam com argumentos fixos."""
+    with banco.cursor() as cur:
+        _gravar(cur, CHAVE_JORNADA, "true" if ligada else "false",
+                "Jornada controla o estado: disponível no início do turno, "
+                "offline no fim. Nasce desligada.")
+    log.info("presença: jornada controla estado -> %s",
+             "ligada" if ligada else "desligada")
+    return config()
 
 
 def definir_config(regra_ligada: bool, minutos_ausente: int, minutos_offline: int,
@@ -229,22 +259,116 @@ def aplicar_regra(agora: datetime | None = None, forcar: bool = False,
     return {"ligada": True, "ausentes": ausentes, "offline": offline}
 
 
+# ⚠️ As bordas são calculadas no FUSO de cada pessoa: a jornada é gravada na
+# hora local (`atendente_jornada`), e comparar sem o fuso erraria por 3 h, o
+# mesmo tropeço que `em_jornada` teve em 24/09. `EXTRACT(DOW)` dá 0=domingo,
+# igual ao `(weekday()+1)%7` do `em_jornada` -- as jornadas usam 1=segunda.
+_FUSO = "COALESCE(a.fuso, 'America/Sao_Paulo')"
+
+_BORDA_INICIO = f"""
+WITH alvo AS (
+  SELECT a.id,
+         min(((( %(agora)s AT TIME ZONE {_FUSO})::date + j.inicio)
+              AT TIME ZONE {_FUSO})) AS inicio_utc
+    FROM atendente a
+    JOIN atendente_jornada j ON j.atendente_id = a.id
+     AND j.dia_semana = EXTRACT(DOW FROM (%(agora)s AT TIME ZONE {_FUSO}))::int
+   WHERE a.ativo
+     AND (%(somente)s::bigint[] IS NULL OR a.id = ANY(%(somente)s::bigint[]))
+   GROUP BY a.id
+)
+UPDATE atendente a
+   SET estado = 'disponivel', estado_automatico = true,
+       ultima_acao_em = %(agora)s, atualizado_em = now()
+  FROM alvo
+ WHERE a.id = alvo.id
+   AND alvo.inicio_utc >  %(desde)s
+   AND alvo.inicio_utc <= %(agora)s
+RETURNING a.id
+"""
+
+_BORDA_FIM = f"""
+WITH alvo AS (
+  SELECT a.id,
+         max(((( %(agora)s AT TIME ZONE {_FUSO})::date + j.fim)
+              AT TIME ZONE {_FUSO})) AS fim_utc
+    FROM atendente a
+    JOIN atendente_jornada j ON j.atendente_id = a.id
+     AND j.dia_semana = EXTRACT(DOW FROM (%(agora)s AT TIME ZONE {_FUSO}))::int
+   WHERE a.ativo
+     AND NOT (a.sempre_online AND a.owner)
+     AND (%(somente)s::bigint[] IS NULL OR a.id = ANY(%(somente)s::bigint[]))
+   GROUP BY a.id
+)
+UPDATE atendente a
+   SET estado = 'offline', estado_automatico = true, atualizado_em = now()
+  FROM alvo
+ WHERE a.id = alvo.id
+   AND a.estado <> 'offline'
+   AND alvo.fim_utc >  %(desde)s
+   AND alvo.fim_utc <= %(agora)s
+RETURNING a.id
+"""
+
+
+def aplicar_jornada(agora: datetime | None = None, desde: datetime | None = None,
+                    forcar: bool = False, somente: list[int] | None = None) -> dict:
+    """O estado pelas BORDAS da jornada (pedido dele, 05/10): no minuto que
+    cruza o INÍCIO do turno → `disponivel` (e o relógio da inatividade é
+    zerado, senão quem passou a noite parado cairia offline logo depois); no
+    que cruza o FIM → `offline`.
+
+    🚨 DISPARA SÓ NA BORDA -- quando ela cai em `(desde, agora]`. Não é
+    contínuo, de propósito: no meio do turno NÃO toca em nada, então não desfaz
+    "em pausa"/"não perturbe" da pessoa nem o offline que a inatividade pôs.
+    Owner "sempre online" não cai no fim. Um expediente por dia: primeiro
+    início, último fim.
+
+    ⚠️ `forcar`/`somente`/`agora`/`desde` são para o teste -- a suíte roda em
+    produção; sem `somente` a régua passaria sobre atendentes reais.
+    """
+    if not config()["jornada_controla_estado"] and not forcar:
+        return {"ligada": False, "ligados": [], "deslogados": []}
+    agora = agora or datetime.now(timezone.utc)
+    desde = desde or (agora - timedelta(seconds=INTERVALO_SEG))
+    p = {"agora": agora, "desde": desde, "somente": somente}
+    with banco.cursor() as cur:
+        cur.execute(_BORDA_INICIO, p)
+        ligados = [r["id"] for r in cur.fetchall()]
+        cur.execute(_BORDA_FIM, p)
+        deslogados = [r["id"] for r in cur.fetchall()]
+    if ligados or deslogados:
+        log.info("jornada: %d entraram (disponível), %d saíram (offline)",
+                 len(ligados), len(deslogados))
+    return {"ligada": True, "ligados": ligados, "deslogados": deslogados}
+
+
 async def rodar(parar: asyncio.Event) -> None:
     """Laço de um minuto. Espelha `vigia.rodar`: a regra tem de valer mesmo
     com ninguém olhando a tela -- é justamente quando ninguém olha que ela
     importa."""
     log.info("presença ativa (a cada %ds)", INTERVALO_SEG)
+    desde = None
     while not parar.is_set():
+        agora = datetime.now(timezone.utc)
         # 🔵 25/09: as datas do afastamento vêm PRIMEIRO -- quem sai hoje fica
         # offline antes da regra de status e da distribuição olharem.
         try:
             await asyncio.to_thread(aplicar_afastamentos)
         except Exception:                                     # noqa: BLE001
             log.exception("afastamentos falharam -- segue tentando")
+        # 🔵 05/10: a jornada vem ANTES da inatividade -- o início do turno põe
+        # disponível e zera o relógio; se viesse depois, a inatividade poria
+        # offline de novo quem passou a noite parado, no mesmo minuto.
+        try:
+            await asyncio.to_thread(aplicar_jornada, agora, desde)
+        except Exception:                                     # noqa: BLE001
+            log.exception("regra de jornada falhou -- segue tentando")
         try:
             await asyncio.to_thread(aplicar_regra)
         except Exception:                                     # noqa: BLE001
             log.exception("regra de presença falhou -- segue tentando")
+        desde = agora
         # 🔵 24/09: a distribuição da fila roda no mesmo minuto, DEPOIS da
         # regra de status -- assim ela já vê quem acabou de ficar offline.
         try:

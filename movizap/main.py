@@ -984,14 +984,18 @@ def email_enviar(corpo: EmailNovo,
                 status_code=400,
                 detail="Você tem mais de uma caixa: diga por qual enviar.")
         conta_id = minhas[0]["id"]
+    eu = _atendente_do_usuario(usuario)
     try:
-        return enviar_email.enviar(
+        enviado = enviar_email.enviar(
             conta_id=conta_id, para=corpo.para, assunto=corpo.assunto,
-            corpo=corpo.corpo, atendente_id=_atendente_do_usuario(usuario),
+            corpo=corpo.corpo, atendente_id=eu,
             responder_a=corpo.responder_a, cc=corpo.cc, cco=corpo.cco,
             html=corpo.html, anexos=corpo.anexos)
     except enviar_email.EnvioRecusado as e:
         raise HTTPException(status_code=400, detail=str(e))
+    # 🔵 05/10: enviar e-mail pelo painel também é USO (pedido dele).
+    presenca.registrar_acao(eu)
+    return enviado
 
 
 @app.get("/api/eu/assinatura")
@@ -3099,6 +3103,11 @@ class PresencaConfig(BaseModel):
     minutos_offline: int
     mensagem_ligada: bool
     mensagem_texto: str = Field(default="", max_length=presenca.TETO_TEXTO)
+    # 🔵 05/10: a jornada controla o estado (online no início, offline no fim).
+    # Opcional para não quebrar chamadas antigas; ausente = não mexe no valor.
+    jornada_controla_estado: bool | None = None
+    # 🔵 05/10: carimbo do nome na mensagem ao cliente. Opcional = não mexe.
+    carimbo_nome_ligado: bool | None = None
 
 
 @app.get("/api/config/presenca")
@@ -3111,9 +3120,14 @@ def ver_presenca(usuario: dict = Depends(auth.requer_tela("CFG_7.1"))):
 @app.put("/api/config/presenca")
 def definir_presenca(dados: PresencaConfig,
                      usuario: dict = Depends(auth.requer_tela("CFG_7.1"))):
-    return presenca.definir_config(
+    cfg = presenca.definir_config(
         dados.regra_ligada, dados.minutos_ausente, dados.minutos_offline,
         dados.mensagem_ligada, dados.mensagem_texto)
+    if dados.jornada_controla_estado is not None:
+        cfg = presenca.definir_jornada_controla_estado(dados.jornada_controla_estado)
+    if dados.carimbo_nome_ligado is not None:
+        cfg = presenca.definir_carimbo_nome(dados.carimbo_nome_ligado)
+    return cfg
 
 
 class DistribuicaoConfig(BaseModel):
@@ -3427,6 +3441,10 @@ def chat_escrever(sala_id: int, dados: ChatTexto,
                               dados.citando_id)
     if not resultado["ok"]:
         raise HTTPException(status_code=409, detail=resultado["motivo"])
+    # 🔵 05/10: agir no chat interno é USO -- zera o relógio da inatividade e
+    # traz de volta quem a régua tinha posto em ausente/offline. Quem conversa
+    # com a equipe está presente, e não pode aparecer "fora do expediente".
+    presenca.registrar_acao(eu)
     return resultado
 
 
@@ -3477,6 +3495,7 @@ async def chat_arquivo(sala_id: int,
         arquivo.filename or "arquivo", legenda, chamados)
     if not resultado["ok"]:
         raise HTTPException(status_code=409, detail=resultado["motivo"])
+    presenca.registrar_acao(eu)  # 🔵 05/10: anexo no chat interno é uso
     return resultado
 
 
@@ -3488,6 +3507,7 @@ def chat_editar_mensagem(sala_id: int, mensagem_id: int, dados: ChatEdicao,
     r = chat.editar_propria(sala_id, mensagem_id, eu, dados.texto)
     if not r["ok"]:
         raise HTTPException(status_code=409, detail=r["motivo"])
+    presenca.registrar_acao(eu)  # 🔵 05/10: editar no chat interno é uso
     return r
 
 
@@ -3499,6 +3519,7 @@ def chat_apagar_mensagem(sala_id: int, mensagem_id: int,
     r = chat.apagar_propria(sala_id, mensagem_id, eu)
     if not r["ok"]:
         raise HTTPException(status_code=409, detail=r["motivo"])
+    presenca.registrar_acao(eu)  # 🔵 05/10: apagar no chat interno é uso
     return r
 
 

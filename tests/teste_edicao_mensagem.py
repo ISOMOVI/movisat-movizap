@@ -153,3 +153,36 @@ class TestEdicaoDeMensagem:
         assert "sem texto reconhecido" in nota
         assert ler()["conteudo"] == "Bom dia, pode confirmar?"
         assert ler()["editada_em"] is None
+
+
+def entregar(status: str, chave: str = CHAVE) -> str:
+    """Um `messages.update` de entrega cru (sem edição), como o Evolution manda."""
+    with banco.cursor() as cur:
+        return conversas._atualizar_entrega(
+            cur, {}, {"data": {"keyId": chave, "status": status}})
+
+
+class TestEntregaSoAvanca:
+    """🚨 05/10: o `messages.update` chega FORA DE ORDEM. Um `SERVER_ACK`
+    atrasado depois do `READ` rebaixava "lida" para "enviada" -- foi o que
+    travou 14.840 mensagens em 1 risquinho. A entrega só pode avançar."""
+
+    def test_server_ack_atrasado_nao_rebaixa_lida(self, cena):
+        assert ler()["entrega"] == "lida"
+        entregar("SERVER_ACK")
+        assert ler()["entrega"] == "lida", "ack atrasado rebaixou o tique de leitura"
+
+    def test_sequencia_fora_de_ordem_termina_no_maior(self, cena):
+        banco.executar("UPDATE mensagem SET entrega = 'enviada' WHERE id_externo = %s",
+                       (CHAVE,))
+        entregar("DELIVERY_ACK");  assert ler()["entrega"] == "entregue"
+        entregar("SERVER_ACK");    assert ler()["entrega"] == "entregue"
+        entregar("READ");          assert ler()["entrega"] == "lida"
+        entregar("SERVER_ACK");    assert ler()["entrega"] == "lida"
+        entregar("DELIVERY_ACK");  assert ler()["entrega"] == "lida"
+
+    def test_avanca_normalmente_quando_em_ordem(self, cena):
+        banco.executar("UPDATE mensagem SET entrega = 'enviada' WHERE id_externo = %s",
+                       (CHAVE,))
+        entregar("READ")
+        assert ler()["entrega"] == "lida"

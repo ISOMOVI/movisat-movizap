@@ -99,10 +99,29 @@ class TestListagemDoDono:
         assert cena["orfa"] not in r, "conversa sem dono apareceu como minha"
 
     def test_sem_dono_traz_so_as_orfas(self, cena):
+        # 🔵 02/10: "sem dono" é cliente ESPERANDO -- a órfã só conta com uma
+        # mensagem de `entrada` por último (regra nova dele).
+        entrada(cena["orfa"], "sd")
         r = ids(conversas.listar(sem_dono=True, limite=500))
         assert cena["orfa"] in r
         assert cena["minha"] not in r
         assert cena["dele"] not in r
+
+    def test_sem_dono_exclui_quem_nao_espera(self, cena):
+        """🔵 02/10 (regra nova): órfã sem mensagem, órfã onde NÓS falamos por
+        último, e concluída NÃO são "sem dono" -- não há cliente esperando."""
+        # A órfã nasce sem mensagem nenhuma: não é sem dono.
+        assert cena["orfa"] not in ids(conversas.listar(sem_dono=True, limite=500))
+        # Cliente escreveu: passa a ser sem dono.
+        entrada(cena["orfa"], "ex1")
+        assert cena["orfa"] in ids(conversas.listar(sem_dono=True, limite=500))
+        # Nós respondemos por último: sai de sem dono (foi atendida).
+        banco.executar(
+            """INSERT INTO mensagem (conversa_id, id_externo, direcao, autor,
+                                     tipo, conteudo, criada_em)
+               VALUES (%s, %s, 'saida', 'atendente', 'texto', 'ja respondo', now())""",
+            (cena["orfa"], f"{LOGIN}ex2"))
+        assert cena["orfa"] not in ids(conversas.listar(sem_dono=True, limite=500))
 
     def test_sem_filtro_traz_todas(self, cena):
         r = ids(conversas.listar(limite=500))
@@ -178,6 +197,7 @@ class TestListagemDoParticipante:
             conversas.listar(atendente_id=cena["eu"], limite=500))
 
     def test_convidar_nao_mexe_na_lista_de_sem_dono(self, cena):
+        entrada(cena["orfa"], "cv")  # cliente esperando (regra nova de 02/10)
         conversas.convidar(cena["orfa"], cena["outro"], cena["eu"])
         r = ids(conversas.listar(sem_dono=True, limite=500))
         assert cena["orfa"] in r, "a órfã sumiu da fila por causa de um convite"
@@ -444,5 +464,6 @@ class TestAbaDoTime:
         # time para quem não é dele.
         meu, _ = self._dois_times()
         conversas.transferir(cena["orfa"], meu, None)
+        entrada(cena["orfa"], "tm")  # cliente esperando (regra nova de 02/10)
         assert cena["orfa"] in ids(conversas.listar(limite=5000, sem_dono=True,
                                                     visualizador_id=cena["outro"]))

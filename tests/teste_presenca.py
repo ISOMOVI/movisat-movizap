@@ -341,6 +341,100 @@ class TestAfastadoNaBarra:
             presenca.definir_minha_volta(aid, dias(aid, 1))
 
 
+# ------------------------------------------------------ jornada controla estado
+
+def _dar_jornada(aid, dia_semana, inicio="08:00", fim="18:00"):
+    banco.executar(
+        "INSERT INTO atendente_jornada (atendente_id, dia_semana, inicio, fim) "
+        "VALUES (%s, %s, %s, %s)", (aid, dia_semana, inicio, fim))
+
+
+# 2026-10-05 é uma SEGUNDA. Em São Paulo (UTC-3): 11:00Z = 08:00 (início),
+# 21:00Z = 18:00 (fim), 15:00Z = 12:00 (meio do turno). DOW de segunda = 1.
+_UTC = timezone.utc
+_SEG = 1
+_INICIO_Z = datetime(2026, 10, 5, 11, 0, tzinfo=_UTC)
+_MEIO_Z = datetime(2026, 10, 5, 15, 0, tzinfo=_UTC)
+_FIM_Z = datetime(2026, 10, 5, 21, 0, tzinfo=_UTC)
+_UM_MIN = timedelta(minutes=1)
+
+
+class TestJornadaControlaEstado:
+    """🔵 05/10: o estado vira pelas bordas da jornada -- disponível no início,
+    offline no fim -- e SÓ nas bordas (no meio não toca)."""
+
+    def test_o_inicio_do_turno_poe_disponivel_e_zera_o_relogio(self):
+        # Entrou a noite offline/parado; ao cruzar as 08:00, volta disponível.
+        aid = novo_atendente(parado_ha_min=600, estado="offline", automatico=True)
+        _dar_jornada(aid, _SEG)
+        r = presenca.aplicar_jornada(agora=_INICIO_Z, desde=_INICIO_Z - _UM_MIN,
+                                     forcar=True, somente=[aid])
+        assert aid in r["ligados"]
+        assert estado_de(aid)["estado"] == "disponivel"
+        # Relógio zerado: a inatividade logo depois NÃO o derruba.
+        r2 = presenca.aplicar_regra(agora=_INICIO_Z, forcar=True, somente=[aid])
+        assert aid not in r2["offline"] and aid not in r2["ausentes"]
+
+    def test_o_fim_do_turno_poe_offline(self):
+        aid = novo_atendente(estado="disponivel")
+        _dar_jornada(aid, _SEG)
+        r = presenca.aplicar_jornada(agora=_FIM_Z, desde=_FIM_Z - _UM_MIN,
+                                     forcar=True, somente=[aid])
+        assert aid in r["deslogados"]
+        assert estado_de(aid)["estado"] == "offline"
+
+    def test_no_meio_do_turno_nao_toca_na_escolha_manual(self):
+        aid = novo_atendente(estado="nao_perturbe")
+        _dar_jornada(aid, _SEG)
+        r = presenca.aplicar_jornada(agora=_MEIO_Z, desde=_MEIO_Z - _UM_MIN,
+                                     forcar=True, somente=[aid])
+        assert r["ligados"] == [] and r["deslogados"] == []
+        assert estado_de(aid)["estado"] == "nao_perturbe"
+
+    def test_owner_sempre_online_nao_cai_no_fim(self):
+        aid = novo_atendente(estado="disponivel")
+        # `owner` é coluna gerada de `perfil = 'owner'`; não se escreve direto.
+        banco.executar("UPDATE atendente SET perfil = 'owner', sempre_online = true "
+                       "WHERE id = %s", (aid,))
+        _dar_jornada(aid, _SEG)
+        r = presenca.aplicar_jornada(agora=_FIM_Z, desde=_FIM_Z - _UM_MIN,
+                                     forcar=True, somente=[aid])
+        assert aid not in r["deslogados"]
+        assert estado_de(aid)["estado"] == "disponivel"
+
+    def test_sem_jornada_no_dia_nao_muda_nada(self):
+        # Jornada só de TERÇA (DOW 2); na segunda, nenhuma borda.
+        aid = novo_atendente(estado="disponivel")
+        _dar_jornada(aid, 2)
+        r = presenca.aplicar_jornada(agora=_INICIO_Z, desde=_INICIO_Z - _UM_MIN,
+                                     forcar=True, somente=[aid])
+        assert r["ligados"] == [] and r["deslogados"] == []
+
+    def test_em_jornada_agora_pega_so_quem_tem_turno_cobrindo_agora(self):
+        """🔵 05/10: o conjunto, em uma consulta, que a Caixa e o chat usam para
+        o rótulo do offline ("Ausente" dentro do turno)."""
+        from movizap import operacao
+        dentro = novo_atendente()
+        fora = novo_atendente()
+        for d in range(7):  # turno cobrindo qualquer dia/hora
+            _dar_jornada(dentro, d, "00:00", "23:59")
+        r = operacao.em_jornada_agora([dentro, fora])
+        assert dentro in r
+        assert fora not in r
+        assert operacao.em_jornada_agora([]) == set()
+
+    def test_desligada_nao_faz_nada(self, monkeypatch):
+        # Config monkeypatchado (independe do estado real da produção, que a
+        # Fase 2 liga): sem `forcar` e desligada, a régua não mexe.
+        config_falsa(monkeypatch, jornada_controla_estado=False)
+        aid = novo_atendente(estado="offline", automatico=True)
+        _dar_jornada(aid, _SEG)
+        r = presenca.aplicar_jornada(agora=_INICIO_Z, desde=_INICIO_Z - _UM_MIN,
+                                     somente=[aid])
+        assert r["ligada"] is False
+        assert estado_de(aid)["estado"] == "offline"
+
+
 # ------------------------------------------------------------ fim de expediente
 
 class TestFimDeExpediente:

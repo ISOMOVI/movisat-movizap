@@ -820,7 +820,7 @@ async function salvarEdicaoChat() {
   }
 }
 async function apagarMensagemChat(m) {
-  if (!confirm('Apagar esta mensagem? Ela some para todos na sala, mas continua registrada, marcada como apagada.')) return
+  if (!confirm('Apagar esta mensagem? O conteúdo some para todos na sala; só o owner pode ver depois o que dizia.')) return
   try {
     await api.post(`/api/chat/salas/${sala.value.id}/mensagens/${m.id}/apagar`)
     await abrir(sala.value.id)
@@ -1053,10 +1053,14 @@ function quando(iso) {
             >
               <span class="ci__avatar" :style="{ background: corDaInicial(sl.com) }"
                     aria-hidden="true">
-                {{ iniciais(sl.com) }}
+                <!-- 🔵 05/10: a foto da Minha conta do colega, quando há;
+                     senão, as iniciais de sempre. -->
+                <img v-if="sl.com_tem_foto && sl.com_id" class="ci__avatar-foto"
+                     :src="`/api/atendentes/${sl.com_id}/foto`" :alt="sl.com || ''" />
+                <template v-else>{{ iniciais(sl.com) }}</template>
                 <span class="ci__estado"
                       :style="{ background: corDoEstado(sl.com_estado) }"
-                      :title="rotuloDoEstado(sl.com_estado)"></span>
+                      :title="rotuloDoEstado(sl.com_estado, { automatico: sl.com_estado_auto, emJornada: sl.com_em_jornada })"></span>
               </span>
               <span class="ci__corpo">
                 <span class="ci__topo1">
@@ -1649,6 +1653,16 @@ function quando(iso) {
   font-weight: var(--peso-forte);
 }
 .ci__avatar--grupo { background: var(--superficie-3); color: var(--texto-fraco); }
+/* 🔵 05/10: a foto preenche o círculo; a bolinha de estado vem depois no DOM
+   e fica por cima. */
+.ci__avatar-foto {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: inherit;
+}
 
 /* O ponto de estado fica NO avatar, não numa coluna à parte: é sobre aquela
    pessoa, e ler os dois juntos é uma olhada só. */

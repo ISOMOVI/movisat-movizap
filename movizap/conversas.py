@@ -141,6 +141,14 @@ ENTREGA = {
     "ERROR": "falhou",
 }
 
+# 🚨 A ENTREGA SÓ AVANÇA, NUNCA VOLTA (05/10). O `messages.update` do Evolution
+# chega FORA DE ORDEM: um `SERVER_ACK` atrasado depois do `READ` rebaixava "lida"
+# para "enviada" num UPDATE cego, e foi o que deixou 14.840 mensagens travadas em
+# 1 risquinho com o tique de leitura já recebido. A régua é a ordem do WhatsApp:
+# pendente < enviada < entregue < lida. `falhou` só entra enquanto não houver
+# entrega confirmada (não rebaixa uma já entregue/lida).
+RANK_ENTREGA = {"pendente": 0, "enviada": 1, "entregue": 2, "lida": 3}
+
 
 def _cavar(corpo, *caminho, padrao=None):
     atual = corpo
@@ -888,9 +896,20 @@ def _atualizar_entrega(cur, evento: dict, corpo: dict) -> str:
     # minutos depois, se o aparelho estiver desligado.
     if informativos.registrar_entrega(id_msg, bruto):
         return f"entrega de informativo -> {estado}"
+    # 🚨 SÓ AVANÇA (ver RANK_ENTREGA): um ack atrasado não rebaixa o tique.
     cur.execute(
-        "UPDATE mensagem SET entrega = %s WHERE id_externo = %s",
-        (estado, id_msg))
+        """UPDATE mensagem SET entrega = %(novo)s
+            WHERE id_externo = %(id)s
+              AND CASE
+                    WHEN %(novo)s = 'falhou'
+                      THEN entrega IS DISTINCT FROM 'lida'
+                       AND entrega IS DISTINCT FROM 'entregue'
+                    ELSE %(rank)s > CASE entrega
+                           WHEN 'lida' THEN 3 WHEN 'entregue' THEN 2
+                           WHEN 'enviada' THEN 1 WHEN 'pendente' THEN 0
+                           ELSE -1 END
+                  END""",
+        {"novo": estado, "id": id_msg, "rank": RANK_ENTREGA.get(estado, -1)})
     return f"entrega -> {estado} ({cur.rowcount} mensagem)"
 
 
@@ -1237,7 +1256,20 @@ def listar(estado: str | None = None, atendente_id: int | None = None,
                               AND p.saiu_em IS NULL))""")
         params.extend([atendente_id, atendente_id])
     if sem_dono:
-        condicoes.append("c.atendente_id IS NULL")
+        # 🔵 02/10: "sem dono" é cliente ESPERANDO, não só conversa sem
+        # atendente. Pedido dele: *"Sem dono é quando tem mensagem do cliente
+        # nova não lida"* e *"conversas respondidas, ou sem agente + sem
+        # mensagem não lida, não é sem dono"*. Então, além de não ter dono, a
+        # ÚLTIMA mensagem tem de ser de `entrada` -- se nós respondemos, a
+        # conversa já foi atendida e cai em "Todas", não aqui. A subconsulta
+        # espelha o LATERAL `u` (mesma ordem), para não depender do alias.
+        condicoes.append(
+            """c.atendente_id IS NULL
+               AND c.estado <> 'resolvida'
+               AND (SELECT m.direcao FROM mensagem m
+                     WHERE m.conversa_id = c.id
+                     ORDER BY m.criada_em DESC, m.id DESC
+                     LIMIT 1) = 'entrada'""")
     # 🔵 A ABA "TIME" (pedido dele, 23/09: *"uma nova aba de tipo de conversa
     # além das 3: 'Time', onde poderemos transferir para times"*). Transferir
     # para um time tira o dono e grava `time_id` -- e até aqui a conversa caía
@@ -1366,6 +1398,20 @@ def listar(estado: str | None = None, atendente_id: int | None = None,
         SELECT c.id, c.estado, c.telefone_e164, c.contato_id, c.canal_id,
                c.tipo, c.grupo_jid, c.grupo_nome,
                c.ultima_atividade_em, c.criada_em, c.atendente_id,
+               -- 🔵 30/09: quando esta linha está ENCERRADA mas o mesmo grupo
+               -- (ou número) tem outra conversa ABERTA, devolve o id dela --
+               -- a tela marca a encerrada com um selo que leva à viva. Mesma
+               -- comparação do índice `ux_conversa_aberta` e do `assumir`
+               -- (`COALESCE(grupo_jid, telefone_e164)`), sem consulta nova na
+               -- tela. Só para resolvida: na aberta não há "outra viva" a
+               -- apontar. `NULL` quando não há -- a tela não mostra selo.
+               CASE WHEN c.estado = 'resolvida' THEN (
+                      SELECT v.id FROM conversa v
+                       WHERE v.canal_id = c.canal_id
+                         AND COALESCE(v.grupo_jid, v.telefone_e164)
+                             = COALESCE(c.grupo_jid, c.telefone_e164)
+                         AND v.estado <> 'resolvida'
+                       LIMIT 1) END AS conversa_viva_id,
                -- ⚠️ A tela precisa separar "sou o dono" de "fui convidado":
                -- as duas aparecem na mesma lista, e só o dono responde por ela.
                CASE WHEN %s::bigint IS NULL THEN false
@@ -1378,7 +1424,11 @@ def listar(estado: str | None = None, atendente_id: int | None = None,
                a.nome  AS atendente_nome,
                -- 🔵 23/09: o estado de quem responde (disponível, em pausa,
                -- não perturbe, fora do expediente) -- a bolinha da lista.
+               -- 🔵 05/10: `estado_automatico` + `em_jornada` (anexado depois)
+               -- deixam a tela escolher o rótulo do offline: "Ausente" dentro
+               -- do turno, "fora do expediente" fora dele.
                a.estado AS atendente_estado,
+               a.estado_automatico AS atendente_estado_auto,
                EXISTS (SELECT 1 FROM numero_bloqueado nb
                         WHERE nb.canal_id = c.canal_id
                           AND nb.telefone_e164 = c.telefone_e164
@@ -1451,6 +1501,14 @@ def listar(estado: str | None = None, atendente_id: int | None = None,
     trechos = _trechos_achados(alvo, busca)
     for l in linhas:
         l["trecho"] = trechos.get(l["id"])
+    # 🔵 05/10: quem dos donos está DENTRO do turno agora -- a tela usa isto
+    # para o offline automático virar "Ausente" (inativo, mas em horário) em
+    # vez de "fora do expediente". Uma consulta só para o conjunto exibido.
+    from .operacao import em_jornada_agora
+    donos = {l["atendente_id"] for l in linhas if l.get("atendente_id")}
+    em_turno = em_jornada_agora(donos) if donos else set()
+    for l in linhas:
+        l["atendente_em_jornada"] = l.get("atendente_id") in em_turno
     return linhas
 
 
@@ -1459,6 +1517,7 @@ def conversa(conversa_id: int) -> dict | None:
         """SELECT c.*, ct.nome AS contato_nome, cl.nome AS cliente_nome,
                   cl.id AS cliente_id, a.nome AS atendente_nome,
                   a.estado AS atendente_estado,
+                  a.estado_automatico AS atendente_estado_auto,
                   t.nome AS time_nome, ca.nome AS canal_nome
              FROM conversa c
              LEFT JOIN contato ct ON ct.id = c.contato_id
@@ -1469,6 +1528,11 @@ def conversa(conversa_id: int) -> dict | None:
             WHERE c.id = %s""", (conversa_id,))
     if not linha:
         return None
+    # 🔵 05/10: dono dentro do turno agora -> a tela mostra "Ausente" em vez de
+    # "fora do expediente" para o offline automático.
+    from .operacao import em_jornada_agora
+    linha["atendente_em_jornada"] = bool(
+        linha.get("atendente_id") and em_jornada_agora([linha["atendente_id"]]))
     linha["mensagens"] = mensagens(conversa_id)
     # 🔵 23/09: o bloqueio feito pelo painel -- a tela trava o compositor e
     # oferece "Desbloquear" em vez de deixar escrever para quem não recebe.
@@ -2052,6 +2116,25 @@ def assumir(conversa_id: int, atendente_id: int) -> dict:
 TETO_MENSAGEM = 4000
 
 
+def _carimbo_ligado() -> bool:
+    """🔵 05/10: a mensagem ao cliente leva o nome de quem responde, como
+    carimbo (`*Nome:*` no topo). NASCE LIGADO, e só o owner muda (na Geral).
+    Ausente no `config` = ligado."""
+    r = banco.um("SELECT valor FROM config WHERE chave = %s", ("carimbo_nome_ligado",))
+    return r is None or r["valor"] == "true"
+
+
+def _com_carimbo(texto: str, atendente_id: int | None) -> str:
+    """Prefixa `*Nome:*` quando o carimbo está ligado e há quem assine.
+    O que VAI para o cliente leva o nome; o que GRAVAMOS fica sem ele -- o
+    painel já mostra o autor de cada mensagem, repetir seria ruído."""
+    if not (atendente_id and _carimbo_ligado()):
+        return texto
+    linha = banco.um("SELECT nome FROM atendente WHERE id = %s", (atendente_id,))
+    nome = (linha or {}).get("nome")
+    return f"*{nome}:*\n{texto}" if nome else texto
+
+
 def responder(conversa_id: int, texto: str, atendente_id: int | None,
               citando_id: int | None = None, assumir: bool = True,
               mencionados: list[str] | None = None) -> dict:
@@ -2128,7 +2211,8 @@ def responder(conversa_id: int, texto: str, atendente_id: int | None,
 
     try:
         enviado = evolution.enviar_texto(
-            conversa_atual["instancia"], conversa_atual["destino"], texto,
+            conversa_atual["instancia"], conversa_atual["destino"],
+            _com_carimbo(texto, atendente_id),
             citando=chave_citada,
             # 🚨 SO EM GRUPO. Fora dele o WhatsApp ignora `mentioned`, e mandar
             # assim mesmo seria prometer na tela o que o outro lado nao faz.
@@ -2709,9 +2793,12 @@ def responder_com_arquivo(conversa_id: int, dados: bytes, mime: str,
     if tipo == "audio" and legenda:
         texto_depois, legenda = legenda, ""
     try:
+        # 🔵 05/10: a legenda da mídia leva o carimbo (não-áudio); no áudio o
+        # nome vai no `texto_depois`, que passa pelo `responder` e é carimbado lá.
         enviado = evolution.enviar_midia(
             conversa_atual["instancia"], conversa_atual["destino"],
-            base64.b64encode(dados).decode("ascii"), mime, nome_arquivo, legenda)
+            base64.b64encode(dados).decode("ascii"), mime, nome_arquivo,
+            legenda if tipo == "audio" else _com_carimbo(legenda, atendente_id))
     except evolution.ErroEvolution as e:
         log.warning("conversa %s: arquivo recusado pelo Evolution: %s",
                     conversa_id, e)
@@ -3222,9 +3309,17 @@ def resumo() -> dict:
     """O cabeçalho da caixa de entrada — e a prova de que a fila anda."""
     return {
         "conversas": banco.um("SELECT COUNT(*) AS n FROM conversa")["n"],
+        # 🔵 02/10: mesma regra do filtro em `listar` e do painel inicial --
+        # "sem dono" é cliente ESPERANDO (última mensagem de `entrada`), não só
+        # conversa sem atendente. Os três contadores têm de dizer o mesmo
+        # número, senão a aba e o selo brigam.
         "sem_dono": banco.um(
             "SELECT COUNT(*) AS n FROM conversa "
-            "WHERE atendente_id IS NULL AND estado <> 'resolvida'")["n"],
+            "WHERE atendente_id IS NULL AND estado <> 'resolvida' "
+            "AND (SELECT m.direcao FROM mensagem m "
+            "      WHERE m.conversa_id = conversa.id "
+            "      ORDER BY m.criada_em DESC, m.id DESC "
+            "      LIMIT 1) = 'entrada'")["n"],
         "nao_identificadas": banco.um(
             "SELECT COUNT(*) AS n FROM conversa WHERE contato_id IS NULL")["n"],
         # 🔵 23/09: quantos números o painel bloqueou -- o botão do filtro

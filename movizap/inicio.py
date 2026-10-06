@@ -183,7 +183,11 @@ def resumo(atendente_id: int | None = None, owner: bool = False) -> dict:
         SELECT
           count(*) FILTER (WHERE estado <> 'resolvida')                  AS em_aberto,
           count(*) FILTER (WHERE estado <> 'resolvida'
-                             AND atendente_id IS NULL)                   AS sem_dono,
+                             AND atendente_id IS NULL
+                             AND (SELECT m.direcao FROM mensagem m
+                                   WHERE m.conversa_id = conversa.id
+                                   ORDER BY m.criada_em DESC, m.id DESC
+                                   LIMIT 1) = 'entrada')                 AS sem_dono,
           count(*) FILTER (WHERE estado <> 'resolvida'
                              AND atendente_id = %s)                      AS minhas,
           count(*) FILTER (WHERE estado = 'adiada'

@@ -42,16 +42,51 @@ def _estilo(arquivo: Path) -> str:
     return re.sub(r"/\*.*?\*/", "", bloco.group(1), flags=re.S)
 
 
-def _regra(estilo: str, seletor: str) -> str:
-    """O corpo da regra do seletor EXATO.
+def _sem_media(estilo: str) -> str:
+    """O CSS sem os blocos `@media`, deixando só as regras base.
 
-    ⚠️ ANCORADO NO COMEÇO DA LINHA, e isso não é detalhe: sem a âncora,
-    procurar `.conversas` casava com `.coluna > .conversas`, que vem antes no
-    arquivo -- e o teste afirmava sobre a regra errada. A trava pegou isso na
-    primeira rodada, no meu próprio teste.
+    🚨 `@media` tem chaves aninhadas, então não sai com regex simples — conta
+    chave a chave. Sem isto, procurar uma regra acha a versão de dentro de um
+    `@media` (celular) ANTES da regra base, porque ela vem antes no arquivo, e
+    o teste passa a afirmar sobre a cascata do celular (foi o que escondeu a
+    gaveta sem `overflow-y: auto`).
     """
-    m = re.search(r"^\s*" + re.escape(seletor) + r"\s*(?:,[^{]*)?\{([^}]*)\}",
-                  estilo, re.M)
+    saida = []
+    i = 0
+    while i < len(estilo):
+        j = estilo.find("@media", i)
+        if j == -1:
+            saida.append(estilo[i:])
+            break
+        saida.append(estilo[i:j])
+        k = estilo.find("{", j)
+        if k == -1:
+            break
+        profundidade = 1
+        k += 1
+        while k < len(estilo) and profundidade:
+            if estilo[k] == "{":
+                profundidade += 1
+            elif estilo[k] == "}":
+                profundidade -= 1
+            k += 1
+        i = k
+    return "".join(saida)
+
+
+def _regra(estilo: str, seletor: str) -> str:
+    """O corpo da regra BASE do seletor EXATO, fora de `@media`.
+
+    ⚠️ Duas armadilhas, as duas já medidas:
+      - sem âncora de começo de regra, procurar `.conversas` casava com
+        `.coluna > .conversas`, que vem antes -- a âncora `(?:^|[},])` resolve
+        (o seletor tem de começar a regra, não ser descendente);
+      - a versão de dentro de um `@media` (celular) aparece antes da regra base
+        no arquivo, então o teste afirmava sobre a cascata do celular. Por isso
+        os `@media` saem antes da busca (`_sem_media`).
+    """
+    m = re.search(r"(?:^|[},])\s*" + re.escape(seletor) + r"\s*(?:,[^{]*)?\{([^}]*)\}",
+                  _sem_media(estilo))
     assert m, f"não achei a regra `{seletor}`"
     return m.group(1)
 

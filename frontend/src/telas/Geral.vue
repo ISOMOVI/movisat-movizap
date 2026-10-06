@@ -240,6 +240,37 @@ onMounted(carregar)
         </div>
       </section>
 
+      <section class="cartao tela__bloco">
+        <div class="cartao__corpo pilha">
+          <label class="interruptor">
+            <input v-model="presenca.jornada_controla_estado" type="checkbox" :disabled="salvando" />
+            <span><strong>A jornada controla o status</strong></span>
+          </label>
+          <p class="apagado pequeno">
+            No <strong>início</strong> do turno de cada atendente o status volta a
+            <strong>Disponível</strong>; no <strong>fim</strong>, vai a
+            <strong>Fora do expediente</strong>. Quem fica offline por inatividade
+            <strong>dentro</strong> do turno aparece como <strong>Ausente</strong>,
+            não "fora do expediente". Precisa da jornada cadastrada em Atendentes.
+          </p>
+        </div>
+      </section>
+
+      <section class="cartao tela__bloco">
+        <div class="cartao__corpo pilha">
+          <label class="interruptor">
+            <input v-model="presenca.carimbo_nome_ligado" type="checkbox" :disabled="salvando" />
+            <span><strong>Carimbar o nome de quem responde na mensagem ao cliente</strong></span>
+          </label>
+          <p class="apagado pequeno">
+            Toda mensagem enviada ao cliente começa com <strong>*Nome:*</strong> — ele
+            sabe com qual atendente está falando. O painel continua sem o carimbo
+            (aqui o autor de cada mensagem já aparece). No áudio, o nome vai na
+            mensagem de texto que o acompanha.
+          </p>
+        </div>
+      </section>
+
       <div class="linha salvar">
         <button class="botao botao--primario" type="button"
                 :disabled="salvando || !presencaMudou" @click="salvarPresenca">

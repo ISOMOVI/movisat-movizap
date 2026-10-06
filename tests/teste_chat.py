@@ -349,6 +349,45 @@ class TestEntrarESairDoGrupo:
         assert r["ok"] is False
         assert chat.e_membro(s, gente["carla"]) is False
 
+
+class TestApagadaSoOOwnerVe:
+    """🔵 05/10 (*"apagar mesmo e não deixar registrado o que dizia, somente ao
+    owner deixar para ver"*): apagar no Chat interno some o CONTEÚDO para todos
+    -- inclusive o autor --, e só o owner continua vendo o que dizia."""
+
+    @staticmethod
+    def _vira_owner(aid):
+        # `owner` é coluna gerada de `perfil = 'owner'`.
+        banco.executar("UPDATE atendente SET perfil = 'owner' WHERE id = %s", (aid,))
+
+    def test_esconde_o_texto_de_todos_menos_o_owner(self, gente):
+        self._vira_owner(gente["ana"])
+        s = chat.abrir_direta(gente["ana"], gente["bruno"])["sala_id"]
+        chat.escrever(s, gente["bruno"], "segredo do bruno")
+        mid = chat.mensagens(s, gente["bruno"])[0]["id"]
+        assert chat.apagar_propria(s, mid, gente["bruno"])["ok"] is True
+
+        # o autor, que NÃO é owner, também perde o conteúdo
+        mb = chat.mensagens(s, gente["bruno"])[0]
+        assert mb["apagada_em"] is not None
+        assert mb["texto"] is None
+
+        # o owner continua vendo o que dizia
+        ma = next(m for m in chat.mensagens(s, gente["ana"]) if m["id"] == mid)
+        assert ma["apagada_em"] is not None
+        assert ma["texto"] == "segredo do bruno"
+
+    def test_a_previa_da_sala_nao_vaza_a_apagada(self, gente):
+        self._vira_owner(gente["ana"])
+        s = chat.abrir_direta(gente["ana"], gente["bruno"])["sala_id"]
+        chat.escrever(s, gente["bruno"], "ultima coisa")
+        mid = chat.mensagens(s, gente["bruno"])[0]["id"]
+        chat.apagar_propria(s, mid, gente["bruno"])
+        pb = next(x for x in chat.salas(gente["bruno"]) if x["id"] == s)
+        assert pb["ultima_mensagem"] is None
+        pa = next(x for x in chat.salas(gente["ana"]) if x["id"] == s)
+        assert pa["ultima_mensagem"] == "ultima coisa"
+
     def test_NAO_da_para_sair_de_uma_sala_DIRETA(self, gente):
         s = chat.abrir_direta(gente["ana"], gente["bruno"])["sala_id"]
         assert chat.sair_do_grupo(s, gente["ana"])["ok"] is False

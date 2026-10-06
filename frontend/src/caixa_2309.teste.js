@@ -352,3 +352,45 @@ describe('Plano 2 (25/09) — só marca lida o que foi visto', () => {
     }
   })
 })
+
+/* 🔵 30/09 — a linha da lista e o "está em andamento" dele:
+   *"Se o grupo já está aberto e com alguém... deveria entrar pelo botão de
+   entrar"*, e *"parece que tem duas conversas"* (a encerrada ao lado da viva). */
+describe('30/09 — Entrar na linha, e a viva no lugar de reabrir', () => {
+  it('conversa EM ANDAMENTO com dono oferece "Entrar", não "Assumir", e entra sem assumir', async () => {
+    // A lista padrão já é uma conversa com dono (atendente_id 1, estado humano).
+    const w = mount(CaixaDeEntrada)
+    await assentar(w)
+    expect(botao(w, 'Entrar'), 'faltou o botão Entrar na conversa com dono').toBeTruthy()
+    expect(botao(w, 'Assumir'), 'conversa com dono não pode oferecer Assumir').toBeFalsy()
+    await botao(w, 'Entrar').trigger('click')
+    await assentar(w)
+    expect(postado('/api/conversas/7/entrar').length, 'o clique tem de entrar como participante').toBe(1)
+    expect(postado('/api/conversas/7/assumir').length, 'não pode assumir').toBe(0)
+  })
+
+  it('conversa ENCERRADA com uma viva do mesmo grupo leva à aberta, e não oferece Reabrir', async () => {
+    respostas['/api/conversas?'] = [
+      { ...CONVERSA, id: 8, estado: 'resolvida', atendente_id: 2, atendente_nome: 'Outra', conversa_viva_id: 9 },
+    ]
+    respostas['/api/conversas/9'] = { ...CONVERSA, id: 9, estado: 'humano' }
+    const w = mount(CaixaDeEntrada)
+    await assentar(w)
+    expect(botao(w, 'Ir para a aberta'), 'faltou o atalho para a conversa viva').toBeTruthy()
+    expect(botao(w, 'Reabrir'), 'com viva, reabrir só erraria no índice').toBeFalsy()
+    gets = []
+    await botao(w, 'Ir para a aberta').trigger('click')
+    await assentar(w)
+    expect(gets.some((g) => g.startsWith('/api/conversas/9')), 'tem de abrir a conversa viva').toBe(true)
+  })
+
+  it('conversa ENCERRADA sem viva mantém o "Reabrir" de sempre', async () => {
+    respostas['/api/conversas?'] = [
+      { ...CONVERSA, id: 8, estado: 'resolvida', atendente_id: null, atendente_nome: null, conversa_viva_id: null },
+    ]
+    const w = mount(CaixaDeEntrada)
+    await assentar(w)
+    expect(botao(w, 'Reabrir'), 'sem viva, reabrir continua sendo a ação').toBeTruthy()
+    expect(botao(w, 'Ir para a aberta')).toBeFalsy()
+  })
+})

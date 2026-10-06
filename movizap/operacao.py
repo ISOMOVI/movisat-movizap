@@ -671,6 +671,31 @@ def em_jornada(atendente_id: int, quando) -> bool:
     return bool(linha)
 
 
+def em_jornada_agora(ids) -> set[int]:
+    """Quais destes atendentes estão DENTRO do turno AGORA — em uma consulta só.
+
+    🔵 05/10: a lista da Caixa e o chat precisam disto por atendente para o
+    rótulo do offline ("Ausente" dentro do turno × "fora do expediente" fora).
+    Chamar `em_jornada` por linha custaria 2 consultas por pessoa; aqui é uma.
+    Mesma régua do `em_jornada`: dia e hora no FUSO de cada um, `inicio <= agora
+    < fim`. `EXTRACT(DOW)` dá 0=domingo, igual ao `(weekday()+1)%7` de lá.
+    """
+    ids = [int(i) for i in ids if i]
+    if not ids:
+        return set()
+    fuso = "COALESCE(a.fuso, 'America/Sao_Paulo')"
+    linhas = banco.varios(
+        f"""SELECT DISTINCT a.id
+              FROM atendente a
+              JOIN atendente_jornada j ON j.atendente_id = a.id
+               AND j.dia_semana = EXTRACT(DOW FROM (now() AT TIME ZONE {fuso}))::int
+               AND j.inicio <= (now() AT TIME ZONE {fuso})::time
+               AND j.fim    >  (now() AT TIME ZONE {fuso})::time
+             WHERE a.id = ANY(%s)""",
+        (ids,))
+    return {r["id"] for r in linhas}
+
+
 # ============================================================================
 # CLASSIFICAÇÕES — CFG_4.1
 # ============================================================================

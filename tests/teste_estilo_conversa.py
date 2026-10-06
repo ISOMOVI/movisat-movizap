@@ -43,6 +43,37 @@ def _estilo_sem_comentario() -> str:
     return re.sub(r"/\*.*?\*/", "", bloco.group(1), flags=re.S)
 
 
+def _sem_media(estilo: str) -> str:
+    """O CSS sem os blocos `@media`, deixando só as regras base.
+
+    🚨 `@media` tem chaves aninhadas, então não sai com regex simples — conta
+    chave a chave. Sem isto, procurar uma regra acha a versão de dentro de um
+    `@media` (celular/toque) ANTES da regra base, porque ela vem antes no
+    arquivo, e o teste passa a afirmar sobre a cascata errada.
+    """
+    saida = []
+    i = 0
+    while i < len(estilo):
+        j = estilo.find("@media", i)
+        if j == -1:
+            saida.append(estilo[i:])
+            break
+        saida.append(estilo[i:j])
+        k = estilo.find("{", j)
+        if k == -1:
+            break
+        profundidade = 1
+        k += 1
+        while k < len(estilo) and profundidade:
+            if estilo[k] == "{":
+                profundidade += 1
+            elif estilo[k] == "}":
+                profundidade -= 1
+            k += 1
+        i = k
+    return "".join(saida)
+
+
 def _tokens_declarados() -> set[str]:
     return set(re.findall(r"^\s*(--[a-z0-9-]+)\s*:", TOKENS.read_text(encoding="utf-8"),
                           re.M))
@@ -102,8 +133,16 @@ class TestAsAcoesDoBalaoSaoAlcancaveis:
     num tablet não há hover nenhum."""
 
     def _regra(self, seletor: str) -> str:
-        estilo = _estilo_sem_comentario()
-        m = re.search(re.escape(seletor) + r"\s*\{([^}]*)\}", estilo)
+        """O corpo da regra BASE do seletor exato (fora de `@media`).
+
+        ⚠️ A âncora `(?:^|[},])` garante que o seletor começa a regra — sem
+        ela, `.balao__acoes` casava dentro de `.balao:focus-within
+        .balao__acoes` e de `.balao--tocado .balao__acoes` (num `@media`), e o
+        teste media a regra errada.
+        """
+        estilo = _sem_media(_estilo_sem_comentario())
+        m = re.search(r"(?:^|[},])\s*" + re.escape(seletor) + r"\s*(?:,[^{]*)?\{([^}]*)\}",
+                      estilo)
         assert m, f"não achei a regra `{seletor}`"
         return m.group(1)
 

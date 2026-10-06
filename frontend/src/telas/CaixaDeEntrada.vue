@@ -1270,6 +1270,16 @@ async function assumirDaLista(c) {
   if (aberta.value && aberta.value.estado === 'resolvida') pedirParaAssumir()
 }
 
+/* 🔵 30/09 (pedido dele): numa conversa EM ANDAMENTO com dono, a linha oferece
+   "Entrar" em vez de "assumir". Entrar é acompanhar -- quem responde continua
+   sendo o dono --, e o mecanismo (migração 021) já existia; faltava a porta na
+   lista. Abre a conversa e reusa o `entrarNaConversa` já testado de dentro
+   dela, em vez de duplicar a chamada. */
+async function entrarDaLista(c) {
+  await abrir(c.id)
+  if (aberta.value) await entrarNaConversa()
+}
+
 function pedirParaAssumir() {
   if (aberta.value.estado === 'resolvida') {
     perguntar(
@@ -2583,7 +2593,7 @@ function carregarMidiasDaConversa(c) {
                      conversa de alguém fora do expediente não anda. Mesma régua
                      do Chat interno (`util/estado.js`). -->
                 <span v-if="c.atendente_nome" class="chip chip--acento chip--pequeno"
-                      :title="`${c.atendente_nome}: ${rotuloDoEstado(c.atendente_estado)}`">
+                      :title="`${c.atendente_nome}: ${rotuloDoEstado(c.atendente_estado, { automatico: c.atendente_estado_auto, emJornada: c.atendente_em_jornada })}`">
                   <span class="estado-bolinha" aria-hidden="true"
                         :style="{ background: corDoEstado(c.atendente_estado) }"></span>
                   {{ c.atendente_nome }}
@@ -2592,10 +2602,24 @@ function carregarMidiasDaConversa(c) {
               </span>
             </button>
 
-            <!-- Sem dono, ou encerrada: dá para pegar daqui, sem abrir antes.
-                 Encerrada, assumir REABRE -- por isso o rótulo muda. -->
+            <!-- 🔵 30/09: ENCERRADA que tem uma viva do mesmo grupo/número não
+                 oferece reabrir -- o índice `ux_conversa_aberta` recusaria.
+                 Leva à conversa aberta, que é onde a resposta chega, e mata o
+                 "parece que tem duas conversas" que ele notou. -->
             <button
-              v-if="!c.atendente_id || c.estado === 'resolvida'"
+              v-if="c.estado === 'resolvida' && c.conversa_viva_id"
+              class="botao botao--pequeno conversas__assumir"
+              type="button"
+              title="Este grupo/número já tem uma conversa aberta — ir até ela"
+              @click="abrir(c.conversa_viva_id)"
+            >
+              <i class="bi bi-box-arrow-in-right" aria-hidden="true"></i>
+              Ir para a aberta
+            </button>
+            <!-- Sem dono, ou encerrada sem viva: dá para pegar daqui, sem abrir
+                 antes. Encerrada, assumir REABRE -- por isso o rótulo muda. -->
+            <button
+              v-else-if="!c.atendente_id || c.estado === 'resolvida'"
               class="botao botao--pequeno botao--primario conversas__assumir"
               type="button"
               :title="c.estado === 'resolvida'
@@ -2605,6 +2629,21 @@ function carregarMidiasDaConversa(c) {
             >
               <i class="bi" :class="c.estado === 'resolvida' ? 'bi-arrow-counterclockwise' : 'bi-hand-index-thumb'" aria-hidden="true"></i>
               {{ c.estado === 'resolvida' ? 'Reabrir' : 'Assumir' }}
+            </button>
+            <!-- 🔵 30/09 (pedido dele): EM ANDAMENTO com dono -- "deveria entrar
+                 pelo botão de entrar pois está em andamento". Antes a linha não
+                 tinha botão nenhum aqui e "assumir" respondia "já foi assumida
+                 por X" (beco sem saída). Entrar acompanha sem tirar de quem
+                 atende. -->
+            <button
+              v-else-if="c.atendente_id && c.estado !== 'resolvida'"
+              class="botao botao--pequeno conversas__assumir"
+              type="button"
+              title="Entrar para acompanhar — quem responde continua sendo o dono"
+              @click="entrarDaLista(c)"
+            >
+              <i class="bi bi-box-arrow-in-right" aria-hidden="true"></i>
+              Entrar
             </button>
           </li>
         </ul>
@@ -2728,7 +2767,7 @@ function carregarMidiasDaConversa(c) {
               <span class="estado-bolinha" aria-hidden="true"
                     :style="{ background: corDoEstado(aberta.atendente_estado) }"></span>
               {{ aberta.atendente_nome }}
-              <span class="estado-rotulo">· {{ rotuloDoEstado(aberta.atendente_estado) }}</span>
+              <span class="estado-rotulo">· {{ rotuloDoEstado(aberta.atendente_estado, { automatico: aberta.atendente_estado_auto, emJornada: aberta.atendente_em_jornada }) }}</span>
             </span>
           </header>
 

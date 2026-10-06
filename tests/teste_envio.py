@@ -33,6 +33,7 @@ def limpar():
         "(SELECT id FROM conversa WHERE telefone_e164 = %s)", (FONE,))
     banco.executar("DELETE FROM conversa WHERE telefone_e164 = %s", (FONE,))
     banco.executar("DELETE FROM webhook_evento WHERE id_externo = %s", (ID_FALSO,))
+    banco.executar("DELETE FROM atendente WHERE login LIKE %s", ("zz_teste_envio%",))
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -182,3 +183,33 @@ class TestNotaInterna:
 
     def test_nota_vazia_e_recusada(self, uma_conversa):
         assert conversas.anotar(uma_conversa, "  ", None)["ok"] is False
+
+
+class TestCarimboDoNome:
+    """🔵 05/10: a mensagem ao cliente leva `*Nome:*` (nasce ligado). O painel
+    guarda o texto SEM o carimbo -- aqui o autor já aparece por mensagem."""
+
+    def _atendente(self):
+        return banco.um(
+            """INSERT INTO atendente (nome, login, email, senha_hash, perfil, ativo)
+               VALUES ('Ludmila Teste', %s, %s, 'x', 'atendimento', true)
+               RETURNING id""",
+            ("zz_teste_envio_carimbo", "zz_teste_envio_carimbo@x.invalid"))["id"]
+
+    def test_ligado_poe_o_nome_no_enviado_e_guarda_o_original(self, uma_conversa, sem_enviar):
+        aid = self._atendente()
+        conversas.responder(uma_conversa, "bom dia", aid)
+        assert sem_enviar[-1]["texto"] == "*Ludmila Teste:*\nbom dia"
+        m = banco.um("SELECT conteudo FROM mensagem WHERE conversa_id = %s "
+                     "ORDER BY id DESC LIMIT 1", (uma_conversa,))
+        assert m["conteudo"] == "bom dia", "o painel guarda o texto sem o carimbo"
+
+    def test_desligado_envia_sem_carimbo(self, uma_conversa, sem_enviar, monkeypatch):
+        monkeypatch.setattr(conversas, "_carimbo_ligado", lambda: False)
+        aid = self._atendente()
+        conversas.responder(uma_conversa, "oi", aid)
+        assert sem_enviar[-1]["texto"] == "oi"
+
+    def test_sem_atendente_nao_carimba(self, uma_conversa, sem_enviar):
+        conversas.responder(uma_conversa, "sistema", None)
+        assert sem_enviar[-1]["texto"] == "sistema"

@@ -22,6 +22,13 @@ export function corDoEstado(estado) {
   return (ESTADO[estado] || {}).cor || 'var(--texto-apagado)'
 }
 
-export function rotuloDoEstado(estado) {
+/* 🔵 05/10 (decisão dele): o `offline` tem DOIS significados. Quando a régua de
+   inatividade o põe DENTRO do turno, a pessoa está só inativa, não fora do
+   expediente -- o rótulo é "Ausente". "Fora do expediente" fica para quem
+   escolheu o estado à mão, ou para o offline posto FORA do turno (fim de dia).
+   Os flags vêm do backend por atendente (`estado_automatico` e `em_jornada`);
+   sem eles, o comportamento é o de antes ("fora do expediente"). */
+export function rotuloDoEstado(estado, { automatico = false, emJornada = false } = {}) {
+  if (estado === 'offline' && automatico && emJornada) return 'Ausente'
   return (ESTADO[estado] || {}).rotulo || 'sem estado'
 }

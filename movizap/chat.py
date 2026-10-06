@@ -242,13 +242,22 @@ def mostrar(sala_id: int, eu: int) -> dict:
     return {"ok": True, "sala_id": sala_id}
 
 
+def _eh_owner(atendente_id: int) -> bool:
+    """🔵 05/10: mensagem apagada no Chat interno some o CONTEÚDO para todos --
+    só o owner continua vendo o que dizia (*"apagar mesmo e não deixar
+    registrado o que dizia, somente ao owner deixar para ver"*). O texto fica
+    no banco (senão o owner não veria), mas a leitura é que o esconde."""
+    r = banco.um("SELECT owner FROM atendente WHERE id = %s", (atendente_id,))
+    return bool(r and r["owner"])
+
+
 def salas(eu: int) -> list[dict]:
     """As salas desta pessoa, com quem é, a última mensagem e o não lido.
 
     ⚠️ Ordena por atividade e não por nome: o que acabou de chegar tem de
     estar no topo, como em qualquer chat.
     """
-    return banco.varios(
+    linhas = banco.varios(
         """
         SELECT s.id, s.tipo, s.nome,
                -- 🚨 SÓ NA SALA DIRETA o "com" é a outra pessoa. Sem o
@@ -273,9 +282,26 @@ def salas(eu: int) -> list[dict]:
                    WHERE m4.sala_id = s.id AND m4.atendente_id <> %s
                    LIMIT 1)
                END AS com_estado,
+               -- 🔵 05/10: estado_automatico + id do outro, para o rótulo do
+               -- offline virar "Ausente" dentro do turno (em_jornada anexado
+               -- depois). Os marcadores abaixo são todos `eu`, então a ordem
+               -- posicional não importa -- seis iguais. (Nada de marcador no
+               -- comentário: o driver conta e desalinha -- aconteceu aqui.)
+               CASE WHEN s.tipo = 'direta' THEN
+                 (SELECT a.estado_automatico FROM chat_membro m5
+                    JOIN atendente a ON a.id = m5.atendente_id
+                   WHERE m5.sala_id = s.id AND m5.atendente_id <> %s
+                   LIMIT 1)
+               END AS com_estado_auto,
+               CASE WHEN s.tipo = 'direta' THEN
+                 (SELECT m6.atendente_id FROM chat_membro m6
+                   WHERE m6.sala_id = s.id AND m6.atendente_id <> %s
+                   LIMIT 1)
+               END AS com_id,
                (SELECT count(*) FROM chat_membro m3
                  WHERE m3.sala_id = s.id) AS qtd_membros,
                u.texto  AS ultima_mensagem,
+               u.apagada_em AS ultima_apagada_em,
                u.criada_em AS ultima_em,
                ua.nome  AS ultimo_autor,
                (SELECT count(*) FROM chat_mensagem x
@@ -285,7 +311,7 @@ def salas(eu: int) -> list[dict]:
           FROM chat_membro m
           JOIN chat_sala s ON s.id = m.sala_id
           LEFT JOIN LATERAL (
-                SELECT id, texto, criada_em, atendente_id FROM chat_mensagem c
+                SELECT id, texto, criada_em, atendente_id, apagada_em FROM chat_mensagem c
                  WHERE c.sala_id = s.id ORDER BY c.id DESC LIMIT 1
           ) u ON true
           LEFT JOIN atendente ua ON ua.id = u.atendente_id
@@ -302,14 +328,34 @@ def salas(eu: int) -> list[dict]:
                 OR COALESCE(u.id, 0) > m.oculta_ate_id)
          ORDER BY COALESCE(u.criada_em, s.criada_em) DESC
         """,
-        # 🚨 QUATRO `%s`, NÃO TRÊS. O `com_estado` acrescentou um placeholder no
-        # meio da consulta, e psycopg casa por POSIÇÃO.
+        # 🚨 SEIS `%s` desde 05/10 (eram quatro). `com_estado`, `com_estado_auto`
+        # e `com_id` põem placeholders no meio e psycopg casa por POSIÇÃO -- mas
+        # TODOS são `eu`, então seis iguais e a ordem não muda nada.
         #
         # ⚠️ E ESTE COMENTÁRIO FICA FORA DAS ASPAS. Escrevi-o dentro da string
-        # na primeira tentativa: o `%s` do próprio texto virou um QUINTO
-        # placeholder e o psycopg recusou a consulta. Comentário dentro de SQL
-        # é SQL.
-        (eu, eu, eu, eu))
+        # na primeira tentativa: o `%s` do próprio texto virou um placeholder
+        # extra e o psycopg recusou a consulta. Comentário dentro de SQL é SQL.
+        (eu, eu, eu, eu, eu, eu))
+    # 🔵 05/10: quem do outro lado da sala direta está dentro do turno agora --
+    # a tela usa para o offline automático virar "Ausente".
+    from .operacao import em_jornada_agora
+    comids = {l["com_id"] for l in linhas if l.get("com_id")}
+    em_turno = em_jornada_agora(comids) if comids else set()
+    # 🔵 05/10: quem do outro lado tem foto (Minha conta) -- a tela usa a foto
+    # em vez das iniciais na sala direta. Servida por /api/atendentes/{id}/foto.
+    com_fotos = {r["id"] for r in banco.varios(
+        "SELECT id FROM atendente WHERE id = ANY(%s) AND foto IS NOT NULL",
+        (list(comids),))} if comids else set()
+    for l in linhas:
+        l["com_em_jornada"] = l.get("com_id") in em_turno
+        l["com_tem_foto"] = l.get("com_id") in com_fotos
+    # 🔵 05/10: a prévia não pode mostrar o texto de uma última mensagem
+    # apagada para quem não é owner.
+    if not _eh_owner(eu):
+        for l in linhas:
+            if l.get("ultima_apagada_em"):
+                l["ultima_mensagem"] = None
+    return linhas
 
 
 def e_membro(sala_id: int, eu: int) -> bool:
@@ -357,6 +403,19 @@ def mensagens(sala_id: int, eu: int, limite: int = 500) -> list[dict]:
                 ORDER BY c.id DESC LIMIT %s
            ) recentes ORDER BY id""", (eu, sala_id, limite))
     _juntar_mencoes(linhas, eu)
+    # 🔵 05/10: apagada no Chat interno some o conteúdo para todos menos o owner
+    # -- texto, histórico de edição e mídia. `apagada_em` continua indo, para a
+    # tela desenhar "mensagem apagada"; sem conteúdo, o botão "ver o que dizia"
+    # (condicionado a `texto || midia_id`) nem aparece para quem não é owner.
+    if not _eh_owner(eu):
+        for l in linhas:
+            if l.get("apagada_em"):
+                l["texto"] = None
+                l["conteudo_original"] = None
+                l["midia_id"] = None
+                l["midia_mime"] = None
+                l["midia_nome"] = None
+                l["midia_tamanho"] = None
     return linhas
 
 
