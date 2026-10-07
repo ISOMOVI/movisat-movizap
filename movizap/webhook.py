@@ -134,6 +134,11 @@ def registrar(corpo: dict) -> dict:
     evento = _cavar(corpo, "event") or ""
 
     id_externo = _cavar(corpo, "data", "key", "id")
+    # messages.edited traz o mesmo key.id da msg original que ja entrou como
+    # upsert -- gravar com id_externo colidiria no UNIQUE e o DO NOTHING
+    # descartaria a edicao como "reentrega". NULL evita a colisao.
+    if evento == "messages.edited":
+        id_externo = None
     jid = _jid_do_cliente(_cavar(corpo, "data", "key", padrao={}))
     de_mim = _cavar(corpo, "data", "key", "fromMe")
 

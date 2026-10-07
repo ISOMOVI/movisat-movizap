@@ -993,7 +993,7 @@ Hoje o parser tem três destinos, e nenhum deles é o nome cru da chave:
 |---|---|---|
 | **descarte** | `pollUpdateMessage` (voto criptografado), `albumMessage` (cabeçalho — as imagens chegam à parte), `placeholderMessage`, `messageHistoryNotice`, e **todo tipo ainda não tratado** | `conversas.DESCARTADOS`, e o motivo vai para `webhook_evento.motivo_ignorado` |
 | **texto legível** | `templateMessage`, `pollCreationMessage*`, `listMessage`, `listResponseMessage` | extratores em `conversas.py` |
-| **aviso** | `secretEncryptedMessage` — chega criptografado e não temos a chave; o atendente precisa saber que veio algo | `conversas.AVISOS` |
+| **aviso** | `secretEncryptedMessage` **sem** `targetMessageKey` — chega criptografado e não temos a chave; o atendente precisa saber que veio algo. **Com** alvo e `secretEncType` 2 é edição e não vira linha (06/10) | `conversas.AVISOS` |
 
 🚨 **O RÓTULO DO AVISO MENTIU DE 27/08 A 17/09.** A razão escrita acima sempre
 esteve certa, mas o texto que ia para a tela dizia **"[mensagem de visualização
@@ -1516,6 +1516,23 @@ a cor do WhatsApp no chat interno (*"o chat interno não é WhatsApp"*) — a
 demanda de 25/09 é posterior e explícita, e prevalece.
 
 ### O achado paralelo: a edição em conversa direta chega cifrada
+
+✅ **RESOLVIDO EM 06/10 (marca, não texto).** Era a edição, e dá para provar sem
+a chave: o `secretEncryptedMessage` traz `secretEncType` **2** (MESSAGE_EDIT no
+protocolo do WhatsApp) e **`targetMessageKey.id`** = a mensagem editada. Medido
+em 06/10: **94 de 94** eventos assim, todos com o original no banco. Hoje
+`conversas._marcar_edicao_cifrada` grava `editada_em` no original e **não cria
+linha**; `conteudo` fica como estava e **`conteudo_original` fica NULL — esse
+NULL é o sinal** para a tela dizer *"editada (texto novo ilegível)"*. Sem alvo
+ou com outro `secretEncType`, continua o aviso. Backfill feito só no número de
+teste (3 linhas, `scripts/backfill_edicao_cifrada.py`); restam **152** linhas-lixo,
+e só **91** ainda têm o evento bruto que aponta o alvo (de 08/09 em diante): as
+61 mais antigas perderam o evento no expurgo de 30 dias e não dá para saber
+qual mensagem editaram. Esperam decisão. ⚠️ O evento `MESSAGES_EDITED` da Evolution chega como
+**`messages.edited`** e, nesta base, só trouxe ruído interno
+(`GROUP_MEMBER_LABEL_CHANGE`, `PEER_DATA_OPERATION...`).
+
+O registro abaixo é o de 17/09, mantido como histórico.
 
 ⚠️ **NO MESMO TESTE, A EDIÇÃO DO SEGUNDO *"Oi"* NÃO CHEGOU COMO
 `editedMessage`.** O que chegou 6 segundos depois dos três *"Oi"* foi um

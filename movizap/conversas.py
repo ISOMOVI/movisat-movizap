@@ -63,7 +63,10 @@ EVENTOS_TRATADOS = {"messages.upsert", "messages.update", "send.message",
                     # 🚨 ENTROU EM 17/09. Antes disso o evento nem era
                     # assinado no Evolution -- e sem este nome aqui, ele
                     # chegaria, seria gravado e ficaria eternamente pendente.
-                    "messages.delete"}
+                    "messages.delete",
+                    # 🚨 ENTROU EM 06/10. Edicao do cliente chega como evento
+                    # separado (MESSAGES_EDITED), nao embutido no update.
+                    "messages.edited"}
 
 # `data.message` traz UMA destas chaves. A ordem importa: `extendedTextMessage`
 # é texto com citação/link, e precisa ser visto antes do genérico.
@@ -127,6 +130,9 @@ DESCARTADOS = {
 # e o painel não consegue abrir. Não afirma O QUE é, porque não sabemos -- em
 # 17/09 um destes apareceu no lugar exato de uma edição de mensagem, e mesmo
 # assim não dá para provar que era ela.
+# ✅ 06/10: DÁ PARA PROVAR, e não chega mais aqui. Com `targetMessageKey` e
+# `secretEncType` 2 é edição -- ver `_marcar_edicao_cifrada`. Este aviso fica
+# só para o cifrado SEM alvo.
 AVISOS = {
     "secretEncryptedMessage": "[mensagem cifrada que o painel não consegue abrir]",
 }
@@ -643,6 +649,31 @@ def garantir_conversa(cur, canal_id: int, e164: str | None,
     return cur.fetchone()["id"]
 
 
+def _marcar_edicao_cifrada(cur, id_alvo: str, quando) -> str:
+    """O cliente editou uma mensagem e a versão nova chegou cifrada.
+
+    🚨 MEDIDO EM 06/10: a edição de CLIENTE nunca chega legível. A Evolution
+    entrega um `messages.upsert` com `secretEncryptedMessage`
+    (`secretEncType` 2 = MESSAGE_EDIT no protocolo do WhatsApp) e o
+    `targetMessageKey.id` da mensagem editada. Os 94 eventos desde 07/08 eram
+    TODOS assim, com o original no banco nos 94 -- e viravam mensagem-lixo
+    "[mensagem cifrada...]" logo abaixo do texto editado.
+
+    ⚠️ SÓ A MARCA, NÃO O TEXTO: `conteudo` fica como estava e
+    `conteudo_original` fica NULL. É esse NULL que diz à tela "editada, mas a
+    versão nova não pôde ser lida" -- sem ele o atendente leria o texto
+    antigo como se fosse o novo. Decifrar é o nível 2, não feito.
+
+    ⚠️ ALVO QUE NÃO TEMOS NÃO VIRA NADA, como na reação.
+    """
+    cur.execute(
+        "UPDATE mensagem SET editada_em = COALESCE(%s::timestamptz, now()) WHERE id_externo = %s",
+        (quando, id_alvo))
+    if cur.rowcount:
+        return f"edição cifrada -> mensagem {id_alvo} marcada como editada"
+    return f"edição cifrada sem original no banco ({id_alvo})"
+
+
 def _gravar_mensagem(cur, evento: dict, corpo: dict,
                      depois: list | None = None) -> str:
     """`depois` recolhe as conversas que devem ser olhadas pela automação.
@@ -683,6 +714,16 @@ def _gravar_mensagem(cur, evento: dict, corpo: dict,
     # 161 vezes.
     if isinstance(data.get("message"), dict) and "reactionMessage" in data["message"]:
         return _aplicar_reacao(cur, data, e_grupo, e164)
+
+    # 🚨 EDIÇÃO CIFRADA SAI AQUI, pela mesma razão da reação: não é mensagem,
+    # muda uma que já existe (ver `_marcar_edicao_cifrada`).
+    cifrada = (data.get("message") or {}).get("secretEncryptedMessage") \
+        if isinstance(data.get("message"), dict) else None
+    if (isinstance(cifrada, dict)
+            and str(cifrada.get("secretEncType")) == "2"
+            and _cavar(cifrada, "targetMessageKey", "id")):
+        return _marcar_edicao_cifrada(
+            cur, cifrada["targetMessageKey"]["id"], _quando(data))
 
     # 🚨 PELA MESMA RAZÃO DA REAÇÃO, e no mesmo ponto: o que não é mensagem sai
     # ANTES de `garantir_conversa`. Depois dela, um voto de enquete ou um aviso
@@ -793,7 +834,11 @@ def _aplicar_edicao(cur, corpo: dict) -> str | None:
     pode ser de mensagem anterior ao painel; inventar linha para ela poria na
     conversa um texto sem contexto nenhum.
     """
+    # messages.update: data.message.editedMessage.message
+    # messages.edited: data.editedMessage (sem wrapper)
     editada = _cavar(corpo, "data", "message", "editedMessage", "message")
+    if not isinstance(editada, dict):
+        editada = _cavar(corpo, "data", "editedMessage")
     if not isinstance(editada, dict):
         return None
 
@@ -941,6 +986,9 @@ def processar_pendentes(limite: int = 500) -> dict:
                     contas["mensagens"] += 1
                 elif evento["evento"] == "messages.update":
                     nota = _atualizar_entrega(cur, evento, corpo)
+                    contas["entregas"] += 1
+                elif evento["evento"] == "messages.edited":
+                    nota = _aplicar_edicao(cur, corpo) or "messages.edited sem editedMessage"
                     contas["entregas"] += 1
                 elif evento["evento"] == "messages.delete":
                     nota = _aplicar_exclusao(cur, corpo)

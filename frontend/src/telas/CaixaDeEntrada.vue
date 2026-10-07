@@ -3395,6 +3395,15 @@ function carregarMidiasDaConversa(c) {
                 <template v-if="m.tipo === 'nota'">editada por {{ m.atendente_nome || 'quem escreveu' }}, em {{ hora(m.editada_em) }} · </template>
                 antes: {{ m.conteudo_original }}
               </p>
+              <!-- 🚨 EDIÇÃO CIFRADA (06/10): o cliente editou e a versão nova
+                   chegou cifrada; o balão segue com o texto ANTIGO. Sem esta
+                   linha, o selo "editada" faria o atendente ler o antigo como
+                   se fosse o novo. `conteudo_original` NULL é o sinal. -->
+              <p v-if="m.editada_em && !m.conteudo_original && originalAberto.has(m.id)"
+                 class="balao__original pequeno">
+                o cliente editou esta mensagem, mas a versão nova chegou cifrada
+                e o painel não consegue abri-la. O texto acima é o de antes da edição.
+              </p>
 
               <p class="balao__rodape apagado pequeno">
                 {{ hora(m.criada_em) }}
@@ -3410,9 +3419,9 @@ function carregarMidiasDaConversa(c) {
                      conferir o que leu. -->
                 <button v-if="m.editada_em" type="button" class="balao__editada"
                         :aria-expanded="originalAberto.has(m.id)"
-                        :title="m.conteudo_original ? 'ver o texto anterior' : ''"
+                        :title="m.conteudo_original ? 'ver o texto anterior' : 'ver por que o texto novo não aparece'"
                         @click="alternarOriginal(m.id)">
-                  · editada
+                  · {{ m.conteudo_original ? 'editada' : 'editada (texto novo ilegível)' }}
                 </button>
                 <!-- 🚨 O TIQUE, não a palavra (27/08). "enviada / entregue /
                      lida" é vocabulário nosso, do CHECK do banco; quem atende
