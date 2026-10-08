@@ -1532,7 +1532,10 @@ def _midia_que_posso_ver(midia_id: int, usuario: dict) -> dict:
     if not dono:
         raise HTTPException(status_code=404, detail="Mídia não encontrada.")
     if dono["sala_id"]:
-        _minha_sala(dono["sala_id"], usuario)     # 404 se não for membro
+        eu = _minha_sala(dono["sala_id"], usuario)     # 404 se não for membro
+        # 07/10: anexo de mensagem apagada no chat, mesma regra da lista.
+        if chat.midia_escondida(midia_id, eu):
+            raise HTTPException(status_code=404, detail="Mídia não encontrada.")
     elif not registro_telas.pode_acessar(usuario, "ATD_1.2"):
         raise HTTPException(status_code=404, detail="Mídia não encontrada.")
 
@@ -1699,6 +1702,23 @@ def definir_tipo_da_conversa(conversa_id: int, dados: TipoDaConversa,
             "CRIOU FICHA %s(%s) conversa=%s tipo=%s -> contato=%s(%s)",
             usuario["nome"], usuario["id"], conversa_id, dados.relacao,
             r.get("nome"), r.get("id"))
+    return r
+
+
+class NomeDoContato(BaseModel):
+    nome: str
+
+
+@app.put("/api/conversas/{conversa_id}/contato/nome")
+def definir_nome_do_contato(conversa_id: int, dados: NomeDoContato,
+                            usuario: dict = Depends(auth.requer_tela("ATD_1.2"))):
+    """🔵 07/10: edita o nome do contato de dentro da conversa (ficha de Lead).
+
+    Mesma permissão do tipo (ATD_1.2): é gesto de quem atende, não do cadastro.
+    """
+    r = conversas.definir_nome_contato(conversa_id, dados.nome)
+    if not r.get("ok"):
+        raise HTTPException(status_code=400, detail=r.get("motivo"))
     return r
 
 

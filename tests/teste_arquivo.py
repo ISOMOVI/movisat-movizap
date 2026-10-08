@@ -71,6 +71,10 @@ def cena(monkeypatch):
         return {"id_externo": f"TESTE_ARQ_{len(enviados)}", "status": "PENDING"}
 
     monkeypatch.setattr(evolution, "enviar_midia", fingir)
+    # 07/10: o carimbo `*Nome:*` (05/10) entra na legenda e no texto do áudio
+    # -- é o esperado, e tem teste próprio em `teste_envio.py`. Aqui o assunto
+    # é o arquivo; com ele ligado, todo texto viria prefixado.
+    monkeypatch.setattr(conversas, "_carimbo_ligado", lambda: False)
     yield {"conversa": conversa, "dono": dono, "enviados": enviados}
     limpar()
 

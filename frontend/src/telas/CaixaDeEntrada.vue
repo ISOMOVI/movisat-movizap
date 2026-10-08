@@ -42,6 +42,9 @@ const aberta = ref(null)
    de um botão; `balaoTocado` é o balão cujas ações o toque mostrou -- em
    tela de toque não existe "passar o mouse". */
 const acoesCelular = ref(false)
+/* 🔵 07/10: menu "Outro" do compositor (anexo, áudio, mensagens rápidas)
+   recolhido atrás de um botão, no celular e no computador. */
+const outroAberto = ref(false)
 const balaoTocado = ref(null)
 /* Destaque transiente de "clicar na citação vai até a original" (29/09) --
    ver `irParaMensagem`. Não é `balao--atual` (preso ao estado da busca). */
@@ -347,6 +350,38 @@ async function trocarTipo(nova) {
     if (contato) contato.relacao = antes
     erro.value = e instanceof ErroDeApi ? e.message : 'Não consegui marcar o tipo.'
     relatarErroDeBotao('marcar_tipo', e, aberta.value?.id)
+  }
+}
+
+/* 🔵 07/10 — o tipo do contato governa dois detalhes da ficha:
+   - LEAD deixa o nome do contato editável (decisão dele); fora de lead o nome
+     fica só-leitura, mas o que foi salvo permanece, porque mora em `contato`.
+   - TÉCNICO esconde "Empresas vinculadas" e "Vincular a uma empresa": técnico é
+     pessoa, não se liga a empresa. */
+const relacaoContato = computed(() => aberta.value?.empresa?.contato?.relacao || '')
+const ehTecnico = computed(() => relacaoContato.value === 'tecnico')
+const ehLead = computed(() => relacaoContato.value === 'lead')
+
+const rascunhoNome = ref('')
+const salvandoNome = ref(false)
+const nomeSalvo = ref(false)
+
+async function salvarNomeContato() {
+  const contato = aberta.value?.empresa?.contato
+  const nome = rascunhoNome.value.trim()
+  if (!contato || !nome || nome === contato.nome) return
+  salvandoNome.value = true
+  nomeSalvo.value = false
+  try {
+    const r = await api.put(`/api/conversas/${aberta.value.id}/contato/nome`,
+                            { nome })
+    contato.nome = r.nome
+    nomeSalvo.value = true
+  } catch (e) {
+    erro.value = e instanceof ErroDeApi ? e.message : 'Não consegui salvar o nome.'
+    relatarErroDeBotao('salvar_nome_contato', e, aberta.value?.id)
+  } finally {
+    salvandoNome.value = false
   }
 }
 
@@ -1161,6 +1196,9 @@ async function abrir(id) {
     buscaCliente.value = ''
     achadosCliente.value = []
     aberta.value = await api.get(`/api/conversas/${id}`)
+    // 🔵 07/10: semeia o rascunho do nome (editável quando o tipo for Lead).
+    rascunhoNome.value = aberta.value?.empresa?.contato?.nome || ''
+    nomeSalvo.value = false
     carregarParticipantes(id)
     carregarMidiasDaConversa(aberta.value)
     carregarFoto(aberta.value)
@@ -1174,6 +1212,7 @@ async function abrir(id) {
       else router.push({ path: `/atendimento/${id}` })
     }
     acoesCelular.value = false
+    outroAberto.value = false
     balaoTocado.value = null
   } catch (e) {
     erro.value = e instanceof ErroDeApi ? e.message : 'Falha ao abrir a conversa.'
@@ -1960,6 +1999,16 @@ function comecaODia(m, i) {
   return _diaDe(m.criada_em) !== _diaDe(aberta.value.mensagens[i - 1].criada_em)
 }
 
+/* 🔵 07/10: o histórico é contínuo mesmo quando a conversa foi transferida ou
+   reaberta — nesse caso nasce uma conversa NOVA (outro `conversa_id`) e o
+   backend junta as irmãs do mesmo número. Esta marca separa um atendimento do
+   outro no mesmo fio. Não aparece no primeiro da janela (lá a marca seria sobre
+   o que está ACIMA, que a janela ainda não trouxe). */
+function comecaOutraConversa(m, i) {
+  if (!aberta.value || i === 0) return false
+  return m.conversa_id !== aberta.value.mensagens[i - 1].conversa_id
+}
+
 function rotuloDoDia(iso) {
   if (!iso) return ''
   const d = new Date(iso)
@@ -2740,11 +2789,13 @@ function carregarMidiasDaConversa(c) {
             </div>
             <!-- 🔵 25/09, celular: a barra de ações (Transferir, Convidar,
                  Devolver, Sair, Bloquear, Concluir) ocupava metade da altura.
-                 No celular ela fica atrás deste botão; no computador, sempre
-                 à vista como antes. -->
+                 No celular ela ficava atrás deste botão.
+                 🔵 07/10: passa a valer TAMBÉM no computador (decisão dele) —
+                 recolhida atrás de "Ações" nas duas pontas, pelo ganho de
+                 tela. Por isso o `so-celular` saiu. -->
             <button
               v-if="aberta.estado !== 'resolvida'"
-              class="botao botao--contorno botao--pequeno so-celular"
+              class="botao botao--contorno botao--pequeno"
               type="button"
               :aria-expanded="acoesCelular"
               @click="acoesCelular = !acoesCelular"
@@ -2937,8 +2988,11 @@ function carregarMidiasDaConversa(c) {
             </p>
 
             <!-- Empresas do grupo desta pessoa. Consulta, não escolha: o
-                 número identifica quem fala, não a empresa do assunto. -->
+                 número identifica quem fala, não a empresa do assunto.
+                 🔵 07/10: escondido para TÉCNICO — técnico é pessoa, não se
+                 liga a empresa (decisão dele). -->
             <button
+              v-if="!ehTecnico"
               class="botao botao--pequeno botao--contorno"
               type="button"
               :aria-expanded="empresasAbertas"
@@ -2948,7 +3002,7 @@ function carregarMidiasDaConversa(c) {
               {{ empresasAbertas ? 'Ocultar empresas' : 'Empresas vinculadas' }}
             </button>
 
-            <div v-if="empresasAbertas" class="gaveta__bloco">
+            <div v-if="empresasAbertas && !ehTecnico" class="gaveta__bloco">
               <p v-if="buscandoEmpresas" class="apagado pequeno">consultando…</p>
               <p v-else-if="!empresas.length" class="apagado pequeno">
                 Este número não está em nenhum cadastro.
@@ -3000,7 +3054,28 @@ function carregarMidiasDaConversa(c) {
                      acionam nada; anunciá-los na ficha promete recurso que não
                      existe, sobre um eixo que não é do atendimento. -->
                 <dt>Contato</dt>
-                <dd>{{ aberta.empresa.contato.nome }}</dd>
+                <!-- 🔵 07/10: LEAD deixa o nome do contato editável. Fora de
+                     lead, só-leitura. O que foi salvo permanece ao trocar de
+                     tipo, porque mora em `contato.nome`. -->
+                <dd v-if="ehLead" class="gaveta__nome-edit">
+                  <input
+                    v-model="rascunhoNome"
+                    class="campo__entrada campo__entrada--compacto"
+                    type="text"
+                    maxlength="120"
+                    :placeholder="aberta.empresa.contato.nome"
+                    @keyup.enter="salvarNomeContato"
+                  />
+                  <button
+                    class="botao botao--pequeno botao--contorno"
+                    type="button"
+                    :disabled="salvandoNome || !rascunhoNome.trim()
+                               || rascunhoNome.trim() === aberta.empresa.contato.nome"
+                    @click="salvarNomeContato"
+                  >Salvar</button>
+                  <span v-if="nomeSalvo" class="chip chip--ok">gravado</span>
+                </dd>
+                <dd v-else>{{ aberta.empresa.contato.nome }}</dd>
                 <template v-if="aberta.empresa.contato.email">
                   <dt>E-mail do contato</dt>
                   <dd>{{ aberta.empresa.contato.email }}</dd>
@@ -3101,6 +3176,30 @@ function carregarMidiasDaConversa(c) {
                     {{ NOME_RELACAO[tipoAtual] || 'Sem cadastro' }}
                   </span>
                 </dd>
+
+                <!-- 🔵 07/10: LEAD sem empresa também edita o nome. Só quando
+                     já existe contato (o nome mora nele). -->
+                <template v-if="ehLead && aberta.empresa && aberta.empresa.contato">
+                  <dt>Nome</dt>
+                  <dd class="gaveta__nome-edit">
+                    <input
+                      v-model="rascunhoNome"
+                      class="campo__entrada campo__entrada--compacto"
+                      type="text"
+                      maxlength="120"
+                      :placeholder="aberta.empresa.contato.nome"
+                      @keyup.enter="salvarNomeContato"
+                    />
+                    <button
+                      class="botao botao--pequeno botao--contorno"
+                      type="button"
+                      :disabled="salvandoNome || !rascunhoNome.trim()
+                                 || rascunhoNome.trim() === aberta.empresa.contato.nome"
+                      @click="salvarNomeContato"
+                    >Salvar</button>
+                    <span v-if="nomeSalvo" class="chip chip--ok">gravado</span>
+                  </dd>
+                </template>
               </dl>
 
               <!-- 🚨 SELO AMARELO: informação sem afirmação. Diz que a pessoa
@@ -3135,6 +3234,7 @@ function carregarMidiasDaConversa(c) {
                    que o Bitrix acha); o modal fica com o que é ESCOLHA. Era a
                    mistura dos dois no mesmo teto que espremia. -->
               <button
+                v-if="!ehTecnico"
                 class="botao botao--pequeno botao--primario"
                 type="button"
                 @click="abrirPainel('vincular')"
@@ -3246,6 +3346,14 @@ function carregarMidiasDaConversa(c) {
               </button>
             </div>
             <template v-for="(m, i) in aberta.mensagens" :key="m.id">
+            <!-- 🔵 07/10: fronteira entre atendimentos do mesmo número no fio
+                 contínuo (transferência/reabertura). -->
+            <p v-if="comecaOutraConversa(m, i)" class="fio-anterior">
+              <span class="fio-anterior__marca">
+                <i class="bi bi-arrow-down-up" aria-hidden="true"></i>
+                nova conversa · {{ rotuloDoDia(m.criada_em) }}
+              </span>
+            </p>
             <p v-if="comecaODia(m, i)" class="diario">
               <span class="diario__marca">{{ rotuloDoDia(m.criada_em) }}</span>
             </p>
@@ -3342,7 +3450,7 @@ function carregarMidiasDaConversa(c) {
               <p v-if="m.apagada_em && !originalAberto.has(m.id)"
                  class="balao__texto balao__apagada">
                 <i class="bi bi-slash-circle" aria-hidden="true"></i>
-                mensagem apagada
+                mensagem excluída
                 <button v-if="m.conteudo" type="button" class="balao__revelar"
                         @click="alternarOriginal(m.id)">ver o que dizia</button>
               </p>
@@ -3361,7 +3469,7 @@ function carregarMidiasDaConversa(c) {
               <p v-if="m.apagada_em && originalAberto.has(m.id)"
                  class="balao__marca pequeno">
                 <i class="bi bi-slash-circle" aria-hidden="true"></i>
-                apagada pelo cliente ·
+                excluída ·
                 <button type="button" class="balao__revelar"
                         @click="alternarOriginal(m.id)">esconder</button>
               </p>
@@ -3398,11 +3506,12 @@ function carregarMidiasDaConversa(c) {
               <!-- 🚨 EDIÇÃO CIFRADA (06/10): o cliente editou e a versão nova
                    chegou cifrada; o balão segue com o texto ANTIGO. Sem esta
                    linha, o selo "editada" faria o atendente ler o antigo como
-                   se fosse o novo. `conteudo_original` NULL é o sinal. -->
+                   se fosse o novo. `conteudo_original` NULL é o sinal.
+                   🔵 07/10: só a ação, sem "ilegível"/"cifrada" (decisão dele;
+                   upgrade do Evolution e patch do Baileys descartados). -->
               <p v-if="m.editada_em && !m.conteudo_original && originalAberto.has(m.id)"
                  class="balao__original pequeno">
-                o cliente editou esta mensagem, mas a versão nova chegou cifrada
-                e o painel não consegue abri-la. O texto acima é o de antes da edição.
+                O texto acima é o de antes da edição.
               </p>
 
               <p class="balao__rodape apagado pequeno">
@@ -3419,9 +3528,9 @@ function carregarMidiasDaConversa(c) {
                      conferir o que leu. -->
                 <button v-if="m.editada_em" type="button" class="balao__editada"
                         :aria-expanded="originalAberto.has(m.id)"
-                        :title="m.conteudo_original ? 'ver o texto anterior' : 'ver por que o texto novo não aparece'"
+                        :title="m.conteudo_original ? 'ver o texto anterior' : 'ver detalhe da edição'"
                         @click="alternarOriginal(m.id)">
-                  · {{ m.conteudo_original ? 'editada' : 'editada (texto novo ilegível)' }}
+                  · editada
                 </button>
                 <!-- 🚨 O TIQUE, não a palavra (27/08). "enviada / entregue /
                      lida" é vocabulário nosso, do CHECK do banco; quem atende
@@ -3650,29 +3759,43 @@ function carregarMidiasDaConversa(c) {
                 </button>
               </template>
 
-              <!-- 🔵 25/09: *"no canto inferior das conversas, pode ter o botão
-                   redondinho onde abre um menu dos tipos"*. -->
-              <BotaoMensagensRapidas v-if="!gravando" onde="cliente" :dados="dadosDaConversa"
-                                     @inserir="inserirNoCampo" />
-
+              <!-- 🔵 07/10: anexo, áudio e mensagens rápidas recolhidos atrás de
+                   "Outro" — mesmo conceito do "Ações" lá no topo, pelo ganho de
+                   tela no compositor (celular e computador). -->
               <button v-if="!gravando" class="botao botao--contorno botao--icone"
-                      type="button" title="Gravar áudio" aria-label="Gravar áudio"
-                      @click="comecarGravacao">
-                <i class="bi bi-mic" aria-hidden="true"></i>
+                      type="button"
+                      :title="outroAberto ? 'Fechar' : 'Outras ações (anexo, áudio, mensagens rápidas)'"
+                      :aria-label="outroAberto ? 'Fechar' : 'Outras ações'"
+                      :aria-expanded="outroAberto"
+                      @click="outroAberto = !outroAberto">
+                <i class="bi" :class="outroAberto ? 'bi-x-lg' : 'bi-plus-lg'" aria-hidden="true"></i>
               </button>
 
-              <label v-if="!gravando" class="botao botao--contorno botao--icone"
-                     :title="`Anexar arquivo (até ${TETO_ANEXOS})`">
-                <i class="bi bi-paperclip" aria-hidden="true"></i>
-                <span class="so-leitor">Anexar arquivo</span>
-                <input
-                  id="campo-arquivo"
-                  class="so-leitor"
-                  type="file"
-                  multiple
-                  @change="escolherArquivo"
-                />
-              </label>
+              <span v-show="!gravando && outroAberto" class="extras">
+                <!-- 🔵 25/09: *"no canto inferior das conversas, pode ter o botão
+                     redondinho onde abre um menu dos tipos"*. -->
+                <BotaoMensagensRapidas onde="cliente" :dados="dadosDaConversa"
+                                       @inserir="inserirNoCampo" />
+
+                <button class="botao botao--contorno botao--icone"
+                        type="button" title="Gravar áudio" aria-label="Gravar áudio"
+                        @click="comecarGravacao">
+                  <i class="bi bi-mic" aria-hidden="true"></i>
+                </button>
+
+                <label class="botao botao--contorno botao--icone"
+                       :title="`Anexar arquivo (até ${TETO_ANEXOS})`">
+                  <i class="bi bi-paperclip" aria-hidden="true"></i>
+                  <span class="so-leitor">Anexar arquivo</span>
+                  <input
+                    id="campo-arquivo"
+                    class="so-leitor"
+                    type="file"
+                    multiple
+                    @change="escolherArquivo"
+                  />
+                </label>
+              </span>
 
               <!-- O DESTINO É O BOTÃO. Verde é WhatsApp em toda a casa;
                    amarelo é nota. A cor diz para onde vai antes do clique. -->
@@ -4249,6 +4372,14 @@ function carregarMidiasDaConversa(c) {
   margin: 0;
   overflow-wrap: anywhere;
 }
+/* 🔵 07/10: linha do nome editável do Lead — input + Salvar + "gravado". */
+.gaveta__nome-edit {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--e-1);
+}
+.gaveta__nome-edit .campo__entrada--compacto { flex: 1 1 8rem; min-width: 0; }
 .gaveta__bitrix {
   display: flex; flex-direction: column; gap: 2px;
   padding: var(--e-2);
@@ -4459,9 +4590,8 @@ function carregarMidiasDaConversa(c) {
   .conversa__cabecalho .chip { display: none; }
   .conversa__voltar { flex: none; margin-left: calc(-1 * var(--e-2)); }
 
-  /* A barra de ações só aparece quando o botão "Ações" pede. */
-  .acoes { display: none; }
-  .acoes.acoes--aberta-celular { display: block; }
+  /* A barra de ações recolhida vale em todas as larguras (regra global, acima);
+     aqui não precisa repetir. */
 
   /* A ficha vira a tela da conversa por cima, e não uma faixa de 42% dela. */
   .coluna--larga > .gaveta { max-height: 60vh; }
@@ -5314,6 +5444,33 @@ function carregarMidiasDaConversa(c) {
 }
 .diario__marca { flex: none; text-transform: lowercase; }
 
+/* 🔵 07/10: fronteira entre atendimentos do mesmo número (histórico contínuo).
+   Mesma forma do separador de dia, mas com cor de acento e traço mais forte,
+   para ler como "outro atendimento", não como "outro dia". */
+.fio-anterior {
+  display: flex;
+  align-items: center;
+  gap: var(--e-3);
+  margin: var(--e-4) 0 var(--e-2);
+  color: var(--acento, var(--texto-apagado));
+  font-size: var(--txt-sm);
+}
+.fio-anterior::before,
+.fio-anterior::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--acento, var(--borda));
+  opacity: .5;
+}
+.fio-anterior__marca {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--e-1);
+  text-transform: lowercase;
+}
+
 .buscaconversa {
   display: flex;
   flex-direction: column;
@@ -5370,7 +5527,20 @@ function carregarMidiasDaConversa(c) {
    preso ao estado da busca). */
 .balao--realcado { outline: 2px solid var(--acento); }
 
-.acoes { border-top: 1px solid var(--borda, rgba(128, 128, 128, .25)); }
+/* 🔵 07/10: a barra de ações nasce RECOLHIDA em qualquer largura; o botão
+   "Ações" a abre. Antes isto valia só no celular (media query 860px); agora
+   vale no computador também, pelo ganho de tela nas duas pontas. */
+.acoes {
+  border-top: 1px solid var(--borda, rgba(128, 128, 128, .25));
+  display: none;
+}
+.acoes.acoes--aberta-celular { display: block; }
+
+/* 🔵 07/10: o menu "Outro" do compositor — recolhe anexo, áudio e mensagens
+   rápidas atrás de um botão, mesmo conceito do "Ações". `display: contents`
+   faz os botões participarem da mesma linha flex quando abertos; o `v-show`
+   cuida de esconder. */
+.extras { display: contents; }
 
 textarea.campo__entrada { resize: vertical; }
 .campo--nota { background: rgba(255, 193, 7, .10); }

@@ -174,10 +174,17 @@ class TestD7TipoSemCadastro:
         isso a âncora também deixou de ser um comentário (`SEM vínculo: o caso
         comum`, que o próprio filtro apagava) e passou a ser o que a tela
         MOSTRA no bloco.
+
+        🚨 07/10: A JANELA DEIXOU DE SER POR CONTAGEM. Eram 2600 caracteres
+        depois da âncora; o campo do Lead editar o nome entrou no mesmo bloco e
+        empurrou o botão para 2938. O botão estava lá -- o teste media a
+        distância, não o bloco. Agora o recorte vai de "Não está no cadastro"
+        até "Responde por", textos visíveis do mesmo bloco, antes e depois do
+        botão.
         """
         fonte = _sem_comentario(CAIXA)
         i = fonte.index("Não está no cadastro")
-        trecho = fonte[i:i + 2600]
+        trecho = fonte[i:fonte.index("Responde por", i)]
         assert "<button" in trecho, "o bloco sem cadastro não oferece ação"
         assert "Vincular a uma empresa" in trecho, (
             "sumiu o caminho para destravar o tipo -- a regra da escada da IA "

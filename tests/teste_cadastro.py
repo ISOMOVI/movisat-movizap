@@ -44,6 +44,12 @@ def celular_com_dono():
     """
     linha = banco.um(r"""
         SELECT t.e164 FROM contato_telefone t
+          JOIN contato c ON c.id = t.contato_id
+         -- 🚨 07/10: E O CONTATO TEM DE TER CLIENTE. A busca procura em
+         -- `cliente`; contato nascido no atendimento (origem 'movizap', sem
+         -- `cliente_id`) não é achado, e com razão. Sem esta guarda e sem
+         -- ordem, o sorteio caiu num desses (+5511961369236, de 02/10) e o
+         -- teste reprovou código correto.
          -- 🚨 `9[6-9]` e não só `9`. Celular brasileiro nasceu com 8 dígitos
          -- começando em 6-9, e a migração de 2016 prefixou o 9 -- então a
          -- forma real é 9[6-9]xxxxxxx. A base tem números como
@@ -52,7 +58,9 @@ def celular_com_dono():
          -- não é telefone. Testar as três grafias com um desses testaria uma
          -- premissa falsa, não o código.
          WHERE t.e164 ~ '^\+55[0-9]{2}9[6-9][0-9]{7}$'
+           AND c.cliente_id IS NOT NULL
          GROUP BY t.e164 HAVING count(DISTINCT t.contato_id) = 1
+         ORDER BY t.e164
          LIMIT 1
     """)
     if not linha:

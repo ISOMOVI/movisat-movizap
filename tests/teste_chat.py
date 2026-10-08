@@ -388,6 +388,45 @@ class TestApagadaSoOOwnerVe:
         pa = next(x for x in chat.salas(gente["ana"]) if x["id"] == s)
         assert pa["ultima_mensagem"] == "ultima coisa"
 
+    def test_a_CITACAO_da_apagada_nao_vaza(self, gente):
+        """🚨 07/10: quem respondeu a uma mensagem depois apagada carregava o
+        texto dela em `citada_texto`, para todo mundo."""
+        self._vira_owner(gente["ana"])
+        s = chat.abrir_direta(gente["ana"], gente["bruno"])["sala_id"]
+        chat.escrever(s, gente["bruno"], "vai ser apagada")
+        alvo = chat.mensagens(s, gente["bruno"])[0]["id"]
+        chat.escrever(s, gente["ana"], "respondendo", citando_id=alvo)
+        chat.apagar_propria(s, alvo, gente["bruno"])
+
+        rb = next(m for m in chat.mensagens(s, gente["bruno"]) if m["citada_id"] == alvo)
+        assert rb["citada_apagada_em"] is not None
+        assert rb["citada_texto"] is None
+        ra = next(m for m in chat.mensagens(s, gente["ana"]) if m["citada_id"] == alvo)
+        assert ra["citada_texto"] == "vai ser apagada"
+
+    def test_o_ANEXO_da_apagada_nao_sai_pelo_link(self, gente, monkeypatch, tmp_path):
+        """🚨 07/10: a rota de download só conferia a sala; o `midia_id` é
+        sequencial e o arquivo da apagada saía para quem tivesse o número."""
+        from movizap import midia
+        monkeypatch.setattr(midia, "RAIZ", tmp_path)
+        self._vira_owner(gente["ana"])
+        s = chat.abrir_direta(gente["ana"], gente["bruno"])["sala_id"]
+        r = chat.escrever_com_arquivo(s, gente["bruno"], b"zz anexo do teste 0710",
+                                      "application/pdf", "x.pdf", "")
+        assert r["ok"] is True
+        try:
+            md = r["midia_id"]
+            assert chat.midia_escondida(md, gente["bruno"]) is False
+            chat.apagar_propria(s, r["mensagem_id"], gente["bruno"])
+            assert chat.midia_escondida(md, gente["bruno"]) is True
+            assert chat.midia_escondida(md, gente["carla"]) is True
+            assert chat.midia_escondida(md, gente["ana"]) is False
+        finally:
+            # ⚠️ `midia.sala_id` não tem cascata: sem isto a limpeza da sala
+            # quebra por chave estrangeira e derruba o resto da suíte.
+            banco.executar("DELETE FROM chat_mensagem WHERE sala_id = %s", (s,))
+            banco.executar("DELETE FROM midia WHERE sala_id = %s", (s,))
+
     def test_NAO_da_para_sair_de_uma_sala_DIRETA(self, gente):
         s = chat.abrir_direta(gente["ana"], gente["bruno"])["sala_id"]
         assert chat.sair_do_grupo(s, gente["ana"])["ok"] is False

@@ -820,7 +820,7 @@ async function salvarEdicaoChat() {
   }
 }
 async function apagarMensagemChat(m) {
-  if (!confirm('Apagar esta mensagem? O conteúdo some para todos na sala; só o owner pode ver depois o que dizia.')) return
+  if (!confirm('Apagar esta mensagem? O conteúdo some para todos na sala.')) return
   try {
     await api.post(`/api/chat/salas/${sala.value.id}/mensagens/${m.id}/apagar`)
     await abrir(sala.value.id)
@@ -1069,7 +1069,7 @@ function quando(iso) {
                 </span>
                 <span class="ci__previa pequeno apagado">
                   <span v-if="sl.ultimo_autor" class="fraco">{{ sl.ultimo_autor }}: </span>
-                  {{ sl.ultima_mensagem || 'sem mensagem ainda' }}
+                  {{ sl.ultima_mensagem || (sl.ultima_apagada_em ? 'mensagem excluída' : 'sem mensagem ainda') }}
                 </span>
               </span>
               <span v-if="sl.nao_lidas" class="ci__badge">{{ sl.nao_lidas }}</span>
@@ -1096,7 +1096,7 @@ function quando(iso) {
                 </span>
                 <span class="ci__previa pequeno apagado">
                   <span v-if="sl.ultimo_autor" class="fraco">{{ sl.ultimo_autor }}: </span>
-                  {{ sl.ultima_mensagem || `${sl.qtd_membros} pessoas` }}
+                  {{ sl.ultima_mensagem || (sl.ultima_apagada_em ? 'mensagem excluída' : `${sl.qtd_membros} pessoas`) }}
                 </span>
               </span>
               <span v-if="sl.nao_lidas" class="ci__badge">{{ sl.nao_lidas }}</span>
@@ -1234,10 +1234,11 @@ function quando(iso) {
                    @click="irParaMensagem(m.citada_id)">
                   <i class="bi bi-reply" aria-hidden="true"></i>
                   <span class="fraco">{{ m.citada_autor || '(apagada)' }}:</span>
+                  <!-- 07/10: citada depois excluída chega sem conteúdo. -->
                   {{ m.citada_texto
                      || (m.citada_midia_mime
                          ? `(${tipoDaMidia({ midia_mime: m.citada_midia_mime })})`
-                         : '(mensagem)') }}
+                         : (m.citada_apagada_em ? 'mensagem excluída' : '(mensagem)')) }}
                 </p>
                 <!-- 🚨 O DESTAQUE VEM DE `mencionados`, NÃO DE PROCURAR "@" NO
                      TEXTO. Quem foi chamado está gravado; caçar arroba no texto
@@ -1293,14 +1294,14 @@ function quando(iso) {
                 <p v-if="m.apagada_em && !originalAberto.has(m.id)"
                    class="balao__texto balao__apagada">
                   <i class="bi bi-slash-circle" aria-hidden="true"></i>
-                  mensagem apagada
+                  mensagem excluída
                   <button v-if="m.texto || m.midia_id" type="button" class="balao__revelar"
                           @click="alternarOriginal(m.id)">ver o que dizia</button>
                 </p>
                 <p v-if="m.apagada_em && originalAberto.has(m.id)"
                    class="balao__marca pequeno">
                   <i class="bi bi-slash-circle" aria-hidden="true"></i>
-                  apagada ·
+                  excluída ·
                   <button type="button" class="balao__revelar"
                           @click="alternarOriginal(m.id)">esconder</button>
                 </p>

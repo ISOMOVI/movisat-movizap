@@ -1901,6 +1901,21 @@ def definir_tipo(conversa_id: int, relacao: str) -> dict:
             "automacao_antes": "sem_cadastro", "automacao_depois": relacao}
 
 
+def definir_nome_contato(conversa_id: int, nome: str) -> dict:
+    """🔵 07/10: renomeia o contato DESTA conversa. A ficha só expõe o campo
+    quando o tipo é Lead, mas a trava de existência vale para qualquer chamada:
+    sem contato não há o que renomear, e grupo não tem contato único."""
+    linha = banco.um(
+        "SELECT id, contato_id, tipo FROM conversa WHERE id = %s", (conversa_id,))
+    if not linha:
+        return {"ok": False, "motivo": "Conversa não encontrada."}
+    if linha.get("tipo") == "grupo":
+        return {"ok": False, "motivo": "Grupo não tem contato para renomear."}
+    if not linha["contato_id"]:
+        return {"ok": False, "motivo": "Esta conversa não tem cadastro para renomear."}
+    return cadastro.definir_nome(linha["contato_id"], nome)
+
+
 def desvincular(conversa_id: int) -> dict:
     """Desfaz o vínculo da CONVERSA. Não apaga telefone do cadastro.
 
@@ -1945,6 +1960,31 @@ JANELA_INICIAL = 60
 JANELA_ANTERIORES = 200
 
 
+def _ids_do_historico(conversa_id: int) -> list[int]:
+    """🔵 07/10: as conversas IRMÃS — mesmas do mesmo número (ou grupo) no mesmo
+    canal. Transferir/reabrir cria uma conversa NOVA (o `garantir_conversa` só
+    reaproveita a NÃO-resolvida), e o histórico antigo fica preso nas resolvidas.
+    Para a conversa mostrar o fio inteiro, a janela de mensagens passa a abranger
+    todas elas. Casa por `grupo_jid` quando é grupo, senão por `telefone_e164`."""
+    base = banco.um(
+        "SELECT canal_id, telefone_e164, grupo_jid FROM conversa WHERE id = %s",
+        (conversa_id,))
+    if not base:
+        return [conversa_id]
+    if base.get("grupo_jid"):
+        irmas = banco.varios(
+            "SELECT id FROM conversa WHERE canal_id = %s AND grupo_jid = %s",
+            (base["canal_id"], base["grupo_jid"]))
+    elif base.get("telefone_e164"):
+        irmas = banco.varios(
+            "SELECT id FROM conversa WHERE canal_id = %s AND telefone_e164 = %s",
+            (base["canal_id"], base["telefone_e164"]))
+    else:
+        return [conversa_id]
+    ids = [r["id"] for r in irmas]
+    return ids or [conversa_id]
+
+
 def mensagens(conversa_id: int, limite: int = JANELA_INICIAL,
               antes_de: int | None = None) -> list[dict]:
     """A janela de mensagens da conversa, da mais recente para trás.
@@ -1970,7 +2010,7 @@ def mensagens(conversa_id: int, limite: int = JANELA_INICIAL,
     # Pega-se as n mais RECENTES e reordena para exibir.
     return banco.varios(
         """SELECT * FROM (
-               SELECT m.id, m.direcao, m.autor, m.tipo, m.conteudo, m.entrega,
+               SELECT m.id, m.conversa_id, m.direcao, m.autor, m.tipo, m.conteudo, m.entrega,
                       m.criada_em, m.id_externo, a.nome AS atendente_nome,
                       -- 🔵 23/09: o id de quem mandou -- a tela só oferece
                       -- editar e apagar na mensagem que é MINHA, e nome não
@@ -2015,7 +2055,7 @@ def mensagens(conversa_id: int, limite: int = JANELA_INICIAL,
                  LEFT JOIN atendente a ON a.id = m.atendente_id
                  LEFT JOIN midia md ON md.id = m.midia_id
                  LEFT JOIN mensagem q ON q.id = m.citada_id
-                WHERE m.conversa_id = %s
+                WHERE m.conversa_id = ANY(%s)
                   AND (%s::bigint IS NULL OR
                        (m.criada_em, m.id) <
                        (SELECT criada_em, id FROM mensagem WHERE id = %s))
@@ -2023,7 +2063,7 @@ def mensagens(conversa_id: int, limite: int = JANELA_INICIAL,
                 LIMIT %s
            ) recentes
            ORDER BY criada_em, id""",
-        (conversa_id, antes_de, antes_de, limite))
+        (_ids_do_historico(conversa_id), antes_de, antes_de, limite))
 
 
 def tem_anteriores(conversa_id: int, antes_de: int | None) -> bool:
@@ -2039,10 +2079,10 @@ def tem_anteriores(conversa_id: int, antes_de: int | None) -> bool:
     return banco.um(
         """SELECT EXISTS (
              SELECT 1 FROM mensagem m
-              WHERE m.conversa_id = %s
+              WHERE m.conversa_id = ANY(%s)
                 AND (m.criada_em, m.id) <
                     (SELECT criada_em, id FROM mensagem WHERE id = %s)
-           ) AS tem""", (conversa_id, antes_de))["tem"]
+           ) AS tem""", (_ids_do_historico(conversa_id), antes_de))["tem"]
 
 
 # ⚠️ TETO DOS ACERTOS, e ele é DECLARADO. Buscar "a" numa conversa de 776

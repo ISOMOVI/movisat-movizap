@@ -386,7 +386,7 @@ def mensagens(sala_id: int, eu: int, limite: int = 500) -> list[dict]:
                       c.editada_em, c.conteudo_original, c.apagada_em,
                       c.citada_id, q.texto AS citada_texto,
                       q.midia_id AS citada_midia_id, qmd.mime AS citada_midia_mime,
-                      qa.nome AS citada_autor,
+                      qa.nome AS citada_autor, q.apagada_em AS citada_apagada_em,
                       COALESCE((
                           SELECT MIN(COALESCE(cm.lido_ate, 0))
                             FROM chat_membro cm
@@ -405,8 +405,10 @@ def mensagens(sala_id: int, eu: int, limite: int = 500) -> list[dict]:
     _juntar_mencoes(linhas, eu)
     # 🔵 05/10: apagada no Chat interno some o conteúdo para todos menos o owner
     # -- texto, histórico de edição e mídia. `apagada_em` continua indo, para a
-    # tela desenhar "mensagem apagada"; sem conteúdo, o botão "ver o que dizia"
+    # tela desenhar "mensagem excluída"; sem conteúdo, o botão "ver o que dizia"
     # (condicionado a `texto || midia_id`) nem aparece para quem não é owner.
+    # 🚨 07/10: A CITAÇÃO VAZAVA. Quem respondeu a uma mensagem depois apagada
+    # carregava o texto dela em `citada_texto` para todo mundo. Mesma regra.
     if not _eh_owner(eu):
         for l in linhas:
             if l.get("apagada_em"):
@@ -416,6 +418,10 @@ def mensagens(sala_id: int, eu: int, limite: int = 500) -> list[dict]:
                 l["midia_mime"] = None
                 l["midia_nome"] = None
                 l["midia_tamanho"] = None
+            if l.get("citada_apagada_em"):
+                l["citada_texto"] = None
+                l["citada_midia_id"] = None
+                l["citada_midia_mime"] = None
     return linhas
 
 
@@ -596,6 +602,21 @@ def dono_da_midia(midia_id: int) -> dict | None:
     """
     return banco.um(
         "SELECT id, conversa_id, sala_id FROM midia WHERE id = %s", (midia_id,))
+
+
+def midia_escondida(midia_id: int, eu: int) -> bool:
+    """Se este anexo é de uma mensagem do chat apagada que `eu` não pode mais ver.
+
+    🚨 07/10: a lista já escondia o `midia_id` da apagada, mas a rota de
+    download só conferia se a pessoa está na sala. O id é sequencial: com o
+    número na mão (ou guardado de antes de apagar), o arquivo saía igual.
+    Mesma regra de 05/10 -- apagada, só o owner vê.
+    """
+    if _eh_owner(eu):
+        return False
+    return banco.um(
+        "SELECT 1 FROM chat_mensagem WHERE midia_id = %s AND apagada_em IS NOT NULL",
+        (midia_id,)) is not None
 
 
 # ── Editar/apagar a própria mensagem (25/09, item B) ─────────────────────────

@@ -1488,6 +1488,23 @@ Mesmo padrão da 043/045, agora em `chat_mensagem`. Sem chamada ao
 Rotas: `POST /api/chat/salas/{sala_id}/mensagens/{mensagem_id}/editar` e
 `.../apagar`.
 
+**Apagada, só o owner vê** (🔵 05/10 — *"apagar mesmo e não deixar registrado o
+que dizia, somente ao owner deixar para ver"*). O texto fica no banco; quem
+esconde é a LEITURA, por `chat._eh_owner`. Todas as portas por onde o conteúdo
+sai precisam da mesma guarda:
+
+| Porta | Guarda | Desde |
+|---|---|---|
+| `chat.mensagens` (texto, histórico, mídia) | zera para quem não é owner | 05/10 |
+| `chat.salas` (prévia da última) | `ultima_mensagem` NULL | 05/10 |
+| citação (`citada_texto`, `citada_midia_*`) | `q.apagada_em AS citada_apagada_em` e zera | 07/10 |
+| `/api/midia/{id}` e `/ver` | `chat.midia_escondida()` → 404 | 07/10 |
+
+🚨 **As duas últimas vazaram de 05/10 a 07/10.** A citação levava o texto da
+apagada para todos; o link do anexo só conferia a sala, e o `midia_id` é
+sequencial. Porta nova que devolver conteúdo de `chat_mensagem` entra nesta
+tabela. A tela não cita owner (pedido dele, 07/10): diz `mensagem excluída`.
+
 ### Item G (25/09): tique de leitura no Chat interno, sem coluna nova
 
 🔵 Demanda dele: *"ajustar o painel interno visualmente igual ao do externo
@@ -1523,7 +1540,12 @@ protocolo do WhatsApp) e **`targetMessageKey.id`** = a mensagem editada. Medido
 em 06/10: **94 de 94** eventos assim, todos com o original no banco. Hoje
 `conversas._marcar_edicao_cifrada` grava `editada_em` no original e **não cria
 linha**; `conteudo` fica como estava e **`conteudo_original` fica NULL — esse
-NULL é o sinal** para a tela dizer *"editada (texto novo ilegível)"*. Sem alvo
+NULL é o sinal** para a tela dizer só *"editada"* (e, no clique, que o texto
+exibido é o de antes da edição). 🔵 **07/10, decisão dele: só a ação** — saiu o
+"(texto novo ilegível)"; exclusão passou de "mensagem apagada"/"apagada pelo
+cliente" para *"mensagem excluída"*/*"excluída"*. Decifrar foi descartado: a
+Evolution 2.4 só existe como rc, não sobe o Baileys e não corrige; o patch do
+Baileys (#2743) segue sem merge. Reavaliar só se o #2743 entrar. Sem alvo
 ou com outro `secretEncType`, continua o aviso. Backfill feito só no número de
 teste (3 linhas, `scripts/backfill_edicao_cifrada.py`); restam **152** linhas-lixo,
 e só **91** ainda têm o evento bruto que aponta o alvo (de 08/09 em diante): as

@@ -83,6 +83,10 @@ def sem_whatsapp(monkeypatch):
     monkeypatch.setattr(evolution, "enviar_reacao", reacao)
     monkeypatch.setattr(evolution, "enviar_audio", audio)
     monkeypatch.setattr(evolution, "enviar_midia", midia)
+    # 07/10: o carimbo `*Nome:*` (05/10) entra também na legenda -- é o
+    # esperado, e tem teste próprio em `teste_envio.py`. Aqui o assunto é o
+    # transporte; com ele ligado, todo texto viria prefixado.
+    monkeypatch.setattr(conversas, "_carimbo_ligado", lambda: False)
     yield saiu
 
 

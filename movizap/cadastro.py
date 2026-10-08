@@ -318,6 +318,25 @@ def definir_relacao(contato_id: int, relacao: str) -> dict:
     return {"ok": True, **linha}
 
 
+def definir_nome(contato_id: int, nome: str) -> dict:
+    """Renomeia o contato. 🔵 07/10: usado pela ficha quando o tipo é Lead.
+
+    ⚠️ O SYNC NÃO DESFAZ para contato nascido no atendimento (origem='movizap'):
+    toda escrita do `sync.py` filtra `origem='harmonit'`. Um lead digitado aqui
+    sobrevive à madrugada; renomear um contato vindo do Harmonit seria
+    sobrescrito no próximo sync -- fora do escopo (lead é movizap)."""
+    nome = (nome or "").strip()
+    if not nome:
+        return {"ok": False, "motivo": "O nome não pode ficar vazio."}
+    linha = banco.um(
+        """UPDATE contato SET nome = %s, atualizado_em = now()
+            WHERE id = %s RETURNING id, nome, relacao""",
+        (nome, contato_id))
+    if not linha:
+        return {"ok": False, "motivo": "Contato não encontrado."}
+    return {"ok": True, **linha}
+
+
 TETO_LOTE = 500
 
 
