@@ -2220,7 +2220,13 @@ async function procurarCliente() {
   }
 }
 
-async function vincularA(clienteId) {
+/* 🚨 CANDIDATO SEM EMPRESA VAI POR `contato_id` (08/10). O botão do candidato
+   mandava `c.cliente_id || c.id` -- e técnico não tem empresa, então o id do
+   CONTATO ia no campo de EMPRESA. O servidor procurava a empresa com esse id,
+   não achava, e tentava criar contato nela. Era a única saída que a trava do
+   "marcar tipo" oferece ("vincule a um dos candidatos"), e estava fechada
+   justo para os 274 técnicos importados em 02/10. */
+async function vincularA(clienteId, contatoId = null) {
   vinculando.value = true
   try {
     /* 🚨 O MODAL FECHA NO SUCESSO, NÃO NO CLIQUE (28/08). Fechar antes da
@@ -2229,6 +2235,7 @@ async function vincularA(clienteId) {
        onde escolher de novo. */
     await api.post(`/api/conversas/${aberta.value.id}/vincular`, {
       cliente_id: clienteId,
+      contato_id: contatoId,
       nome: nomeDoContato.value.trim() || null,
     })
     painelAcao.value = ''
@@ -4099,7 +4106,7 @@ function carregarMidiasDaConversa(c) {
               class="vincular__item"
               type="button"
               :disabled="vinculando"
-              @click="vincularA(c.cliente_id || c.id)"
+              @click="c.cliente_id ? vincularA(c.cliente_id) : vincularA(null, c.id)"
             >
               <span>{{ c.nome }}</span>
             </button>
