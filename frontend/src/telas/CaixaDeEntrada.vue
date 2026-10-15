@@ -4591,6 +4591,11 @@ function carregarMidiasDaConversa(c) {
 
   .conversa__cabecalho { flex-wrap: nowrap; gap: var(--e-2); align-items: center; }
   .conversa__quem { min-width: 0; flex: 1 1 auto; }
+  /* ⚠️ REDUNDANTE DESDE 14/10: o cabeçalho virou flex com quebra, e o nome já
+     tem teto e reticências em todas as larguras. Fica por enquanto porque não
+     atrapalha (item de flex é blocado de todo jeito) e porque tirar linha de
+     layout sem olhar o celular é como o defeito nasceu. Sai quando ele
+     conferir no aparelho. */
   .conversa__quem > strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   /* O telefone fica; canal, cadastro e estado saem da faixa (estão na ficha). */
   .conversa__detalhe > span { display: none; }
@@ -4777,8 +4782,19 @@ function carregarMidiasDaConversa(c) {
 
 /* 🚨 UMA LINHA SÓ, COM RETICÊNCIAS. A prévia com duas linhas fazia o item
    pular de altura conforme o texto -- e uma lista que muda de ritmo é mais
-   difícil de varrer do que uma lista densa. */
-.conversa__quem,
+   difícil de varrer do que uma lista densa.
+
+   🚨 PRESA À LISTA (`.conversa__topo`), e isto é o conserto de 14/10.
+   `conversa__quem` serve a DOIS lugares com necessidades opostas: aqui, o item
+   da lista, onde cortar é o certo; e o CABEÇALHO da conversa, onde a mesma
+   classe envolve o botão "Ficha". Solta, ela punha o nome e o botão na mesma
+   linha sem poder quebrar (`white-space: nowrap`) dentro de uma caixa com
+   `overflow: hidden` -- então **nome comprido empurrava o botão para fora e o
+   recortava**. Era a queixa dele, *"o botão Ficha tem ficado invisível"*, e o
+   "tem ficado" é a assinatura do defeito: dependia do tamanho do nome. No
+   celular não aparecia, porque a media query de 860px dá linha própria ao
+   nome. Nenhum teste viu: DOM não calcula recorte de layout. */
+.conversa__topo .conversa__quem,
 .conversa__previa {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -4855,6 +4871,41 @@ function carregarMidiasDaConversa(c) {
 }
 
 .conversa__topo { display: flex; justify-content: space-between; gap: var(--e-2); }
+
+/* ---- o cabeçalho da conversa: o nome tem TETO, o botão não encolhe --------
+   🚨 A PRIORIDADE É O BOTÃO NÃO SUMIR (decisão dele, 14/10): *"proponha limite
+   do tamanho da exibição de nome, com a prioridade do botão não sumir. ao abrir
+   a ficha ele aparece completo mesmo"*. Então o nome corta com reticências num
+   teto, e o botão é `flex: none` -- ele não encolhe, não quebra e não é
+   recortado, nem com nome absurdo nem com janela estreita.
+   ⚠️ O nome inteiro continua na ficha, que é onde ele importa; aqui ele é
+   identificação de relance. */
+.conversa__cabecalho .conversa__quem {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--e-2);
+  /* `flex` e `min-width` explícitos, iguais aos que a media query de 860px já
+     declarava: a caixa ocupa a folga da barra e encolhe sem empurrar nada. */
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.conversa__cabecalho .conversa__quem > strong {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 1 auto;
+  min-width: 0;
+  /* O teto. Em `ch` porque o que importa é quantos caracteres cabem, não
+     pixels: assim ele acompanha o tamanho da fonte. */
+  max-width: 32ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* 🚨 O botão da ficha é o último a ceder espaço -- na verdade, não cede. */
+.conversa__cabecalho .conversa__quem > .botao { flex: none; }
+/* O telefone é a segunda linha da identificação, não concorrente do botão. */
+.conversa__cabecalho .conversa__detalhe { flex: 1 0 100%; margin: 0; }
 .conversa__acompanham {
   display: flex; align-items: center; gap: var(--e-1);
   flex-wrap: wrap; padding: 0 var(--e-3) var(--e-2);

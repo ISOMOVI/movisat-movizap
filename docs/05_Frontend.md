@@ -229,3 +229,64 @@ divergir deles, eles ganham:
 | `/home/claude/docs/00_Commit_e_Segredos.md` | git, segredo em repositório, trava do commit automático |
 | `/home/claude/docs/01_Seguranca_Login.md` | limite de tentativas, mensagem única, IP atrás do nginx |
 | `/home/claude/docs/02_Padrao_Visual.md` | paleta, menu escuro, tela de login, os 16px do iOS |
+
+---
+
+## 14/10/2026 — o botão "Ficha" era recortado pelo nome do cliente (NO AR)
+
+**Queixa dele:** *"o botão 'Ficha' de cada conversa tem ficado invisível"*. O **"tem ficado"** era a
+assinatura do defeito: ele dependia do **tamanho do nome**, e só acontecia no computador.
+
+### O mecanismo
+1. A classe `conversa__quem` servia a **dois lugares com necessidades opostas**: o item da **lista**
+   (`CaixaDeEntrada.vue:2593`, onde cortar com reticências é o certo) e a caixa que envolve o **botão
+   Ficha** no cabeçalho da conversa (linha 2727).
+2. Uma regra **global** — escrita para a lista, ao lado de `.conversa__previa`, que só existe lá — dava
+   `overflow:hidden; text-overflow:ellipsis; white-space:nowrap`.
+3. No cabeçalho isso punha o nome (`<strong>`, inline, com a foto dentro) e o `<button>` na **mesma linha
+   sem poder quebrar**. Nome comprido empurrava o botão para fora da caixa, e o `overflow:hidden`
+   **recortava** ele.
+4. **No celular não aparecia:** `@media (max-width: 860px)` tem `.conversa__quem > strong{display:block}`,
+   o nome ganha linha própria e o botão volta. No computador essa linha não existe.
+
+🚨 **Nenhum teste viu, e nem podia:** `jsdom` não calcula layout, então recorte não aparece em teste de
+DOM. Foi suíte verde e build limpo com o botão invisível — a família do `M9`. **De novo o problema era a
+tela, não a função:** em 28/08 ele já havia dito *"não vejo mais a ficha nas conversas"*, e a ficha estava
+lá o tempo todo.
+
+### A decisão dele, 14/10
+*"proponha limite do tamanho da exibição de nome, com a prioridade do botão não sumir. ao abrir a ficha ele
+aparece completo mesmo."*
+
+### O conserto (só CSS; o template não mudou)
+| O que | Por quê |
+|---|---|
+| A regra de reticências passou a `.conversa__topo .conversa__quem` | **tira a origem**: a classe não serve mais a dois lugares com regras opostas |
+| `.conversa__cabecalho .conversa__quem` virou `flex` com `flex-wrap: wrap` | a linha pode quebrar em vez de recortar |
+| O nome ganhou `max-width: 32ch` + reticências + `min-width: 0` | o teto que ele pediu; em `ch` para acompanhar a fonte, e sem `min-width:0` o item de flex se recusa a encolher e as reticências viram enfeite |
+| O botão ganhou `flex: none` | 🚨 **a prioridade dele**: o botão não encolhe, não quebra e não é recortado — nem com nome absurdo, nem com janela estreita |
+| O telefone ganhou `flex: 1 0 100%` | segunda linha da identificação, não concorrente do botão |
+
+⚠️ A linha `display:block` do `strong` na media query de 860px ficou **redundante** e **continua lá, anotada**:
+tirar linha de layout sem olhar o celular é exatamente como o defeito nasceu. Sai quando ele conferir no
+aparelho.
+
+### Guarda nova
+`frontend/src/ficha_visivel_1410.teste.js` (5 verificações): falha se o seletor solto voltar, se o botão
+perder o `flex: none`, se o teto do nome sair ou se o rótulo "Ficha · vincular" desaparecer.
+⚠️ **É guarda de TEXTO, não de layout.** Ela impede a volta desta regra; não descobre a próxima.
+
+### Conferido pelo estado
+```
+suíte JS      16 arquivos, 222 testes, 0 falhas
+suíte Python  1.312 passando, 0 falhas
+build         vite 11,49s -> index-xQKFEq-3.css (189 kB)
+no CSS servido: zero regra de recorte em `.conversa__quem` solto
+                (sobram só min-width/flex da media query e overflow-wrap)
+porta 8008: index.html 200, CSS 200, JS 200, e a regra do botão está no CSS entregue
+```
+**Backups:** `frontend/src/telas/CaixaDeEntrada.vue.bak_pre_ficha_2026-10-14` (5.560 linhas conferidas) e
+`frontend/dist.bak_pre_ficha_2026-10-14`.
+
+🔴 **Falta ele validar no navegador** — e são três casos: nome curto, **nome longo** (o que falhava) e
+conversa **sem cadastro** (`Ficha · vincular`, 61% das conversas), mais uma passada no celular.
