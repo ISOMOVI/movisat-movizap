@@ -122,9 +122,21 @@ class TestTransferenciaEATriagemManual:
 
     @staticmethod
     def _notas(conversa_id):
+        """As notas de GENTE. 🔵 15/10: o log de ações (Bloco 11) também é
+        nota interna, e sem o `evento IS NULL` estas guardas passariam a contar
+        o evento de transferência junto do resumo -- e elas são sobre o resumo.
+        """
         return banco.varios(
             "SELECT direcao, tipo, conteudo FROM mensagem "
-            "WHERE conversa_id = %s AND tipo = 'nota'", (conversa_id,))
+            "WHERE conversa_id = %s AND tipo = 'nota' AND evento IS NULL",
+            (conversa_id,))
+
+    @staticmethod
+    def _eventos(conversa_id):
+        return banco.varios(
+            "SELECT evento, conteudo FROM mensagem "
+            "WHERE conversa_id = %s AND evento IS NOT NULL ORDER BY id",
+            (conversa_id,))
 
     def test_resumo_vira_nota_interna_para_o_time(self, uma_conversa):
         t = banco.um("SELECT id, nome FROM time WHERE ativo ORDER BY id LIMIT 1")
@@ -154,10 +166,21 @@ class TestTransferenciaEATriagemManual:
         conversas.transferir(uma_conversa, t["id"], None)
         assert self._notas(uma_conversa) == []
 
+    def test_transferencia_manual_deixa_evento_mesmo_sem_resumo(self, uma_conversa):
+        """🔵 15/10, Bloco 11: até hoje, transferir sem escrever resumo não
+        deixava rastro NENHUM na conversa -- a nota de 23/09 só nasce com
+        resumo. O evento existe sempre."""
+        t = banco.um("SELECT id FROM time WHERE ativo ORDER BY id LIMIT 1")
+        conversas.transferir(uma_conversa, t["id"], None)
+        assert self._notas(uma_conversa) == [], "não havia resumo para anotar"
+        assert [e["evento"] for e in self._eventos(uma_conversa)] == ["transferiu"]
+
     def test_transferencia_recusada_nao_deixa_nota(self, uma_conversa):
         r = conversas.transferir(uma_conversa, 999999, None, texto_resumo="x")
         assert r["ok"] is False
         assert self._notas(uma_conversa) == []
+        # O log é de ação que ACONTECEU: transferência recusada não é ação.
+        assert self._eventos(uma_conversa) == []
 
     def test_a_migracao_049_escreve_o_mesmo_texto(self):
         """⚠️ O resumo antigo entra pela migração 049, em SQL; o novo, pela

@@ -120,7 +120,11 @@ class TestIntegridadeDoRegistro:
             # INI entrou em 10/08 com a tela inicial: é a porta de entrada,
             # não atendimento nem cadastro. Prefixo novo se registra AQUI --
             # é este teste que impede código inventado passar despercebido.
-            assert modulo in {"INI", "EML", "ATD", "CAD", "CFG", "REL"}, t["codigo"]
+            #
+            # LIG entrou em 15/10: ligação do MicroSIP não é conversa de
+            # WhatsApp nem cadastro, e a aba é de auditoria -- pendurá-la em
+            # ATD faria o log misturar "falou com cliente" e "ligou".
+            assert modulo in {"INI", "EML", "ATD", "CAD", "CFG", "LIG", "REL"}, t["codigo"]
             assert numero, t["codigo"]
             for parte in numero.split("."):
                 assert parte.isdigit(), f"{t['codigo']}: parte não numérica"

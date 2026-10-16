@@ -104,6 +104,24 @@ class Settings:
     # reapontado, e nada se perde. Vazio = nenhuma rotação em curso.
     webhook_segredo_anterior: str = _ler("MOVIZAP_WEBHOOK_SEGREDO_ANTERIOR")
 
+    # ---- Ligações do MicroSIP: alistamento por senha (15/10/2026) ----
+    # 🔵 *"validar o atendente do MicroSip com uma senha que será gerada
+    # sempre via algoritmo e é mutável para rodar"*.
+    #
+    # 🚨 SEGREDO PRÓPRIO, nunca o `jwt_secret`. Dele saem as senhas de
+    # alistamento (HMAC sobre ramal + janela de 10 min), e ele JAMAIS sai da
+    # VPS: o instalador no PC não deriva senha, só manda o que foi digitado.
+    # Trocar este valor invalida toda senha em circulação -- é a saída se uma
+    # vazar.
+    ligacoes_senha_segredo: str = _ler("MOVIZAP_LIGACOES_SENHA_SEGREDO")
+
+    # 🔵 15/10: *"Rotina da VPS verifica se os envios estão sendo feito
+    # corretamente"*. Quem recebe o aviso do vigia (`scripts/agentes_mudos.py
+    # --avisar-whatsapp`, no cron das 08:10 e 18:10). Vazio = não envia, só
+    # imprime -- é o que mantém o gancho da sessão funcionando sem mandar
+    # mensagem para ninguém.
+    ligacoes_aviso_numero: str = _ler("MOVIZAP_LIGACOES_AVISO_NUMERO")
+
     def dsn(self) -> str:
         """String de conexão do Postgres.
 

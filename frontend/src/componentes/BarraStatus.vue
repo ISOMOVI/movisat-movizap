@@ -37,6 +37,26 @@ const duracao = computed(() => {
   return `${seg}s`
 })
 
+/* 🔵 15/10 — a sessão é DO DIA, então a barra diz a hora em que ela acaba,
+   não só quanto tempo faz que começou. "10 horas" não dizia nada a quem
+   entrou às 17h. */
+const fimDoDia = computed(() => {
+  if (!sessao.expiraEm) return ''
+  const d = new Date(sessao.expiraEm)
+  if (Number.isNaN(d.getTime())) return ''
+  return d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+})
+
+/* 🟡 Aviso 15 minutos antes da virada (minha): quem está com a tela aberta
+   não pode perder o que digitou sem ter sido avisado. O rascunho sobrevive a
+   F5, mas não ao fim da sessão -- é o que ele decidiu. */
+const QUASE = 15 * 60 * 1000
+const acabando = computed(() => {
+  if (!sessao.expiraEm) return false
+  const resta = new Date(sessao.expiraEm).getTime() - agora.value.getTime()
+  return resta > 0 && resta <= QUASE
+})
+
 const codigo = computed(() => rota.meta.codigo || '—')
 </script>
 
@@ -57,9 +77,14 @@ const codigo = computed(() => rota.meta.codigo || '—')
 
     <span class="barra__sep" aria-hidden="true">·</span>
 
-    <span class="barra__item barra__item--opcional" title="Tempo desde o início desta sessão">
+    <span class="barra__item barra__item--opcional"
+          :class="{ 'barra__item--acabando': acabando }"
+          :title="fimDoDia
+            ? 'Esta sessão vale até ' + fimDoDia + '. Depois é entrar de novo.'
+            : 'Tempo desde o início desta sessão'">
       <i class="bi bi-hourglass-split" aria-hidden="true"></i>
-      sessão {{ duracao }}
+      <template v-if="fimDoDia">sessão do dia · até {{ fimDoDia }}</template>
+      <template v-else>sessão {{ duracao }}</template>
     </span>
 
     <span class="espaco"></span>
@@ -99,6 +124,8 @@ const codigo = computed(() => rota.meta.codigo || '—')
 .barra__item { display: inline-flex; align-items: center; gap: 5px; }
 .barra__item--codigo { color: var(--acento); font-weight: var(--peso-medio); }
 .barra__item--voando { color: var(--texto-fraco); }
+/* Só nos últimos 15 minutos do dia: cor de aviso o tempo todo seria ruído. */
+.barra__item--acabando { color: var(--aviso, #b45309); font-weight: var(--peso-medio); }
 .barra__sep { opacity: .45; }
 .barra .chip { padding: 0 6px; }
 

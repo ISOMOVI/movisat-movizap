@@ -142,6 +142,28 @@ def certs_vencendo(dias: int = 30) -> list[dict]:
             ORDER BY g.cert_validade""", (dias,))
 
 
+def agentes_vivos_resumo() -> dict:
+    """Os números do resumo diário do vigia (15/10).
+
+    🔵 Pedido dele: um resumo quando está tudo em dia -- antes o vigia ficava
+    mudo, e silêncio não distingue "nada errado" de "o cron parou de rodar".
+
+    🚨 DIZ O NÚMERO, não "tudo ok". A frase que não conta nada não distingue
+    vigia funcionando de vigia olhando para uma base vazia -- e era disso que
+    ele estava se protegendo ao pedir o resumo.
+    """
+    return dict(banco.um(
+        """SELECT (SELECT count(*) FROM agente_ligacao
+                    WHERE revogado_em IS NULL)                      AS com_agente,
+                  (SELECT count(*) FROM atendente a
+                    WHERE a.ativo AND NOT EXISTS (
+                      SELECT 1 FROM agente_ligacao g
+                       WHERE g.atendente_id = a.id
+                         AND g.revogado_em IS NULL))                 AS sem_agente,
+                  (SELECT count(*) FROM ligacao
+                    WHERE inicio >= date_trunc('day', now()))        AS ligacoes_hoje"""))
+
+
 def agentes_mudos(horas: int = HORAS_MUDO) -> list[dict]:
     """Os agentes vivos (não revogados) sem contato há mais de `horas`.
     Nunca falou também conta: chave gerada e agente nunca instalado é mudo."""

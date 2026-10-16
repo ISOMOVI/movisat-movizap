@@ -9,7 +9,7 @@ import pathlib
 import secrets
 import time
 from contextlib import asynccontextmanager
-from datetime import date
+from datetime import date, datetime, timezone
 
 import psycopg
 import psycopg_pool
@@ -40,6 +40,9 @@ from . import ia
 from . import inicio as tela_inicial
 from . import informativos
 from . import ligacoes
+from . import ligacoes_alistar
+from . import ligacoes_consulta
+from . import relatorio_csv
 from . import mensagens_rapidas
 from . import midia
 from . import operacao
@@ -251,9 +254,12 @@ def login(dados: Credenciais, request: Request):
         )
 
     ratelimit.registrar_sucesso(chave)
+    # 🔵 15/10: a sessão é do DIA. A resposta devolve a hora exata do fim, não
+    # "quantas horas" -- "10 horas" não dizia nada a quem entrou às 17h.
+    token, expira = auth.criar_token_e_expiracao(usuario["login"])
     return {
-        "token": auth.criar_token(usuario["login"]),
-        "expira_em_horas": auth.TOKEN_EXPIRA_HORAS,
+        "token": token,
+        "expira_em": expira.isoformat(),
         "usuario": {"login": usuario["login"], "nome": usuario["nome"], "owner": usuario["owner"]},
     }
 
@@ -284,6 +290,12 @@ def eu(usuario: dict = Depends(auth.get_usuario)):
         "estado": (meu or {}).get("estado"),
         "tem_foto": bool((meu or {}).get("foto")),
         "telas": registro_telas.do_usuario(usuario),
+        # 🔵 15/10: a hora em que esta sessão do dia termina. Vem daqui, e não
+        # só da resposta do login, porque um F5 não refaz o login -- e o login
+        # pelo Google nem passa pela rota de senha.
+        "sessao_expira_em": (
+            datetime.fromtimestamp(usuario["token_exp"], timezone.utc).isoformat()
+            if usuario.get("token_exp") else None),
     }
 
 
@@ -688,6 +700,77 @@ def empresas_da_conversa(conversa_id: int,
     carregar o grupo inteiro em toda abertura seria trabalho por nada.
     """
     return conversas.empresas_do_telefone(conversa_id)
+
+
+class NotasVistas(BaseModel):
+    # Teto de 200: isto vem do navegador, e a tela manda o que está visível.
+    ids: list[int] = Field(default_factory=list, max_length=200)
+
+
+@app.post("/api/conversas/{conversa_id}/notas/vistas")
+def marcar_notas_vistas(conversa_id: int, corpo: NotasVistas,
+                        usuario: dict = Depends(auth.requer_tela("ATD_1.2"))):
+    """🔵 15/10, Bloco 12: carimba "visto por" nas notas que apareceram na tela.
+
+    🚨 QUEM SABE O QUE ESTÁ VISÍVEL É A TELA, e por isso ela é que manda os
+    ids. O backend não confia neles para nada além disto: só carimba nota
+    DESTA conversa, e só a partir do dia em que o registro passou a existir.
+
+    ⚠️ Sem vínculo de atendimento não há quem carimbar, e isso não é erro: a
+    rota responde 0 e segue. Levantar 400 faria a tela mostrar erro para quem
+    só estava lendo.
+    """
+    quantas = conversas.marcar_notas_vistas(
+        conversa_id, corpo.ids, _atendente_do_usuario(usuario))
+    return {"ok": True, "novas": quantas}
+
+
+@app.get("/api/conversas/{conversa_id}/contatos-da-empresa")
+def contatos_da_empresa_da_conversa(
+        conversa_id: int,
+        usuario: dict = Depends(auth.requer_tela("ATD_1.2"))):
+    """Os outros contatos da empresa vinculada a esta conversa (Bloco 6, 15/10).
+
+    🚨 `ATD_1.2` de propósito, como a rota de empresas e a de ligações: é
+    consulta da conversa. A rota de cadastro (`/api/clientes/{id}`) é
+    `CAD_1.1` e daria 403 justamente para quem atende.
+
+    ⚠️ Lista vazia vem com `motivo` -- "sem_cadastro" não é a mesma coisa que
+    "empresa sem outro contato", e a tela precisa dizer qual é o caso.
+    """
+    r = conversas.contatos_da_empresa(conversa_id)
+    if r["motivo"] == "conversa_inexistente":
+        # 404, e não corpo vazio: é o mesmo trato da rota irmã de ligações --
+        # conversa que não existe é erro de quem chamou, não lista vazia.
+        raise HTTPException(status_code=404, detail="Conversa não encontrada.")
+    return r
+
+
+@app.get("/api/conversas/{conversa_id}/ligacoes")
+def ligacoes_da_conversa(conversa_id: int, dias: int = ligacoes_consulta.DIAS_PADRAO_FICHA,
+                         usuario: dict = Depends(auth.requer_tela("ATD_1.2"))):
+    """As ligações do telefone desta conversa, para o modal do botão Ligações.
+
+    🔵 *"aqui na conversa, o modal só trará ultimos 7 dias, para mais dias um
+    botão vai levar para a aba Ligações"*.
+
+    🚨 É `ATD_1.2`, a permissão da própria conversa — não a da aba Ligações.
+    Quem atende vê as ligações do número que está atendendo; a aba (com o
+    histórico de todos) é outra permissão, e nasce só do owner.
+
+    ⚠️ Devolve `cobertura` junto: a tela precisa poder dizer que só aparecem
+    ligações de ramais com agente instalado. Sem isso ela afirmaria "nenhuma
+    ligação" onde a verdade é "aquele PC não manda".
+    """
+    conversa = banco.um("SELECT telefone_e164 FROM conversa WHERE id = %s", (conversa_id,))
+    if not conversa:
+        raise HTTPException(status_code=404, detail="Conversa não encontrada.")
+    if not conversa["telefone_e164"]:
+        # Grupo não tem ficha, e sem número não há o que consultar.
+        return {"dias": dias, "telefone_e164": None, "total": 0,
+                "por_sentido": {s: [] for s in ligacoes.SENTIDOS},
+                "cobertura": {"com_agente": 0, "atendentes": 0}}
+    return ligacoes_consulta.do_telefone(conversa["telefone_e164"], dias)
 
 
 @app.get("/api/conversas/buscar-empresa")
@@ -1672,6 +1755,14 @@ def vincular_conversa(conversa_id: int, corpo: Vinculo,
         resultado.get("cliente_nome") or "—",
         " [FICHA NOVA]" if resultado.get("criou_contato") else "",
     )
+    # 🔵 15/10, Bloco 11: além do journal em arquivo, o log DENTRO da conversa
+    # -- é lá que quem atende vai perguntar "quem ligou este número a esta
+    # empresa?", e não num log do servidor que ele não abre.
+    conversas.registrar_evento(
+        conversa_id, "vinculou",
+        "vinculou o número a " + (resultado.get("cliente_nome")
+                                  or resultado.get("contato_nome") or "um cadastro"),
+        _atendente_do_usuario(usuario))
     return resultado
 
 
@@ -1692,6 +1783,12 @@ def definir_tipo_da_conversa(conversa_id: int, dados: TipoDaConversa,
     r = conversas.definir_tipo(conversa_id, dados.relacao)
     if not r.get("ok"):
         raise HTTPException(status_code=400, detail=r.get("motivo"))
+    # 🔵 15/10, Bloco 11. O tipo decide se a automação e a IA atendem esta
+    # pessoa (CFG_5.1): mudá-lo sem rastro deixava a conversa sem explicação
+    # para "por que a automação parou de responder aqui?".
+    conversas.registrar_evento(
+        conversa_id, "mudou_tipo", f"mudou o tipo para {dados.relacao}",
+        _atendente_do_usuario(usuario))
     # ⚠️ Escolha minha, declarada: marcar o tipo CRIA ficha quando não há
     # contato, e ficha nascendo pelo atendimento é a mesma pergunta do
     # journal de vínculos ("quem criou isto?"). Sem esta linha, as fichas que
@@ -1737,6 +1834,11 @@ def desvincular_conversa(conversa_id: int,
         resultado.get("contato_nome") or "—", resultado.get("contato_id"),
         resultado.get("cliente_nome") or "—",
     )
+    conversas.registrar_evento(
+        conversa_id, "desvinculou",
+        "desfez o vínculo com " + (resultado.get("cliente_nome")
+                                   or resultado.get("contato_nome") or "o cadastro"),
+        _atendente_do_usuario(usuario))
     return resultado
 
 
@@ -2987,6 +3089,148 @@ async def ligacao_do_agente(request: Request, dados: str = Form(...),
             pedacos.append(pedaco)
         conteudo, nome = b"".join(pedacos), arquivo.filename
     return ligacoes.registrar(agente, meta, conteudo, nome, meta.get("pc"))
+
+
+# ── Aba Ligações (LIG_1.1, 15/10) ───────────────────────────────────────────
+#
+# 🔵 *"um grid simples ... exportar e importar e um botão para baixar a ligação
+# se quiser ou reproduzir por lá"*.
+#
+# 🚨 A aba é `LIG_1.1`, permissão que nenhum perfil tem: nasce só do owner.
+# O modal da ficha é outra rota, sob `ATD_1.2` -- quem atende vê as ligações do
+# número que está atendendo, sem ver a aba.
+
+
+@app.get("/api/ligacoes")
+def listar_ligacoes(de: str | None = None, ate: str | None = None,
+                    atendente_id: int | None = None, ramal: str | None = None,
+                    sentido: str | None = None, numero: str | None = None,
+                    cliente_id: int | None = None, com_gravacao: bool | None = None,
+                    pagina: int = 1,
+                    por_pagina: int = ligacoes_consulta.POR_PAGINA,
+                    usuario: dict = Depends(auth.requer_tela("LIG_1.1"))):
+    """O grid da aba. Os totais vêm do filtro inteiro, não da página."""
+    return ligacoes_consulta.consultar(
+        pagina=pagina, por_pagina=por_pagina, de=de, ate=ate,
+        atendente_id=atendente_id, ramal=ramal, sentido=sentido, numero=numero,
+        cliente_id=cliente_id, com_gravacao=com_gravacao)
+
+
+@app.get("/api/ligacoes/agentes")
+def agentes_de_ligacao(usuario: dict = Depends(auth.requer_tela("LIG_1.1"))):
+    """Quem tem agente e desde quando.
+
+    🚨 É o que impede a aba de mentir por omissão: ausência de ligação de
+    alguém significa "aquele PC não tem agente", não "não ligou".
+    """
+    return {"agentes": ligacoes_consulta.agentes()}
+
+
+@app.get("/api/ligacoes/exportar.csv")
+def exportar_ligacoes(de: str | None = None, ate: str | None = None,
+                      atendente_id: int | None = None, ramal: str | None = None,
+                      sentido: str | None = None, numero: str | None = None,
+                      cliente_id: int | None = None, com_gravacao: bool | None = None,
+                      usuario: dict = Depends(auth.requer_tela("LIG_1.1"))):
+    """O CSV do que está filtrado.
+
+    🚨 Registra quem exportou, quando, com que filtros e quantas linhas:
+    exportar ligação é número de telefone e áudio de conversa saindo do
+    sistema, e sem rastro não há como responder depois quem levou o quê.
+    """
+    import json
+
+    filtros = {"de": de, "ate": ate, "atendente_id": atendente_id, "ramal": ramal,
+               "sentido": sentido, "numero": numero, "cliente_id": cliente_id,
+               "com_gravacao": com_gravacao}
+    linhas = ligacoes_consulta.para_csv(**filtros)
+    for linha in linhas:
+        # O banco devolve timestamptz no fuso da sessão (America/Sao_Paulo):
+        # não há o que converter aqui.
+        linha["quando"] = linha["inicio"].strftime("%d/%m/%Y %H:%M")
+        linha["duracao"] = linha["duracao_s"]
+        linha["cliente"] = " | ".join(c["nome"] for c in linha["clientes"]) or "sem cadastro"
+        linha["contato"] = " | ".join(
+            c["contato_nome"] for c in linha["clientes"] if c.get("contato_nome"))
+        linha["gravacao"] = len(linha["gravacoes"])
+    dados = relatorio_csv.gerar([
+        ("quando", "Quando"), ("sentido", "Sentido"), ("situacao", "Situação"),
+        ("telefone_e164", "Número"), ("cliente", "Cliente"), ("contato", "Contato"),
+        ("atendente", "Atendente"), ("ramal", "Ramal"),
+        ("duracao", "Duração (s)"), ("gravacao", "Gravações"), ("pc", "PC"),
+    ], linhas)
+    atendente_id_dono = _atendente_do_usuario(usuario)
+    if atendente_id_dono:
+        banco.executar(
+            """INSERT INTO ligacao_exportacao (atendente_id, filtros, linhas)
+               VALUES (%s, %s, %s)""",
+            (atendente_id_dono, json.dumps(filtros, default=str), len(linhas)))
+    nome = f"ligacoes-{date.today():%Y-%m-%d}.csv"
+    return Response(content=dados, media_type="text/csv; charset=utf-8",
+                    headers=relatorio_csv.cabecalhos(nome))
+
+
+@app.get("/api/ligacoes/gravacao/{gravacao_id}")
+def ouvir_gravacao(gravacao_id: int, usuario: dict = Depends(auth.get_usuario)):
+    """O mp3, para tocar no navegador ou baixar.
+
+    🚨 A autorização é DENTRO e devolve **404, não 403**, no molde de
+    `/api/midia/{id}/ver`: "existe mas não é seu" não se anuncia.
+
+    🚨 Quem pode ouvir: quem tem a aba (`LIG_1.1`) **ou** quem atende
+    (`ATD_1.2`) -- senão o player do modal da ficha não funcionaria para
+    ninguém além do owner.
+
+    O `FileResponse` do Starlette já responde `Range`/206, então arrastar o
+    áudio funciona sem código nosso.
+    """
+    pode = (registro_telas.pode_acessar(usuario, "LIG_1.1")
+            or registro_telas.pode_acessar(usuario, "ATD_1.2"))
+    if not pode:
+        raise HTTPException(status_code=404, detail="Gravação não encontrada.")
+    g = ligacoes_consulta.gravacao(gravacao_id)
+    if not g:
+        raise HTTPException(status_code=404, detail="Gravação não encontrada.")
+    caminho = pathlib.Path(g["caminho"])
+    if not caminho.exists():
+        raise HTTPException(status_code=404, detail="Arquivo não está no disco.")
+    return FileResponse(caminho, media_type="audio/mpeg")
+
+
+# ── Alistamento do agente por SENHA (15/10/2026) ────────────────────────────
+#
+# 🔵 *"o .exe deve rodar livre assim, porém validar o atendente do MicroSip
+# com uma senha que será gerada sempre via algoritmo e é mutável para rodar"*
+# e *"se trocarem de PC é só executar novamente e me pedir a senha de uso"*.
+#
+# 🚨 ESTA ROTA MORA AQUI, NO PAINEL, e não na porta própria (8010): lá o nginx
+# exige certificado de cliente, e um PC que está se alistando ainda NÃO TEM
+# certificado -- não conseguiria nem abrir a conexão. Alistar aqui também é o
+# que mantém a promessa do kit: nenhum passo precisa de root nem toca o nginx.
+#
+# 🚨 Sem `requer_tela`: quem fala é o PC da pessoa, e a prova é a senha de uso
+# único (`movizap/ligacoes_alistar.py`). Tentativa errada cai no `ratelimit`,
+# o mesmo que trava o login.
+
+
+class AlistarEntrada(BaseModel):
+    ramal: str = Field(max_length=10)
+    senha: str = Field(max_length=30)
+    pedido: str = Field(max_length=8000)   # o CSR que o `certreq` gerou no PC
+    pc: str | None = Field(default=None, max_length=100)
+
+
+@app.post("/api/ligacoes/agente/alistar")
+def alistar_agente(dados: AlistarEntrada, request: Request):
+    """Uma chamada e o PC está pronto: confere a senha, queima a janela,
+    revoga o PC anterior do ramal, cria a chave e assina o certificado deste
+    PC. Devolve a chave e o certificado -- é a única vez que a chave aparece."""
+    try:
+        return ligacoes_alistar.alistar(
+            dados.ramal, dados.senha, dados.pedido, dados.pc,
+            ratelimit.ip_do_cliente(request))
+    except ligacoes_alistar.SenhaInvalida as e:
+        raise HTTPException(status_code=401, detail=str(e)) from e
 
 
 class NotificacaoAtiva(BaseModel):

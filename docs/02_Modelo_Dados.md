@@ -1750,16 +1750,104 @@ Cada operador usa o MicroSIP (central Intelbras WideVoice); um agente no PC
 | `agente_ligacao` | a chave do agente de cada ramal (**só o hash**, `chave_sha256`), `ultimo_contato_em`, `ultimo_pc`, `ultima_versao`, `ultimo_erro`, `pendentes`, `revogado_em`. Gerar chave nova revoga a anterior do ramal. **Migração 060 (25/09, mTLS):** `cert_sha256` e `cert_validade` (o certificado do mesmo agente, conferido junto da chave na porta própria), `ultimo_ip` e `ultimo_aviso` (o que o alerta de PC mudo e de certificado vencendo já mostrou, para não repetir) |
 | `ligacao` | uma linha por ligação do histórico, com ou sem gravação: `agente_id`, `atendente_id`, `ramal`, `call_id`, `numero_bruto`, `telefone_e164`, `sentido` (feita/recebida/perdida), `situacao`, `inicio`, `duracao_s`, `pc`, `recebida_em`. Única por `(ramal, call_id)` |
 | `ligacao_gravacao` | as gravações de cada ligação: `ligacao_id`, `nome_original`, `arquivo_sha256` (único), `arquivo_bytes`, `caminho`, `inicio`, `recebida_em` |
+| `alistamento_queimado` | **migração 063 (15/10)**: a janela de senha de alistamento já GASTA — `ramal`, `janela` (epoch/600), `usado_em`, `pc`, `ip`, `agente_id`, com `UNIQUE (ramal, janela)`. 🚨 A senha NUNCA é guardada: ela é derivada por HMAC de `MOVIZAP_LIGACOES_SENHA_SEGREDO` sobre (ramal, janela de 10 min), e é este `UNIQUE` que a faz servir **uma vez só** |
+| `ligacao_exportacao` | **migração 063 (15/10)**: o rastro de cada CSV exportado da aba Ligações — `atendente_id`, `quando`, `filtros` (jsonb) e `linhas`. Não guarda o conteúdo exportado, só quem levou o quê e quando: exportar ligação é número de telefone e áudio de conversa saindo do sistema |
 
 - **Uma ligação pode ter várias gravações:** quando a gravação recomeça, o
   MicroSIP abre outro arquivo (medido em 10/08 13:27 e 18/09 17:34). Por isso
   a gravação tem tabela própria, e não colunas em `ligacao`.
+- **Índices da 063 (15/10), nascidos junto das consultas que os usam:**
+  `ligacao (inicio DESC)` para o grid, `(atendente_id, inicio DESC)` e
+  `(ramal, inicio DESC)` para os filtros, e a FK `(agente_id)`. O de
+  `(telefone_e164, inicio DESC)` vem da 059 e é o que serve o modal da ficha.
+  Índice sem consulta é palpite -- por isso não nasceram antes.
 - **O arquivo mora em disco**, em `/home/claude/movizap_ligacoes/AAAA/MM/<sha256>.mp3`
   (0640), fora da pasta de mídia do WhatsApp, para entrar sozinho no backup
   noturno (`empacotar movizap_ligacoes`).
 - **Idempotente pelo banco:** o agente reenvia sem duplicar. A resposta
   devolve o SHA-256 relido do disco, e o agente só marca como salvo quando ele
   bate com o do PC.
+- **Agente de importação (15/10):** uma linha de `agente_ligacao` pode nascer
+  **já revogada**, com `ultima_versao = 'import'` — é o dono que o import
+  retroativo (`scripts/importar_ligacoes.py`) usa quando o ramal nunca teve
+  agente. Ela existe para a ligação ter de quem ser, e **não** serve para
+  enviar: a chave é aleatória e ninguém a vê. O import **nunca** revoga o
+  agente vivo de um ramal.
 - **Alerta:** `ligacoes.agentes_mudos()` lista quem está sem contato há mais
   de 24 h (ou nunca falou); `scripts/agentes_mudos.py` roda no gancho
   `SessionStart` do Claude Code dele e não imprime nada quando está tudo em dia.
+
+### `mensagem.evento` — o log de ações da conversa (migração 064, 15/10)
+
+🔵 *"log dentro da conversa interno apenas sobre ações de transfernecia,
+inserir pessoas, etc, pode ser em Nota interna do Movizap"*.
+
+| Campo | O quê |
+|---|---|
+| `mensagem.evento` | `text`, nulo em mensagem comum. Lista fechada no CHECK `ck_evento_conhecido`: `assumiu`, `entrou`, `convidou`, `saiu`, `removeu`, `devolveu`, `transferiu`, `encerrou`, `vinculou`, `desvinculou`, `mudou_tipo`, `bloqueou`, `desbloqueou` |
+
+- 🚨 **É COLUNA, E NÃO UM `tipo` NOVO.** O CHECK `ck_nota_e_interna` amarra
+  `tipo = 'nota'` a `direcao = 'interna'` **nos dois sentidos**: um
+  `tipo = 'sistema'` interna seria recusado, e afrouxar esse CHECK abriria a
+  porta para uma nota vazar como mensagem de saída. O evento **é** nota
+  interna, com uma marca a mais — e `ck_evento_e_nota_interna` garante isso no
+  banco, não na confiança do código.
+- 🚨 **`autor = 'sistema'`**, nunca `'atendente'`: a frase foi escrita pelo
+  sistema, em nome de quem agiu. Quem agiu vai em `atendente_id`.
+- 🚨 **Evento não se edita nem se apaga.** A recusa mora em
+  `conversas._minha_nota`, o único caminho de editar e apagar nota. Ela é
+  obrigatória porque o `atendente_id` do evento é de quem agiu — sem a recusa
+  explícita, essa pessoa passaria no teste "só quem escreveu pode editar".
+- ⚠️ **Nada retroativo**, decisão declarada: transferência, encerramento e
+  convite dariam para reconstituir, mas **vínculo e tipo não têm histórico**, e
+  log pela metade com data inventada engana mais do que log que começa hoje.
+- ⚠️ **Não conta como não lida**: só `direcao = 'entrada'` conta, e nota nunca
+  contou.
+- Índice parcial `ix_mensagem_evento (conversa_id, id) WHERE evento IS NOT NULL`,
+  para quem quiser só o log de um atendimento.
+
+🚨 **A armadilha que isto custou, medida em 15/10 com `faulthandler`:** gravar o
+evento pedindo uma **conexão nova** dentro de um `with banco.cursor()` ainda
+aberto **trava para sempre**. A `INSERT INTO mensagem` tem FK para `conversa` e
+precisa de trava na linha da conversa, que a transação do chamador já segura:
+uma sessão espera a outra, que espera a primeira, e o Postgres não vê deadlock
+porque só há **um** esperando. Não é o pool (`max_size=8`, `timeout=10`: falta
+de conexão daria erro em 10 s). Por isso `registrar_evento` aceita `cur`, e
+quem chama de dentro de uma transação **tem de passar**. Com `cur`, um erro no
+log abortaria a transação da ação inteira — daí o **SAVEPOINT**: falha de log
+desfaz só o log.
+
+### `nota_leitura` — "visto por" na nota interna (migração 065, 15/10)
+
+🔵 *"confirmação de leitura das notas dentro da conversa ... um icone que ao
+clicar mostra que ja leu aquela nota, junto ao carimbo de data e hora, bem
+pequeno mesmo"*.
+
+| Tabela | O quê |
+|---|---|
+| `nota_leitura` | `mensagem_id`, `atendente_id`, `visto_em`. PK `(mensagem_id, atendente_id)`, que é o que faz o carimbo ser o da PRIMEIRA vez |
+
+- 🚨 **O rótulo é "visto por", nunca "leu".** O sistema sabe que a nota esteve
+  na tela de alguém; não sabe que a pessoa leu. Dizer "leu" vira prova de algo
+  que não se mediu.
+- 🚨 **Marca quando a nota APARECE na tela** (`IntersectionObserver`), não
+  quando a conversa abre: abrir uma conversa de 200 mensagens e não rolar até o
+  fim não é ver a nota de lá atrás.
+- 🚨 **Nota anterior a `conversas.LEITURA_DE_NOTA_DESDE` (15/10) não é
+  carimbada**, e a consulta devolve `leitura_rastreada = False` por nota. É o
+  que permite à tela dizer *"sem registro"* em vez de *"ninguém viu"* — que
+  seria uma afirmação falsa sobre o passado.
+- ⚠️ A conversa é **coletiva** e não tinha nenhuma noção de leitura por
+  mensagem. Quem tem marcador é o chat interno, e lá é marca d'água por sala
+  (`chat_membro.lido_ate`), não por mensagem.
+- Índice `ix_nota_leitura_atendente (atendente_id, visto_em DESC)` para o
+  caminho oposto ("o que esta pessoa já viu"), que ainda não tem tela.
+
+🚨 **O EVENTO NÃO É "A ÚLTIMA MENSAGEM" DA CONVERSA**, e isso vale para duas
+consultas de `listar()`: a prévia da lista (`u.conteudo`) e a regra de **sem
+dono** (02/10: "a última mensagem tem de ser de `entrada`"). Sem
+`m.evento IS NULL` nas duas, convidar alguém numa conversa órfã a **tirava da
+fila**, e toda conversa passaria a mostrar "assumiu a conversa" no lugar da
+última fala do cliente. Achado pela suíte inteira, não por leitura.
+⚠️ A exclusão é do **evento**, não da nota: nota é coisa que uma pessoa
+escreveu, e vê-la na prévia informa.

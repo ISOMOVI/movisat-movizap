@@ -1315,7 +1315,7 @@ def listar(estado: str | None = None, atendente_id: int | None = None,
             """c.atendente_id IS NULL
                AND c.estado <> 'resolvida'
                AND (SELECT m.direcao FROM mensagem m
-                     WHERE m.conversa_id = c.id
+                     WHERE m.conversa_id = c.id AND m.evento IS NULL
                      ORDER BY m.criada_em DESC, m.id DESC
                      LIMIT 1) = 'entrada'""")
     # 🔵 A ABA "TIME" (pedido dele, 23/09: *"uma nova aba de tipo de conversa
@@ -1513,8 +1513,14 @@ def listar(estado: str | None = None, atendente_id: int | None = None,
           LEFT JOIN time t ON t.id = c.time_id
           LEFT JOIN canal ca ON ca.id = c.canal_id
           LEFT JOIN LATERAL (
+                -- 🚨 15/10: `evento IS NULL` -- o log de ações (Bloco 11) NÃO
+                -- é a última mensagem da conversa. Sem isto, toda conversa
+                -- passaria a mostrar "assumiu a conversa" na prévia, no lugar
+                -- da última fala do cliente, na tela mais usada do painel.
+                -- ⚠️ NOTA DE GENTE CONTINUA VALENDO: ela é informação ("fulano
+                -- anotou X"); evento é contabilidade do sistema.
                 SELECT conteudo, direcao, tipo FROM mensagem m
-                 WHERE m.conversa_id = c.id
+                 WHERE m.conversa_id = c.id AND m.evento IS NULL
                  ORDER BY m.criada_em DESC, m.id DESC LIMIT 1
           ) u ON true
           -- 🔵 23/09: SÓ PARA A ORDEM -- "tem não lida?", e não "quantas".
@@ -1647,6 +1653,76 @@ def empresas_do_telefone(conversa_id: int) -> dict:
             WHERE tel.e164 = %s
             ORDER BY cl.nome""",
         (conversa_linha["telefone_e164"],))}
+
+
+def contatos_da_empresa(conversa_id: int) -> dict:
+    """Os outros contatos da empresa desta conversa (Bloco 6, 15/10).
+
+    🔵 15/10: na ficha, poder ver os outros contatos da empresa vinculada e
+    pular para a conversa de um deles.
+
+    🚨 ROTA IRMÃ, NÃO `/api/clientes/{id}`. A consulta sai sob `ATD_1.2`
+    porque é da CONVERSA; `/api/clientes/{id}` é `CAD_1.1`, que o perfil
+    `atendimento` não tem desde 10/08 -- a gaveta tomaria 403. É o mesmo
+    motivo de `buscar_empresa_para_vincular` existir.
+
+    🚨 CADA TELEFONE É UMA LINHA, não cada contato: contato com dois números
+    dá duas linhas, e contato SEM número nenhum aparece mesmo assim, com
+    `e164` nulo. Esconder quem não tem número faria a lista afirmar "a empresa
+    tem 3 contatos" onde ela tem 5 -- omissão também é tela que mente.
+
+    ⚠️ `tem_whatsapp` tem TRÊS valores, e eles não se confundem: `true` é
+    conferido e tem, `false` é conferido e NÃO tem, `None` é nunca conferido.
+    O valor vai cru; quem decide o que mostrar é a tela.
+
+    ⚠️ `motivo` existe para a tela não precisar adivinhar por que a lista veio
+    vazia: número sem cadastro é diferente de empresa sem outro contato.
+    """
+    conversa = banco.um(
+        "SELECT contato_id, telefone_e164 FROM conversa WHERE id = %s",
+        (conversa_id,))
+    if not conversa:
+        return {"cliente": None, "contatos": [], "motivo": "conversa_inexistente"}
+    if not conversa["contato_id"]:
+        return {"cliente": None, "contatos": [], "motivo": "sem_cadastro"}
+
+    pessoa = cadastro.contato(conversa["contato_id"])
+    if not pessoa or not pessoa.get("cliente_id"):
+        return {"cliente": None, "contatos": [], "motivo": "contato_sem_empresa"}
+
+    empresa = cadastro.cliente(pessoa["cliente_id"])
+    if not empresa:
+        return {"cliente": None, "contatos": [], "motivo": "contato_sem_empresa"}
+
+    atual = conversa["contato_id"]
+    linhas = []
+    for c in empresa.get("contatos") or []:
+        base = {"contato_id": c["id"], "nome": c["nome"],
+                "papeis": c.get("papeis") or [],
+                "este_contato": c["id"] == atual}
+        telefones = c.get("telefones") or []
+        if not telefones:
+            linhas.append({**base, "telefone_id": None, "e164": None,
+                           "bruto": None, "principal": False,
+                           "tem_whatsapp": None, "esta_conversa": False})
+            continue
+        for t in telefones:
+            linhas.append({**base, "telefone_id": t["id"], "e164": t["e164"],
+                           "bruto": t.get("bruto"),
+                           "principal": bool(t.get("principal")),
+                           "tem_whatsapp": t.get("tem_whatsapp"),
+                           "esta_conversa": bool(conversa["telefone_e164"]
+                                                 and t["e164"] == conversa["telefone_e164"])})
+
+    # O contato DESTA conversa primeiro, depois por nome: quem abre o modal
+    # está perguntando "quem mais existe além de quem eu estou atendendo".
+    linhas.sort(key=lambda l: (not l["este_contato"], (l["nome"] or "").lower(),
+                               not l["principal"], l["e164"] or ""))
+
+    return {"cliente": {"id": empresa["id"], "nome": empresa["nome"],
+                        "nome_fantasia": empresa.get("nome_fantasia"),
+                        "ativo": empresa.get("ativo")},
+            "contatos": linhas, "motivo": None}
 
 
 def _empresa_da_conversa(conversa: dict) -> dict | None:
@@ -2008,7 +2084,7 @@ def mensagens(conversa_id: int, limite: int = JANELA_INICIAL,
     # passou do teto ainda (a maior tem 130), então isso nunca apareceu: é
     # defeito latente, e subir o teto sozinho não o corrigiria.
     # Pega-se as n mais RECENTES e reordena para exibir.
-    return banco.varios(
+    linhas = banco.varios(
         """SELECT * FROM (
                SELECT m.id, m.conversa_id, m.direcao, m.autor, m.tipo, m.conteudo, m.entrega,
                       m.criada_em, m.id_externo, a.nome AS atendente_nome,
@@ -2016,6 +2092,23 @@ def mensagens(conversa_id: int, limite: int = JANELA_INICIAL,
                       -- editar e apagar na mensagem que é MINHA, e nome não
                       -- serve para isso (dois atendentes podem ter o mesmo).
                       m.atendente_id,
+                      -- 🔵 15/10, Bloco 11: a marca de EVENTO. Sem ela a tela
+                      -- desenharia o log como nota comum, com balão e com
+                      -- botão de editar -- e evento não se edita.
+                      m.evento,
+                      -- 🔵 15/10, Bloco 12: quem teve esta NOTA na tela, e
+                      -- quando. Subconsulta, e não JOIN: com JOIN, uma nota
+                      -- vista por três pessoas viraria três linhas no fio.
+                      -- Só para nota: mensagem do cliente não tem isto.
+                      CASE WHEN m.tipo = 'nota' THEN (
+                          SELECT json_agg(json_build_object(
+                                     'atendente_id', v.atendente_id,
+                                     'nome', av.nome, 'visto_em', v.visto_em)
+                                 ORDER BY v.visto_em)
+                            FROM nota_leitura v
+                            JOIN atendente av ON av.id = v.atendente_id
+                           WHERE v.mensagem_id = m.id)
+                      END AS vistos,
                       -- Quem falou DENTRO do grupo. Nulo em conversa direta,
                       -- onde o remetente é a própria conversa.
                       m.remetente_jid, m.remetente_nome,
@@ -2064,6 +2157,18 @@ def mensagens(conversa_id: int, limite: int = JANELA_INICIAL,
            ) recentes
            ORDER BY criada_em, id""",
         (_ids_do_historico(conversa_id), antes_de, antes_de, limite))
+
+    for linha in linhas:
+        # Lista no lugar de NULL: a tela não precisa saber que `json_agg` sem
+        # acerto devolve `None`.
+        linha["vistos"] = linha.get("vistos") or []
+        # ⚠️ O QUE DISTINGUE "NINGUÉM VIU" DE "NÃO HAVIA REGISTRO" (Bloco 12).
+        # Sem isto, toda nota anterior a 15/10 apareceria como não vista por
+        # ninguém -- afirmação falsa sobre o passado, dita com cara de dado.
+        linha["leitura_rastreada"] = bool(
+            linha["tipo"] == "nota"
+            and linha["criada_em"] >= LEITURA_DE_NOTA_DESDE)
+    return linhas
 
 
 def tem_anteriores(conversa_id: int, antes_de: int | None) -> bool:
@@ -2142,6 +2247,8 @@ def assumir(conversa_id: int, atendente_id: int) -> dict:
             WHERE id = %s AND atendente_id IS NULL AND estado <> 'resolvida'
             RETURNING id""", (atendente_id, conversa_id))
     if linha:
+        # 🔵 15/10, Bloco 11: o log da ação.
+        registrar_evento(conversa_id, "assumiu", "assumiu a conversa", atendente_id)
         return {"ok": True, "conversa_id": conversa_id, "reaberta": False}
 
     atual = banco.um(
@@ -2198,6 +2305,8 @@ def assumir(conversa_id: int, atendente_id: int) -> dict:
 
     log.info("conversa %s reaberta e assumida pelo atendente %s",
              conversa_id, atendente_id)
+    registrar_evento(conversa_id, "assumiu",
+                     "reabriu e assumiu a conversa", atendente_id)
     return {"ok": True, "conversa_id": conversa_id, "reaberta": True}
 
 
@@ -3009,15 +3118,150 @@ def anotar(conversa_id: int, texto: str, atendente_id: int | None) -> dict:
 # ⚠️ SEM JANELA DE TEMPO -- decisão dele (28/09): é registro interno, baixo
 # risco, e travar por tempo só atrapalharia corrigir uma nota antiga.
 
+# ── EVENTO: o log de ações DENTRO da conversa (Bloco 11, 15/10) ─────────────
+#
+# 🔵 Pedido dele: *"log dentro da conversa interno apenas sobre ações de
+# transfernecia, inserir pessoas, etc, pode ser em Nota interna do Movizap"*.
+#
+# 🚨 O EVENTO É UMA NOTA INTERNA COM UMA MARCA (`mensagem.evento`, migração
+# 064), e não um `tipo` novo: o CHECK `ck_nota_e_interna` amarra
+# `tipo = 'nota'` a `direcao = 'interna'` nos dois sentidos, e afrouxá-lo
+# abriria a porta para uma nota vazar como mensagem de saída. Como nota, o
+# evento aparece na conversa, no ponto do tempo certo, e nunca vai ao cliente.
+#
+# 🚨 `autor = 'sistema'`, e NÃO 'atendente': a frase foi escrita pelo sistema,
+# em nome de quem agiu. Quem agiu vai em `atendente_id`, que é o que a tela usa
+# para dizer o nome.
+#
+# 🚨 EVENTO NÃO SE EDITA NEM SE APAGA -- log que se reescreve não é log. A
+# recusa mora em `_minha_nota`, o único caminho de editar e apagar nota. Sem
+# ela o próprio autor passaria no teste "só quem escreveu pode editar", porque
+# `atendente_id` é dele.
+#
+# ⚠️ FALHAR AQUI NÃO PODE DERRUBAR A AÇÃO. A transferência já aconteceu e está
+# comitada quando o evento é gravado; se a gravação do log estourar, o certo é
+# perder a LINHA DO LOG e registrar o erro, nunca desfazer o trabalho de quem
+# clicou. É a razão de o `except` ser largo e de o evento ficar FORA da
+# transação da ação.
+#
+# ⚠️ NADA RETROATIVO, decisão declarada: transferência, encerramento e convite
+# dariam para reconstituir, mas vínculo e tipo NÃO TÊM HISTÓRICO -- e log pela
+# metade, com data inventada para o que falta, engana mais que log que começa
+# hoje. A tela diz desde quando registra.
+_INSERT_EVENTO = """INSERT INTO mensagem
+       (conversa_id, direcao, autor, tipo, conteudo, evento,
+        atendente_id, criada_em)
+   VALUES (%s, 'interna', 'sistema', 'nota', %s, %s, %s, now())
+   RETURNING id"""
+
+
+def registrar_evento(conversa_id: int, evento: str, texto: str,
+                     atendente_id: int | None = None, cur=None) -> int | None:
+    """Uma linha no log da conversa. Devolve o id da nota, ou None se falhou.
+
+    `evento` tem de estar na lista do CHECK `ck_evento_conhecido` (migração
+    064): valor novo exige migração, e é isso que impede o log de ganhar dois
+    verbos diferentes para a mesma ação em dois lugares do código.
+
+    🚨 **QUEM CHAMA DE DENTRO DE UM `with banco.cursor()` TEM DE PASSAR O
+    `cur`.** Sem ele, esta função pede uma conexão NOVA e faz `INSERT INTO
+    mensagem`, que precisa de trava na linha de `conversa` por causa da FK --
+    trava que a transação ainda aberta do chamador já segura. Uma sessão espera
+    a outra, que espera a primeira; o Postgres não vê deadlock (só há um
+    esperando) e **espera para sempre**. Medido em 15/10 dentro de `sair()`,
+    com `faulthandler`, depois de a suíte ficar pendurada.
+
+    ⚠️ Não foi o pool: ele tem `max_size=8` e `timeout=10`, e falta de conexão
+    daria erro em 10 s. Aumentar o pool não consertaria nada.
+
+    ⚠️ COM `cur`, O LOG ENTRA NA TRANSAÇÃO DA AÇÃO, e um erro aqui abortaria
+    essa transação inteira -- o `except` não desfaz o estado abortado no
+    Postgres. Daí o SAVEPOINT: falha de log desfaz só o log, e a ação, que é o
+    trabalho de quem clicou, continua valendo.
+    """
+    dados = (conversa_id, texto, evento, atendente_id)
+    if cur is not None:
+        try:
+            cur.execute("SAVEPOINT evento_log")
+            cur.execute(_INSERT_EVENTO, dados)
+            return cur.fetchone()["id"]
+        except Exception:
+            log.exception("evento %r não gravado na conversa %s (na transação)",
+                          evento, conversa_id)
+            try:
+                cur.execute("ROLLBACK TO SAVEPOINT evento_log")
+            except Exception:
+                log.exception("savepoint do evento não desfeito")
+            return None
+    try:
+        return banco.um(_INSERT_EVENTO, dados)["id"]
+    except Exception:
+        log.exception("evento %r não gravado na conversa %s", evento, conversa_id)
+        return None
+
+
+# ── "VISTO POR": quem teve a nota interna na tela (Bloco 12, 15/10) ─────────
+#
+# 🔵 Pedido dele: *"um icone que ao clicar mostra que ja leu aquela nota, junto
+# ao carimbo de data e hora, bem pequeno mesmo"*.
+#
+# 🚨 O RÓTULO É "VISTO POR", NUNCA "LEU", e isto não é preciosismo de palavra.
+# O que o sistema sabe é que a nota ESTEVE NA TELA de alguém. Dizer "leu"
+# transforma suposição em prova, e alguém vai cobrar com base nisso.
+#
+# 🚨 MARCA QUANDO A NOTA APARECE, não quando a conversa abre: abrir uma
+# conversa de 200 mensagens e não rolar até o fim não é ver a nota de lá atrás.
+# Quem decide que apareceu é a tela (ela é a única que sabe o que está visível);
+# o backend só aceita ids de nota DESTA conversa.
+#
+# ⚠️ NOTA ANTERIOR A 15/10 NÃO TEM REGISTRO, e a tela diz isso em vez de
+# "ninguém viu". O corte vai junto de cada nota, em `leitura_rastreada`, para a
+# tela não precisar saber de data nenhuma.
+LEITURA_DE_NOTA_DESDE = datetime(2026, 10, 15, tzinfo=timezone.utc)
+
+
+def marcar_notas_vistas(conversa_id: int, mensagem_ids: list[int],
+                        atendente_id: int | None) -> int:
+    """Carimba "visto" nas notas que apareceram na tela desta pessoa.
+
+    Devolve quantas linhas nasceram agora. Idempotente pela PK
+    `(mensagem_id, atendente_id)`: a mesma nota reaparecendo na tela não muda
+    a hora do primeiro "visto" -- e não deve, senão o carimbo passa a dizer
+    "a última vez em que rolou por aqui".
+    """
+    if not atendente_id or not mensagem_ids:
+        return 0
+    ids = [int(i) for i in mensagem_ids][:200]
+    linha = banco.um(
+        """WITH alvo AS (
+               SELECT id FROM mensagem
+                WHERE id = ANY(%s) AND conversa_id = %s AND tipo = 'nota'
+                  AND criada_em >= %s
+           ), entrou AS (
+               INSERT INTO nota_leitura (mensagem_id, atendente_id)
+               SELECT id, %s FROM alvo
+               ON CONFLICT DO NOTHING
+               RETURNING 1
+           )
+           SELECT count(*) AS n FROM entrou""",
+        (ids, conversa_id, LEITURA_DE_NOTA_DESDE, atendente_id))
+    return linha["n"]
+
+
 def _minha_nota(conversa_id: int, mensagem_id: int, atendente_id: int | None):
     """(linha, motivo). A mensagem, se ela for uma nota MINHA."""
     m = banco.um(
-        """SELECT id, conversa_id, tipo, conteudo, atendente_id, apagada_em
+        """SELECT id, conversa_id, tipo, conteudo, evento, atendente_id, apagada_em
              FROM mensagem WHERE id = %s""", (mensagem_id,))
     if not m or m["conversa_id"] != conversa_id:
         return None, "Nota não encontrada nesta conversa."
     if m["tipo"] != "nota":
         return None, "Só nota interna pode ser editada ou apagada por aqui."
+    # 🚨 LOG QUE SE REESCREVE NÃO É LOG (Bloco 11, 15/10). A recusa tem de
+    # estar aqui porque o `atendente_id` do evento é de quem AGIU -- sem esta
+    # linha, essa pessoa passaria no teste "só quem escreveu pode editar".
+    if m["evento"]:
+        return None, "Isto é um registro de ação, e não se edita nem se apaga."
     if not atendente_id or m["atendente_id"] != atendente_id:
         return None, "Só quem escreveu a nota pode editá-la ou apagá-la."
     if m["apagada_em"]:
@@ -3237,6 +3481,26 @@ def transferir(conversa_id: int, time_id: int | None,
                  de_atendente_id or atual["atendente_id"]))
     log.info("conversa %s transferida (time=%s pessoa=%s)",
              conversa_id, time_id, para_atendente_id)
+    # ⚠️ ESTE EVENTO NÃO SUBSTITUI A NOTA DE RESUMO de 23/09, e os dois não são
+    # a mesma coisa: a nota é o TEXTO que quem assume precisa ler, e só existe
+    # quando houve resumo; o evento é o LOG, e existe sempre. Transferência sem
+    # resumo não deixava rastro nenhum na conversa até hoje.
+    # ⚠️ SÓ O MANUAL VIRA EVENTO. A distribuição automática
+    # (`inatividade`, `ia_triagem`, `sem_time`) já grava uma nota do sistema
+    # explicando a regra; o evento ali seria uma segunda linha dizendo quase o
+    # mesmo, em toda conversa distribuída.
+    _destino = None
+    if motivo == "manual" and para_atendente_id:
+        _destino = (banco.um("SELECT nome FROM atendente WHERE id = %s",
+                             (para_atendente_id,)) or {}).get("nome")
+    elif motivo == "manual" and time_id:
+        _time = (banco.um("SELECT nome FROM time WHERE id = %s", (time_id,)) or {}).get("nome")
+        _destino = f"o time {_time}" if _time else None
+    if motivo == "manual":
+        registrar_evento(conversa_id, "transferiu",
+                         f"transferiu para {_destino}" if _destino
+                         else "transferiu a conversa",
+                         de_atendente_id)
     return {"ok": True, "conversa_id": conversa_id}
 
 
@@ -3253,6 +3517,8 @@ def devolver_para_fila(conversa_id: int, de_atendente_id: int | None,
         """INSERT INTO transferencia (conversa_id, de_atendente_id, motivo, resumo)
            VALUES (%s, %s, 'manual', %s)""",
         (conversa_id, de_atendente_id, observacao))
+    registrar_evento(conversa_id, "devolveu",
+                     "devolveu a conversa para a fila", de_atendente_id)
     return {"ok": True, "conversa_id": conversa_id}
 
 
@@ -3342,6 +3608,11 @@ def encerrar(conversa_id: int, classificacao_id: int | None = None,
     log.info("conversa %s concluída por %s%s%s", conversa_id, autor,
              f" como {classificacao['nome']}" if classificacao else "",
              f", {sairam} participante(s) saíram" if sairam else "")
+    registrar_evento(
+        conversa_id, "encerrou",
+        "encerrou o atendimento"
+        + (f" como {classificacao['nome']}" if classificacao else ""),
+        autor)
     return {"ok": True, "conversa_id": conversa_id,
             "resolvida_por": autor, "participantes_saidos": sairam}
 
@@ -3568,6 +3839,14 @@ def convidar(conversa_id: int, atendente_id: int,
                       ELSE EXCLUDED.convidado_por END""",
         (conversa_id, atendente_id, convidado_por))
     log.info("conversa %s: %s foi convidado", conversa_id, alvo["nome"])
+    # 🔵 15/10, Bloco 11. `convidado_por == atendente_id` é a pessoa entrando
+    # por conta própria -- `entrar()` reusa este caminho de propósito --, e não
+    # alguém sendo chamado. O log diz qual dos dois foi.
+    if convidado_por == atendente_id:
+        registrar_evento(conversa_id, "entrou", "entrou na conversa", atendente_id)
+    else:
+        registrar_evento(conversa_id, "convidou",
+                         f"chamou {alvo['nome']} para acompanhar", convidado_por)
     return {"ok": True, "conversa_id": conversa_id, "atendente_id": atendente_id,
             "nome": alvo["nome"]}
 
@@ -3605,6 +3884,7 @@ def sair(conversa_id: int, atendente_id: int) -> dict:
         if not era_dono and not era_participante:
             return {"ok": False, "motivo": "Você não está nesta conversa."}
         if not era_dono:
+            registrar_evento(conversa_id, "saiu", "saiu da conversa", atendente_id, cur=cur)
             return {"ok": True, "conversa_id": conversa_id, "novo_dono": None,
                     "para_fila": False}
 
@@ -3634,6 +3914,8 @@ def sair(conversa_id: int, atendente_id: int) -> dict:
                 (conversa_id, atendente_id, "saiu e não havia quem herdasse"))
             log.info("conversa %s voltou para a fila: o dono saiu sem herdeiro",
                      conversa_id)
+            registrar_evento(conversa_id, "saiu",
+                             "saiu da conversa, que voltou para a fila", atendente_id, cur=cur)
             return {"ok": True, "conversa_id": conversa_id, "novo_dono": None,
                     "para_fila": True}
 
@@ -3654,6 +3936,8 @@ def sair(conversa_id: int, atendente_id: int) -> dict:
              "o dono saiu; herdou quem estava há mais tempo"))
         log.info("conversa %s: dono saiu, %s herdou",
                  conversa_id, herdeiro["nome"])
+        registrar_evento(conversa_id, "saiu",
+                         f"saiu da conversa; {herdeiro['nome']} herdou", atendente_id, cur=cur)
         return {"ok": True, "conversa_id": conversa_id,
                 "novo_dono": herdeiro["atendente_id"],
                 "novo_dono_nome": herdeiro["nome"], "para_fila": False}
@@ -3682,6 +3966,12 @@ def remover(conversa_id: int, atendente_id: int, quem_pede: int | None) -> dict:
             RETURNING atendente_id""", (conversa_id, atendente_id))
     if not linha:
         return {"ok": False, "motivo": "Esta pessoa não está na conversa."}
+    # O nome de quem saiu vem por consulta: a função recebe só o id, e um log
+    # que diz "tirou o atendente 28684" não é legível por ninguém.
+    _fora = banco.um("SELECT nome FROM atendente WHERE id = %s", (atendente_id,))
+    registrar_evento(conversa_id, "removeu",
+                     f"tirou {(_fora or {}).get('nome') or 'um atendente'} da conversa",
+                     quem_pede)
     return {"ok": True, "conversa_id": conversa_id}
 
 
@@ -3857,6 +4147,7 @@ def bloquear(conversa_id: int, atendente_id: int | None) -> dict:
         (c["canal_id"], c["telefone_e164"], atendente_id))
     log.info("numero da conversa %s bloqueado pelo atendente %s",
              conversa_id, atendente_id)
+    registrar_evento(conversa_id, "bloqueou", "bloqueou este número", atendente_id)
     return {"ok": True, "conversa_id": conversa_id}
 
 
@@ -3879,4 +4170,6 @@ def desbloquear(conversa_id: int, atendente_id: int | None) -> dict:
         (atendente_id, c["canal_id"], c["telefone_e164"]))
     log.info("numero da conversa %s desbloqueado pelo atendente %s",
              conversa_id, atendente_id)
+    registrar_evento(conversa_id, "desbloqueou",
+                     "desbloqueou este número", atendente_id)
     return {"ok": True, "conversa_id": conversa_id}

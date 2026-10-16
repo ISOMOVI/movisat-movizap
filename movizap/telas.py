@@ -375,6 +375,37 @@ TELAS = [
         "permissao": "owner",
         "fase": 2,
     },
+    # ---- LIG: ligações do MicroSIP ----
+    {
+        # 🔵 15/10: *"considere que vamos precisar de uma aba nova no Movizap
+        # para 'Ligações' - a idéia é um grid simples que tenha as ligações do
+        # historico do MicroSip, consultadas por cliente - ja da base Movizap,
+        # ou por Atendente, ou por data ou por numero, etc"*.
+        #
+        # 🚨 NASCEU SÓ DO OWNER E DUROU UM DIA. Em 15/10, poucas horas depois:
+        # *"pode exibir a aba para todos"*. Virou permissão `atendimento` em
+        # vez de permissão própria concedida a cada perfil, porque é isso que
+        # o `test_admin_ve_exatamente_o_que_ele_decidiu` prevê ("tela nova de
+        # atendimento entra sozinha -- é a permissão"): o conjunto fechado do
+        # admin, que guarda a frase dele de 24/09, continua intacto.
+        #
+        # ⚠️ Fica de fora o perfil `cadastro` (só CAD_1.1/CAD_1.2). Se for para
+        # lá também, volta a ser permissão própria, concedida perfil a perfil.
+        #
+        # 🚨 Todo atendente passa a poder OUVIR, BAIXAR e EXPORTAR. O rastro de
+        # `ligacao_exportacao` deixa de ser detalhe: é a única resposta para
+        # "quem levou o quê".
+        #
+        # ⚠️ Módulo novo (LIG): `MenuLateral.NOME_DO_MODULO` precisa conhecê-lo,
+        # senão o menu mostra o prefixo cru.
+        "codigo": "LIG_1.1",
+        "titulo": "Ligações",
+        "rota": "/ligacoes",
+        "icone": "bi-telephone",
+        "descricao": "Ligações do MicroSIP: por cliente, atendente, data ou número.",
+        "permissao": "atendimento",
+        "fase": 1,
+    },
     {
         "codigo": "REL_1.1",
         "titulo": "Relatórios",

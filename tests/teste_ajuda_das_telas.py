@@ -34,6 +34,7 @@ pytestmark = pytest.mark.skipif(
 COM_AJUDA = [
     "Atendentes.vue", "Automacao.vue", "Canais.vue", "Classificacoes.vue",
     "Clientes.vue", "Contatos.vue", "Fila.vue", "Historico.vue",
+    "Ligacoes.vue",
     "IaPrompt.vue", "Informativos.vue", "RegistroDeTelas.vue",
     "Sincronizacao.vue", "Times.vue",
 ]

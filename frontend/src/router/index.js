@@ -33,6 +33,7 @@ import CaixaDeEntrada from '../telas/CaixaDeEntrada.vue'
 import Fila from '../telas/Fila.vue'
 import Informativos from '../telas/Informativos.vue'
 import Historico from '../telas/Historico.vue'
+import Ligacoes from '../telas/Ligacoes.vue'
 import ChatInterno from '../telas/ChatInterno.vue'
 import Atendentes from '../telas/Atendentes.vue'
 import Times from '../telas/Times.vue'
@@ -90,6 +91,14 @@ const rotas = [
     name: 'ATD_5.1',
     component: Historico,
     meta: { codigo: 'ATD_5.1', titulo: 'Histórico' },
+  },
+  {
+    // Fora de /atendimento: ligação do MicroSIP não é conversa de WhatsApp, e
+    // a aba é de auditoria (só do owner), não de atendimento.
+    path: '/ligacoes',
+    name: 'LIG_1.1',
+    component: Ligacoes,
+    meta: { codigo: 'LIG_1.1', titulo: 'Ligações' },
   },
   {
     // 🚨 Fora de /atendimento de propósito: é conversa entre ATENDENTES, e

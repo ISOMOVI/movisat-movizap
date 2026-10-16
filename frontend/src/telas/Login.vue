@@ -8,7 +8,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
-import { entrar } from '../estado/sessao.js'
+import { entrar, motivoDaSaida } from '../estado/sessao.js'
 import { api, definirToken, ErroDeApi } from '../api/cliente.js'
 
 const rota = useRoute()
@@ -55,6 +55,14 @@ onMounted(async () => {
     return
   }
   if (recusa) erro.value = recusa
+  /* 🚨 QUEM CAIU AQUI POR FIM DE SESSÃO TEM DE LER ISSO. Sem a frase, a
+     pessoa que estava trabalhando volta para o login sem explicação e conclui
+     que o sistema a derrubou por erro. A recusa do Google ganha a vez: ela é
+     sobre a tentativa de agora. */
+  if (!erro.value && motivoDaSaida.value) {
+    erro.value = motivoDaSaida.value
+    motivoDaSaida.value = ''
+  }
 
   try {
     const r = await api.get('/api/auth/google/disponivel')

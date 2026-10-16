@@ -85,6 +85,7 @@ const NOME_DO_MODULO = {
   ATD: 'Atendimento',
   CAD: 'Cadastro',
   CFG: 'Configuração',
+  LIG: 'Ligações',
   REL: 'Relatórios',
 }
 

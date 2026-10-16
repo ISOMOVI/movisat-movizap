@@ -12,6 +12,7 @@ para quando a tabela estiver errada, vazia ou fora do ar.
 """
 import logging
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 import psycopg
 from fastapi import Depends, HTTPException, status
@@ -26,7 +27,26 @@ from .config import settings
 log = logging.getLogger("movizap.auth")
 
 ALGORITMO = "HS256"
-TOKEN_EXPIRA_HORAS = 10
+
+# 🔵 15/10 — UM LOGIN POR DIA. Antes o token valia 10 horas corridas, o que
+# fazia a pessoa reentrar no meio da tarde por nada. Agora ele vale até a
+# VIRADA DO DIA, e é isso que dá ao rascunho da conversa (Bloco 7) um ciclo de
+# vida definido: dentro do dia o rascunho fica; na virada, morre com o login.
+#
+# 🚨 O FUSO É O DO ESCRITÓRIO, não UTC. Em UTC a virada cairia às 21h de
+# Brasília -- em plena tarde de trabalho.
+#
+# ⚠️ PISO DE 2 HORAS (minha, declarada): quem entra às 23:30 não pode cair às
+# 00:00. Nesse caso o token vai até a virada do dia SEGUINTE. Sem o piso, o
+# turno da noite é derrubado no meio.
+#
+# ⚠️ O QUE ISSO CUSTA, por escrito: quem entra às 08:00 passa a ter token de
+# 16 h em vez de 10 h -- o token vive mais, e é o preço de um login por dia.
+# Continuam valendo as travas que já existem: `atendente.ativo = false`
+# derruba na requisição seguinte, perda de permissão vira 403 na hora, e
+# rotação do `MOVIZAP_JWT_SECRET` invalida tudo.
+FUSO_DO_DIA = ZoneInfo("America/Sao_Paulo")
+PISO_HORAS = 2
 
 bearer = HTTPBearer(auto_error=False)
 pwd_ctx = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -141,13 +161,35 @@ def validar_login(login: str, senha: str) -> dict | None:
     return usuario
 
 
+def expira_na_virada(agora: datetime | None = None) -> datetime:
+    """Meia-noite seguinte em `America/Sao_Paulo`, com piso de 2 horas.
+
+    Devolve sempre em UTC -- quem assina o token não precisa saber de fuso.
+    """
+    agora = (agora or datetime.now(timezone.utc)).astimezone(FUSO_DO_DIA)
+    virada = (agora + timedelta(days=1)).replace(
+        hour=0, minute=0, second=0, microsecond=0)
+    if virada - agora < timedelta(hours=PISO_HORAS):
+        # Entrou colado na virada: vale até a virada do dia seguinte.
+        virada = (virada + timedelta(days=1)).replace(hour=0)
+    return virada.astimezone(timezone.utc)
+
+
+def criar_token_e_expiracao(login: str) -> tuple[str, datetime]:
+    """O token e a hora exata em que ele morre.
+
+    Os dois saem da MESMA conta de propósito: calcular a expiração duas vezes
+    deixaria a tela dizer uma hora e o token obedecer a outra se a chamada
+    atravessasse a meia-noite.
+    """
+    expira = expira_na_virada()
+    token = jwt.encode({"sub": login, "tipo": "movizap", "exp": expira},
+                       settings.jwt_secret, algorithm=ALGORITMO)
+    return token, expira
+
+
 def criar_token(login: str) -> str:
-    payload = {
-        "sub": login,
-        "tipo": "movizap",
-        "exp": datetime.now(timezone.utc) + timedelta(hours=TOKEN_EXPIRA_HORAS),
-    }
-    return jwt.encode(payload, settings.jwt_secret, algorithm=ALGORITMO)
+    return criar_token_e_expiracao(login)[0]
 
 
 def get_usuario(
@@ -172,6 +214,9 @@ def get_usuario(
     usuario = buscar_usuario(login)
     if not usuario or not usuario["ativo"]:
         raise nao_autorizado
+    # A expiração vem do token JÁ VALIDADO, e não de uma conta nova: é a hora
+    # em que ESTA sessão termina, mesmo que a regra mude no meio do dia.
+    usuario["token_exp"] = payload.get("exp")
     return usuario
 
 

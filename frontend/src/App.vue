@@ -10,8 +10,8 @@
    nº 10 ("toda tela mostra a barra com um código válido") não pode depender
    de disciplina de quem escreve a próxima tela.
    ============================================================================ */
-import { computed } from 'vue'
-import { useRoute } from 'vue-router'
+import { computed, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 
 import MenuLateral from './componentes/MenuLateral.vue'
 import BarraStatus from './componentes/BarraStatus.vue'
@@ -20,7 +20,19 @@ import Notificador from './componentes/Notificador.vue'
 import { autenticado } from './estado/sessao.js'
 
 const rota = useRoute()
+const roteador = useRouter()
 const comCasca = computed(() => autenticado.value && !rota.meta.publica)
+
+/* 🚨 QUEM PERDE A SESSÃO VAI PARA O LOGIN, e não para uma tela morta. O 401
+   limpa a sessão em `estado/sessao.js`, a casca desaparece -- e a tela de
+   dentro continuava desenhada, sem menu e sem responder, até a pessoa tentar
+   navegar. Fica AQUI, na casca, porque é o único lugar que vê as duas coisas:
+   se ainda estou autenticado e em que rota estou. */
+watch(autenticado, (agora) => {
+  if (!agora && !rota.meta.publica) {
+    roteador.push({ name: 'login', query: { destino: rota.fullPath } })
+  }
+})
 </script>
 
 <template>

@@ -3272,6 +3272,45 @@ testes JS verdes, computador idêntico em 1280 px. **Falta ele:** testar no
 celular real, inclusive o áudio pelo iPhone para `+5518998116168`, e o
 celular deitado.
 
+## 15/10 — Ligações do MicroSIP: a aba (LIG_1.1)
+
+🔵 *"considere que vamos precisar de uma aba nova no Movizap para 'Ligações' -
+a idéia é um grid simples que tenha as ligações do historico do MicroSip,
+consultadas por cliente - ja da base Movizap, ou por Atendente, ou por data ou
+por numero, etc, exportar e importar e um botão para baixar a ligação se quiser
+ou reproduzir por lá"*.
+
+### A aba Ligações
+
+Grid com uma linha por ligação: quando, sentido (feita, recebida, perdida),
+número, cliente, atendente (com o ramal), duração e a gravação. Filtros de
+período, atendente, sentido, número e "só com gravação"; paginação de 50.
+
+- **Ouvir e baixar na própria linha.** O áudio vem por `pedirBlob` (o token
+  vive no cabeçalho, e `<audio src>` não o manda); arrastar funciona porque o
+  blob está inteiro na memória. Um player por vez, e o blob é liberado ao
+  trocar ou sair da tela.
+- **Exportar CSV** do que está filtrado, com rastro: quem exportou, quando,
+  com que filtros e quantas linhas (`ligacao_exportacao`).
+- **Faixa de cobertura no topo**, e é ela que impede a tela de mentir por
+  omissão: diz quantos atendentes têm agente, com o último contato de cada um,
+  e **nomeia quem está de fora**. Sem isso, quem não tem agente instalado
+  pareceria não ter ligado. A mesma frase aparece no estado vazio.
+- **Cliente em várias empresas** vira "nome +N", nunca uma empresa escolhida
+  no lugar das outras. Sem cadastro aparece como "sem cadastro", que é
+  diferente de vazio.
+- ⚠️ **Não há busca de empresa por nome:** isso é `CAD_1.1`, permissão que
+  esta aba não tem. Quando se chega aqui pela ficha de uma conversa, o
+  `cliente_id` vem na URL e aparece como chip removível.
+- 🚨 **Nasceu só do owner e durou um dia.** Horas depois, em 15/10: *"pode
+  exibir a aba para todos"*. Passou à permissão **`atendimento`** — todo
+  atendente (e o admin) vê a aba, ouve, baixa e exporta. Fica de fora só o
+  perfil `cadastro`. É por isso que o rastro de `ligacao_exportacao` deixou de
+  ser detalhe: com a aba aberta a todos, ele é a única resposta para "quem
+  levou o quê".
+- O **import** que ele pediu junto é o Bloco 9 do plano (retroativo de PC que
+  ainda não tinha agente) e não entrou nesta rodada.
+
 ## 28/09 — Plano 4: nota editável, Chat interno com a cara da Caixa, anexos em lote
 
 **No ar em 28/09** (migração 061 → restart → build). Suíte completa
@@ -3310,3 +3349,139 @@ quantos já foram enviados.
 lida mesmo com a aba em segundo plano (a Caixa só marca com a aba visível,
 desde o Plano 2) · decifrar a edição cifrada de cliente em grupo (achado de
 25/09, é criptografia real, não virou código).
+
+
+## ATD_1.2 — Ligações, Outros contatos e rascunho (15/10)
+
+**Botão `Ligações`** na ficha: modal com as ligações daquele número nos
+**últimos 7 dias**, separadas em `Feitas`, `Recebidas` e `Perdidas`, com hora,
+duração, quem atendeu, e ouvir/baixar a gravação na própria linha. O modal diz
+**quantos atendentes têm agente instalado** — sem essa linha, "nenhuma ligação"
+e "aquele PC não manda" ficam iguais na tela. O rodapé **Ver todas na aba
+Ligações** aparece só para quem tem `LIG_1.1`.
+
+**Botão `Outros contatos`** na ficha: os contatos da empresa vinculada, com
+papel e telefone, o atual marcado como "este", chip `sem WhatsApp` para quem
+foi conferido e não tem, e **Mensagem** por linha, que pula para a conversa
+daquele número (ou abre "Nova mensagem" preenchida, se ela ainda não existe).
+Vazio **diz por quê**: número sem cadastro é um caso, empresa com um contato só
+é outro.
+
+**O `dt>Contato` passou a mostrar o telefone** — os dois primeiros, com `+N`
+quando há mais.
+
+**Rascunho por conversa:** o que foi digitado e não enviado fica guardado
+naquela conversa (`localStorage`, chave `movizap.rascunho.<id>`), sobrevive a
+F5 e à troca de conversa, aparece como chip **rascunho** na lista, e morre em
+três momentos: envio bem-sucedido, texto apagado, e fim da sessão do dia.
+🚨 Antes disso o texto **vazava** para a conversa seguinte.
+
+**A barra de status** passou a dizer `sessão do dia · até HH:MM`, em cor de
+aviso nos últimos 15 minutos.
+
+
+## ATD_1.2 — a ficha, desenho A (15/10)
+
+🔵 *"essa tela dentro da ficha esta redundante e um pouco feia"* → três mockups
+→ *"Tipo A 100%"*.
+
+**O defeito que ele viu:** o mesmo telefone **três vezes** na mesma tela — no
+topo, em "Contato" (o nome do contato, derivado, era o próprio número) e na
+linha de telefones acrescentada horas antes no Bloco 6. Duas das três eram
+minhas, do mesmo dia.
+
+O que está no ar:
+
+1. **O telefone aparece uma vez.** A linha de telefones do Bloco 6 saiu.
+2. **Nome derivado não se mostra como nome:** quando `contato.nome` é o próprio
+   telefone, a ficha diz **"sem nome no cadastro"**. Ausência de dado com cara
+   de dado é tela que mente. A comparação é por dígitos e exige 10 ou mais,
+   para não confundir nome com número.
+3. **As três consultas dividem uma linha** (`Ligações`, `Contatos`, `Empresas`),
+   em vez de três botões soltos numa gaveta que é `flex-direction: column` e
+   tem `max-height: 45%`. Rótulo curto na barra, nome inteiro no `title`.
+4. **A empresa é um cartão:** razão social com peso, nome fantasia como
+   subtítulo, CNPJ e e-mail numa linha de apoio com ícone. Os rótulos "Nome
+   fantasia" e "CNPJ/CPF" saíram — o dado fala por si. O e-mail **quebra** em
+   vez de cortar com reticências: e-mail cortado não dá para copiar.
+5. **Desvincular saiu da pilha das consultas** e foi para o pé, depois de um
+   fio, ao lado da contagem de empresas. Eram três botões de ler e um de
+   apagar, todos iguais.
+6. **O botão `Contatos` só existe havendo empresa** — sem ela o modal só teria
+   "este número não está no cadastro", que a ficha já diz em âmbar.
+
+⚠️ **Uma coisa do mockup A que NÃO foi feita:** lá o "Tipo" era chip no topo.
+Aqui ele **fica na lista de dados**, porque para quem tem `podeTrocarTipo` ele é
+um `<select>` — um controle, não um rótulo. Chip no topo mais campo embaixo
+recriaria a duplicação que o desenho existe para matar.
+
+**Provado:** 32 testes em `frontend/src/ficha_1510.teste.js` (a guarda do Bloco
+6 que afirmava o contrário foi **reescrita**, não apagada: ela passou a guardar
+a decisão nova), suíte de frontend **261 verdes**, e os 4 arquivos de teste que
+leem a `CaixaDeEntrada.vue` conferidos à parte.
+
+
+## ATD_1.2 — o log de ações na conversa (Bloco 11, 15/10)
+
+🔵 *"ao final proponha log dentro da conversa interno apenas sobre ações de
+transfernecia, inserir pessoas, etc, pode ser em Nota interna do Movizap"*.
+
+Treze ações passam a deixar **uma linha** na conversa, no ponto do tempo em que
+aconteceram: assumir, entrar, convidar, sair, remover alguém, devolver à fila,
+transferir, encerrar, vincular, desvincular, mudar o tipo, bloquear e
+desbloquear.
+
+🚨 **LINHA, NÃO BALÃO.** Como balão o log entraria no fio com o mesmo peso do
+que o cliente escreveu, ganharia o menu de editar e apagar, e a conversa viraria
+metade conversa e metade log. Como linha discreta (ícone, quem fez, o que fez,
+hora à direita) ele se lê de relance e se ignora de relance.
+
+- **A frase vem do servidor**, nunca montada na tela: montá-la aqui faria o
+  mesmo log ter dois textos quando esta tela mudasse, e o histórico não se
+  reescreve junto com o frontend.
+- **Evento que a tela não reconhece ainda aparece**, com um ponto no lugar do
+  ícone. Tela que esconde o que não entende mente por omissão.
+- **Sem os fios do separador de dia**: separador de dia aparece uma vez por
+  dia; evento, várias vezes por atendimento. Com dois traços cada, o fio da
+  conversa viraria uma escada.
+- No celular a hora sai da linha — ali o que importa é o que aconteceu.
+- **Transferência agora deixa rastro mesmo sem resumo.** A nota de resumo
+  (23/09) só é gravada quando há resumo; até hoje, transferir sem escrever nada
+  não deixava nenhuma marca na conversa. O evento e a nota de resumo são coisas
+  diferentes e os dois continuam: a nota é o texto que quem assume precisa ler,
+  o evento é o log.
+
+**Provado:** 14 testes em `tests/teste_eventos_conversa.py` (cada ação, a
+recusa de editar e apagar o evento, nota comum continuando editável, não contar
+como não lida) e 8 em `frontend/src/eventos_1510.teste.js`.
+
+⚠️ **Um teste que eu tive de desfazer:** a primeira versão chamava
+`conversas.bloquear()`, que fala com a **API do WhatsApp de verdade** — a suíte
+ficou pendurada nas retentativas de rede e o `timeout` teve de derrubar. Pior:
+ia além de ler produção, ia tentar bloquear um número. Hoje o teste prova que
+os dois eventos existem para o banco, e diz por escrito que quem prova o resto
+é bloquear um número na tela.
+
+
+## ATD_1.2 — "visto por" na nota (Bloco 12, 15/10)
+
+🔵 *"um icone que ao clicar mostra que ja leu aquela nota, junto ao carimbo de
+data e hora, bem pequeno mesmo"*.
+
+Um olho pequeno ao lado do carimbo da nota, com o número de pessoas que a
+tiveram na tela. Clicando, a lista: nome e hora de cada uma.
+
+- 🚨 **"Visto por", nunca "leu".** O sistema sabe que a nota esteve na tela.
+- 🚨 **Marca ao aparecer**, por `IntersectionObserver`, em lote e com 1,2 s de
+  espera: rolar a conversa passa por dezenas de notas, e uma requisição por
+  nota seria uma rajada.
+- **Falhar ao marcar não vira erro na tela:** a pessoa está lendo e não pediu
+  nada; o carimbo se perde e a nota é marcada na próxima vez em que aparecer.
+- **Nota anterior ao início do registro diz isso**, em vez de "ninguém viu". A
+  data mora no backend; repeti-la na tela criaria uma segunda verdade.
+- O observador é remontado ao trocar de conversa e quando chega mensagem nova
+  (o refresh de 8 s): elemento novo não nasce observado, e sem isso o recurso
+  pareceria funcionar — as notas antigas apareceriam certas.
+
+**Provado:** 11 testes em `tests/teste_nota_vista.py` e 9 em
+`frontend/src/visto_por_1510.teste.js`.

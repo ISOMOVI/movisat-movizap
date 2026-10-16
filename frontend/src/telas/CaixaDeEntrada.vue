@@ -94,6 +94,231 @@ const comentario = ref('')
 const resposta = ref('')
 const enviando = ref(false)
 
+/* ---- RASCUNHO POR CONVERSA (Bloco 7, 15/10) ------------------------------
+   🔵 Pedido dele nesta rodada: o que foi digitado e nao enviado tem de ficar
+   guardado por conversa, e morrer com o login do dia.
+
+   🚨 ISTO CORRIGE UM DEFEITO, nao so acrescenta recurso. `resposta` sobrevivia
+   a troca de conversa: quem digitava meia frase para a empresa A, trocava para
+   a B e apertava Enter mandava o texto da A para a B. Agora o texto e DAQUELA
+   conversa, e so dela.
+
+   ⚠️ `rascunho` aqui e o TEXTO DO COMPOSITOR. Nao confundir com
+   `rascunhoNome`, que e o nome do contato sendo editado na ficha (07/10).
+
+   ⚠️ `localStorage` em try/catch, no padrao `movizap.*` do projeto: em janela
+   privada, ou com dados do site bloqueados, o acesso ESTOURA -- e perder o
+   rascunho e aceitavel, derrubar a tela nao e. */
+const PREFIXO_RASCUNHO = 'movizap.rascunho.'
+/* Quais conversas tem rascunho guardado, para a lista poder marcar. Vive em
+   memoria de proposito: ler o `localStorage` dentro do `v-for` seria uma
+   leitura por conversa em cada desenho da lista (sao centenas). */
+const comRascunho = ref(new Set())
+
+function chaveRascunho(id) { return PREFIXO_RASCUNHO + id }
+
+function lerRascunho(id) {
+  try { return localStorage.getItem(chaveRascunho(id)) || '' } catch { return '' }
+}
+
+function apagarRascunho(id = null) {
+  const alvo = id ?? aberta.value?.id
+  if (!alvo) return
+  try { localStorage.removeItem(chaveRascunho(alvo)) } catch { /* sem storage */ }
+  if (comRascunho.value.has(alvo)) {
+    const s = new Set(comRascunho.value)
+    s.delete(alvo)
+    comRascunho.value = s
+  }
+}
+
+/* Guarda o que esta no compositor DA CONVERSA ABERTA AGORA. Chamada ANTES de
+   trocar de conversa, ao fechar, e no `beforeunload`. */
+function guardarRascunho() {
+  const id = aberta.value?.id
+  if (!id) return
+  const texto = resposta.value
+  if (!texto || !texto.trim()) { apagarRascunho(id); return }
+  try { localStorage.setItem(chaveRascunho(id), texto) } catch { return }
+  if (!comRascunho.value.has(id)) {
+    const s = new Set(comRascunho.value)
+    s.add(id)
+    comRascunho.value = s
+  }
+}
+
+/* Uma varredura so, no arranque: quais conversas tem rascunho. */
+function lerRascunhosGuardados() {
+  const achados = new Set()
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const chave = localStorage.key(i)
+      if (chave && chave.startsWith(PREFIXO_RASCUNHO)) {
+        const id = Number(chave.slice(PREFIXO_RASCUNHO.length))
+        if (id) achados.add(id)
+      }
+    }
+  } catch { /* sem storage: a marca simplesmente nao aparece */ }
+  comRascunho.value = achados
+}
+
+/* ---- LIGACOES DESTA PESSOA (Bloco 5, 15/10) ------------------------------
+   🔵 *"aqui na conversa, o modal so trara ultimos 7 dias, para mais dias um
+   botao vai levar para a aba Ligacoes"* e *"importante a separacao basica
+   entre, feitas, recebidas, etc"*.
+
+   🚨 A ROTA E `ATD_1.2`, a permissao da CONVERSA. Quem atende ve as ligacoes
+   do numero que esta atendendo, mesmo sem a aba Ligacoes. */
+const ligacoesAbertas = ref(false)
+const ligacoesCarregando = ref(false)
+const ligacoesDados = ref(null)
+const ligacoesErro = ref('')
+const tocandoLigacao = ref({ id: null, url: '' })
+const SENTIDOS_LIGACAO = [
+  ['feita', 'Feitas', 'bi-telephone-outbound'],
+  ['recebida', 'Recebidas', 'bi-telephone-inbound'],
+  ['perdida', 'Perdidas', 'bi-telephone-x'],
+]
+/* O salto para a aba so aparece para quem TEM a aba: para os outros seria um
+   botao que leva a um 403. */
+const vejoAbaLigacoes = computed(() => codigosPermitidos.value.has('LIG_1.1'))
+
+function soltarPlayerLigacao() {
+  if (tocandoLigacao.value.url) URL.revokeObjectURL(tocandoLigacao.value.url)
+  tocandoLigacao.value = { id: null, url: '' }
+}
+
+function fecharLigacoes() {
+  soltarPlayerLigacao()
+  ligacoesAbertas.value = false
+}
+
+async function verLigacoes() {
+  if (!aberta.value) return
+  ligacoesAbertas.value = true
+  ligacoesCarregando.value = true
+  ligacoesErro.value = ''
+  try {
+    ligacoesDados.value = await api.get(`/api/conversas/${aberta.value.id}/ligacoes?dias=7`)
+  } catch (e) {
+    ligacoesDados.value = null
+    ligacoesErro.value = e instanceof ErroDeApi ? e.message : 'Nao consegui ler as ligacoes.'
+  } finally {
+    ligacoesCarregando.value = false
+  }
+}
+
+async function tocarLigacao(g) {
+  if (tocandoLigacao.value.id === g.id) return soltarPlayerLigacao()
+  soltarPlayerLigacao()
+  try {
+    const blob = await pedirBlob(`/api/ligacoes/gravacao/${g.id}`)
+    tocandoLigacao.value = { id: g.id, url: URL.createObjectURL(blob) }
+  } catch (e) {
+    ligacoesErro.value = e instanceof ErroDeApi ? e.message : 'Nao consegui abrir a gravacao.'
+  }
+}
+
+async function baixarLigacao(g) {
+  try {
+    const blob = await pedirBlob(`/api/ligacoes/gravacao/${g.id}`)
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = g.nome || `ligacao-${g.id}.mp3`
+    a.click()
+    URL.revokeObjectURL(url)
+  } catch (e) {
+    ligacoesErro.value = e instanceof ErroDeApi ? e.message : 'Nao consegui baixar a gravacao.'
+  }
+}
+
+function todasAsLigacoes() {
+  const numero = aberta.value?.telefone_e164
+  fecharLigacoes()
+  router.push({ path: '/ligacoes', query: { numero, dias: 30 } })
+}
+
+function duracaoLigacao(s) {
+  const n = Number(s || 0)
+  return `${Math.floor(n / 60)}:${String(n % 60).padStart(2, '0')}`
+}
+
+function horaLigacao(iso) {
+  if (!iso) return '—'
+  return new Date(iso).toLocaleString('pt-BR', {
+    day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit',
+  })
+}
+
+/* ---- OUTROS CONTATOS DA EMPRESA (Bloco 6, 15/10) -------------------------
+   🔵 Pedido dele nesta rodada: ver os outros contatos da empresa vinculada,
+   com telefone, e poder pular para a conversa de um deles.
+
+   🚨 ROTA IRMA SOB `ATD_1.2`. `/api/clientes/{id}` e `CAD_1.1`, que o perfil
+   `atendimento` nao tem desde 10/08: a gaveta tomaria 403 justamente para
+   quem atende. */
+const outrosAbertos = ref(false)
+const outrosCarregando = ref(false)
+const outros = ref(null)
+const outrosErro = ref('')
+
+function fecharOutros() { outrosAbertos.value = false }
+
+/* ---- o nome do contato quando NINGUEM digitou um (15/10, desenho A) -------
+   🚨 `contato.nome` é DERIVADO quando ninguém o preencheu: o backend usa o
+   apelido do WhatsApp (já limpo) ou, não havendo nenhum, o próprio telefone.
+   Quando ele é o telefone, mostrá-lo na ficha repete o número que o topo já
+   diz e faz **ausência de dado parecer dado**. A ficha passa a dizer o que é.
+
+   ⚠️ Compara só dígitos e exige 10 ou mais: nome curto de números ("2 Irmãos"
+   não tem, mas "1000" teria) não pode ser confundido com telefone. */
+function soDigitos(valor) {
+  return String(valor || '').replace(/\D/g, '')
+}
+
+const contatoSemNome = computed(() => {
+  const nome = aberta.value?.empresa?.contato?.nome
+  if (!nome || !nome.trim()) return true
+  const digitos = soDigitos(nome)
+  return digitos.length >= 10 && digitos === soDigitos(aberta.value?.telefone_e164)
+})
+
+async function verOutrosContatos() {
+  if (!aberta.value) return
+  outrosAbertos.value = true
+  outrosCarregando.value = true
+  outrosErro.value = ''
+  try {
+    outros.value = await api.get(`/api/conversas/${aberta.value.id}/contatos-da-empresa`)
+  } catch (e) {
+    outros.value = null
+    outrosErro.value = e instanceof ErroDeApi ? e.message : 'Nao consegui ler os contatos.'
+  } finally {
+    outrosCarregando.value = false
+  }
+}
+
+/* Pular para a conversa de outro numero da mesma empresa.
+
+   🚨 REUSA A RECEITA QUE JA EXISTE (a do `?numero=` que vem da ficha do
+   cliente): busca o numero, 1 acerto abre a conversa, 0 acerto abre "Nova
+   mensagem" preenchida. Nao existe rota que apenas localize ou crie conversa
+   sem enviar, e inventar uma so para este botao seria um segundo caminho de
+   conversa nascer. */
+async function conversarCom(linha) {
+  if (!linha.e164) return
+  fecharOutros()
+  busca.value = linha.e164
+  await carregar()
+  if (lista.value.length === 1) {
+    await abrir(lista.value[0].id)
+  } else if (!lista.value.length) {
+    abrirNova()
+    novoNumero.value = linha.e164
+  }
+}
+
 /* ---- responder citando (aprovado em 12/08, feito em 25/08) ---------------
    🚨 RECEBÍAMOS A CITAÇÃO E NÃO SABÍAMOS ENVIAR. O balão já desenha
    `citada_conteudo` desde sempre -- só o caminho de volta faltava. Citar é
@@ -1159,6 +1384,9 @@ async function carregar({ silencioso = false } = {}) {
 
 async function abrir(id) {
   try {
+    /* 🚨 O RASCUNHO DA CONVERSA ANTERIOR É GUARDADO AQUI, ANTES DE TROCAR --
+       depois de `aberta.value` mudar não há mais de quem ele é. */
+    guardarRascunho()
     // Solta o que a conversa anterior segurava ANTES de trocar: o object URL
     // da foto de outro cliente não tem por que continuar vivo.
     soltarMidias()
@@ -1166,6 +1394,10 @@ async function abrir(id) {
     // ele confirmaria sobre a conversa nova com o texto da velha.
     painelAcao.value = ''
     confirmacao.value = null
+    // Os modais novos também não atravessam a troca: o de Ligações mostraria
+    // o telefone da conversa anterior, e o player ficaria tocando.
+    fecharLigacoes()
+    fecharOutros()
     limparPaineis()
     // 🚨 PELA MESMA RAZÃO, A MENÇÃO NÃO ATRAVESSA A TROCA. Um chamado montado
     // no grupo A seguiria para o grupo B — e lá o JID nem existe. A lista de
@@ -1196,6 +1428,10 @@ async function abrir(id) {
     buscaCliente.value = ''
     achadosCliente.value = []
     aberta.value = await api.get(`/api/conversas/${id}`)
+    /* 🔵 15/10: o compositor passa a nascer com o rascunho DESTA conversa --
+       e vazio quando ela não tem nenhum, que é o que mata o vazamento de
+       texto de uma conversa para a outra. */
+    resposta.value = lerRascunho(id)
     // 🔵 07/10: semeia o rascunho do nome (editável quando o tipo for Lead).
     rascunhoNome.value = aberta.value?.empresa?.contato?.nome || ''
     nomeSalvo.value = false
@@ -1203,6 +1439,10 @@ async function abrir(id) {
     carregarMidiasDaConversa(aberta.value)
     carregarFoto(aberta.value)
     rolarParaOFim()
+    // 🔵 15/10, Bloco 12: quem olha as notas é remontado por conversa -- os
+    // elementos são outros, e o que estava pendente vai antes de trocar.
+    vistoAberto.value = null
+    olharAsNotas()
     recado.value = ''
     /* ⚠️ Da LISTA para a conversa é `push`: no celular, o "voltar" do aparelho
        tem de trazer de volta à lista, não sair da tela. Entre conversas
@@ -1367,6 +1607,7 @@ async function enviar(interna = false) {
       mencionados: vivos.map((p) => p.jid),
     })
     resposta.value = ''
+    apagarRascunho()
     citando.value = null
     mencionados.value = []
     listaArroba.value = []
@@ -1617,6 +1858,7 @@ async function enviarArquivo(interna = false) {
     }
     limparArquivos()
     resposta.value = ''
+    apagarRascunho()
     recado.value = total > 1 ? `${enviados} arquivos enviados.` : 'Arquivo enviado.'
     await Promise.all([abrir(aberta.value.id), carregar({ silencioso: true })])
   } catch (e) {
@@ -1630,6 +1872,7 @@ async function enviarArquivo(interna = false) {
     relatarErroDeBotao('enviar_arquivo', e, aberta.value?.id)
     if (enviados > 0) {
       resposta.value = ''
+      apagarRascunho()
       await Promise.all([abrir(aberta.value.id), carregar({ silencioso: true })])
     }
   } finally {
@@ -1795,6 +2038,9 @@ async function carregarAtalhos() {
 function fecharComEsc(evento) {
   if (evento.key !== 'Escape') return
   if (confirmacao.value) { confirmacao.value = null; return }
+  // Modal fica ACIMA da gaveta, então Esc fecha o modal primeiro.
+  if (ligacoesAbertas.value) { fecharLigacoes(); return }
+  if (outrosAbertos.value) { fecharOutros(); return }
   if (emTelaCheia.value) { emTelaCheia.value = null; return }
   if (encaminhando.value) { encaminhando.value = null; return }
   if (novaAberta.value) { novaAberta.value = false; return }
@@ -1838,6 +2084,10 @@ function atalho(evento) {
 onMounted(async () => {
   document.addEventListener('keydown', atalho)
   document.addEventListener('keydown', fecharComEsc)
+  /* 🚨 FECHAR A ABA TAMBÉM TEM DE GUARDAR. Sem isto, o F5 e o fechar levavam
+     embora o que estava digitado -- e é justamente aí que a pessoa reclama. */
+  window.addEventListener('beforeunload', guardarRascunho)
+  lerRascunhosGuardados()
   document.addEventListener('click', fecharFiltroSeForaDele)
   /* 🚨 O FILTRO VEM DA URL QUANDO A TELA INICIAL MANDA. Os cartões da INI_1.1
      apontam para `/atendimento?minhas=1` e `?sem_dono=1`: sem ler a query, o
@@ -1889,6 +2139,12 @@ onMounted(async () => {
 
 onUnmounted(() => {
   clearInterval(timer)
+  // Sair da Caixa de entrada para outra tela não é descartar o que foi
+  // digitado: guarda, e solta o áudio que estiver tocando.
+  guardarRascunho()
+  soltarPlayerLigacao()
+  pararDeOlharAsNotas()
+  window.removeEventListener('beforeunload', guardarRascunho)
   document.removeEventListener('keydown', atalho)
   document.removeEventListener('keydown', fecharComEsc)
   document.removeEventListener('click', fecharFiltroSeForaDele)
@@ -1920,6 +2176,10 @@ watch(() => route.params.id, (id) => {
 /* 🔵 25/09, celular: o "Voltar" do cabeçalho. Fecha como a troca de conversa
    fecha (solta mídia, modal, citação), e a URL volta para a lista. */
 function fecharConversa() {
+  // O texto não se perde ao fechar a conversa: ele é rascunho dela.
+  guardarRascunho()
+  fecharLigacoes()
+  fecharOutros()
   soltarMidias()
   painelAcao.value = ''
   confirmacao.value = null
@@ -2026,6 +2286,112 @@ function rotuloDoDia(iso) {
 
 function hora(iso) {
   return new Date(iso).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })
+}
+
+/* ---- EVENTO: o log de ações dentro da conversa (Bloco 11, 15/10) ---------
+   🔵 *"log dentro da conversa interno apenas sobre ações de transfernecia,
+   inserir pessoas, etc, pode ser em Nota interna do Movizap"*.
+
+   🚨 A lista fechada vive no BANCO (`ck_evento_conhecido`, migração 064). Este
+   mapa é só desenho: evento que chegue sem ícone aqui continua aparecendo, com
+   um ponto -- a tela não esconde o que não reconhece.
+
+   ⚠️ A FRASE VEM DO SERVIDOR, não daqui. Montá-la no navegador faria o mesmo
+   log ter dois textos quando esta tela mudasse, e o histórico não se reescreve
+   junto com o frontend. */
+/* ---- "VISTO POR" NA NOTA (Bloco 12, 15/10) -------------------------------
+   🔵 *"um icone que ao clicar mostra que ja leu aquela nota, junto ao carimbo
+   de data e hora, bem pequeno mesmo"*.
+
+   🚨 MARCA QUANDO A NOTA APARECE NA TELA, não quando a conversa abre. Abrir
+   uma conversa de 200 mensagens e não rolar até o fim não é ver a nota que
+   está lá atrás -- carimbar isso seria inventar o dado. Daí o
+   `IntersectionObserver`: ele é a única coisa que sabe o que está visível.
+
+   🚨 E O RÓTULO É "VISTO POR", NUNCA "LEU": o sistema sabe que a nota esteve
+   na tela, não que a pessoa leu. Dizer "leu" vira prova de algo que não se
+   mediu, e alguém cobra com base nisso.
+
+   ⚠️ EM LOTE, com espera: rolar a conversa passa por dezenas de notas, e uma
+   requisição por nota seria uma rajada. Junta e manda uma vez. */
+const vistoAberto = ref(null)
+const notasParaMarcar = new Set()
+let observadorDeNotas = null
+let timerDeNotas = null
+
+function alternarVisto(id) {
+  vistoAberto.value = vistoAberto.value === id ? null : id
+}
+
+async function mandarNotasVistas() {
+  timerDeNotas = null
+  const ids = [...notasParaMarcar]
+  notasParaMarcar.clear()
+  if (!ids.length || !aberta.value) return
+  try {
+    await api.post(`/api/conversas/${aberta.value.id}/notas/vistas`, { ids })
+  } catch {
+    /* ⚠️ Falhar aqui não pode virar erro na tela: a pessoa está LENDO, e não
+       pediu nada. O carimbo se perde e a nota será marcada na próxima vez em
+       que aparecer. */
+  }
+}
+
+function olharAsNotas() {
+  pararDeOlharAsNotas()
+  if (typeof IntersectionObserver === 'undefined') return
+  observadorDeNotas = new IntersectionObserver((entradas) => {
+    for (const e of entradas) {
+      if (!e.isIntersecting) continue
+      const id = Number(e.target.dataset.nota)
+      if (id) notasParaMarcar.add(id)
+      // Uma vez visto, não precisa ser observado de novo.
+      observadorDeNotas.unobserve(e.target)
+    }
+    if (notasParaMarcar.size && !timerDeNotas) {
+      timerDeNotas = setTimeout(mandarNotasVistas, 1200)
+    }
+  }, { threshold: 0.6 })
+  nextTick(() => {
+    document.querySelectorAll('[data-nota]').forEach((el) => {
+      observadorDeNotas?.observe(el)
+    })
+  })
+}
+
+/* ⚠️ O refresh de 8s e o "carregar anteriores" trazem nota nova, e elemento
+   novo não nasce observado. Sem este `watch`, nota que chegasse depois da
+   abertura nunca seria marcada -- e o recurso pareceria funcionar, porque as
+   antigas aparecem certas. */
+watch(() => aberta.value?.mensagens?.length, () => {
+  if (aberta.value) olharAsNotas()
+})
+
+function pararDeOlharAsNotas() {
+  observadorDeNotas?.disconnect()
+  observadorDeNotas = null
+  if (timerDeNotas) {
+    clearTimeout(timerDeNotas)
+    timerDeNotas = null
+  }
+  // O que já estava visto vai agora: fechar a conversa não apaga o fato.
+  if (notasParaMarcar.size) mandarNotasVistas()
+}
+
+const ICONE_EVENTO = {
+  assumiu: 'bi-hand-index-thumb',
+  entrou: 'bi-box-arrow-in-right',
+  convidou: 'bi-person-plus',
+  saiu: 'bi-box-arrow-right',
+  removeu: 'bi-person-dash',
+  devolveu: 'bi-arrow-counterclockwise',
+  transferiu: 'bi-arrow-left-right',
+  encerrou: 'bi-check2-circle',
+  vinculou: 'bi-link-45deg',
+  desvinculou: 'bi-x-circle',
+  mudou_tipo: 'bi-tag',
+  bloqueou: 'bi-slash-circle',
+  desbloqueou: 'bi-unlock',
 }
 
 /* `partir` e `marcar` mudaram para `util/destaque.js` em 12/08 — funções puras
@@ -2630,6 +2996,14 @@ function carregarMidiasDaConversa(c) {
                    responde (quando há), a empresa (quando se sabe) e o
                    estado excepcional. -->
               <div class="conversa__marcas pequeno">
+                <!-- 🟡 15/10 (minha): sem esta marca, o texto guardado fica
+                     invisível até a pessoa reabrir a conversa -- e rascunho
+                     que ninguém vê é rascunho esquecido. -->
+                <span v-if="comRascunho.has(c.id)" class="chip chip--pequeno"
+                      title="Você tem texto digitado e não enviado nesta conversa">
+                  <i class="bi bi-pencil" aria-hidden="true"></i>
+                  rascunho
+                </span>
                 <span v-if="!c.contato_nome" class="chip chip--aviso chip--pequeno">
                   sem cadastro
                 </span>
@@ -2994,20 +3368,64 @@ function carregarMidiasDaConversa(c) {
               <span class="apagado pequeno mono">{{ aberta.telefone_e164 }}</span>
             </p>
 
-            <!-- Empresas do grupo desta pessoa. Consulta, não escolha: o
-                 número identifica quem fala, não a empresa do assunto.
-                 🔵 07/10: escondido para TÉCNICO — técnico é pessoa, não se
-                 liga a empresa (decisão dele). -->
-            <button
-              v-if="!ehTecnico"
-              class="botao botao--pequeno botao--contorno"
-              type="button"
-              :aria-expanded="empresasAbertas"
-              @click="verEmpresas"
-            >
-              <i class="bi bi-buildings" aria-hidden="true"></i>
-              {{ empresasAbertas ? 'Ocultar empresas' : 'Empresas vinculadas' }}
-            </button>
+            <!-- ══ AS CONSULTAS, EM UMA BARRA (desenho A, 15/10) ═══════════
+                 🔵 *"essa tela dentro da ficha esta redundante e um pouco
+                 feia"* → três botões empilhados, do mesmo peso e cada um numa
+                 linha, numa gaveta que já luta por altura (`max-height: 45%`).
+                 Em barra eles gastam uma linha, e não três.
+
+                 🚨 SÓ CONSULTA MORA AQUI. "Desvincular" apaga um vínculo e
+                 está no pé do cartão, de propósito: ação destrutiva não pode
+                 ter a mesma cara de um botão de ler.
+
+                 ⚠️ Rótulo CURTO ("Contatos", "Empresas") porque em barra o
+                 espaço é lateral; o `title` carrega o nome inteiro, que é o que
+                 o leitor de tela anuncia. -->
+            <div class="gaveta__acoes">
+              <!-- 🔵 15/10, Bloco 5: as LIGAÇÕES deste número, últimos 7 dias.
+                   Modal, e não gaveta: é consulta de um minuto. -->
+              <button
+                class="botao botao--pequeno botao--contorno"
+                type="button"
+                title="Ligações deste número nos últimos 7 dias"
+                @click="verLigacoes"
+              >
+                <i class="bi bi-telephone" aria-hidden="true"></i>
+                Ligações
+              </button>
+
+              <!-- 🔵 15/10, Bloco 6: os outros contatos da MESMA empresa. Só
+                   aparece havendo empresa: sem ela o modal só teria "este
+                   número não está no cadastro", que a própria ficha já diz. -->
+              <button
+                v-if="aberta.empresa && aberta.empresa.cliente && !ehTecnico"
+                class="botao botao--pequeno botao--contorno"
+                type="button"
+                title="Outros contatos desta empresa"
+                @click="verOutrosContatos"
+              >
+                <i class="bi bi-person-lines-fill" aria-hidden="true"></i>
+                Contatos
+              </button>
+
+              <!-- Empresas do grupo desta pessoa. Consulta, não escolha: o
+                   número identifica quem fala, não a empresa do assunto.
+                   🔵 07/10: escondido para TÉCNICO — técnico é pessoa, não se
+                   liga a empresa (decisão dele). -->
+              <button
+                v-if="!ehTecnico"
+                class="botao botao--pequeno botao--contorno"
+                type="button"
+                :aria-expanded="empresasAbertas"
+                :title="empresasAbertas
+                  ? 'Ocultar as empresas deste número'
+                  : 'Todas as empresas que este número alcança'"
+                @click="verEmpresas"
+              >
+                <i class="bi bi-buildings" aria-hidden="true"></i>
+                {{ empresasAbertas ? 'Ocultar' : 'Empresas' }}
+              </button>
+            </div>
 
             <div v-if="empresasAbertas && !ehTecnico" class="gaveta__bloco">
               <p v-if="buscandoEmpresas" class="apagado pequeno">consultando…</p>
@@ -3038,24 +3456,36 @@ function carregarMidiasDaConversa(c) {
 
             <!-- COM vínculo: os dados da empresa -->
             <template v-if="aberta.empresa && aberta.empresa.cliente">
-              <dl class="gaveta__dados">
-                <dt>Empresa</dt>
-                <dd>
+              <!-- ══ A EMPRESA, EM CARTÃO (desenho A, 15/10) ═══════════════
+                   Antes eram quatro pares rótulo/valor com o MESMO peso --
+                   "Empresa", "Nome fantasia", "CNPJ/CPF", "E-mail" --, e o
+                   fato mais útil da ficha (de quem é a conversa) não se
+                   distinguia do rótulo ao lado. Aqui a razão social tem peso,
+                   a fantasia é subtítulo, e CNPJ e e-mail descem para uma
+                   linha de apoio: a mesma informação, em menos altura e com
+                   onde olhar primeiro. -->
+              <div class="gaveta__cartao">
+                <p class="gaveta__razao">
                   {{ aberta.empresa.cliente.nome }}
                   <span v-if="!aberta.empresa.cliente.ativo" class="chip chip--erro">inativo</span>
-                </dd>
-                <template v-if="aberta.empresa.cliente.nome_fantasia">
-                  <dt>Nome fantasia</dt>
-                  <dd>{{ aberta.empresa.cliente.nome_fantasia }}</dd>
-                </template>
-                <template v-if="aberta.empresa.cliente.documento">
-                  <dt>CNPJ/CPF</dt>
-                  <dd class="mono">{{ documentoLegivel(aberta.empresa.cliente.documento) }}</dd>
-                </template>
-                <template v-if="aberta.empresa.cliente.email">
-                  <dt>E-mail</dt>
-                  <dd>{{ aberta.empresa.cliente.email }}</dd>
-                </template>
+                </p>
+                <p v-if="aberta.empresa.cliente.nome_fantasia" class="gaveta__fantasia">
+                  {{ aberta.empresa.cliente.nome_fantasia }}
+                </p>
+                <div v-if="aberta.empresa.cliente.documento || aberta.empresa.cliente.email"
+                     class="gaveta__meta pequeno">
+                  <span v-if="aberta.empresa.cliente.documento">
+                    <i class="bi bi-hash" aria-hidden="true"></i>
+                    <span class="mono">{{ documentoLegivel(aberta.empresa.cliente.documento) }}</span>
+                  </span>
+                  <span v-if="aberta.empresa.cliente.email">
+                    <i class="bi bi-envelope" aria-hidden="true"></i>
+                    {{ aberta.empresa.cliente.email }}
+                  </span>
+                </div>
+              </div>
+
+              <dl class="gaveta__dados">
                 <!-- ⚠️ NÃO mostrar `contato.papeis` aqui. Os papéis existem no
                      banco desde a migração 001, vieram do modelo do ERP e não
                      acionam nada; anunciá-los na ficha promete recurso que não
@@ -3081,6 +3511,15 @@ function carregarMidiasDaConversa(c) {
                     @click="salvarNomeContato"
                   >Salvar</button>
                   <span v-if="nomeSalvo" class="chip chip--ok">gravado</span>
+                </dd>
+                <!-- 🚨 15/10: NOME DERIVADO NÃO SE MOSTRA COMO NOME. Sem
+                     ninguém ter digitado um, o backend usa o apelido do
+                     WhatsApp ou o próprio telefone -- e aí a ficha repetia o
+                     número que o topo já diz, fazendo falta de cadastro
+                     parecer cadastro. Foi o que ele viu: o mesmo número três
+                     vezes na mesma tela. -->
+                <dd v-else-if="contatoSemNome" class="apagado">
+                  sem nome no cadastro
                 </dd>
                 <dd v-else>{{ aberta.empresa.contato.nome }}</dd>
                 <template v-if="aberta.empresa.contato.email">
@@ -3112,9 +3551,24 @@ function carregarMidiasDaConversa(c) {
                   <span v-if="tipoSalvo" class="chip chip--ok">gravado</span>
                 </dd>
               </dl>
-              <button class="botao botao--pequeno botao--fantasma" type="button" @click="desvincular">
-                <i class="bi bi-x-circle" aria-hidden="true"></i> Desvincular
-              </button>
+
+              <!-- ⚠️ AÇÃO DESTRUTIVA SEPARADA DAS CONSULTAS (desenho A).
+                   "Desvincular" estava na mesma pilha e com o mesmo peso de
+                   "Ligações" e "Empresas vinculadas" -- três botões de ler e
+                   um de apagar, iguais. Aqui ele fica no pé, depois de um
+                   fio, ao lado do fato que dá contexto a ele. -->
+              <div class="gaveta__pe">
+                <span class="apagado pequeno">
+                  {{ empresas.length > 1
+                     ? empresas.length + ' empresas vinculadas'
+                     : '1 empresa vinculada' }}
+                </span>
+                <button class="botao botao--pequeno botao--fantasma" type="button"
+                        title="Desfaz o vínculo deste número com a empresa"
+                        @click="desvincular">
+                  <i class="bi bi-x-circle" aria-hidden="true"></i> Desvincular
+                </button>
+              </div>
             </template>
 
             <!-- SEM EMPRESA: o caso comum. Marcar o tipo e/ou vincular. -->
@@ -3364,7 +3818,26 @@ function carregarMidiasDaConversa(c) {
             <p v-if="comecaODia(m, i)" class="diario">
               <span class="diario__marca">{{ rotuloDoDia(m.criada_em) }}</span>
             </p>
+            <!-- ══ EVENTO: LINHA, NÃO BALÃO (Bloco 11, 15/10) ════════════
+                 🚨 Como balão, o log entraria no fio com o mesmo peso do que o
+                 cliente escreveu e ganharia o menu de editar e apagar --
+                 justamente o que um log não pode ter. Como linha discreta ele
+                 se lê de relance e se ignora de relance.
+
+                 ⚠️ `data-mensagem` fica: é por ele que `irParaMensagem` rola
+                 até uma linha quando a busca casa com o texto dela. -->
+            <p v-if="m.evento" class="evento" :data-mensagem="m.id">
+              <i class="bi" :class="ICONE_EVENTO[m.evento] || 'bi-dot'"
+                 aria-hidden="true"></i>
+              <span>
+                <strong v-if="m.atendente_nome">{{ m.atendente_nome }}</strong>
+                {{ m.conteudo }}
+              </span>
+              <span class="evento__hora mono">{{ hora(m.criada_em) }}</span>
+            </p>
+
             <div
+              v-else
               class="balao"
               :class="[`balao--${m.direcao}`, {
                 'balao--casa': casaNaConversa(m),
@@ -3373,6 +3846,7 @@ function carregarMidiasDaConversa(c) {
                 'balao--realcado': m.id === balaoRealcado,
               }]"
               :data-mensagem="m.id"
+              :data-nota="m.tipo === 'nota' && m.leitura_rastreada ? m.id : null"
               @click="tocarBalao(m, $event)"
             >
               <!-- A mensagem que esta está respondendo. Clicar rola até ela e
@@ -3552,6 +4026,46 @@ function carregarMidiasDaConversa(c) {
                       :class="{ 'balao__lida': m.entrega === 'lida' }"
                       :title="m.entrega">{{ TIQUE[m.entrega] }}</span>
                 <span v-else-if="m.entrega"> · {{ m.entrega }}</span>
+
+                <!-- 🔵 15/10, Bloco 12: "visto por", junto ao carimbo, bem
+                     pequeno -- do tamanho que ele pediu.
+                     🚨 O OLHO NÃO DIZ "LIDA". Ele diz quantas pessoas tiveram
+                     a nota na tela, e o popover diz quem e quando. -->
+                <button v-if="m.tipo === 'nota'" type="button" class="balao__visto"
+                        :aria-expanded="vistoAberto === m.id"
+                        title="quem teve esta nota na tela"
+                        @click.stop="alternarVisto(m.id)">
+                  · <i class="bi"
+                       :class="m.vistos && m.vistos.length ? 'bi-eye-fill' : 'bi-eye'"
+                       aria-hidden="true"></i>
+                  <template v-if="m.vistos && m.vistos.length">{{ m.vistos.length }}</template>
+                </button>
+              </p>
+
+              <!-- O popover do "visto por". Fora do rodapé porque pode ter
+                   várias linhas, e o rodapé é de uma. -->
+              <p v-if="m.tipo === 'nota' && vistoAberto === m.id"
+                 class="balao__vistos pequeno">
+                <!-- 🚨 "NÃO HAVIA REGISTRO" NÃO É "NINGUÉM VIU". Nota anterior
+                     ao início do registro não pode aparecer como não vista por
+                     ninguém: seria uma afirmação falsa sobre o passado.
+                     ⚠️ Sem data escrita aqui: a data mora no backend
+                     (`LEITURA_DE_NOTA_DESDE`), e repeti-la na tela criaria uma
+                     segunda verdade para divergir no dia em que ela mudar. -->
+                <template v-if="!m.leitura_rastreada">
+                  Sem registro: esta nota é anterior ao dia em que o MoviZap
+                  passou a anotar quem vê.
+                </template>
+                <template v-else-if="!m.vistos || !m.vistos.length">
+                  Ninguém teve esta nota na tela ainda.
+                </template>
+                <template v-else>
+                  <strong>Visto por</strong>
+                  <span v-for="v in m.vistos" :key="v.atendente_id"
+                        class="balao__visto-quem">
+                    {{ v.nome }} <span class="apagado">{{ hora(v.visto_em) }}</span>
+                  </span>
+                </template>
               </p>
 
               <!-- A reação fica PENDURADA no canto do balão, como no
@@ -4081,6 +4595,147 @@ function carregarMidiasDaConversa(c) {
       </div>
     </div>
 
+    <!-- ============ LIGAÇÕES DESTE NÚMERO — 7 dias (Bloco 5, 15/10) ======
+         🔵 *"o modal só trará ultimos 7 dias, para mais dias um botão vai
+         levar para a aba Ligações"*. -->
+    <div v-if="ligacoesAbertas && aberta" class="modal" @click.self="fecharLigacoes">
+      <div class="modal__caixa modal__caixa--larga" role="dialog" aria-modal="true"
+           aria-label="Ligações deste número">
+        <p class="modal__titulo">
+          Ligações · últimos 7 dias
+          <span class="apagado pequeno mono">{{ aberta.telefone_e164 }}</span>
+        </p>
+
+        <p v-if="ligacoesErro" class="aviso aviso--erro pequeno" role="alert">
+          {{ ligacoesErro }}
+        </p>
+        <p v-if="ligacoesCarregando" class="apagado pequeno">consultando…</p>
+
+        <template v-else-if="ligacoesDados">
+          <!-- 🚨 A FAIXA QUE IMPEDE A TELA DE MENTIR: "nenhuma ligação" e
+               "aquele PC não manda ligação nenhuma" são coisas diferentes, e
+               só esta linha distingue as duas. -->
+          <p class="apagado pequeno">
+            Só aparecem ligações de ramais com o agente instalado:
+            <strong>{{ ligacoesDados.cobertura.com_agente }}</strong>
+            de {{ ligacoesDados.cobertura.atendentes }} atendentes.
+          </p>
+
+          <p v-if="!ligacoesDados.total" class="apagado pequeno">
+            Nenhuma ligação com este número nos últimos 7 dias.
+          </p>
+
+          <div v-for="[valor, rotulo, icone] in SENTIDOS_LIGACAO" :key="valor">
+            <template v-if="ligacoesDados.por_sentido[valor].length">
+              <p class="campo__rotulo">
+                <i class="bi" :class="icone" aria-hidden="true"></i>
+                {{ rotulo }} · {{ ligacoesDados.por_sentido[valor].length }}
+              </p>
+              <ul class="ligacoes__lista">
+                <li v-for="l in ligacoesDados.por_sentido[valor]" :key="l.id"
+                    class="ligacoes__item pequeno">
+                  <span class="mono">{{ horaLigacao(l.inicio) }}</span>
+                  <span class="apagado">{{ duracaoLigacao(l.duracao_s) }}</span>
+                  <span>{{ l.atendente || 'ramal ' + l.ramal }}</span>
+                  <span v-if="!l.gravacoes.length" class="apagado">sem gravação</span>
+                  <span v-for="g in l.gravacoes" :key="g.id" class="ligacoes__grav">
+                    <button class="botao botao--pequeno botao--contorno" type="button"
+                            @click="tocarLigacao(g)">
+                      <i class="bi" aria-hidden="true"
+                         :class="tocandoLigacao.id === g.id ? 'bi-stop-fill' : 'bi-play-fill'"></i>
+                      {{ tocandoLigacao.id === g.id ? 'Parar' : 'Ouvir' }}
+                    </button>
+                    <button class="botao botao--pequeno botao--contorno" type="button"
+                            @click="baixarLigacao(g)">
+                      <i class="bi bi-download" aria-hidden="true"></i>
+                    </button>
+                    <audio v-if="tocandoLigacao.id === g.id" :src="tocandoLigacao.url"
+                           controls autoplay></audio>
+                  </span>
+                </li>
+              </ul>
+            </template>
+          </div>
+        </template>
+
+        <div class="modal__acoes">
+          <!-- O salto só existe para quem tem a aba: para os outros seria um
+               botão que termina em 403. -->
+          <button v-if="vejoAbaLigacoes" class="botao botao--contorno" type="button"
+                  @click="todasAsLigacoes">
+            Ver todas na aba Ligações
+          </button>
+          <button class="botao botao--primario" type="button"
+                  @click="fecharLigacoes">Fechar</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============ OUTROS CONTATOS DA EMPRESA (Bloco 6, 15/10) ========== -->
+    <div v-if="outrosAbertos && aberta" class="modal" @click.self="fecharOutros">
+      <div class="modal__caixa modal__caixa--larga" role="dialog" aria-modal="true"
+           aria-label="Outros contatos da empresa">
+        <p class="modal__titulo">
+          Outros contatos
+          <span v-if="outros && outros.cliente" class="apagado pequeno">
+            {{ outros.cliente.nome }}
+          </span>
+        </p>
+
+        <p v-if="outrosErro" class="aviso aviso--erro pequeno" role="alert">
+          {{ outrosErro }}
+        </p>
+        <p v-if="outrosCarregando" class="apagado pequeno">consultando…</p>
+
+        <template v-else-if="outros">
+          <!-- ⚠️ VAZIO DIZ POR QUÊ. "Número sem cadastro" e "empresa sem
+               outro contato" são casos diferentes, e a tela não pode
+               devolver a mesma frase para os dois. -->
+          <p v-if="outros.motivo === 'sem_cadastro'" class="apagado pequeno">
+            Este número não está no cadastro — então não há empresa de onde
+            tirar outros contatos. Dá para vincular pela ficha.
+          </p>
+          <p v-else-if="outros.motivo === 'contato_sem_empresa'" class="apagado pequeno">
+            Esta pessoa não está vinculada a nenhuma empresa.
+          </p>
+          <p v-else-if="outros.contatos.length <= 1" class="apagado pequeno">
+            Esta empresa tem só este contato cadastrado.
+          </p>
+
+          <ul v-if="outros.contatos.length" class="outros__lista">
+            <li v-for="(l, i) in outros.contatos" :key="i" class="outros__item">
+              <span class="outros__quem">
+                {{ l.nome }}
+                <span v-if="l.este_contato" class="chip chip--pequeno">este</span>
+                <span v-for="p in l.papeis" :key="p" class="chip chip--pequeno">{{ p }}</span>
+              </span>
+              <span class="mono pequeno">{{ l.e164 || 'sem telefone' }}</span>
+              <span v-if="l.tem_whatsapp === false"
+                    class="chip chip--aviso chip--pequeno">sem WhatsApp</span>
+              <!-- 🟡 O botão não aparece sem número nem para quem foi
+                   conferido e NÃO tem WhatsApp: mandar ali só produz 409.
+                   `tem_whatsapp` nulo (nunca conferido) continua tendo botão
+                   -- recusar por falta de conferência seria inventar o `false`. -->
+              <button
+                v-if="l.e164 && l.tem_whatsapp !== false && !l.esta_conversa"
+                class="botao botao--pequeno botao--contorno"
+                type="button"
+                @click="conversarCom(l)"
+              >
+                <i class="bi bi-chat-dots" aria-hidden="true"></i>
+                Mensagem
+              </button>
+            </li>
+          </ul>
+        </template>
+
+        <div class="modal__acoes">
+          <button class="botao botao--primario" type="button"
+                  @click="fecharOutros">Fechar</button>
+        </div>
+      </div>
+    </div>
+
     <!-- VINCULAR A UMA EMPRESA — a escolha que morava espremida na gaveta -->
     <div v-if="painelAcao === 'vincular' && aberta" class="modal" @click.self="fecharPainel">
       <div class="modal__caixa modal__caixa--larga" role="dialog" aria-modal="true"
@@ -4433,6 +5088,79 @@ function carregarMidiasDaConversa(c) {
    serve para escolher entre nomes de atendente; razão social com CNPJ ao lado
    quebra em duas linhas nessa largura e a lista vira parede. */
 .modal__caixa--larga { max-width: 560px; }
+
+/* Ligações e Outros contatos: linha por item, sem tabela. São listas curtas
+   (7 dias, um punhado de contatos) e tabela aqui só acrescentaria moldura. */
+.ligacoes__lista,
+.outros__lista { list-style: none; margin: 0 0 var(--e-3); padding: 0; }
+.ligacoes__item,
+.outros__item {
+  display: flex;
+  align-items: center;
+  gap: var(--e-2);
+  flex-wrap: wrap;
+  padding: 4px 0;
+  border-bottom: var(--borda-fina) solid var(--borda);
+}
+.ligacoes__grav { display: inline-flex; align-items: center; gap: 4px; }
+.ligacoes__item audio { max-width: 200px; height: 30px; }
+.outros__quem { display: inline-flex; align-items: center; gap: 4px; flex: 1; min-width: 40%; }
+/* ---- desenho A da ficha (15/10) --------------------------------------
+   🔵 *"está redundante e um pouco feia"*. A gaveta é `flex-direction: column`,
+   então TODO botão solto nela ganhava uma linha inteira; estes três passam a
+   dividir uma. `flex-wrap` porque no celular a gaveta vira a tela da conversa
+   e três rótulos podem não caber lado a lado. */
+.gaveta__acoes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--e-2);
+}
+.gaveta__acoes .botao { flex: 1 1 auto; justify-content: center; }
+
+/* O cartão da empresa: fundo de superfície dentro da gaveta, que é
+   `--superficie-2`. É o contraste que faz o cartão existir sem precisar de
+   sombra nem de borda grossa. */
+.gaveta__cartao {
+  background: var(--superficie);
+  border: var(--borda-fina) solid var(--borda);
+  border-radius: var(--r-md);
+  padding: var(--e-3);
+}
+.gaveta__razao {
+  margin: 0;
+  font-weight: var(--peso-forte);
+  line-height: var(--entrelinha-apertada);
+  overflow-wrap: anywhere;
+}
+.gaveta__fantasia {
+  margin: 1px 0 0;
+  font-size: var(--txt-sm);
+  color: var(--texto-fraco);
+  overflow-wrap: anywhere;
+}
+.gaveta__meta {
+  display: grid;
+  gap: 2px;
+  margin-top: var(--e-2);
+  padding-top: var(--e-2);
+  border-top: var(--borda-fina) dashed var(--borda);
+  color: var(--texto-fraco);
+}
+.gaveta__meta span { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.gaveta__meta i { color: var(--texto-apagado); flex: none; }
+/* ⚠️ `anywhere` e não `ellipsis`: e-mail cortado com reticências não dá para
+   copiar, e copiar é o que se faz com um e-mail. */
+.gaveta__meta span > :last-child { overflow-wrap: anywhere; min-width: 0; }
+
+.gaveta__pe {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--e-2);
+  flex-wrap: wrap;
+  padding-top: var(--e-2);
+  border-top: var(--borda-fina) solid var(--borda);
+}
 
 .vincular__bloco { margin-bottom: var(--e-4); }
 
@@ -5501,6 +6229,59 @@ function carregarMidiasDaConversa(c) {
   background: var(--borda);
 }
 .diario__marca { flex: none; text-transform: lowercase; }
+
+/* 🔵 15/10, Bloco 11 — o log de ações.
+   ⚠️ SEM os fios de `::before`/`::after` do separador de dia, de propósito:
+   separador de dia aparece uma vez por dia, evento aparece várias vezes por
+   atendimento. Com dois traços cada, o fio da conversa viraria uma escada. */
+.evento {
+  display: flex;
+  align-items: baseline;
+  gap: var(--e-2);
+  margin: 2px 0;
+  padding: 2px var(--e-2);
+  color: var(--texto-apagado);
+  font-size: var(--txt-sm);
+  line-height: var(--entrelinha-apertada);
+}
+.evento i { flex: none; }
+/* O nome de quem agiu é o que se procura numa linha de log: ganha peso, mas
+   não cor -- cor aqui competiria com o balão ao lado. */
+.evento strong { font-weight: var(--peso-medio); color: var(--texto-fraco); }
+.evento__hora { margin-left: auto; flex: none; font-size: var(--txt-xs); }
+
+/* 🔵 15/10, Bloco 12 — "visto por" na nota. `bem pequeno mesmo`, no tamanho do
+   carimbo, e com alvo de toque decente mesmo sendo pequeno de desenho. */
+.balao__visto {
+  appearance: none;
+  border: 0;
+  background: none;
+  padding: 0 2px;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+.balao__visto:hover { color: var(--texto-fraco); }
+.balao__vistos {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin: var(--e-1) 0 0;
+  padding: var(--e-2);
+  border-radius: var(--r-sm);
+  background: var(--superficie-2);
+  color: var(--texto-fraco);
+}
+.balao__visto-quem { display: flex; gap: var(--e-2); justify-content: space-between; }
+@media (max-width: 860px) {
+  /* No celular a hora completa empurra o texto para duas linhas; ali o que
+     importa é o que aconteceu. */
+  .evento__hora { display: none; }
+}
 
 /* 🔵 07/10: fronteira entre atendimentos do mesmo número (histórico contínuo).
    Mesma forma do separador de dia, mas com cor de acento e traço mais forte,
