@@ -1,0 +1,12 @@
+/* 🚨 `alvoId` entrou em 16/10: sem o id do que a ação tentou mexer, o journal
+   registra que falhou e não deixa descobrir em QUE falhou. Opcional porque a
+   maioria das ações não tem alvo. */
+export function relatarErroDeBotao(acao, erro, conversaId = null, alvoId = null) {
+  const mensagem = erro instanceof ErroDeApi ? erro.message : String(erro?.message || erro)
+  api.post('/api/erros/frontend', {
+    acao,
+    mensagem: mensagem.slice(0, 500),
+    url: window.location.pathname,
+    conversa_id: conversaId,
+    alvo_id: alvoId,
+  }).catch(() => {

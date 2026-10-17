@@ -909,13 +909,19 @@ async function salvarEdicao() {
     await abrir(aberta.value.id)
   } catch (x) {
     erro.value = x instanceof ErroDeApi ? x.message : 'Não consegui editar.'
-    relatarErroDeBotao('editar_mensagem', x, aberta.value?.id)
+    relatarErroDeBotao('editar_mensagem', x, aberta.value?.id, e.id)
   } finally {
     mexendo.value = false
   }
 }
 function pedirParaApagar(m) {
   const nota = m.tipo === 'nota'
+  /* 🚨 A CONVERSA É CONGELADA JUNTO COM A MENSAGEM (16/10). A confirmação
+     capturava `m` no clique e lia `aberta.value.id` só no "sim" -- se a
+     conversa aberta mudasse com o diálogo na tela, o pedido ia para a conversa
+     NOVA levando o id da mensagem da ANTIGA, e o painel respondia que a
+     mensagem não era daquela conversa. Corrida pequena, erro confuso. */
+  const conversaId = aberta.value?.id
   perguntar(nota ? 'Apagar esta nota?' : 'Apagar para todos?',
     nota ? 'A nota some da conversa para a equipe. Continua registrada, marcada como apagada.'
          : 'A mensagem some do WhatsApp do cliente. Aqui ela continua registrada, marcada como apagada.',
@@ -923,12 +929,12 @@ function pedirParaApagar(m) {
     async () => {
       try {
         const rota = nota ? 'nota/apagar' : 'apagar'
-        await api.post(`/api/conversas/${aberta.value.id}/${rota}`, { mensagem_id: m.id })
+        await api.post(`/api/conversas/${conversaId}/${rota}`, { mensagem_id: m.id })
         recado.value = nota ? 'Nota apagada.' : 'Mensagem apagada para todos.'
-        await abrir(aberta.value.id)
+        await abrir(conversaId)
       } catch (x) {
         erro.value = x instanceof ErroDeApi ? x.message : 'Não consegui apagar.'
-        relatarErroDeBotao('apagar_mensagem', x, aberta.value?.id)
+        relatarErroDeBotao('apagar_mensagem', x, conversaId, m.id)
       }
     }, true)
 }

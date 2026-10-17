@@ -1,0 +1,7 @@
+# rel_path | antes | depois | apelido
+movizap/main.py | 40_erro_modelo_antes.txt | 40_erro_modelo_depois.txt | ErroDeBotao: campo alvo_id
+movizap/main.py | 41_erro_log_antes.txt | 41_erro_log_depois.txt | journal de botao: grava alvo
+movizap/conversas.py | 42_guarda_antes.txt | 42_guarda_depois.txt | guarda: duas frases
+frontend/src/api/cliente.js | 43_cliente_antes.txt | 43_cliente_depois.txt | relatarErroDeBotao: alvoId
+frontend/src/telas/CaixaDeEntrada.vue | 44_apagar_antes.txt | 44_apagar_depois.txt | apagar: congela a conversa
+frontend/src/telas/CaixaDeEntrada.vue | 45_editar_antes.txt | 45_editar_depois.txt | editar: relata o alvo

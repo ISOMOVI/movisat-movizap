@@ -1,0 +1,12 @@
+class ErroDeBotao(BaseModel):
+    # Tetos generosos, mas tetos: isto vem do navegador, não é confiável.
+    acao: str = Field(min_length=1, max_length=64)
+    mensagem: str = Field(min_length=1, max_length=500)
+    url: str = Field(default="", max_length=200)
+    conversa_id: int | None = None
+    # 🚨 O ID DO ALVO (16/10). Em 16/10 às 11:55 um "apagar" falhou com
+    # "Mensagem não encontrada nesta conversa" e o journal registrou ação,
+    # atendente, conversa, url e navegador -- tudo menos o ÚNICO campo que
+    # responderia qual mensagem era. Sem ele, três hipóteses ficaram
+    # indistinguíveis. Opcional: a maioria das ações não tem alvo.
+    alvo_id: int | None = None

@@ -1102,6 +1102,34 @@ no próximo carregamento, sem explicação.
 **Nenhuma linha de `chat_mensagem` é tocada** — a conversa reaparece inteira,
 do começo.
 
+### `chat_reacao` — reagir a mensagem no chat interno (066)
+
+Pedido do usuário em 16/10: *"verifique recursos de reagir a mensagens
+internas, como do externo"* → *"pode fazer tudo"*.
+
+| Coluna | Nota |
+|---|---|
+| `mensagem_id` | FK para `chat_mensagem`, **`ON DELETE CASCADE`** |
+| `atendente_id` | FK para `atendente`, **`ON DELETE CASCADE`** — mesma forma da `chat_mencao`, para a limpeza dos testes não travar em chave estrangeira |
+| `emoji` | um dos **seis da Caixa** (`chat.REACOES`), conferido no backend |
+| `em` | quando reagiu (ou trocou) |
+
+**PK `(mensagem_id, atendente_id)`** — uma reação por pessoa por mensagem:
+trocar o emoji substitui (`ON CONFLICT ... DO UPDATE`), reagir com vazio apaga
+a linha. É o contrato da `mensagem_reacao` (034/036) sem o eco do WhatsApp, e
+por isso a chave é o `atendente_id`, não o texto `quem`.
+
+🚨 **LISTA FECHADA DE EMOJIS, IGUAL NAS TRÊS PONTAS.** Sem ela a rota aceitaria
+qualquer texto e viraria um segundo campo de mensagem. `teste_chat_reacao_busca.py`
+confere que `chat.REACOES`, a `REACOES` da `CaixaDeEntrada.vue` e a do
+`ChatInterno.vue` são idênticas, por codepoint (o coração é U+2764 + U+FE0F).
+
+⚠️ **Reação não é mensagem:** não mexe em `lido_ate`, não acende não lida, não
+sobe a sala na lista. Reagir à própria mensagem pode, como no WhatsApp.
+
+⚠️ **Apagada não recebe reação, e a que já tinha some junto com o conteúdo**
+para quem não é owner — mesma régua do texto (05/10).
+
 ### `chat_mencao` — quem foi chamado por `@` no chat interno (037)
 
 Pedido do usuário em 27/08: *"interessante e pode ser, tanto no interno quanto

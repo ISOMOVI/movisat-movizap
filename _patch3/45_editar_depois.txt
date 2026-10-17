@@ -1,0 +1,2 @@
+    erro.value = x instanceof ErroDeApi ? x.message : 'Não consegui editar.'
+    relatarErroDeBotao('editar_mensagem', x, aberta.value?.id, e.id)

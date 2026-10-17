@@ -174,13 +174,17 @@ export const api = {
    🚨 DISPARA E ESQUECE, DE PROPÓSITO. Isto é chamado de DENTRO do `catch` de
    uma ação que já falhou -- se o relato também falhar (rede caiu), não pode
    virar um segundo erro por cima do primeiro. */
-export function relatarErroDeBotao(acao, erro, conversaId = null) {
+/* 🚨 `alvoId` entrou em 16/10: sem o id do que a ação tentou mexer, o journal
+   registra que falhou e não deixa descobrir em QUE falhou. Opcional porque a
+   maioria das ações não tem alvo. */
+export function relatarErroDeBotao(acao, erro, conversaId = null, alvoId = null) {
   const mensagem = erro instanceof ErroDeApi ? erro.message : String(erro?.message || erro)
   api.post('/api/erros/frontend', {
     acao,
     mensagem: mensagem.slice(0, 500),
     url: window.location.pathname,
     conversa_id: conversaId,
+    alvo_id: alvoId,
   }).catch(() => {
     // Se até relatar falhar, não há mais nada a fazer daqui.
   })

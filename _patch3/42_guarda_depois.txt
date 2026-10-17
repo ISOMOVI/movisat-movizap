@@ -1,0 +1,9 @@
+    # 🚨 DUAS FRASES, NÃO UMA (16/10). Até aqui "a mensagem não existe" e "a
+    # mensagem é de outra conversa" davam o MESMO texto -- e foi isso que
+    # deixou o erro da Aline de 16/10 às 11:55 sem diagnóstico: a frase servia
+    # para dois defeitos de causas opostas. Quem lê a tela passa a saber qual
+    # dos dois aconteceu, e eu também.
+    if not m:
+        return None, "Esta mensagem não existe mais."
+    if m["conversa_id"] != conversa_id:
+        return None, "Esta mensagem é de outra conversa — recarregue a página."

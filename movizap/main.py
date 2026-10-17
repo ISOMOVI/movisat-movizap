@@ -305,6 +305,12 @@ class ErroDeBotao(BaseModel):
     mensagem: str = Field(min_length=1, max_length=500)
     url: str = Field(default="", max_length=200)
     conversa_id: int | None = None
+    # 🚨 O ID DO ALVO (16/10). Em 16/10 às 11:55 um "apagar" falhou com
+    # "Mensagem não encontrada nesta conversa" e o journal registrou ação,
+    # atendente, conversa, url e navegador -- tudo menos o ÚNICO campo que
+    # responderia qual mensagem era. Sem ele, três hipóteses ficaram
+    # indistinguíveis. Opcional: a maioria das ações não tem alvo.
+    alvo_id: int | None = None
 
 
 @app.post("/api/erros/frontend")
@@ -320,9 +326,10 @@ def erro_de_botao(dados: ErroDeBotao, request: Request,
     o "dispara e esquece" do frontend é o que evita um erro em cima do erro.
     """
     log_erros_botao.info(
-        "acao=%s atendente=%s(%s) conversa=%s url=%s ua=%s :: %s",
+        "acao=%s atendente=%s(%s) conversa=%s alvo=%s url=%s ua=%s :: %s",
         dados.acao, usuario["nome"], usuario["id"], dados.conversa_id,
-        dados.url, request.headers.get("user-agent", "?"), dados.mensagem,
+        dados.alvo_id, dados.url, request.headers.get("user-agent", "?"),
+        dados.mensagem,
     )
     return {"ok": True}
 
@@ -3556,6 +3563,11 @@ class ChatEdicao(BaseModel):
     texto: str = Field(max_length=4000)
 
 
+class ChatReacao(BaseModel):
+    # Vazio TIRA a reação, como na Caixa. A lista aceita é conferida no `chat`.
+    emoji: str = Field(default="", max_length=16)
+
+
 class ChatAbrir(BaseModel):
     atendente_id: int
 
@@ -3785,6 +3797,39 @@ def chat_apagar_mensagem(sala_id: int, mensagem_id: int,
         raise HTTPException(status_code=409, detail=r["motivo"])
     presenca.registrar_acao(eu)  # 🔵 05/10: apagar no chat interno é uso
     return r
+
+
+@app.post("/api/chat/salas/{sala_id}/mensagens/{mensagem_id}/reagir")
+def chat_reagir(sala_id: int, mensagem_id: int, dados: ChatReacao,
+                usuario: dict = Depends(auth.requer_tela("ATD_6.1"))):
+    """🔵 16/10: reajo a uma mensagem da sala, "como do externo".
+
+    Emoji vazio tira. A lista aceita, a trava de uma por pessoa e a recusa em
+    mensagem apagada moram no `chat.reagir`.
+    """
+    eu = _minha_sala(sala_id, usuario)
+    r = chat.reagir(sala_id, mensagem_id, eu, dados.emoji)
+    if not r["ok"]:
+        raise HTTPException(status_code=409, detail=r["motivo"])
+    presenca.registrar_acao(eu)  # reagir é uso, como escrever/editar/apagar
+    return r
+
+
+@app.get("/api/chat/salas/{sala_id}/buscar")
+def chat_buscar(sala_id: int, termo: str = "",
+                usuario: dict = Depends(auth.requer_tela("ATD_6.1"))):
+    """🔵 16/10: onde, DENTRO desta sala, alguém disse isso.
+
+    Mesmo contrato da `/api/conversas/{id}/buscar`: posições, `limitado` e
+    `teto`. 🚨 O limite aparece -- encostar no teto calado faz quem procura
+    concluir que achou tudo.
+    """
+    eu = _minha_sala(sala_id, usuario)
+    r = chat.buscar(sala_id, eu, termo)
+    if not r["ok"]:
+        raise HTTPException(status_code=409, detail=r["motivo"])
+    return {"achados": r["achados"], "limitado": r["limitado"],
+            "teto": chat.TETO_ACHADOS}
 
 
 def _atendente_do_usuario(usuario: dict) -> int | None:

@@ -454,3 +454,57 @@ class TestBuscaDentroDaConversaNoServidor:
                 (cena["conversa"], f"zzordem {i}", i + 1))
         achados = conversas.buscar_na_conversa(cena["conversa"], "zzordem")
         assert [a["id"] for a in achados] == sorted(a["id"] for a in achados)
+
+
+class TestBuscaAtravessaAsConversasIrmas:
+    """🚨 16/10: desde 07/10 a conversa mostra o fio inteiro do número
+    (`_ids_do_historico`), mas a busca olhava só a conversa aberta -- a
+    mensagem aparecia na tela e a busca respondia "nada com esse termo".
+    """
+
+    FONE_OUTRO = "+5599944440001"
+
+    def _conversa(self, canal, fone, estado):
+        return banco.um(
+            """INSERT INTO conversa (canal_id, telefone_e164, estado, nome_whatsapp)
+               VALUES (%s, %s, %s, 'zz irmã') RETURNING id""",
+            (canal, fone, estado))["id"]
+
+    def _mensagem(self, conversa, texto, dias_atras):
+        banco.executar(
+            """INSERT INTO mensagem (conversa_id, direcao, autor, tipo,
+                                     conteudo, criada_em)
+               VALUES (%s, 'entrada', 'cliente', 'texto', %s,
+                       now() - (%s || ' days')::interval)""",
+            (conversa, texto, dias_atras))
+
+    def _limpar_outro(self):
+        banco.executar(
+            """DELETE FROM mensagem WHERE conversa_id IN
+               (SELECT id FROM conversa WHERE telefone_e164 = %s)""",
+            (self.FONE_OUTRO,))
+        banco.executar("DELETE FROM conversa WHERE telefone_e164 = %s",
+                       (self.FONE_OUTRO,))
+
+    def test_acha_na_conversa_ANTERIOR_do_mesmo_numero(self, cena):
+        alvo = "zzditonaantiga"
+        # Resolvida: o índice de conversa aberta só deixa UMA não resolvida
+        # por número -- e é exatamente assim que as irmãs nascem.
+        antiga = self._conversa(cena["canal"], FONE, "resolvida")
+        self._mensagem(antiga, alvo, 20)
+
+        achados = conversas.buscar_na_conversa(cena["conversa"], alvo)
+        assert len(achados) == 1
+        # E a tela consegue chegar nela: a janela de mensagens também a traz.
+        tudo = conversas.mensagens(cena["conversa"], limite=500)
+        assert achados[0]["id"] in [m["id"] for m in tudo]
+
+    def test_NAO_acha_na_conversa_de_OUTRO_numero(self, cena):
+        alvo = "zzditoporoutro"
+        self._limpar_outro()
+        try:
+            outra = self._conversa(cena["canal"], self.FONE_OUTRO, "resolvida")
+            self._mensagem(outra, alvo, 1)
+            assert conversas.buscar_na_conversa(cena["conversa"], alvo) == []
+        finally:
+            self._limpar_outro()

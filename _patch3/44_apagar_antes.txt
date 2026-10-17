@@ -1,0 +1,18 @@
+function pedirParaApagar(m) {
+  const nota = m.tipo === 'nota'
+  perguntar(nota ? 'Apagar esta nota?' : 'Apagar para todos?',
+    nota ? 'A nota some da conversa para a equipe. Continua registrada, marcada como apagada.'
+         : 'A mensagem some do WhatsApp do cliente. Aqui ela continua registrada, marcada como apagada.',
+    nota ? 'Apagar nota' : 'Apagar para todos',
+    async () => {
+      try {
+        const rota = nota ? 'nota/apagar' : 'apagar'
+        await api.post(`/api/conversas/${aberta.value.id}/${rota}`, { mensagem_id: m.id })
+        recado.value = nota ? 'Nota apagada.' : 'Mensagem apagada para todos.'
+        await abrir(aberta.value.id)
+      } catch (x) {
+        erro.value = x instanceof ErroDeApi ? x.message : 'Não consegui apagar.'
+        relatarErroDeBotao('apagar_mensagem', x, aberta.value?.id)
+      }
+    }, true)
+}

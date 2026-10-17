@@ -343,3 +343,166 @@ describe('Chat interno: o destaque da menção NA TELA', () => {
     expect(marcas[0].classes()).toContain('mencao--eu')
   })
 })
+
+/* ---- 16/10: reagir e buscar, "como do externo" ---------------------------
+   🚨 MONTAM A TELA, não a função solta (a lição do `mencao.teste.js`): se o
+   balão deixar de usar a regra, é aqui que reprova. */
+import { reagirOtimista, acertosForaDaTela } from './util/reacao_chat.js'
+
+/* jsdom não implementa `scrollIntoView`; a busca rola até o acerto. */
+if (!Element.prototype.scrollIntoView) Element.prototype.scrollIntoView = () => {}
+
+const CRIADA = '2026-10-16T10:00:00-03:00'
+
+function msg(id, texto, extra = {}) {
+  return { id, texto, autor: 'Erika', autor_id: 2, criada_em: CRIADA,
+           mencionados: [], reacoes: [], minha_reacao: null, ...extra }
+}
+
+describe('Chat interno: reagir (16/10)', () => {
+  it('mostra a reação pendurada, a conta de dois para cima e QUEM reagiu', async () => {
+    respostas = base({ mensagens: [msg(1, 'bom dia', {
+      reacoes: [{ emoji: '👍', n: 2, minha: true, nomes: ['Iago', 'Rodrigo'] }],
+      minha_reacao: '👍',
+    })] })
+    const t = mount(ChatInterno)
+    await flushPromises()
+    await abrirSala(t, 'Erika')
+    const item = t.get('.balao__reacao-item')
+    expect(item.text()).toBe('👍2')
+    expect(item.attributes('title')).toBe('Iago, Rodrigo')
+    expect(item.classes()).toContain('balao__reacao-item--minha')
+  })
+
+  it('o seletor oferece os seis, e escolher manda para a rota da SALA', async () => {
+    respostas = base({ mensagens: [msg(1, 'bom dia')] })
+    const t = mount(ChatInterno)
+    await flushPromises()
+    await abrirSala(t, 'Erika')
+    await t.get('button[aria-label="Reagir"]').trigger('click')
+    const opcoes = t.findAll('.reacoes__item')
+    expect(opcoes.map((o) => o.text())).toEqual(['👍', '❤️', '😂', '😮', '😢', '🙏'])
+
+    await opcoes[1].trigger('click')
+    await flushPromises()
+    expect(posts.at(-1)).toEqual({
+      rota: '/api/chat/salas/1/mensagens/1/reagir', corpo: { emoji: '❤️' } })
+    // Vira na tela antes da resposta, e o seletor fecha.
+    expect(t.get('.balao__reacao-item').text()).toBe('❤️')
+    expect(t.find('.reacoes').exists()).toBe(false)
+  })
+
+  it('clicar de novo no MEU emoji tira (manda vazio)', async () => {
+    respostas = base({ mensagens: [msg(1, 'bom dia', {
+      reacoes: [{ emoji: '😂', n: 1, minha: true, nomes: ['Iago'] }],
+      minha_reacao: '😂',
+    })] })
+    const t = mount(ChatInterno)
+    await flushPromises()
+    await abrirSala(t, 'Erika')
+    await t.get('button[aria-label="Reagir"]').trigger('click')
+    const minha = t.get('.reacoes__item--minha')
+    expect(minha.text()).toBe('😂')
+    await minha.trigger('click')
+    await flushPromises()
+    expect(posts.at(-1).corpo).toEqual({ emoji: '' })
+    expect(t.find('.balao__reacao').exists()).toBe(false)
+  })
+
+  it('mensagem apagada não oferece reagir', async () => {
+    respostas = base({ mensagens: [msg(1, null, { apagada_em: CRIADA })] })
+    const t = mount(ChatInterno)
+    await flushPromises()
+    await abrirSala(t, 'Erika')
+    expect(t.find('button[aria-label="Reagir"]').exists()).toBe(false)
+  })
+
+  it('o eco otimista mexe só na MINHA parte da lista', () => {
+    const lista = [
+      { emoji: '👍', n: 2, minha: true, nomes: ['Rodrigo', 'você'] },
+      { emoji: '😂', n: 1, minha: false, nomes: ['Claudia'] },
+    ]
+    const troca = reagirOtimista(lista, '👍', '😂')
+    expect(troca.novo).toBe('😂')
+    expect(troca.reacoes).toEqual([
+      { emoji: '👍', n: 1, minha: false, nomes: ['Rodrigo'] },
+      { emoji: '😂', n: 2, minha: true, nomes: ['Claudia', 'você'] },
+    ])
+    // A lista original não é mexida: é ela que volta se a rota falhar.
+    expect(lista[0].n).toBe(2)
+  })
+})
+
+describe('Chat interno: buscar na conversa (16/10)', () => {
+  async function buscar(t, termo) {
+    await t.get('button[aria-label="Buscar nesta conversa"]').trigger('click')
+    await t.get('input[aria-label="Buscar nesta conversa"]').setValue(termo)
+    await vi.advanceTimersByTimeAsync(350)
+    await flushPromises()
+  }
+
+  it('busca NO SERVIDOR, conta "1/2", destaca o termo e o balão atual', async () => {
+    vi.useFakeTimers()
+    respostas = base({ mensagens: [msg(1, 'o boleto venceu'), msg(2, 'oi'),
+                                   msg(3, 'mandei o BOLETO')] })
+    respostas['/api/chat/salas/1/buscar'] = {
+      achados: [{ id: 1 }, { id: 3 }], limitado: false, teto: 200 }
+    const t = mount(ChatInterno)
+    await flushPromises()
+    await abrirSala(t, 'Erika')
+    await buscar(t, 'boleto')
+
+    expect(gets).toContain('/api/chat/salas/1/buscar?termo=boleto')
+    expect(t.get('.buscasala__conta').text()).toBe('1/2')
+    expect(t.findAll('.achado').map((a) => a.text())).toEqual(['boleto', 'BOLETO'])
+    expect(t.get('[data-mensagem="1"]').classes()).toContain('balao--atual')
+    expect(t.get('[data-mensagem="2"]').classes()).not.toContain('balao--casa')
+    vi.useRealTimers()
+  })
+
+  it('acerto MAIS ANTIGO que o que está na tela é dito, não escondido', async () => {
+    vi.useFakeTimers()
+    respostas = base({ mensagens: [msg(10, 'nada aqui')] })
+    respostas['/api/chat/salas/1/buscar'] = {
+      achados: [{ id: 3 }], limitado: false, teto: 200 }
+    const t = mount(ChatInterno)
+    await flushPromises()
+    await abrirSala(t, 'Erika')
+    await buscar(t, 'antigo')
+
+    expect(t.get('.buscasala__conta').text()).toBe('0')
+    expect(t.text()).toContain('1 acerto é mais antigo que as mensagens mostradas aqui.')
+    expect(t.text()).not.toContain('Nada com esse termo')
+    vi.useRealTimers()
+  })
+
+  it('sem acerto, diz que não há', async () => {
+    vi.useFakeTimers()
+    respostas = base({ mensagens: [msg(1, 'bom dia')] })
+    respostas['/api/chat/salas/1/buscar'] = { achados: [], limitado: false, teto: 200 }
+    const t = mount(ChatInterno)
+    await flushPromises()
+    await abrirSala(t, 'Erika')
+    await buscar(t, 'xyz')
+    expect(t.text()).toContain('Nada com esse termo nesta conversa.')
+    vi.useRealTimers()
+  })
+
+  it('trocar de conversa FECHA a busca — o termo era daquela sala', async () => {
+    vi.useFakeTimers()
+    respostas = base({ mensagens: [msg(1, 'o boleto venceu')] })
+    respostas['/api/chat/salas/1/buscar'] = { achados: [{ id: 1 }], limitado: false, teto: 200 }
+    const t = mount(ChatInterno)
+    await flushPromises()
+    await abrirSala(t, 'Erika')
+    await buscar(t, 'boleto')
+    await abrirSala(t, 'Financeiro')
+    expect(t.find('.buscasala').exists()).toBe(false)
+    vi.useRealTimers()
+  })
+
+  it('conta acertos fora da janela pela MESMA função da tela', () => {
+    expect(acertosForaDaTela([1, 2, 3], [{ id: 2 }, { id: 3 }])).toBe(1)
+    expect(acertosForaDaTela([], [{ id: 2 }])).toBe(0)
+  })
+})

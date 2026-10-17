@@ -2211,15 +2211,21 @@ def buscar_na_conversa(conversa_id: int, termo: str,
 
     ⚠️ Devolve a POSIÇÃO de cada acerto, não o texto: a tela já sabe desenhar
     o balão, e o que ela precisa é saber para onde rolar e quantos há.
+
+    🚨 16/10: PROCURA NAS CONVERSAS IRMÃS TAMBÉM. Desde 07/10 a tela mostra o
+    fio inteiro (`_ids_do_historico`), mas a busca olhava só a conversa
+    aberta: a mensagem aparecia na tela e a busca respondia "nada". Agora as
+    duas usam a MESMA lista de ids -- e o `irParaMensagem` da tela já carrega
+    para trás atravessando as irmãs, então achar e rolar seguem juntos.
     """
     termo = (termo or "").strip()
     if not termo:
         return []
     return banco.varios(
         """SELECT id, criada_em FROM mensagem
-            WHERE conversa_id = %s AND conteudo ILIKE %s
+            WHERE conversa_id = ANY(%s) AND conteudo ILIKE %s
             ORDER BY criada_em, id
-            LIMIT %s""", (conversa_id, f"%{termo}%", limite))
+            LIMIT %s""", (_ids_do_historico(conversa_id), f"%{termo}%", limite))
 
 
 def assumir(conversa_id: int, atendente_id: int) -> dict:
@@ -4006,8 +4012,15 @@ def _minha_enviada(conversa_id: int, mensagem_id: int, atendente_id: int | None)
              JOIN conversa c ON c.id = m.conversa_id
              JOIN canal ca ON ca.id = c.canal_id
             WHERE m.id = %s""", (mensagem_id,))
-    if not m or m["conversa_id"] != conversa_id:
-        return None, "Mensagem não encontrada nesta conversa."
+    # 🚨 DUAS FRASES, NÃO UMA (16/10). Até aqui "a mensagem não existe" e "a
+    # mensagem é de outra conversa" davam o MESMO texto -- e foi isso que
+    # deixou o erro da Aline de 16/10 às 11:55 sem diagnóstico: a frase servia
+    # para dois defeitos de causas opostas. Quem lê a tela passa a saber qual
+    # dos dois aconteceu, e eu também.
+    if not m:
+        return None, "Esta mensagem não existe mais."
+    if m["conversa_id"] != conversa_id:
+        return None, "Esta mensagem é de outra conversa — recarregue a página."
     if m["direcao"] != "saida" or m["tipo"] == "nota":
         return None, "Só dá para mudar mensagem que a equipe mandou ao cliente."
     if not atendente_id or m["atendente_id"] != atendente_id:

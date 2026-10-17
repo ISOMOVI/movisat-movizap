@@ -1,0 +1,8 @@
+export function relatarErroDeBotao(acao, erro, conversaId = null) {
+  const mensagem = erro instanceof ErroDeApi ? erro.message : String(erro?.message || erro)
+  api.post('/api/erros/frontend', {
+    acao,
+    mensagem: mensagem.slice(0, 500),
+    url: window.location.pathname,
+    conversa_id: conversaId,
+  }).catch(() => {

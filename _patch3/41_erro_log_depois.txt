@@ -1,0 +1,6 @@
+    log_erros_botao.info(
+        "acao=%s atendente=%s(%s) conversa=%s alvo=%s url=%s ua=%s :: %s",
+        dados.acao, usuario["nome"], usuario["id"], dados.conversa_id,
+        dados.alvo_id, dados.url, request.headers.get("user-agent", "?"),
+        dados.mensagem,
+    )

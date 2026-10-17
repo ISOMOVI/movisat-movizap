@@ -15,6 +15,8 @@ import { useRoute, useRouter } from 'vue-router'
 import { api, pedirBlob, ErroDeApi } from '../api/cliente.js'
 import { corDaInicial, iniciais } from '../util/avatar.js'
 import { partesDoTexto } from '../util/mencao.js'
+import { marcar } from '../util/destaque.js'
+import { reagirOtimista, acertosForaDaTela } from '../util/reacao_chat.js'
 import { corDoEstado, rotuloDoEstado } from '../util/estado.js'
 import BotaoMensagensRapidas from '../componentes/BotaoMensagensRapidas.vue'
 
@@ -829,6 +831,127 @@ async function apagarMensagemChat(m) {
   }
 }
 
+/* ---- reagir com emoji (16/10) ---------------------------------------------
+   🔵 Pedido dele: "reagir a mensagens internas, como do externo". OS MESMOS
+   SEIS da Caixa -- há teste no backend que confere que as listas da Caixa, do
+   Chat e do `chat.py` são iguais; uma divergindo, a tela ofereceria um emoji
+   que a rota recusa.
+
+   ⚠️ Aqui a reação mostra QUEM (ao passar o mouse), e a Caixa não: lá quem
+   reage é o cliente e um "nós" coletivo; aqui são colegas, e num grupo "👍 4"
+   sem nomes não responde a pergunta que a reação existe para responder. */
+const REACOES = ['👍', '❤️', '😂', '😮', '😢', '🙏']
+const reagindoEm = ref(null)
+
+async function reagir(m, emoji) {
+  reagindoEm.value = null
+  /* Vira na tela antes da resposta: reação é clique de meio segundo. Se
+     falhar, desfaz e diz. */
+  const antes = { reacoes: m.reacoes || [], minha: m.minha_reacao || null }
+  const { reacoes, novo } = reagirOtimista(antes.reacoes, antes.minha, emoji)
+  m.reacoes = reacoes
+  m.minha_reacao = novo || null
+  try {
+    await api.post(`/api/chat/salas/${sala.value.id}/mensagens/${m.id}/reagir`,
+                   { emoji: novo })
+  } catch (x) {
+    m.reacoes = antes.reacoes
+    m.minha_reacao = antes.minha
+    erro.value = x instanceof ErroDeApi ? x.message : 'Não consegui reagir.'
+  }
+}
+
+function quemReagiu(r) {
+  return (r.nomes || []).join(', ')
+}
+
+/* ---- buscar dentro da sala (16/10) ----------------------------------------
+   🔵 Pedido dele: "pesquisar conteúdo dentro das conversas também". Mesmo
+   gesto da Caixa: abre por botão, conta "3/7", setas, Enter vai ao próximo,
+   Esc fecha -- quem já busca lá não precisa aprender nada.
+
+   🚨 A BUSCA RODA NO SERVIDOR (`/api/chat/salas/{id}/buscar`), não sobre
+   `mensagens`: a tela carrega as 500 mais recentes, e procurar só no que está
+   carregado responderia "nada" sobre mensagem que existe.
+
+   ⚠️ E O QUE O SERVIDOR ACHA ANTES DAS 500 É DITO, não escondido: a sala não
+   pagina, então não há para onde rolar. Ver `acertosForaDaTela`. */
+const buscaAberta = ref(false)
+const buscaNaSala = ref('')
+const achadosNaSala = ref([])      // ids, na ordem da sala
+const achadoAtual = ref(0)
+const achadosLimitados = ref(false)
+const buscandoNaSala = ref(false)
+const campoBuscaSala = ref(null)
+
+const achadosVisiveis = computed(
+  () => achadosNaSala.value.filter((id) => mensagens.value.some((m) => m.id === id)))
+const achadosAntigos = computed(
+  () => acertosForaDaTela(achadosNaSala.value, mensagens.value))
+const idAchado = computed(() => achadosVisiveis.value[achadoAtual.value] ?? null)
+
+function alternarBusca() {
+  if (buscaAberta.value) { fecharBusca(); return }
+  buscaAberta.value = true
+  // Abrir e ter de clicar no campo seria um clique a mais para nada.
+  nextTick(() => campoBuscaSala.value && campoBuscaSala.value.focus())
+}
+
+/* ⚠️ FECHAR LIMPA O TERMO -- com ele guardado, os balões continuariam
+   marcados sem o campo à vista: um filtro ativo que nada na tela explica. */
+function fecharBusca() {
+  buscaAberta.value = false
+  buscaNaSala.value = ''
+  achadosNaSala.value = []
+  achadoAtual.value = 0
+  achadosLimitados.value = false
+}
+
+async function buscarNaSala() {
+  const alvo = buscaNaSala.value.trim()
+  achadoAtual.value = 0
+  if (!alvo || !sala.value) {
+    achadosNaSala.value = []
+    achadosLimitados.value = false
+    return
+  }
+  buscandoNaSala.value = true
+  try {
+    const r = await api.get(
+      `/api/chat/salas/${sala.value.id}/buscar?termo=${encodeURIComponent(alvo)}`)
+    achadosNaSala.value = (r.achados || []).map((a) => a.id)
+    achadosLimitados.value = Boolean(r.limitado)
+    if (achadosVisiveis.value.length) irParaAchado(0)
+  } catch {
+    achadosNaSala.value = []
+  } finally {
+    buscandoNaSala.value = false
+  }
+}
+
+function irParaAchado(passo) {
+  const total = achadosVisiveis.value.length
+  if (!total) return
+  // Dá a volta nas duas direções: no último, "próximo" volta ao primeiro.
+  achadoAtual.value = (achadoAtual.value + passo + total) % total
+  irParaMensagem(idAchado.value)
+}
+
+/* Espera a digitação parar: uma ida ao banco por tecla seria desperdício. */
+let esperaBusca = null
+watch(buscaNaSala, () => {
+  clearTimeout(esperaBusca)
+  esperaBusca = setTimeout(buscarNaSala, 300)
+})
+
+/* O texto do balão com as menções E o termo da busca acesos. A menção
+   continua vindo de `partesDoTexto` (o gravado, nunca o "@" do texto); o
+   termo é marcado DENTRO de cada pedaço, para um não apagar o outro. */
+function pedacosDoBalao(m) {
+  const termo = buscaAberta.value ? buscaNaSala.value : ''
+  return partesDoTexto(m).map((p) => ({ ...p, trechos: marcar(p.texto, termo) }))
+}
+
 /* ⚠️ Só rola sozinho se já estava no fim. Rolar à força enquanto a pessoa lê
    uma mensagem antiga arranca a tela da mão dela a cada 5 segundos. */
 function estaNoFim() {
@@ -919,6 +1042,10 @@ watch(() => sala.value?.id, (novo, velho) => {
   // o backend recusa (`chat._conferir_citada`), e o balão ficaria pendurado
   // no compositor sem explicação.
   citando.value = null
+  // 16/10: a busca e o seletor de reação também eram DESTA sala. O termo
+  // guardado marcaria balões da outra conversa com acertos que não são dela.
+  fecharBusca()
+  reagindoEm.value = null
 })
 
 function hora(iso) {
@@ -1162,6 +1289,15 @@ function quando(iso) {
               <i class="bi bi-lock" aria-hidden="true"></i> interno
             </span>
             <span class="espaco"></span>
+            <!-- 16/10: buscar DENTRO desta conversa. Abre por botão, como na
+                 Caixa: é ação eventual e não merece uma faixa fixa. -->
+            <button class="botao botao--pequeno botao--fantasma botao--lupa" type="button"
+                    title="Buscar nesta conversa"
+                    aria-label="Buscar nesta conversa"
+                    :aria-expanded="buscaAberta"
+                    @click="alternarBusca">
+              <i class="bi bi-search" aria-hidden="true"></i>
+            </button>
             <template v-if="ehGrupo">
               <button class="botao botao--pequeno botao--fantasma" type="button"
                       @click="mostrandoMembros = !mostrandoMembros">
@@ -1183,6 +1319,65 @@ function quando(iso) {
               <i class="bi bi-trash3" aria-hidden="true"></i>
             </button>
           </header>
+
+          <div v-if="buscaAberta" class="buscasala">
+            <div class="buscasala__linha">
+              <input
+                ref="campoBuscaSala"
+                v-model="buscaNaSala"
+                class="campo__entrada"
+                type="search"
+                placeholder="Buscar nesta conversa"
+                aria-label="Buscar nesta conversa"
+                @keyup.enter="irParaAchado(1)"
+                @keydown.esc="fecharBusca"
+              />
+              <template v-if="buscaNaSala.trim()">
+                <span class="pequeno fraco buscasala__conta">
+                  {{ achadosVisiveis.length
+                     ? `${achadoAtual + 1}/${achadosVisiveis.length}`
+                     : '0' }}
+                </span>
+                <button class="botao botao--pequeno botao--contorno botao--icone"
+                        type="button" :disabled="!achadosVisiveis.length"
+                        title="Ocorrência anterior" aria-label="Ocorrência anterior"
+                        @click="irParaAchado(-1)">
+                  <i class="bi bi-chevron-up" aria-hidden="true"></i>
+                </button>
+                <button class="botao botao--pequeno botao--contorno botao--icone"
+                        type="button" :disabled="!achadosVisiveis.length"
+                        title="Próxima ocorrência" aria-label="Próxima ocorrência"
+                        @click="irParaAchado(1)">
+                  <i class="bi bi-chevron-down" aria-hidden="true"></i>
+                </button>
+              </template>
+              <button class="botao botao--pequeno botao--fantasma botao--icone"
+                      type="button" title="Fechar a busca" aria-label="Fechar a busca"
+                      @click="fecharBusca">
+                <i class="bi bi-x-lg" aria-hidden="true"></i>
+              </button>
+            </div>
+            <p v-if="buscandoNaSala" class="linha pequeno fraco">
+              <span class="girando"></span> procurando…
+            </p>
+            <template v-else-if="buscaNaSala.trim()">
+              <!-- 🚨 O QUE NÃO ESTÁ NA TELA É DITO. A conversa mostra as 500
+                   mais recentes; acerto mais antigo existe, foi achado, e não
+                   há para onde rolar. Calar faria o "0" parecer "não existe". -->
+              <p v-if="achadosAntigos" class="chip chip--aviso pequeno buscasala__aviso">
+                {{ achadosAntigos === 1
+                   ? '1 acerto é mais antigo que as mensagens mostradas aqui.'
+                   : `${achadosAntigos} acertos são mais antigos que as mensagens mostradas aqui.` }}
+              </p>
+              <p v-if="achadosLimitados" class="chip chip--aviso pequeno buscasala__aviso">
+                Mostrando os primeiros {{ achadosNaSala.length }} acertos —
+                use um termo mais específico.
+              </p>
+              <p v-if="!achadosNaSala.length" class="apagado pequeno">
+                Nada com esse termo nesta conversa.
+              </p>
+            </template>
+          </div>
 
           <div v-if="ehGrupo && mostrandoMembros" class="cartao__corpo pilha grupo__novo">
             <p class="campo__rotulo">No grupo</p>
@@ -1222,7 +1417,10 @@ function quando(iso) {
                 class="balao"
                 :class="[m.minha ? 'balao--minha' : 'balao--dele',
                          { 'balao--seguida': mesmoAutor(m, i),
-                           'balao--realcado': m.id === balaoRealcado }]"
+                           'balao--realcado': m.id === balaoRealcado,
+                           'balao--casa': achadosNaSala.includes(m.id),
+                           'balao--atual': m.id === idAchado,
+                           'balao--com-reacao': (m.reacoes || []).length }]"
                 :data-mensagem="m.id"
               >
                 <p v-if="!m.minha && !mesmoAutor(m, i)" class="balao__autor pequeno">
@@ -1284,10 +1482,20 @@ function quando(iso) {
                     </a>
                   </template>
                   <p v-if="m.texto" class="balao__texto">
-                    <template v-for="(p, k) in partesDoTexto(m)" :key="k">
+                    <!-- 16/10: o termo da busca aceso DENTRO de cada pedaço,
+                         para não apagar o destaque da menção (e vice-versa). -->
+                    <template v-for="(p, k) in pedacosDoBalao(m)" :key="k">
                       <mark v-if="p.mencao" class="mencao"
-                            :class="{ 'mencao--eu': p.eu }">{{ p.texto }}</mark>
-                      <template v-else>{{ p.texto }}</template>
+                            :class="{ 'mencao--eu': p.eu }"><template
+                        v-for="(q, j) in p.trechos" :key="j"><span v-if="q.casa"
+                        class="achado">{{ q.texto }}</span><template
+                        v-else>{{ q.texto }}</template></template></mark>
+                      <template v-else>
+                        <template v-for="(q, j) in p.trechos" :key="j">
+                          <span v-if="q.casa" class="achado">{{ q.texto }}</span>
+                          <template v-else>{{ q.texto }}</template>
+                        </template>
+                      </template>
                     </template>
                   </p>
                 </template>
@@ -1335,6 +1543,13 @@ function quando(iso) {
                           aria-label="Responder citando" @click="citar(m)">
                     <i class="bi bi-reply" aria-hidden="true"></i>
                   </button>
+                  <!-- 16/10: reagir, como na Caixa. Apagada não recebe. -->
+                  <button v-if="!m.apagada_em" class="balao__acao" type="button"
+                          title="Reagir" aria-label="Reagir"
+                          :aria-expanded="reagindoEm === m.id"
+                          @click="reagindoEm = reagindoEm === m.id ? null : m.id">
+                    <i class="bi bi-emoji-smile" aria-hidden="true"></i>
+                  </button>
                   <button v-if="podeEditarChat(m)" class="balao__acao" type="button"
                           title="Editar (até 15 minutos depois de enviar)"
                           aria-label="Editar mensagem" @click="abrirEdicaoChat(m)">
@@ -1346,6 +1561,30 @@ function quando(iso) {
                     <i class="bi bi-trash" aria-hidden="true"></i>
                   </button>
                 </div>
+
+                <!-- O seletor: os seis, com o MEU marcado -- clicar nele de
+                     novo é o que tira, e sem a marca o gesto parece não fazer
+                     nada. -->
+                <div v-if="reagindoEm === m.id && !m.apagada_em" class="reacoes"
+                     role="group" aria-label="Escolher reação">
+                  <button v-for="e in REACOES" :key="e" class="reacoes__item"
+                          :class="{ 'reacoes__item--minha': m.minha_reacao === e }"
+                          type="button" :aria-pressed="m.minha_reacao === e"
+                          @click="reagir(m, e)">{{ e }}</button>
+                </div>
+
+                <!-- A reação PENDURADA no canto do balão, como no WhatsApp e na
+                     Caixa. Passar o mouse diz QUEM; a conta aparece de dois
+                     para cima (numa conversa de dois, "1" em todo balão é
+                     ruído). -->
+                <span v-if="(m.reacoes || []).length" class="balao__reacao">
+                  <span v-for="r in m.reacoes" :key="r.emoji"
+                        class="balao__reacao-item"
+                        :class="{ 'balao__reacao-item--minha': r.minha }"
+                        :title="quemReagiu(r)">
+                    {{ r.emoji }}<em v-if="r.n > 1">{{ r.n }}</em>
+                  </span>
+                </span>
               </div>
             </template>
           </div>
@@ -1958,6 +2197,89 @@ function quando(iso) {
   cursor: pointer;
 }
 .balao--realcado { outline: 2px solid var(--acento); }
+
+/* ---- buscar na conversa (16/10), mesmo desenho da Caixa de entrada ------ */
+.botao--lupa[aria-expanded="true"] { color: var(--acento); }
+.buscasala {
+  display: flex;
+  flex-direction: column;
+  gap: var(--e-1);
+  padding: var(--e-2) var(--e-4);
+  border-bottom: var(--borda-fina) solid var(--borda);
+}
+.buscasala__linha { display: flex; align-items: center; gap: var(--e-2); }
+.buscasala__linha .campo__entrada { flex: 1 1 auto; min-width: 0; }
+.buscasala__conta { flex: none; min-width: 3.2em; text-align: right; }
+.buscasala__aviso { align-self: flex-start; }
+/* O mesmo amarelo do termo achado na Caixa: quem busca nas duas telas vê a
+   mesma marca. */
+.achado {
+  background: rgba(255, 193, 7, .45);
+  border-radius: 3px;
+  font-weight: var(--peso-forte);
+}
+/* Todas as que casaram, e a que está "parada" agora, distinta das outras:
+   sem isso, num fio longo, não se sabe qual das 7 é a "3". */
+.balao--casa { outline: 1px solid var(--aviso-borda); }
+.balao--atual { outline: 2px solid var(--acento); }
+
+/* ---- reagir (16/10), mesmo desenho da Caixa de entrada ------------------ */
+.reacoes {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  display: flex;
+  gap: 2px;
+  padding: var(--e-1);
+  background: var(--superficie);
+  border: var(--borda-fina) solid var(--borda);
+  border-radius: var(--r-full);
+  box-shadow: var(--sombra-2);
+  z-index: var(--z-flutuante);
+}
+.reacoes__item {
+  border: 0;
+  background: none;
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 1;
+  padding: 3px;
+  border-radius: var(--r-full);
+}
+.reacoes__item:hover { background: var(--superficie-2); transform: scale(1.15); }
+.reacoes__item--minha { background: var(--superficie-2); outline: 2px solid var(--acento); }
+/* A reação pendurada no canto: dentro do balão viraria mais uma linha. O
+   balão que a tem ganha a altura dela embaixo, senão ela cobre o próximo. */
+.balao--com-reacao { margin-bottom: 12px; }
+.balao__reacao {
+  position: absolute;
+  bottom: -10px;
+  left: var(--e-3);
+  display: flex;
+  gap: 3px;
+  line-height: 1.4;
+}
+.balao__reacao-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 1px 5px;
+  background: var(--superficie);
+  border: var(--borda-fina) solid var(--borda);
+  border-radius: var(--r-full);
+  font-size: var(--txt-sm);
+  cursor: default;
+}
+/* A minha fica marcada: num balão com três reações, sem isso ninguém sabe
+   qual foi a sua -- e clicar de novo tiraria a de outra pessoa na cabeça de
+   quem clica. */
+.balao__reacao-item--minha { border-color: var(--acento); }
+.balao__reacao-item em {
+  font-style: normal;
+  font-size: var(--txt-xs);
+  color: var(--texto-apagado);
+}
+
 .citando {
   display: flex;
   align-items: center;

@@ -38,6 +38,20 @@ TETO_ARQUIVO = TETO_ARQUIVO_MB * 1024 * 1024
 # **Limite é decisão dele:** se um dia isto apertar, o número é dele, não meu.
 TETO_MENCOES = 20
 
+# 🔵 16/10: reagir no Chat interno "como do externo". OS MESMOS SEIS da Caixa
+# (`REACOES` em CaixaDeEntrada.vue), escritos por codepoint para não depender
+# de como o editor grava o coração (U+2764 + U+FE0F). Lista fechada de
+# propósito: sem ela a rota aceitaria qualquer texto e viraria um segundo
+# campo de mensagem. Há teste que confere que as três listas são iguais.
+REACOES = ("\U0001F44D", "❤️", "\U0001F602",
+           "\U0001F62E", "\U0001F622", "\U0001F64F")
+
+# ⚠️ TETO DOS ACERTOS DA BUSCA, DECLARADO -- o mesmo 200 da Caixa
+# (`conversas.TETO_ACHADOS_NA_CONVERSA`). Termo largo casa com quase tudo, e
+# devolver tudo não ajuda a achar nada; o que não pode é encostar calado. A
+# rota devolve `limitado` e a tela diz que está vendo os primeiros.
+TETO_ACHADOS = 200
+
 
 def _chave_do_par(a: int, b: int) -> str:
     """'menor:maior' — a chave que impede sala duplicada para o mesmo par.
@@ -403,6 +417,7 @@ def mensagens(sala_id: int, eu: int, limite: int = 500) -> list[dict]:
                 ORDER BY c.id DESC LIMIT %s
            ) recentes ORDER BY id""", (eu, sala_id, limite))
     _juntar_mencoes(linhas, eu)
+    _juntar_reacoes(linhas, eu)
     # 🔵 05/10: apagada no Chat interno some o conteúdo para todos menos o owner
     # -- texto, histórico de edição e mídia. `apagada_em` continua indo, para a
     # tela desenhar "mensagem excluída"; sem conteúdo, o botão "ver o que dizia"
@@ -418,6 +433,10 @@ def mensagens(sala_id: int, eu: int, limite: int = 500) -> list[dict]:
                 l["midia_mime"] = None
                 l["midia_nome"] = None
                 l["midia_tamanho"] = None
+                # 16/10: a reação é sobre o conteúdo -- "❤️ 3" embaixo de
+                # "mensagem excluída" diria que havia algo de que gostar.
+                l["reacoes"] = []
+                l["minha_reacao"] = None
             if l.get("citada_apagada_em"):
                 l["citada_texto"] = None
                 l["citada_midia_id"] = None
@@ -451,6 +470,114 @@ def _juntar_mencoes(linhas: list[dict], eu: int) -> None:
         chamados = por_mensagem.get(linha["id"], [])
         linha["mencionados"] = chamados
         linha["me_chamou"] = any(c["id"] == eu for c in chamados)
+
+
+def _juntar_reacoes(linhas: list[dict], eu: int) -> None:
+    """Pendura em cada mensagem as reações, agrupadas por emoji.
+
+    Formato: `reacoes = [{emoji, n, minha, nomes}]`, do mais usado para o
+    menos, e `minha_reacao` = o emoji que EU pus, ou None.
+
+    ⚠️ OS NOMES VÊM JUNTO, e é aí que difere da Caixa. Lá quem reage é o
+    cliente e um "nós" coletivo; aqui são colegas, e num grupo de quinze "👍 4"
+    sem dizer quem não responde a pergunta que a reação existe para responder.
+
+    ⚠️ UMA CONSULTA PARA A JANELA INTEIRA, pelo mesmo motivo das menções.
+    """
+    for linha in linhas:
+        linha["reacoes"] = []
+        linha["minha_reacao"] = None
+    if not linhas:
+        return
+    por_id = {linha["id"]: linha for linha in linhas}
+    grupos: dict[int, dict[str, dict]] = {}
+    for r in banco.varios(
+        """SELECT r.mensagem_id, r.emoji, r.atendente_id, a.nome
+             FROM chat_reacao r
+             JOIN atendente a ON a.id = r.atendente_id
+            WHERE r.mensagem_id = ANY(%s)
+            ORDER BY r.em, a.nome""", (list(por_id),)):
+        g = grupos.setdefault(r["mensagem_id"], {}).setdefault(
+            r["emoji"], {"emoji": r["emoji"], "n": 0, "minha": False, "nomes": []})
+        g["n"] += 1
+        g["nomes"].append(r["nome"])
+        if r["atendente_id"] == eu:
+            g["minha"] = True
+            por_id[r["mensagem_id"]]["minha_reacao"] = r["emoji"]
+    for mensagem_id, por_emoji in grupos.items():
+        # `sorted` é estável: empate fica na ordem de chegada, que é a do SQL.
+        por_id[mensagem_id]["reacoes"] = sorted(
+            por_emoji.values(), key=lambda g: -g["n"])
+
+
+def reagir(sala_id: int, mensagem_id: int, eu: int, emoji: str) -> dict:
+    """Reajo a uma mensagem da sala. 🔵 16/10, "como do externo".
+
+    ⚠️ EMOJI VAZIO TIRA A REAÇÃO -- o mesmo gesto da Caixa e do WhatsApp:
+    não existe "remover", existe reagir com nada. Reagir de novo com OUTRO
+    emoji troca; a chave `(mensagem, atendente)` é a trava de uma por pessoa.
+
+    🚨 MENSAGEM APAGADA NÃO RECEBE REAÇÃO. O conteúdo some para quem não é
+    owner (05/10); reagir ao vazio seria reagir a algo que ninguém vê.
+
+    ⚠️ REAGIR À PRÓPRIA MENSAGEM PODE, como no WhatsApp. E reagir NÃO conta
+    como mensagem: não mexe em `lido_ate`, não notifica, não sobe a sala.
+    """
+    emoji = (emoji or "").strip()
+    if emoji and emoji not in REACOES:
+        return {"ok": False, "motivo": "Essa reação não está na lista."}
+    if not e_membro(sala_id, eu):
+        return {"ok": False, "motivo": "Você não está nesta conversa."}
+    m = banco.um("SELECT sala_id, apagada_em FROM chat_mensagem WHERE id = %s",
+                 (mensagem_id,))
+    if not m or m["sala_id"] != sala_id:
+        return {"ok": False, "motivo": "Mensagem não encontrada nesta sala."}
+    if m["apagada_em"]:
+        return {"ok": False, "motivo": "Mensagem apagada não recebe reação."}
+
+    if emoji:
+        banco.executar(
+            """INSERT INTO chat_reacao (mensagem_id, atendente_id, emoji)
+               VALUES (%s, %s, %s)
+               ON CONFLICT (mensagem_id, atendente_id)
+               DO UPDATE SET emoji = EXCLUDED.emoji, em = now()""",
+            (mensagem_id, eu, emoji))
+    else:
+        banco.executar(
+            "DELETE FROM chat_reacao WHERE mensagem_id = %s AND atendente_id = %s",
+            (mensagem_id, eu))
+    return {"ok": True, "mensagem_id": mensagem_id, "reacao": emoji or None}
+
+
+def buscar(sala_id: int, eu: int, termo: str,
+           limite: int = TETO_ACHADOS) -> dict:
+    """Onde, DENTRO desta sala, alguém disse isso. 🔵 16/10, "como do externo".
+
+    ⚠️ DEVOLVE A POSIÇÃO (id), não o texto -- o mesmo contrato da
+    `conversas.buscar_na_conversa`: a tela já desenha o balão, e o que ela
+    precisa é saber para onde rolar e quantos há.
+
+    🚨 RODA NO SERVIDOR, NÃO NO NAVEGADOR. A tela carrega as 500 mais recentes;
+    buscar só no que está carregado responderia "nada" sobre mensagem que
+    existe. Aqui acha tudo, e a tela diz quantos acertos estão ANTES do que
+    ela mostra, em vez de fingir que não existem.
+
+    🚨 APAGADA NÃO ENTRA PARA QUEM NÃO É OWNER. A leitura esconde o texto
+    (05/10); se a busca achasse, devolveria a posição de algo que a tela
+    esconde -- e "achei 1" sobre um balão vazio entrega que ali dizia isso.
+    """
+    termo = (termo or "").strip()
+    if not e_membro(sala_id, eu):
+        return {"ok": False, "motivo": "Você não está nesta conversa."}
+    if not termo:
+        return {"ok": True, "achados": [], "limitado": False}
+    filtro_apagada = "" if _eh_owner(eu) else "AND apagada_em IS NULL"
+    achados = banco.varios(
+        f"""SELECT id, criada_em FROM chat_mensagem
+             WHERE sala_id = %s AND texto ILIKE %s {filtro_apagada}
+             ORDER BY id
+             LIMIT %s""", (sala_id, f"%{termo}%", limite))
+    return {"ok": True, "achados": achados, "limitado": len(achados) >= limite}
 
 
 def _conferir_citada(sala_id: int, citando_id: int | None) -> dict | None:

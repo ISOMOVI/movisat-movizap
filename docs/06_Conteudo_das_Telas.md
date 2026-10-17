@@ -460,6 +460,26 @@ tempo, e três avisos iguais viram decoração que o olho pula.
 **Excluir conversa** esconde para mim e não apaga para o outro — ver `docs/02`,
 migração 038.
 
+**Reagir e buscar, "como do externo" (16/10)** — *"verifique recursos de
+reagir a mensagens internas, como do externo e pesquisar conteudo dentro das
+conversar tbm"*.
+
+- **Reagir:** botão de carinha nas ações do balão, os **mesmos seis** da Caixa,
+  o meu marcado no seletor (clicar nele de novo tira). A reação fica pendurada
+  no canto do balão; a conta aparece de **dois para cima**, e **passar o mouse
+  diz quem reagiu** — diferença deliberada da Caixa: lá quem reage é o cliente
+  e um "nós" coletivo, aqui são colegas. Apagada não oferece reagir.
+- **Buscar:** lupa no cabeçalho da sala, mesmo gesto da Caixa (contador `3/7`,
+  setas, `Enter` vai ao próximo, `Esc` fecha e **fechar limpa o termo**). Roda
+  **no servidor** (`/api/chat/salas/{id}/buscar`), teto de 200 declarado.
+  🚨 **A sala carrega as 500 mais recentes e não pagina**: acerto mais antigo
+  que isso é achado e **dito** ("1 acerto é mais antigo que as mensagens
+  mostradas aqui"), não rola para o nada nem vira "0" calado. Paginar o chat é
+  outro trabalho — hoje a maior sala tem 330.
+- **Busca da Caixa, junto (16/10):** passou a procurar também nas **conversas
+  irmãs** (`_ids_do_historico`) — desde 07/10 a tela mostrava o fio inteiro e a
+  busca olhava só a conversa aberta.
+
 ### `EML_1.1` — E-mail
 
 **As 12 estrelas coloridas do Gmail somem da lista** — *"o tip 'YELLOW_STAR'
@@ -2560,6 +2580,21 @@ inteiro — uma exceção fora do laço travava `mexendo` em `true` para
 sempre, e o modal de confirmação (o mesmo do "Reabrir e assumir") para de
 responder enquanto isso. Corrigido. **Não é a causa confirmada** do caso
 da Aline, só a única fresta real achada lendo o código inteiro.
+
+**16/10 — o journal passou a gravar o ALVO** (item 2, pelo erro do "apagar" da
+Aline às 11:55, que ficou sem diagnóstico: o id que o navegador mandou não
+existia na conversa, e o journal registrava tudo **menos** o `mensagem_id`).
+Três mudanças, no ar desde 16/10 18:12:
+- `ErroDeBotao` ganhou `alvo_id`, e a linha do journal grava `alvo=`. O
+  `relatarErroDeBotao` do frontend manda o id da mensagem no apagar e no
+  editar. Se o erro voltar, o diagnóstico fecha pelo log.
+- **Duas frases, não uma:** "Esta mensagem não existe mais." e "Esta mensagem
+  é de outra conversa — recarregue a página." Antes as duas causas, opostas,
+  davam o mesmo texto.
+- **Apagar congela a conversa no clique:** a confirmação lia `aberta.value.id`
+  só no "sim"; se a conversa aberta mudasse com o diálogo na tela, o pedido ia
+  para a conversa nova com o id da mensagem da antiga. Defeito real, achado no
+  caminho — **não é a causa confirmada** do caso dela.
 
 **Vínculos** (🔵, ao ver as fichas duplicadas do `+5583987916210`: *"acho
 legal termos o log de vínculos, para saber quem vincula o que"*). Grava em
