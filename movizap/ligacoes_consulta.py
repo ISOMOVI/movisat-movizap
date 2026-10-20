@@ -208,13 +208,38 @@ def gravacao(gravacao_id: int) -> dict | None:
             WHERE g.id = %s""", (int(gravacao_id),))
 
 
+# 🚨 O AGENTE SÓ FALA DO PROBLEMA. Ele manda aviso quando a gravação
+# automática está DESLIGADA no MicroSIP (`Settings.autoRecording` ≠ 1); quando
+# está ligada, não diz nada. Então "ligado" é dedução da ausência do aviso na
+# ÚLTIMA passada -- e por isso só vale para quem já falou. PC que nunca falou
+# fica em `desconhecido`: dizer "ligado" ali seria a tela mentindo (`M12`).
+AVISO_REC_DESLIGADO = "gravacao automatica desligada"
+
+
+def rec_do_agente(linha: dict) -> str | None:
+    """O estado da gravação automática daquele PC: `ligado`, `desligado`,
+    `desconhecido` -- ou `None` para quem não tem agente, onde a pergunta nem
+    existe."""
+    if not linha.get("agente_id"):
+        return None
+    if not linha.get("ultimo_contato_em"):
+        return "desconhecido"
+    aviso = (linha.get("ultimo_aviso") or "").lower()
+    return "desligado" if AVISO_REC_DESLIGADO in aviso else "ligado"
+
+
 def agentes() -> list[dict]:
-    """A faixa de cobertura da aba: quem tem agente e desde quando.
+    """A faixa de cobertura da aba: quem tem agente, desde quando, e se o PC
+    está gravando.
 
     🚨 É o que impede a aba de mentir por omissão: ausência de ligação de
     alguém significa "aquele PC não tem agente", não "não ligou".
+
+    🔴 19/10, pedido dele: cada linha diz se o REC está ativado. Medido no
+    dia: 4 dos 5 PCs com agente tinham a gravação desligada e ninguém via isso
+    na tela -- só o histórico subia, o áudio não.
     """
-    return banco.varios(
+    linhas = banco.varios(
         """SELECT a.id AS atendente_id, a.nome, a.ramal,
                   g.id AS agente_id, g.criado_em, g.ultimo_contato_em, g.ultimo_pc,
                   g.ultima_versao, g.cert_validade, g.pendentes,
@@ -225,6 +250,9 @@ def agentes() -> list[dict]:
                     ON g.atendente_id = a.id AND g.revogado_em IS NULL
             WHERE a.ativo
             ORDER BY (g.id IS NULL), a.nome""")
+    for linha in linhas:
+        linha["rec"] = rec_do_agente(linha)
+    return linhas
 
 
 def _enfeitar(linha: dict) -> dict:

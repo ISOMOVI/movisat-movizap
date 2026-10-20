@@ -28,7 +28,10 @@ describe('rotuloDoEstado — o offline tem dois significados', () => {
   it('os outros estados não mudam', () => {
     expect(rotuloDoEstado('disponivel')).toBe('disponível')
     expect(rotuloDoEstado('ausente')).toBe('em pausa')
-    expect(rotuloDoEstado('nao_perturbe')).toBe('não perturbe')
+    // 🔵 19/10: `nao_perturbe` saiu do produto (migração 068). Valor que
+    // não existe mais tem de cair no genérico, e NÃO ficar com rótulo próprio
+    // -- rótulo órfão é o que faz um estado morto parecer vivo na tela.
+    expect(rotuloDoEstado('nao_perturbe')).toBe('sem estado')
     expect(rotuloDoEstado('qualquer')).toBe('sem estado')
   })
 })

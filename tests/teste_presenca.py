@@ -119,6 +119,203 @@ class TestRegraDeTempo:
         assert set(r["ausentes"]) == {parado} and set(r["offline"]) == {sumido}
         assert estado_de(parado)["estado_automatico"] is True
 
+    # ------------------------------------------- dentro da jornada (19/10)
+    #
+    # 🔵 A regra dele, em duas voltas no mesmo dia. Primeiro *"o status dos
+    # atendentes devem permanecer online ou ausente quando logados dentro da
+    # jornada"*; depois, fechando: *"dentro da jornada cadastrada, IMPOSSÍVEL
+    # ficar fora do expediente, e se for colocado offline, volta
+    # automaticamente ao enviar mensagem para online"*.
+    #
+    # 🚨 O que estes testes defendem é a SEPARAÇÃO entre duas perguntas que
+    # pareciam uma: o que a TELA diz (dentro da jornada, no máximo "ausente") e
+    # quem RECEBE conversa (a trava de painel fechado, que vive em
+    # `teste_distribuicao.py`). O `ausente` continua: 30 min sem escrever é
+    # real, e dizer "disponível" para quem largou a aba aberta seria a tela
+    # mentindo.
+
+    def _com_jornada(self, aid, inicio="00:00", fim="23:59"):
+        """Jornada que cobre o dia inteiro nos 7 dias: o teste não pode
+        depender do dia da semana em que a suíte roda."""
+        for dia in range(7):
+            banco.executar(
+                """INSERT INTO atendente_jornada (atendente_id, dia_semana, inicio, fim)
+                   VALUES (%s, %s, %s, %s)""", (aid, dia, inicio, fim))
+
+    def _painel_visto(self, aid, ha_min=0):
+        banco.executar(
+            "UPDATE atendente SET painel_visto_em = now() - make_interval(mins => %s) "
+            "WHERE id = %s", (ha_min, aid))
+
+    def test_logado_dentro_da_jornada_nao_cai_em_offline(self, monkeypatch):
+        config_falsa(monkeypatch)
+        aid = novo_atendente(parado_ha_min=300)
+        self._com_jornada(aid)
+        self._painel_visto(aid, ha_min=0)
+        r = presenca.aplicar_regra(forcar=True, somente=[aid])
+        assert aid not in r["offline"]
+        assert estado_de(aid)["estado"] == "ausente", "ausente sim; offline não"
+
+    def test_mas_continua_virando_ausente(self, monkeypatch):
+        """O painel aberto não é ação: 30 min sem escrever é ausente."""
+        config_falsa(monkeypatch)
+        aid = novo_atendente(parado_ha_min=20)
+        self._com_jornada(aid)
+        self._painel_visto(aid, ha_min=0)
+        presenca.aplicar_regra(forcar=True, somente=[aid])
+        assert estado_de(aid)["estado"] == "ausente"
+
+    def test_painel_fechado_NAO_muda_mais_o_estado(self, monkeypatch):
+        """🚨 ESTE TESTE AFIRMAVA O CONTRÁRIO há algumas horas, e foi ele que
+        marcou a diferença entre a minha primeira leitura e a regra dele.
+
+        De manhã a proteção valia só com o painel aberto, e quem fechava a aba
+        voltava a cair em offline. À tarde ele fechou a regra: dentro da jornada
+        é **impossível** ficar fora do expediente, painel aberto ou fechado. O
+        painel passou a decidir outra coisa -- quem sai da FILA --, e isso se
+        prova em `teste_distribuicao.py`, não aqui."""
+        config_falsa(monkeypatch)
+        aid = novo_atendente(parado_ha_min=300)
+        self._com_jornada(aid)
+        self._painel_visto(aid, ha_min=120)  # fechou a aba há duas horas
+        presenca.aplicar_regra(forcar=True, somente=[aid])
+        assert estado_de(aid)["estado"] == "ausente", "dentro da jornada, o teto é ausente"
+
+    # ---------------------------------------- "impossível" quer dizer impossível
+
+    def test_escolher_fora_do_expediente_dentro_do_turno_e_recusado(self, monkeypatch):
+        aid = novo_atendente(parado_ha_min=5)
+        self._com_jornada(aid)
+        with pytest.raises(operacao.DadoInvalido) as e:
+            presenca.definir_estado_manual(aid, "offline")
+        # A frase tem de dizer o CAMINHO, não só o "não".
+        assert "Em pausa" in str(e.value)
+        assert estado_de(aid)["estado"] == "disponivel"
+
+    def test_fora_do_turno_escolher_offline_continua_valendo(self, monkeypatch):
+        """A trava é da jornada, não do botão: sábado, domingo e depois das 18h a
+        escolha volta a ser dela."""
+        aid = novo_atendente(parado_ha_min=5)  # sem jornada cadastrada
+        presenca.definir_estado_manual(aid, "offline")
+        assert estado_de(aid)["estado"] == "offline"
+
+    def test_offline_dentro_da_jornada_volta_a_disponivel_na_primeira_acao(self):
+        """🔵 *"se for colocado offline, volta automaticamente ao enviar
+        mensagem para online"* -- inclusive quando foi a pessoa que escolheu, o
+        que antes de 19/10 o `registrar_acao` nunca desfazia."""
+        aid = novo_atendente(parado_ha_min=90, estado="offline", automatico=False)
+        self._com_jornada(aid)
+        presenca.registrar_acao(aid)
+        assert estado_de(aid)["estado"] == "disponivel"
+
+    def test_mas_em_pausa_escolhido_a_mao_continua_de_pe(self):
+        """🚨 Só `offline` é desfeito. Quem põe pausa, escreve uma mensagem e
+        volta ao café não quer ser devolvido a disponível -- e desfazer isso
+        apagaria o único estado de uso que sobrou depois da 068."""
+        aid = novo_atendente(parado_ha_min=90, estado="ausente", automatico=False)
+        self._com_jornada(aid)
+        presenca.registrar_acao(aid)
+        assert estado_de(aid)["estado"] == "ausente"
+
+    def test_a_regua_CURA_o_offline_que_outro_caminho_gravou(self, monkeypatch):
+        """🚨 O curativo. A régua não *causar* offline não basta: o cadastro, a
+        reativação e a borda de fim de quem tem dois turnos gravam offline
+        dentro da jornada, e depois da trava a pessoa não pode se consertar à
+        mão. Sem este UPDATE, "impossível" seria intenção, não invariante."""
+        config_falsa(monkeypatch)
+        aid = novo_atendente(parado_ha_min=5, estado="offline", automatico=False)
+        self._com_jornada(aid)
+        r = presenca.aplicar_regra(forcar=True, somente=[aid])
+        assert estado_de(aid)["estado"] == "disponivel"
+        assert aid in r["curados"]
+
+    def test_curado_que_ja_estava_parado_sai_ausente_na_MESMA_passada(self, monkeypatch):
+        """🚨 A ordem dentro da régua é o desenho, e isto foi medido ao vivo:
+        com o curativo no FIM, três pessoas que nunca abriram o painel ficaram
+        um minuto inteiro aparecendo como **Disponível**. Com ele no meio
+        (offline -> curativo -> ausente), a mesma passada já as põe em pausa."""
+        config_falsa(monkeypatch)
+        aid = novo_atendente(parado_ha_min=300, estado="offline", automatico=True)
+        self._com_jornada(aid)
+        r = presenca.aplicar_regra(forcar=True, somente=[aid])
+        assert aid in r["curados"]
+        assert aid in r["ausentes"]
+        assert estado_de(aid)["estado"] == "ausente"
+
+    def test_quem_esta_afastado_NAO_e_curado_nem_acordado(self, monkeypatch):
+        """Férias não viram expediente. O afastado continua logando (é o caminho
+        do `definir_minha_volta`), e sem este filtro uma nota o poria
+        `disponivel` com o afastamento de pé."""
+        config_falsa(monkeypatch)
+        aid = novo_atendente(parado_ha_min=5, estado="offline", automatico=False)
+        self._com_jornada(aid)
+        banco.executar(
+            "UPDATE atendente SET afastamento_motivo = %s WHERE id = %s",
+            ("férias", aid))
+        presenca.aplicar_regra(forcar=True, somente=[aid])
+        assert estado_de(aid)["estado"] == "offline", "o curativo tem de pular o afastado"
+        presenca.registrar_acao(aid)
+        assert estado_de(aid)["estado"] == "offline", "a ação também"
+
+    def test_a_borda_de_inicio_nao_acorda_quem_esta_afastado(self):
+        """Defeito ANTERIOR a hoje, que estava latente: a borda põe todo mundo
+        da jornada em `disponivel` e não filtrava afastamento -- a régua
+        corrigia em 60 min pondo offline. Com a regra nova ela não corrige
+        mais, e o afastado ficaria disponível o dia inteiro."""
+        aid = novo_atendente(parado_ha_min=5, estado="offline", automatico=True)
+        self._com_jornada(aid, inicio="00:00", fim="23:59")
+        banco.executar(
+            "UPDATE atendente SET afastamento_motivo = %s WHERE id = %s",
+            ("licença", aid))
+        agora = datetime.now(timezone.utc)
+        presenca.aplicar_jornada(agora=agora, desde=agora - timedelta(days=1),
+                                 forcar=True, somente=[aid])
+        assert estado_de(aid)["estado"] == "offline"
+
+    def test_sem_jornada_cadastrada_a_regra_e_a_de_antes(self, monkeypatch):
+        """Jornada vazia é 'ninguém disse quando', não '24 h por dia'."""
+        config_falsa(monkeypatch)
+        aid = novo_atendente(parado_ha_min=300)
+        self._painel_visto(aid, ha_min=0)
+        presenca.aplicar_regra(forcar=True, somente=[aid])
+        assert estado_de(aid)["estado"] == "offline"
+
+    def test_fora_da_jornada_cai_mesmo_com_painel_aberto(self, monkeypatch):
+        """Jornada que não contém a hora de agora: sem proteção nenhuma."""
+        config_falsa(monkeypatch)
+        aid = novo_atendente(parado_ha_min=300)
+        agora = datetime.now(timezone.utc).astimezone()
+        fim = (agora - timedelta(minutes=10)).time().replace(microsecond=0)
+        if fim.hour == 0 and fim.minute < 20:
+            pytest.skip("virada do dia: a janela de teste não cabe")
+        self._com_jornada(aid, inicio="00:00", fim=fim.strftime("%H:%M"))
+        self._painel_visto(aid, ha_min=0)
+        presenca.aplicar_regra(forcar=True, somente=[aid])
+        assert estado_de(aid)["estado"] == "offline"
+
+    def test_o_carimbo_do_painel_nao_e_acao_de_atendimento(self):
+        """🚨 Se o carimbo contasse como ação, abrir a Caixa devolveria
+        qualquer um a 'disponível' e a régua nunca mais marcaria ninguém."""
+        aid = novo_atendente(parado_ha_min=90, estado="ausente", automatico=True)
+        antes = banco.um("SELECT ultima_acao_em FROM atendente WHERE id = %s", (aid,))
+        presenca.registrar_painel_aberto(aid)
+        depois = banco.um("SELECT ultima_acao_em, painel_visto_em FROM atendente "
+                          "WHERE id = %s", (aid,))
+        assert depois["ultima_acao_em"] == antes["ultima_acao_em"]
+        assert depois["painel_visto_em"] is not None
+        assert estado_de(aid)["estado"] == "ausente"
+
+    def test_o_carimbo_nao_e_regravado_a_cada_passada(self):
+        """O painel pede a lista a cada 8 s: uma escrita por minuto basta."""
+        aid = novo_atendente(parado_ha_min=5)
+        presenca.registrar_painel_aberto(aid)
+        primeiro = banco.um("SELECT painel_visto_em FROM atendente WHERE id = %s",
+                            (aid,))["painel_visto_em"]
+        presenca.registrar_painel_aberto(aid)
+        segundo = banco.um("SELECT painel_visto_em FROM atendente WHERE id = %s",
+                           (aid,))["painel_visto_em"]
+        assert primeiro == segundo
+
     def test_regra_desligada_nao_mexe_em_ninguem(self, monkeypatch):
         config_falsa(monkeypatch, regra_ligada=False)
         sumido = novo_atendente(parado_ha_min=120)
@@ -384,12 +581,16 @@ class TestJornadaControlaEstado:
         assert estado_de(aid)["estado"] == "offline"
 
     def test_no_meio_do_turno_nao_toca_na_escolha_manual(self):
-        aid = novo_atendente(estado="nao_perturbe")
+        # 🔵 19/10: era `nao_perturbe`, que saiu do produto na 068. `ausente`
+        # é agora o único estado de uso escolhível, e serve ao mesmo propósito
+        # aqui: provar que a borda da jornada NÃO dispara no meio do turno e
+        # portanto não desfaz escolha nenhuma.
+        aid = novo_atendente(estado="ausente")
         _dar_jornada(aid, _SEG)
         r = presenca.aplicar_jornada(agora=_MEIO_Z, desde=_MEIO_Z - _UM_MIN,
                                      forcar=True, somente=[aid])
         assert r["ligados"] == [] and r["deslogados"] == []
-        assert estado_de(aid)["estado"] == "nao_perturbe"
+        assert estado_de(aid)["estado"] == "ausente"
 
     def test_owner_sempre_online_nao_cai_no_fim(self):
         aid = novo_atendente(estado="disponivel")

@@ -60,6 +60,29 @@ const SENTIDOS = [
   ['perdida', 'Perdidas'],
 ]
 
+/* 🔴 19/10 — o REC na faixa de cobertura (pedido dele).
+   🚨 TRÊS estados, não dois. O agente só avisa quando a gravação está
+   DESLIGADA; "ligado" é a ausência do aviso na última passada. PC que ainda
+   não falou não tem resposta, e a tela diz isso em vez de inventar uma. */
+const REC_ROTULO = {
+  ligado: 'REC ligado',
+  desligado: 'REC desligado',
+  desconhecido: 'REC não informado',
+}
+const REC_CLASSE = {
+  ligado: 'chip--ok',
+  desligado: 'chip--erro',
+  desconhecido: 'chip--aviso',
+}
+const REC_AJUDA = {
+  ligado: 'O PC informou, no último contato, que a gravação automática do '
+          + 'MicroSIP está ligada.',
+  desligado: 'O PC informou que a gravação automática do MicroSIP está '
+             + 'desligada: as ligações sobem, o áudio não.',
+  desconhecido: 'Este PC ainda não fez nenhuma passada, então não há o que '
+                + 'dizer sobre a gravação dele.',
+}
+
 const comAgente = computed(() => agentes.value.filter((a) => a.agente_id))
 const semAgente = computed(() => agentes.value.filter((a) => !a.agente_id))
 
@@ -228,6 +251,11 @@ function quando(iso) {
             <span class="apagado pequeno mono">ramal {{ a.ramal }}</span>
             <span class="apagado pequeno">último contato {{ quando(a.ultimo_contato_em) }}</span>
             <span class="apagado pequeno">{{ a.ligacoes }} ligações</span>
+            <!-- 🔴 19/10, pedido dele: o REC de cada PC na própria linha.
+                 Sem isto a aba dizia "N ligações" de um PC que não grava
+                 nenhuma, e o operador só descobria ao procurar o áudio. -->
+            <span :class="['chip', REC_CLASSE[a.rec] || 'chip--aviso']"
+                  :title="REC_AJUDA[a.rec]">{{ REC_ROTULO[a.rec] || 'REC ?' }}</span>
           </li>
         </ul>
         <p v-if="semAgente.length" class="apagado pequeno">

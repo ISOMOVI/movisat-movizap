@@ -127,10 +127,41 @@ def paradas(cfg: dict | None = None, somente: list[int] | None = None) -> list[d
     return linhas
 
 
-def _destino(cfg: dict) -> int | None:
+def _pode_receber_da_fila(aid: int, abertos: set[int]) -> tuple[bool, str]:
+    """A régua da FILA, que é mais estreita que a da transferência à mão.
+
+    🔵 19/10, decisão dele: dentro da jornada ninguém aparece como "fora do
+    expediente" -- o máximo é "em pausa" --, **mas quem está com o painel
+    fechado para de receber distribuição automática**. Separa o que a tela diz
+    de quem recebe conversa.
+
+    🚨 POR QUE AQUI E NÃO EM `presenca.pode_receber`: aquela função tem
+    quatro chamadores, e três não são fila -- `transferir_abertas`, `afastar`
+    (o substituto de quem sai de férias) e `operacao.inativar`. Barrar lá por
+    painel fechado significaria **não conseguir afastar alguém porque o
+    substituto não estava com a aba aberta**, e `_pode_substituir` já decidiu o
+    oposto por escrito ("o que vale é o dia da saída"). Transferência à mão tem
+    trava própria em `conversas.transferir` e fica intocada.
+
+    ⚠️ O motivo volta em texto porque a tela precisa dele: "parada porque as
+    duas estão offline" e "parada porque ninguém está com o painel aberto" não
+    podem sair com a mesma frase (`M12`).
+    """
     from .presenca import pode_receber
-    for aid in (cfg["primeiro_id"], cfg["reserva_id"]):
-        if aid and pode_receber(aid)[0]:
+    ok, motivo = pode_receber(aid)
+    if not ok:
+        return False, motivo
+    if aid not in abertos:
+        return False, "painel fechado"
+    return True, ""
+
+
+def _destino(cfg: dict) -> int | None:
+    from .presenca import painel_aberto_agora
+    candidatos = [a for a in (cfg["primeiro_id"], cfg["reserva_id"]) if a]
+    abertos = painel_aberto_agora(candidatos)
+    for aid in candidatos:
+        if _pode_receber_da_fila(aid, abertos)[0]:
             return aid
     return None
 
@@ -170,18 +201,44 @@ def distribuir(forcar: bool = False, somente: list[int] | None = None,
             "paradas_sem_destino": 0}
 
 
-def situacao() -> dict:
-    """O que a Fila e o Início mostram: se está ligada, para quem vai, e se
-    parou porque as duas pessoas estão offline."""
-    from .presenca import pode_receber
+def situacao(cfg: dict | None = None) -> dict:
+    """O que a Fila e o Início mostram: se está ligada, para quem vai, e **por
+    que** parou, quando parou.
 
-    cfg = config()
+    🚨 19/10: tem de passar pela MESMA `_pode_receber_da_fila` do
+    `_destino`. Enquanto esta função tinha a sua própria conta, ela podia dizer
+    "vai para a Ludmila" enquanto a fila ia para a Erika -- e a tela mentiria
+    sem nada no log.
+
+    ⚠️ `cfg` existe SÓ PARA O TESTE, como em `distribuir` e `paradas`, e entrou
+    em 19/10 pagando um estrago: sem ele, o teste que eu escrevi para esta
+    função chamou `definir_config` e **apagou a configuração real da
+    distribuição** -- ela ficou desligada, apontando para atendentes de teste,
+    até eu restaurar do dump das 02:40. Função que lê `config()` sem porta de
+    teste é convite para o teste escrever em produção.
+    """
+    from .presenca import painel_aberto_agora
+
+    cfg = cfg or config()
     if not cfg["ligada"]:
         return {"ligada": False}
     nomes = {r["id"]: r["nome"] for r in banco.varios(
         "SELECT id, nome FROM atendente WHERE id = ANY(%s)",
         ([x for x in (cfg["primeiro_id"], cfg["reserva_id"]) if x],))}
+    candidatos = [x for x in (cfg["primeiro_id"], cfg["reserva_id"]) if x]
+    abertos = painel_aberto_agora(candidatos)
     destino = _destino(cfg)
+    primeiro_ok = False
+    motivo_parada = ""
+    if cfg["primeiro_id"]:
+        primeiro_ok = _pode_receber_da_fila(cfg["primeiro_id"], abertos)[0]
+    if destino is None and candidatos:
+        motivos = {aid: _pode_receber_da_fila(aid, abertos)[1] for aid in candidatos}
+        # Se todos pararam pelo mesmo motivo, a frase é esse motivo; se
+        # pararam por motivos diferentes, a tela diz "ninguém disponível" em vez
+        # de escolher um deles e mentir sobre o outro.
+        distintos = set(motivos.values())
+        motivo_parada = distintos.pop() if len(distintos) == 1 else "motivos diferentes"
     return {
         "ligada": True,
         "minutos": cfg["minutos"],
@@ -190,5 +247,8 @@ def situacao() -> dict:
         "destino_agora": nomes.get(destino),
         "parada": destino is None,
         "esperando": len(paradas(cfg)) if destino is None else 0,
-        "primeiro_disponivel": bool(cfg["primeiro_id"] and pode_receber(cfg["primeiro_id"])[0]),
+        "primeiro_disponivel": primeiro_ok,
+        # 🔵 19/10: o MOTIVO, para o aviso da tela não chamar "painel fechado"
+        # de "offline". Vazio quando a fila não parou.
+        "parada_motivo": motivo_parada,
     }

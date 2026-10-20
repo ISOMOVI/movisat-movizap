@@ -51,9 +51,14 @@ const AGENTES = {
   agentes: [
     { atendente_id: 1, nome: 'Iago', ramal: '3404', agente_id: 17,
       ultimo_contato_em: '2026-10-15T09:33:04-03:00', ultima_versao: '0.4',
-      ligacoes: 28, pendentes: 0 },
+      ligacoes: 28, pendentes: 0, rec: 'ligado' },
+    { atendente_id: 3, nome: 'Ludmila', ramal: '3348', agente_id: 18,
+      ultimo_contato_em: '2026-10-19T08:47:58-03:00', ultima_versao: '0.4',
+      ligacoes: 30, pendentes: 0, rec: 'desligado' },
+    { atendente_id: 4, nome: 'Erika', ramal: '3401', agente_id: 19,
+      ultimo_contato_em: null, ligacoes: 0, pendentes: 0, rec: 'desconhecido' },
     { atendente_id: 2, nome: 'Claudia', ramal: null, agente_id: null,
-      ultimo_contato_em: null, ligacoes: 0 },
+      ultimo_contato_em: null, ligacoes: 0, rec: null },
   ],
 }
 
@@ -106,9 +111,29 @@ describe('A aba Ligações', () => {
   it('diz quem tem agente e NOMEIA quem está de fora', async () => {
     const tela = await montar()
     const texto = tela.text()
-    expect(texto).toContain('1 de 2')
+    expect(texto).toContain('3 de 4')
     expect(texto).toContain('Sem agente')
     expect(texto).toContain('Claudia')
+  })
+
+  /* 🔴 19/10, pedido dele: *"inserindo no fim de cada linha de o REC
+     está ativado ou não"*. Medido no dia: 4 dos 5 PCs com agente estavam com a
+     gravação desligada, e a aba dizia "30 ligações" sem dizer que nenhuma delas
+     tinha áudio. 🚨 O terceiro estado é o que importa: PC que nunca falou não
+     recebe "ligado" de graça. */
+  it('diz o REC de cada PC, e não inventa o de quem nunca falou', async () => {
+    const tela = await montar()
+    const linhas = tela.findAll('.cobertura__lista li').map((l) => l.text())
+    expect(linhas.find((t) => t.includes('Iago'))).toContain('REC ligado')
+    expect(linhas.find((t) => t.includes('Ludmila'))).toContain('REC desligado')
+    expect(linhas.find((t) => t.includes('Erika'))).toContain('REC não informado')
+  })
+
+  it('quem não tem agente não ganha linha de REC nenhuma', async () => {
+    const tela = await montar()
+    const linhas = tela.findAll('.cobertura__lista li').map((l) => l.text())
+    expect(linhas.some((t) => t.includes('Claudia'))).toBe(false)
+    expect(tela.text()).toContain('Sem agente')
   })
 
   it('número em duas empresas mostra a primeira e o +1, sem calar a outra', async () => {

@@ -1471,7 +1471,8 @@ def listar(estado: str | None = None, atendente_id: int | None = None,
                cl.nome AS cliente_nome,
                a.nome  AS atendente_nome,
                -- 🔵 23/09: o estado de quem responde (disponível, em pausa,
-               -- não perturbe, fora do expediente) -- a bolinha da lista.
+               -- fora do expediente) -- a bolinha da lista. O "não perturbe"
+               -- saiu em 19/10 (068).
                -- 🔵 05/10: `estado_automatico` + `em_jornada` (anexado depois)
                -- deixam a tela escolher o rótulo do offline: "Ausente" dentro
                -- do turno, "fora do expediente" fora dele.

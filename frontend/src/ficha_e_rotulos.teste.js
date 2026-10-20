@@ -235,6 +235,35 @@ describe('O Tipo mostra o que a pessoa É, não uma cópia vazia', () => {
     expect(valores).not.toContain('')
   })
 
+  /* 🔵 19/10 (decisão dele): *"para tecnicos, adicione ele na regra do tipo
+     'LEAD' que permite editar o nome"*. O caso real são os técnicos importados
+     cujo nome do WhatsApp divergia do cadastro -- 7 conversas em 08/10. */
+  it('TÉCNICO edita o nome do contato, como LEAD', async () => {
+    respostas['/api/conversas/7'] = {
+      ...CONVERSA,
+      contato_id: 9,
+      contato_nome: 'Adriano',
+      empresa: { contato: { nome: 'Adriano', relacao: 'tecnico' }, cliente: null },
+    }
+    const w = await comConversaAberta()
+    await acharBotao(w, 'Ficha').trigger('click')
+    await assentar(w)
+    expect(w.find('.gaveta__nome-edit').exists()).toBe(true)
+  })
+
+  it('CLIENTE continua com o nome só-leitura', async () => {
+    respostas['/api/conversas/7'] = {
+      ...CONVERSA,
+      contato_id: 9,
+      contato_nome: 'Velasco',
+      empresa: { contato: { nome: 'Velasco', relacao: 'cliente' }, cliente: null },
+    }
+    const w = await comConversaAberta()
+    await acharBotao(w, 'Ficha').trigger('click')
+    await assentar(w)
+    expect(w.find('.gaveta__nome-edit').exists()).toBe(false)
+  })
+
   it('quem não pode marcar LÊ o tipo, em vez de "Sem cadastro" fixo', async () => {
     const { codigosPermitidos } = await import('./estado/sessao.js')
     const original = codigosPermitidos.value

@@ -382,10 +382,13 @@ class TestEstadoDoDono:
         assert linha["atendente_estado"] == "offline"
 
     def test_o_estado_acompanha_a_mudanca(self, cena):
-        banco.executar("UPDATE atendente SET estado = 'nao_perturbe' WHERE id = %s",
+        # 🔵 19/10: era `nao_perturbe`, que saiu do produto na migração 068.
+        # `ausente` serve ao mesmo propósito aqui: provar que a lista reflete a
+        # mudança de estado, qualquer que seja o valor.
+        banco.executar("UPDATE atendente SET estado = 'ausente' WHERE id = %s",
                        (cena["eu"],))
         linha = next(x for x in conversas.listar(limite=5000) if x["id"] == cena["minha"])
-        assert linha["atendente_estado"] == "nao_perturbe"
+        assert linha["atendente_estado"] == "ausente"
 
     def test_sem_dono_o_estado_vem_vazio(self, cena):
         linha = next(x for x in conversas.listar(limite=5000) if x["id"] == cena["orfa"])

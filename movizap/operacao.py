@@ -29,7 +29,10 @@ log = logging.getLogger("movizap.operacao")
 # 🚨 `offline` ENTROU EM 24/09. A Minha conta (17/09) oferece os quatro, e o
 # CHECK da 044 aceita os quatro -- mas esta lista tinha três: quem se marcasse
 # offline não podia mais ser editado na CAD_2.1 ("Estado inválido" ao salvar).
-ESTADOS = ("disponivel", "ausente", "nao_perturbe", "offline")
+# 🔵 19/10: e agora são TRÊS de novo, por outro motivo -- o "não perturbe" saiu
+# (068). ⚠️ Esta lista e a `ESTADOS_ATENDENTE` do `main.py` têm de andar juntas
+# com o CHECK do banco: foi uma delas ficar atrás que criou o defeito de 24/09.
+ESTADOS = ("disponivel", "ausente", "offline")
 PERFIS = tuple(registro_telas.PERFIS.keys())
 
 # 0 = domingo, igual ao `extract(dow)` do Postgres. Fixado aqui porque a tela

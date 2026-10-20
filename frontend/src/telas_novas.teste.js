@@ -71,7 +71,7 @@ function estadoPadrao() {
       email: 'fulano@movisat.com.br', perfil: 'atendimento',
       estado: 'disponivel', tem_foto: false, fuso: 'America/Sao_Paulo',
       max_conversas: null, ativo: true, enviar_com_enter: false,
-      estados_possiveis: ['disponivel', 'ausente', 'nao_perturbe', 'offline'],
+      estados_possiveis: ['disponivel', 'ausente', 'offline'],
     },
   }
 }
@@ -171,8 +171,12 @@ describe('CFG_10.1 — Minha conta', () => {
        Mostrar nome de coluna na tela foi erro real em outras telas. */
     const w = mount(MinhaConta)
     await assentar(w)
-    expect(w.text()).toContain('Não perturbe')
+    expect(w.text()).toContain('Em pausa')
     expect(w.text()).toContain('Fora do expediente')
+    // 🔵 19/10: o "Não perturbe" saiu (068). O teste passou a cobrar a
+    // AUSÊNCIA dele, que é o que ele pediu, e segue cobrando que nenhum valor
+    // de banco vaze para a tela.
+    expect(w.text()).not.toContain('Não perturbe')
     expect(w.text()).not.toContain('nao_perturbe')
   })
 

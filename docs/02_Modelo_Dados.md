@@ -287,7 +287,7 @@ datado com hardlink às 02:50, retenção 14 dias.
 | `ativo` | |
 | ⚠️ `owner` | **acrescentado na implementação, não estava na v2 aprovada.** O `auth.py` já trata owner como conceito (enxerga todas as telas, independente do que estiver gravado). Sem a coluna, esse conceito viveria só no `.env` e não sobreviveria ao `CAD_2.1` |
 | `convite_token` / `convite_expira_em` | NULL |
-| 🆕 `estado` | enum(`disponivel`,`ausente`,`nao_perturbe`) |
+| 🆕 `estado` | enum(`disponivel`,`ausente`,`offline`) — o `offline` entrou na **044**; o `nao_perturbe` **saiu na 068** (19/10), por decisão dele: não barrava receber conversa, só a tela dizia que barrava. 🚨 O `CHECK` mora no `pg_constraint`, não no `information_schema.columns` |
 | 🆕 `fuso` | text default `America/Sao_Paulo` |
 | ~~`max_conversas`~~ | **saiu na 056 (25/09)**: *"não deve haver máximo de conversas"*. Estava vazia em 11 de 11 e nada a lia |
 
@@ -1680,6 +1680,7 @@ conta. Só o `CHECK` mudou; o alcance mora em `telas.PERFIS` (permissão nova
 |---|---|
 | `atendente.ultima_acao_em` | última AÇÃO DE ATENDIMENTO (enviar, nota, assumir, entrar, transferir, concluir...). Ler não conta: a tela relê a conversa a cada 8 s. NULL = sem ponto de partida, e a regra não derruba quem está NULL |
 | `atendente.estado_automatico` | `true` = o estado foi posto pela regra de tempo, e a próxima ação o desfaz (volta a disponível). Estado escolhido à mão nunca volta sozinho |
+| `atendente.painel_visto_em` (**067**, 19/10) | quando o painel desta pessoa falou com o servidor pela última vez — carimbada pela **lista da Caixa** e pelo **pedido de notificações**, que roda em toda tela (uma escrita por minuto, no máximo). 🚨 Prova que a **aba está aberta**, não que alguém a esteja olhando, e **não é ação**: não devolve ninguém a disponível nem zera `ultima_acao_em`. ⚠️ **Mudou de trabalho no mesmo dia:** de manhã segurava o offline dentro da jornada; à tarde, com a regra fechada (*"dentro da jornada cadastrada, impossível ficar fora do expediente"*), saiu da régua de estado e passou a decidir **quem sai da FILA** (`presenca.painel_aberto_agora`, `distribuicao._pode_receber_da_fila`). `NULL` conta como fechado |
 | `atendente.sempre_online` | exclusivo do owner (`ck_sempre_online_so_owner`): dentro da jornada dele, a regra não o toca |
 | `atendente.afastamento_motivo`, `atendente.afastado_ate` | férias, licença... Com motivo preenchido, a pessoa está offline e não recebe. Desde a 055, `afastado_ate` é o **dia da volta** e vale: nesse dia o laço encerra sozinho |
 | `conversa.fora_expediente_em` | trava de "uma vez a cada 12 h" da mensagem de fim de expediente, no mesmo desenho de `boas_vindas_em` |

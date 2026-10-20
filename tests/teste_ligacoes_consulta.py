@@ -259,6 +259,46 @@ def test_agentes_mostra_quem_tem_e_quem_nao_tem():
     assert any(a["agente_id"] is None for a in linhas), "quem não tem agente também aparece"
 
 
+# --------------------------------------------------------------- REC na faixa
+
+# 🔴 19/10, pedido dele: cada linha da faixa diz se o REC do PC está
+# ativado. O que se prova aqui é o TERCEIRO estado -- o agente só fala quando a
+# gravação está desligada, então "ligado" é dedução, e deduzir de quem nunca
+# falou seria a tela mentindo.
+
+def test_rec_desligado_sai_do_aviso_do_proprio_pc():
+    linha = {"agente_id": 3, "ultimo_contato_em": "2026-10-19T08:00:00-03:00",
+             "ultimo_aviso": "gravacao automatica desligada no MicroSIP; "
+                             "pasta de gravacoes ainda nao existe"}
+    assert ligacoes_consulta.rec_do_agente(linha) == "desligado"
+
+
+def test_rec_ligado_e_a_ausencia_do_aviso_em_quem_ja_falou():
+    linha = {"agente_id": 3, "ultimo_contato_em": "2026-10-19T08:00:00-03:00",
+             "ultimo_aviso": None}
+    assert ligacoes_consulta.rec_do_agente(linha) == "ligado"
+    # Outro aviso, que não é do REC, não derruba o "ligado".
+    linha["ultimo_aviso"] = "disco com 0,4 GB livres"
+    assert ligacoes_consulta.rec_do_agente(linha) == "ligado"
+
+
+def test_pc_que_nunca_falou_nao_recebe_rec_inventado():
+    assert ligacoes_consulta.rec_do_agente(
+        {"agente_id": 3, "ultimo_contato_em": None}) == "desconhecido"
+
+
+def test_quem_nao_tem_agente_nao_tem_pergunta_de_rec():
+    assert ligacoes_consulta.rec_do_agente({"agente_id": None}) is None
+
+
+def test_agentes_carrega_o_rec_em_toda_linha():
+    linhas = ligacoes_consulta.agentes()
+    assert all("rec" in a for a in linhas)
+    meu = [a for a in linhas if a["ramal"] == RAMAL][0]
+    assert meu["rec"] in ("ligado", "desligado", "desconhecido")
+    assert all(a["rec"] is None for a in linhas if not a["agente_id"])
+
+
 def test_o_csv_abre_no_excel_brasileiro_e_nao_executa_formula():
     linhas = [{"quem": "=cmd|' /c calc'!A0", "n": 1}, {"quem": "Normal", "n": 2}]
     dados = relatorio_csv.gerar([("quem", "Quem"), ("n", "N")], linhas)

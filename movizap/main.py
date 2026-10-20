@@ -1460,6 +1460,13 @@ def listar_conversas(estado: str | None = None, sem_dono: bool = False,
     comentário em `conversas.listar`.
     """
     escolhidas = [r.strip() for r in relacoes.split(",") if r.strip()]
+    # 🔵 19/10: ESTA É A PROVA DE QUE O PAINEL ESTÁ ABERTO. A Caixa pede esta
+    # lista a cada 8 s enquanto a aba vive, e era o único sinal de "logado" que
+    # o sistema já tinha sem código novo no navegador. NÃO conta como ação de
+    # atendimento (não devolve ninguém a "disponível", não zera o relógio da
+    # inatividade); serve para a régua não pôr em offline quem está logado
+    # dentro da jornada. Regrava no máximo uma vez por minuto por pessoa.
+    presenca.registrar_painel_aberto(_atendente_do_usuario(usuario))
     return conversas.listar(
         estado=estado, sem_dono=sem_dono, busca=busca,
         relacoes=escolhidas or None,
@@ -2815,7 +2822,10 @@ def definir_enviar_com_enter(dados: EnterEnvia,
 # isso a um código de tela faria quem não vê a `CFG_10.1` ficar sem conseguir
 # sair de "disponível" -- e o status existe justamente para quem atende.
 
-ESTADOS_ATENDENTE = ("disponivel", "ausente", "nao_perturbe", "offline")
+# 🔵 19/10: o "não perturbe" SAIU (migração 068, decisão dele). Ele não
+# barrava receber conversa -- `presenca.pode_receber` só barra offline e
+# afastamento --, então a tela prometia o que o sistema não cumpria.
+ESTADOS_ATENDENTE = ("disponivel", "ausente", "offline")
 TETO_FOTO = 2 * 1024 * 1024
 PASTA_FOTOS_ATENDENTE = pathlib.Path("/home/claude/movizap_midia/atendente")
 
@@ -2850,6 +2860,11 @@ def meu_perfil(usuario: dict = Depends(auth.get_usuario)):
     linha["regra_de_tempo"] = presenca.config()["regra_ligada"]
     linha["enviar_com_enter"] = preferencia.enviar_com_enter(eu)
     linha["estados_possiveis"] = list(ESTADOS_ATENDENTE)
+    # 🔵 19/10: a tela precisa saber se a pessoa está DENTRO do turno agora,
+    # porque dentro dele "fora do expediente" deixou de ser escolhível. ⚠️ Não
+    # basta `tem_jornada`: ter jornada cadastrada e estar nela são coisas
+    # diferentes, e confundi-las travaria o botão às 22h.
+    linha["em_jornada"] = eu in operacao.em_jornada_agora([eu])
     return linha
 
 
@@ -2879,7 +2894,7 @@ def definir_meu_nome(dados: MeuNome, usuario: dict = Depends(auth.get_usuario)):
 @app.put("/api/eu/estado")
 def definir_meu_estado(dados: MeuEstado,
                        usuario: dict = Depends(auth.get_usuario)):
-    """A pessoa diz como está: disponível, em pausa, não perturbe ou fora.
+    """A pessoa diz como está: disponível, em pausa ou fora do expediente.
 
     🔵 DESDE 24/09 O SISTEMA TAMBÉM MUDA O ESTADO (regra de tempo, pedido
     dele) -- a regra de 17/09 *"escolhido, não deduzido"* caiu. O que a pessoa
@@ -2887,7 +2902,14 @@ def definir_meu_estado(dados: MeuEstado,
     escolher conta como ação (senão "disponível" voltaria a offline no minuto
     seguinte). Ver `presenca.py`.
 
-    ⚠️ A LISTA É CONFERIDA AQUI E NO BANCO. O `CHECK` da 044 é a segunda
+    🔵 19/10: duas mudanças dele. O **"não perturbe" saiu** (migração 068:
+    não barrava receber conversa, só a tela dizia que barrava). E **"fora do
+    expediente" é recusado dentro da jornada cadastrada** -- a recusa com a
+    frase mora em `presenca.definir_estado_manual`, porque quem barra é o
+    backend; a Minha conta desabilita o botão e escreve o motivo, mas tela some
+    e regra fica.
+
+    ⚠️ A LISTA É CONFERIDA AQUI E NO BANCO. O `CHECK` da 068 é a segunda
     ponta: sem a conferência aqui, o erro chegaria como 500 do Postgres em vez
     de uma frase que a tela sabe mostrar.
     """
@@ -2931,6 +2953,14 @@ def minhas_notificacoes(usuario: dict = Depends(auth.get_usuario)):
     if not eu:
         return {"ativa": False, "tom": "classico", "volume": 3,
                 "abas": {"minhas": 0, "time": 0}, "assumidas": [], "donas": []}
+    # 🚨 19/10: O SEGUNDO CARIMBO DO PAINEL, e ele é o que importa. O
+    # primeiro (na lista da Caixa) só prova painel aberto para quem está NA
+    # Caixa -- quem passa 20 min no Chat interno, na Fila ou em Contatos
+    # desapareceria, e com a trava de fila pararia de receber conversa
+    # TRABALHANDO. Esta rota é chamada pelo `Notificador.vue`, que está montado
+    # no `App.vue`: roda em toda tela, sem código novo no navegador. O teto de
+    # 55 s de `registrar_painel_aberto` evita a escrita repetida.
+    presenca.registrar_painel_aberto(eu)
     minhas = conversas.listar(atendente_id=eu, visualizador_id=eu,
                               limite=100000, so_nao_lidas=True)
     do_time = conversas.listar(do_meu_time=eu, visualizador_id=eu,
@@ -3379,6 +3409,9 @@ class PresencaConfig(BaseModel):
     jornada_controla_estado: bool | None = None
     # 🔵 05/10: carimbo do nome na mensagem ao cliente. Opcional = não mexe.
     carimbo_nome_ligado: bool | None = None
+    # 🔵 19/10: minutos de painel fechado que tiram da distribuição automática.
+    # Opcional pelo mesmo motivo dos dois acima: chamada antiga não muda o valor.
+    minutos_painel_fila: int | None = None
 
 
 @app.get("/api/config/presenca")
@@ -3398,6 +3431,8 @@ def definir_presenca(dados: PresencaConfig,
         cfg = presenca.definir_jornada_controla_estado(dados.jornada_controla_estado)
     if dados.carimbo_nome_ligado is not None:
         cfg = presenca.definir_carimbo_nome(dados.carimbo_nome_ligado)
+    if dados.minutos_painel_fila is not None:
+        cfg = presenca.definir_minutos_painel_fila(dados.minutos_painel_fila)
     return cfg
 
 

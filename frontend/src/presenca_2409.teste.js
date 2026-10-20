@@ -77,7 +77,7 @@ function estadoPadrao() {
       estado: 'disponivel', tem_foto: false, max_conversas: null, ativo: true,
       enviar_com_enter: true, estado_automatico: false, sempre_online: false,
       afastamento_motivo: null, afastado_ate: null, tem_jornada: true, regra_de_tempo: true,
-      estados_possiveis: ['disponivel', 'ausente', 'nao_perturbe', 'offline'],
+      estados_possiveis: ['disponivel', 'ausente', 'offline'],
     },
   }
 }

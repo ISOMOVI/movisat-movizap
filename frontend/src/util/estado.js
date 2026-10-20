@@ -11,7 +11,12 @@
 export const ESTADO = {
   disponivel: { rotulo: 'disponível', cor: 'var(--ok)' },
   ausente: { rotulo: 'em pausa', cor: 'var(--aviso)' },
-  nao_perturbe: { rotulo: 'não perturbe', cor: 'var(--erro)' },
+  /* 🔵 19/10: `nao_perturbe` SAIU (migração 068, decisão dele: *"pode
+     remover esse status então"*). O motivo: ele não perturbava nada -- quem
+     barra receber conversa é `presenca.pode_receber`, e lá só offline e
+     afastamento barram. A pessoa marcava, continuava recebendo, e o botão não
+     dizia isso. ⚠️ Valor que sumir do `CHECK` tem de sumir daqui também, senão
+     a tela mostra "sem estado" para uma linha antiga. */
   /* Entrou com a 044 (17/09). Sem esta linha, quem escolhesse "fora do
      expediente" apareceria como "sem estado", que é o rótulo de quem nunca
      escolheu nada. */

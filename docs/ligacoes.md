@@ -500,3 +500,54 @@ Continua de uso único e continua só alistando.
 (`--gravar`). Ele **não dá senha a ramal que já está enviando** — usá-la
 revogaria o PC que funciona — e lista, com o motivo, quem ficou de fora. O
 arquivo diz, dentro dele, que é uma chave e que se apaga depois do mutirão.
+
+
+## Agente 0.6 (19/10) — limpeza local das gravações
+
+🔵 Decisão dele: *"7 dias ja pode apagar"* (e, em 19/10, *"ok, fazer"*).
+
+A gravação vive na VPS, com backup noturno; não precisa ocupar o disco de quem
+atende. Na passada de envio, depois de subir e de dar o batimento, o agente
+apaga do PC a gravação com **mais de 7 dias que a VPS já confirmou**.
+
+- 🚨 **Confirmada não é "deu 200".** O hash só entra no `enviados.json`
+  quando a VPS **devolveu o mesmo sha256** do arquivo (a conferência que já
+  existia no envio). Arquivo que nunca subiu, ou que subiu com hash diferente,
+  não está lá e **fica**.
+- 🚨 **Sem `enviados.json`, ou com ele vazio, não apaga nada.** PC
+  reinstalado perde o controle local, e "não sei o que subiu" não pode virar
+  "apago tudo".
+- **Não encosta no `call_log.db`:** o que sai é áudio, e o MicroSIP continua
+  mostrando a ligação na tela dele.
+- **A ordem é envio → batimento → limpeza**, de propósito: o que subiu nesta
+  passada já está confirmado, e o que falhou não entrou no controle.
+- **Cada arquivo apagado deixa rastro** no `agente.log`, com nome, bytes e
+  sha256 — é por ele que se prova depois que a cópia da VPS é a que saiu daqui.
+- `-Dias N` muda o prazo, `-NaoApagar` desliga na passada, e a **simulação
+  apenas conta** o que apagaria (`Limpar-Antigas ... -SoContar`).
+
+**Medido no PC do Iago (19/10, simulação):** 20 gravações na pasta, **19 com
+mais de 7 dias e já confirmadas** — 5,6 MB que sairiam na próxima passada real.
+
+### O `.exe` foi recompilado — e o que estava circulando era o 0.4
+
+🚨 **A fonte estava em 0.5 desde 15/10, mas nenhum PC rodava 0.5:** os cinco
+agentes reportavam `0.4`, porque o `.exe` guarda uma **cópia** dos `.ps1` e
+ninguém o recompilou. Então o pacote do Bloco 9 (`-Exportar`) nunca chegou aos
+PCs das pessoas.
+
+Recompilado em 19/10 com o agente **0.6** dentro (que contém o 0.5):
+
+| | antes | agora |
+|---|---|---|
+| bytes | 69.632 | 81.408 |
+| sha256 | `dc14b2d6bf41fa78…` | `9a0b5899c3fbfc4c…` |
+| versão que o Windows mostra | 0.4.0.0 | 0.6.0.0 |
+
+Conferido no próprio binário: contém `versao 0.6` e `LIMPEZA LOCAL`, e **não**
+contém mais o cabeçalho 0.5. Cópia do anterior em
+`1-PC-DO-OPERADOR\MoviZap-Instalar-Ligacoes.exe.bak_v05_2026-10-19`.
+
+🔴 **O `.exe` que está no grupo "Todos Movisat" (16/10) é o antigo.** Quem
+instalar por ele cai no 0.4: sem `-Exportar` e sem limpeza. Reenviar o novo é
+decisão dele — e, para quem já instalou, o `.ps1` do PC só troca reinstalando.

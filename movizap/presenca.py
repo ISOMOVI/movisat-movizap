@@ -18,6 +18,29 @@ estado atual veio da regra. Se veio, a próxima ação devolve a pessoa a
 quem escolheu, fica -- a regra de 17/09 (*"offline é escolhido"*) caiu por
 decisão dele, mas a escolha manual continua sendo respeitada.
 
+🔵 19/10, regra dele, em duas voltas no mesmo dia. Primeiro *"o status dos
+atendentes devem permanecer online ou ausente quando logados dentro da
+jornada"* -- veio de ver o Thiago offline estando logado. Depois, fechando:
+*"dentro da jornada cadastrada, IMPOSSÍVEL ficar fora do expediente, e se for
+colocado offline, volta automaticamente ao enviar mensagem para online e segue
+regras de tempo para ausencia"*.
+
+🚨 Até aqui o sistema NÃO SABIA quem estava logado -- só quem tinha ESCRITO,
+porque "ação" é escrever. Quem lia conversa a manhã inteira caía para ausente
+em 30 min e offline em 60, logado e olhando a tela.
+
+Como ficou, dentro da jornada cadastrada:
+  · a régua **nunca** põe offline -- o teto é `ausente` (`_DENTRO_DA_JORNADA`);
+  · escolher "fora do expediente" é **recusado** (`definir_estado_manual`);
+  · quem já estava offline volta a disponível na **primeira ação**, mesmo que
+    tenha escolhido o offline à mão (`registrar_acao`);
+  · `ausente` continua existindo: 30 min sem escrever é real, e dizer
+    "disponível" para quem largou a aba aberta seria a tela mentindo.
+
+⚠️ E o `painel_visto_em` (migração 067) **saiu da régua de estado**: ele passou
+a decidir apenas quem sai da FILA, porque o que a tela diz e quem recebe
+conversa são duas perguntas diferentes. Ver `PADRAO_PAINEL_FILA`.
+
 🚨 A REGRA NASCE DESLIGADA. Ninguém tinha `ultima_acao_em` antes da 052: ligada
 de cara, os 10 iriam para offline no mesmo minuto e deixariam de receber
 transferência. Ao ligar, quem está sem registro ganha "agora" como ponto de
@@ -40,6 +63,8 @@ CHAVE_MSG_LIGADA = "fora_expediente_ligada"
 CHAVE_MSG_TEXTO = "fora_expediente_texto"
 CHAVE_JORNADA = "jornada_controla_estado"
 CHAVE_CARIMBO = "carimbo_nome_ligado"
+CHAVE_MIN_PAINEL_FILA = "presenca_minutos_painel_fila"
+CHAVE_ULTIMA_MUDANCA = "presenca_ultima_mudanca"
 
 PADRAO_AUSENTE = 15
 PADRAO_OFFLINE = 60
@@ -47,6 +72,33 @@ TETO_TEXTO = 4000
 
 MENSAGEM_OFFLINE = ("O atendente escolhido está offline e não poderá continuar "
                     "o atendimento.")
+
+# 🔵 19/10: *"se for ausente ja cria caixa de aviso de ausencia... ali pode
+# perguntar se quer enviar mesmo assim ou nao"*. ⚠️ NÃO é recusa: a escolha é de
+# quem transfere, e por isso `pode_receber` continua deixando `ausente` passar.
+# A frase mora aqui, do lado da do offline, para a tela não escrever a sua.
+MENSAGEM_AUSENTE = ("O atendente escolhido está em pausa. Ele vai receber a "
+                    "conversa, mas pode demorar a ver.")
+
+# 🔵 19/10, decisão dele na segunda volta: *"dentro da jornada cadastrada,
+# impossível ficar fora do expediente"*. Então o painel SAIU da régua de estado --
+# dentro da jornada ninguém vai a offline, com painel aberto ou fechado -- e o
+# carimbo passou a servir outra coisa: **sair da FILA**.
+#
+# 🚨 É a separação que ele escolheu: o que a TELA diz (nunca "fora do
+# expediente" dentro do turno) não é a mesma pergunta de quem RECEBE conversa.
+# Sem isto, quem sai às 15h com o navegador fechado seguiria na fila até as 18h e
+# o cliente esperaria por ele.
+#
+# O prazo é ajustável na Geral (pedido dele); 15 min é o padrão: aguenta um F5, um
+# reinicio de máquina e a tela de bloqueio do almoço, e ainda tira da fila quem foi
+# embora. ⚠️ O piso é 2 min -- abaixo disso, trocar de aba tiraria a pessoa da fila.
+PADRAO_PAINEL_FILA = 15
+MINIMO_PAINEL_FILA = 2
+
+# Escrever a cada 8 s por pessoa não serve de nada: o carimbo só é regravado
+# quando passou disto. Uma escrita por minuto por atendente, no máximo.
+SEGUNDOS_ENTRE_CARIMBOS = 55
 
 
 # A MESMA exceção de `operacao`: é ela que `main.py` transforma em 400 com a
@@ -89,7 +141,35 @@ def config() -> dict:
         # 🔵 05/10: o carimbo do nome na mensagem ao cliente NASCE LIGADO
         # (ausente = ligado); só o owner muda, na Geral.
         "carimbo_nome_ligado": _ler(CHAVE_CARIMBO) != "false",
+        # 🔵 19/10: quantos minutos de painel fechado tiram a pessoa da FILA
+        # (não do estado -- ver o comentário de PADRAO_PAINEL_FILA).
+        "minutos_painel_fila": _inteiro(_ler(CHAVE_MIN_PAINEL_FILA), PADRAO_PAINEL_FILA),
+        # 🔵 19/10 (bloco 5): a última vez que a régua MUDOU alguém, já
+        # partida para a tela não ter de entender o formato. `None` quer dizer
+        # "não mexeu em ninguém desde que isto passou a ser gravado" -- e a
+        # Geral tem de dizer exatamente isso, nunca "a régua não rodou".
+        "ultima_mudanca": _ultima_mudanca(),
     }
+
+
+def _ultima_mudanca() -> dict | None:
+    """O carimbo da última mudança da régua: `instante|ausentes|offline|curados`.
+
+    ⚠️ Formato antigo ou lixo não pode derrubar a tela de configuração: diante
+    de qualquer coisa que não se entenda, devolve `None`, que a tela já sabe
+    mostrar.
+    """
+    bruto = _ler(CHAVE_ULTIMA_MUDANCA)
+    if not bruto:
+        return None
+    partes = bruto.split("|")
+    if len(partes) != 4:
+        return None
+    try:
+        return {"em": partes[0], "ausentes": int(partes[1]),
+                "offline": int(partes[2]), "curados": int(partes[3])}
+    except ValueError:
+        return None
 
 
 def definir_carimbo_nome(ligada: bool) -> dict:
@@ -113,6 +193,28 @@ def definir_jornada_controla_estado(ligada: bool) -> dict:
                 "offline no fim. Nasce desligada.")
     log.info("presença: jornada controla estado -> %s",
              "ligada" if ligada else "desligada")
+    return config()
+
+
+def definir_minutos_painel_fila(minutos: int) -> dict:
+    """Quantos minutos de painel FECHADO tiram a pessoa da distribuição
+    automática. Setter próprio pelo mesmo motivo do `definir_jornada_controla_estado`:
+    `definir_config` é chamada com argumentos fixos pela tela e pela suíte.
+
+    ⚠️ A validacao NÃO é a do offline, e de propósito: os dois números medem coisas
+    diferentes (um é *não escreveu*, o outro é *fechou o painel*), então não existe
+    regra de um ser maior que o outro. O que existe é um piso.
+    """
+    minutos = int(minutos)
+    if not MINIMO_PAINEL_FILA <= minutos <= 24 * 60:
+        raise DadoInvalido(
+            f"O tempo de painel fechado vai de {MINIMO_PAINEL_FILA} minutos a 24 "
+            "horas. Abaixo disso, trocar de aba tiraria a pessoa da fila.")
+    with banco.cursor() as cur:
+        _gravar(cur, CHAVE_MIN_PAINEL_FILA, str(minutos),
+                "Minutos de painel fechado que tiram o atendente da distribuição "
+                "automática. Não mexe no estado dele.")
+    log.info("presença: painel fechado tira da fila -> %d min", minutos)
     return config()
 
 
@@ -167,12 +269,53 @@ def registrar_acao(atendente_id: int | None) -> None:
     """
     if not atendente_id:
         return
+    # 🔵 19/10: *"se for colocado offline, volta automaticamente ao enviar
+    # mensagem para online e segue regras de tempo para ausencia"*. Até aqui só o
+    # que a RÉGUA tinha posto era desfeito (`estado_automatico`); agora o
+    # `offline` dentro da jornada é desfeito também quando foi a pessoa que
+    # escolheu -- porque dentro do turno esse estado deixou de ser possível.
+    #
+    # 🚨 SÓ `offline`. "Em pausa" escolhido à mão continua de pé: quem põe
+    # pausa, escreve uma mensagem e volta ao café não quer ser devolvido a
+    # disponível -- e desfazer isso apagaria o único estado de uso que sobrou.
+    #
+    # 🚨 E NUNCA quem está AFASTADO. Quem está de férias continua logando --
+    # é o caminho do `definir_minha_volta` ("ela loga e vai na configuração
+    # dela") --, e sem este filtro uma nota ou uma reação poria a pessoa
+    # `disponivel` com o afastamento ainda de pé: férias aparecendo como quem
+    # atende.
+    banco.executar(
+        f"""UPDATE atendente
+              SET ultima_acao_em = now(),
+                  estado = CASE
+                             WHEN estado_automatico THEN 'disponivel'
+                             WHEN estado = 'offline'
+                                  AND afastamento_motivo IS NULL
+                                  AND ({_DENTRO_DA_JORNADA})
+                                  THEN 'disponivel'
+                             ELSE estado END,
+                  estado_automatico = false
+            WHERE id = %(id)s""",
+        {"id": atendente_id, "agora": datetime.now(timezone.utc)})
+
+
+def registrar_painel_aberto(atendente_id: int | None) -> None:
+    """O painel desta pessoa falou com o servidor. NÃO é ação de atendimento:
+    não devolve ninguém a "disponível" e não zera o relógio da inatividade.
+
+    🚨 SÓ PROVA QUE A ABA ESTÁ ABERTA. É o que faltava para distinguir "foi
+    para casa" de "está lendo conversa sem escrever" -- e é só isso que
+    `aplicar_regra` pergunta antes de pôr alguém em offline dentro da jornada.
+    """
+    if not atendente_id:
+        return
     banco.executar(
         """UPDATE atendente
-              SET ultima_acao_em = now(),
-                  estado = CASE WHEN estado_automatico THEN 'disponivel' ELSE estado END,
-                  estado_automatico = false
-            WHERE id = %s""", (atendente_id,))
+              SET painel_visto_em = now()
+            WHERE id = %s
+              AND (painel_visto_em IS NULL
+                   OR painel_visto_em < now() - make_interval(secs => %s))""",
+        (atendente_id, SEGUNDOS_ENTRE_CARIMBOS))
 
 
 def definir_estado_manual(atendente_id: int, estado: str) -> None:
@@ -191,6 +334,20 @@ def definir_estado_manual(atendente_id: int, estado: str) -> None:
         raise DadoInvalido(
             f"Você está afastado{ate}. Para voltar antes, mude a data de volta "
             "na Minha conta.")
+    # 🔵 19/10, regra dele: *"dentro da jornada cadastrada, impossível ficar
+    # fora do expediente"*. A frase da recusa tem de dizer o CAMINHO, não só o
+    # "não" -- quem quer parar agora tem "Em pausa", e quem quer encerrar o dia
+    # não precisa fazer nada: a borda do fim do turno faz por ele.
+    #
+    # 🚨 Quem barra é o backend. A Minha conta desabilita o botão e escreve o
+    # motivo, mas a trava mora aqui -- tela some, regra fica.
+    if estado == "offline":
+        from .operacao import em_jornada  # tardio: operacao é grande
+        if em_jornada(atendente_id, datetime.now(timezone.utc)):
+            raise DadoInvalido(
+                "Dentro do seu turno não dá para ficar fora do expediente. Use "
+                "\"Em pausa\" se precisar parar — no fim do turno o sistema põe "
+                "você fora do expediente sozinho.")
     banco.executar(
         """UPDATE atendente
               SET estado = %s, estado_automatico = false,
@@ -208,6 +365,35 @@ def definir_sempre_online(atendente_id: int, ligado: bool) -> None:
 
 # ---------------------------------------------------------------- a regra
 
+# 🔵 19/10 — "dentro da jornada": a hora de agora cai numa linha da jornada
+# da pessoa. Decisão dele: *"dentro da jornada cadastrada, impossível ficar fora do
+# expediente"*. A primeira versão de hoje também exigia painel aberto; ele tirou
+# essa condição -- painel fechado passou a tirar da FILA, não a mudar o estado.
+#
+# 🚨 O FUSO É DE CADA UM, e esta foi a armadilha de 24/09: a jornada é
+# gravada na hora LOCAL (`atendente_jornada.inicio`/`fim`), e comparar com UTC
+# erra por 3 h -- "fora do horário" chegava adiantado. Mesma régua do
+# `operacao.em_jornada_agora`: `EXTRACT(DOW)` dá 0=domingo, e a janela é
+# `inicio <= agora < fim`.
+#
+# ⚠️ Quem NÃO tem jornada cadastrada não entra aqui, de propósito: jornada
+# vazia é "ninguém disse quando", e supor 24 h deixaria a pessoa fora do
+# offline para sempre.
+# ⚠️ Nome próprio de propósito: mais abaixo existe outro `_FUSO`, para as
+# bordas da jornada, que aliasa a tabela como `a`. Os dois são f-string de
+# módulo, então o de baixo REBINDA o nome no import -- com um nome só, mover
+# qualquer um dos blocos passaria a gerar SQL com o alias errado.
+_FUSO_ATENDENTE = "COALESCE(atendente.fuso, 'America/Sao_Paulo')"
+_DENTRO_DA_JORNADA = f"""
+    EXISTS (SELECT 1 FROM atendente_jornada j
+             WHERE j.atendente_id = atendente.id
+               AND j.dia_semana = EXTRACT(
+                     DOW FROM (%(agora)s AT TIME ZONE {_FUSO_ATENDENTE}))::int
+               AND j.inicio <= (%(agora)s AT TIME ZONE {_FUSO_ATENDENTE})::time
+               AND j.fim    >  (%(agora)s AT TIME ZONE {_FUSO_ATENDENTE})::time)
+"""
+
+
 def _protegidos(agora: datetime) -> list[int]:
     """Owners com "sempre online" DENTRO da jornada deles agora."""
     from .operacao import em_jornada  # tardio: operacao é grande e não precisa disto
@@ -218,8 +404,18 @@ def _protegidos(agora: datetime) -> list[int]:
 
 def aplicar_regra(agora: datetime | None = None, forcar: bool = False,
                   somente: list[int] | None = None) -> dict:
-    """Passa a régua: offline primeiro (quem está parado há muito também está
-    parado há pouco), depois ausente. Devolve quem mudou.
+    """Passa a régua, em TRÊS tempos, e a ordem é o desenho:
+
+      1. **offline** -- quem está parado há muito também está parado há pouco,
+         então o mais severo vem primeiro;
+      2. **curativo** (19/10) -- tira do offline quem está dentro da jornada;
+      3. **ausente** -- por último, de propósito: assim quem o curativo acabou
+         de tirar do offline, e que está parado há mais de meia hora, já sai
+         desta mesma passada como "em pausa". ⚠️ Com o curativo no fim, a
+         pessoa ficava um minuto inteiro aparecendo como **Disponível** sem ter
+         aberto o painel -- medido ao vivo em 19/10, com três pessoas.
+
+    Devolve quem mudou em cada um dos três.
 
     ⚠️ `forcar` e `somente` EXISTEM PARA O TESTE, e só para ele. A suíte roda
     no banco de produção, e o laço do serviço lê a mesma `config`: um teste
@@ -233,16 +429,43 @@ def aplicar_regra(agora: datetime | None = None, forcar: bool = False,
     protegidos = _protegidos(agora)
     with banco.cursor() as cur:
         cur.execute(
-            """UPDATE atendente
+            f"""UPDATE atendente
                   SET estado = 'offline', estado_automatico = true,
                       atualizado_em = now()
                 WHERE ativo AND estado <> 'offline'
-                  AND ultima_acao_em < %s - make_interval(mins => %s)
-                  AND NOT (id = ANY(%s::bigint[]))
-                  AND (%s::bigint[] IS NULL OR id = ANY(%s::bigint[]))
-            RETURNING id""", (agora, cfg["minutos_offline"], protegidos,
-                              somente, somente))
+                  AND ultima_acao_em < %(agora)s - make_interval(mins => %(mins)s)
+                  AND NOT (id = ANY(%(protegidos)s::bigint[]))
+                  AND (%(somente)s::bigint[] IS NULL OR id = ANY(%(somente)s::bigint[]))
+                  AND NOT ({_DENTRO_DA_JORNADA})
+            RETURNING id""",
+            {"agora": agora, "mins": cfg["minutos_offline"],
+             "protegidos": protegidos, "somente": somente})
         offline = [r["id"] for r in cur.fetchall()]
+        # 🚨 O CURATIVO (19/10). O UPDATE acima faz a régua não
+        # *causar* offline dentro da jornada; ele não *tira* o offline que
+        # outros caminhos gravam lá dentro -- o admin salvando o cadastro
+        # (`operacao.atualizar_atendente`), a reativação (`operacao.reativar`), o
+        # início de afastamento (`_comecar`) e a borda de FIM de quem tem dois
+        # turnos (08-12 / 13-18 cai offline ao meio-dia, dentro do dia de
+        # jornada). E, desde hoje, a pessoa também não pode se consertar à mão,
+        # porque `definir_estado_manual` recusa.
+        #
+        # Sem este terceiro UPDATE, *"dentro da jornada cadastrada é impossível
+        # ficar fora do expediente"* seria intenção, não invariante.
+        #
+        # ⚠️ `estado_automatico = true` de propósito: foi o sistema que pôs, e a
+        # próxima ação da pessoa pode desfazer. E afastado fica de fora -- férias
+        # não viram expediente.
+        cur.execute(
+            f"""UPDATE atendente
+                  SET estado = 'disponivel', estado_automatico = true,
+                      atualizado_em = now()
+                WHERE ativo AND estado = 'offline'
+                  AND afastamento_motivo IS NULL
+                  AND (%(somente)s::bigint[] IS NULL OR id = ANY(%(somente)s::bigint[]))
+                  AND ({_DENTRO_DA_JORNADA})
+            RETURNING id""", {"agora": agora, "somente": somente})
+        curados = [r["id"] for r in cur.fetchall()]
         cur.execute(
             """UPDATE atendente
                   SET estado = 'ausente', estado_automatico = true,
@@ -254,9 +477,28 @@ def aplicar_regra(agora: datetime | None = None, forcar: bool = False,
             RETURNING id""", (agora, cfg["minutos_ausente"], protegidos,
                               somente, somente))
         ausentes = [r["id"] for r in cur.fetchall()]
-    if offline or ausentes:
-        log.info("presença: %d ausente(s), %d offline", len(ausentes), len(offline))
-    return {"ligada": True, "ausentes": ausentes, "offline": offline}
+    if offline or ausentes or curados:
+        log.info("presença: %d ausente(s), %d offline, %d curado(s) na jornada",
+                 len(ausentes), len(offline), len(curados))
+        # 🔵 19/10 (bloco 5): a Geral precisa dizer quando a régua mexeu em
+        # alguém pela última vez. ⚠️ NÃO existe carimbo de "passada" -- e ler
+        # `atendente.atualizado_em` seria mentira, porque nome, foto, times e
+        # afastamento carimbam a mesma coluna. Então grava-se o que é verdade:
+        # a última vez que a régua MUDOU alguém. Silêncio na tela significa
+        # "não mexeu em ninguém", nunca "não rodou", e o texto diz isso.
+        try:
+            with banco.cursor() as cur2:
+                _gravar(cur2, CHAVE_ULTIMA_MUDANCA,
+                        f"{datetime.now(timezone.utc).isoformat()}|"
+                        f"{len(ausentes)}|{len(offline)}|{len(curados)}",
+                        "Última vez que a régua de presença mudou alguém: "
+                        "instante|ausentes|offline|curados.")
+        except Exception:  # noqa: BLE001
+            # O carimbo é informativo: falhar nele não pode derrubar a régua,
+            # que é o que de fato segura o estado de 11 pessoas.
+            log.warning("presença: não consegui gravar o carimbo da última mudança")
+    return {"ligada": True, "ausentes": ausentes, "offline": offline,
+            "curados": curados}
 
 
 # ⚠️ As bordas são calculadas no FUSO de cada pessoa: a jornada é gravada na
@@ -274,6 +516,11 @@ WITH alvo AS (
     JOIN atendente_jornada j ON j.atendente_id = a.id
      AND j.dia_semana = EXTRACT(DOW FROM (%(agora)s AT TIME ZONE {_FUSO}))::int
    WHERE a.ativo
+     -- 🚨 19/10: AFASTADO NÃO ACORDA NA BORDA. Defeito anterior a hoje, que
+     -- estava latente porque a régua de inatividade o corrigia em 60 min pondo
+     -- offline de novo. Com "dentro da jornada nunca vai a offline", ela deixou
+     -- de corrigir -- e o afastado ficaria `disponivel` o dia inteiro.
+     AND a.afastamento_motivo IS NULL
      AND (%(somente)s::bigint[] IS NULL OR a.id = ANY(%(somente)s::bigint[]))
    GROUP BY a.id
 )
@@ -320,7 +567,7 @@ def aplicar_jornada(agora: datetime | None = None, desde: datetime | None = None
 
     🚨 DISPARA SÓ NA BORDA -- quando ela cai em `(desde, agora]`. Não é
     contínuo, de propósito: no meio do turno NÃO toca em nada, então não desfaz
-    "em pausa"/"não perturbe" da pessoa nem o offline que a inatividade pôs.
+    "em pausa" da pessoa nem o offline que a inatividade pôs.
     Owner "sempre online" não cai no fim. Um expediente por dia: primeiro
     início, último fim.
 
@@ -389,6 +636,32 @@ def conversas_abertas(atendente_id: int) -> list[int]:
         """SELECT id FROM conversa
             WHERE atendente_id = %s AND estado <> 'resolvida'
             ORDER BY id""", (atendente_id,))]
+
+
+def painel_aberto_agora(ids, minutos: int | None = None) -> set[int]:
+    """Quais destes atendentes têm o painel ABERTO agora -- em uma consulta só.
+
+    🔵 19/10: serve à trava de FILA, não ao estado. O que se mede é o carimbo
+    de `painel_visto_em`, escrito por qualquer tela do painel (lista da Caixa e
+    o pedido de notificações, que roda em todas elas).
+
+    🚨 `painel_visto_em IS NULL` conta como FECHADO, e isto é decisão
+    declarada: a coluna nasceu em 19/10, então quem nunca abriu o painel desde
+    então fica de fora da distribuição automática até abrir uma tela. O
+    contrário -- tratar `NULL` como aberto -- entregaria conversa a quem nunca
+    apareceu, que é justamente o buraco que esta trava existe para fechar.
+    ⚠️ Transferência à mão NÃO passa por aqui, de propósito.
+    """
+    ids = [int(i) for i in ids if i]
+    if not ids:
+        return set()
+    if minutos is None:
+        minutos = config()["minutos_painel_fila"]
+    return {r["id"] for r in banco.varios(
+        """SELECT id FROM atendente
+            WHERE id = ANY(%s)
+              AND painel_visto_em >= now() - make_interval(mins => %s)""",
+        (ids, int(minutos)))}
 
 
 def pode_receber(atendente_id: int) -> tuple[bool, str]:

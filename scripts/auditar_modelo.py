@@ -40,7 +40,10 @@ IGNORAR = {
     "figurinha", "localizacao", "contato", "sistema", "nota", "pendente",
     "enviada", "entregue", "lida", "falhou", "manual", "inatividade",
     "ia_triagem", "sem_time", "cron", "disponivel", "ausente",
-    "nao_perturbe", "desconectado", "aguardando_qr", "pareando",
+    # 🔵 19/10: "nao_perturbe" saiu do CHECK na migração 068. Mantido FORA
+    # desta lista de propósito -- se voltar a aparecer no banco, o auditor tem
+    # de acusar, que é o trabalho dele.
+    "desconectado", "aguardando_qr", "pareando",
     "conectado", "caiu", "mensagem", "conversa", "canal", "midia",
     "atendente", "classificacao", "config", "transferencia", "time",
     "prompt_versao", "sync_execucao", "canal_evento", "contato_papel",

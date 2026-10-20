@@ -50,11 +50,24 @@ def pool():
 _seq = [0]
 
 
-def pessoa(estado="disponivel"):
+def pessoa(estado="disponivel", painel_ha_min=0):
+    """🚨 19/10: O CARIMBO DO PAINEL ENTROU NO FIXTURE, e sem ele cinco
+    testes deste arquivo reprovariam -- não por defeito, por omissão do
+    cenário. Desde 19/10 a distribuição automática só entrega a quem está com
+    o painel aberto (`presenca.painel_aberto_agora`), e `painel_visto_em NULL`
+    conta como fechado. Atendente criado agora nasce com NULL, então "pessoa
+    disponível" sem carimbo não é mais uma pessoa que recebe.
+
+    `painel_ha_min` existe para o caso contrário: quem fechou o painel.
+    """
     _seq[0] += 1
     a = operacao.criar_atendente(f"Zz Dist {_seq[0]}", f"{LOGIN}{_seq[0]}",
                                  f"{LOGIN}{_seq[0]}@teste.invalid")
-    banco.executar("UPDATE atendente SET estado = %s WHERE id = %s", (estado, a["id"]))
+    banco.executar(
+        """UPDATE atendente
+              SET estado = %s,
+                  painel_visto_em = now() - make_interval(mins => %s)
+            WHERE id = %s""", (estado, painel_ha_min, a["id"]))
     return a["id"]
 
 
@@ -182,6 +195,101 @@ def test_quem_assumiu_no_mesmo_segundo_ganha():
     banco.executar("UPDATE conversa SET atendente_id = %s WHERE id = %s", (quem_assumiu, cid))
     r = conversas.transferir(cid, None, a, "inatividade", so_se_sem_dono=True)
     assert r["ok"] is False and dono(cid) == quem_assumiu
+
+
+# ------------------------------------------ a trava de fila do painel (19/10)
+#
+# 🔵 Decisão dele: *"dentro da jornada cadastrada, impossível ficar fora do
+# expediente"* -- e, respondendo à consequência, que **quem está com o painel
+# fechado para de receber distribuição automática**, continuando a aceitar
+# transferência à mão.
+#
+# 🚨 O que estes testes defendem é a SEPARAÇÃO. Sem ela, o `offline` de 60 min
+# era o que tirava alguém da fila -- e, como ele deixou de existir dentro da
+# jornada, a fila entregaria conversa das 08h às 18h a quem foi embora às 15h.
+
+def test_painel_fechado_sai_da_fila_e_a_conversa_vai_para_a_reserva():
+    a = pessoa(painel_ha_min=90)       # foi embora e fechou o painel
+    b = pessoa()                       # painel aberto agora
+    cid = conversa()
+    mensagem(cid, 15)
+    passar(cfg(a, b), [cid])
+    assert dono(cid) == b
+
+
+def test_as_duas_com_painel_fechado_deixa_na_fila():
+    a = pessoa(painel_ha_min=90)
+    b = pessoa(painel_ha_min=90)
+    cid = conversa()
+    mensagem(cid, 15)
+    r = passar(cfg(a, b), [cid])
+    assert dono(cid) is None
+    assert r["paradas_sem_destino"] == 1
+
+
+def test_quem_nunca_abriu_o_painel_nao_recebe():
+    """`painel_visto_em IS NULL` conta como fechado, e isto é decisão
+    declarada: a coluna nasceu em 19/10. O contrário entregaria conversa a quem
+    nunca apareceu."""
+    a = pessoa()
+    banco.executar("UPDATE atendente SET painel_visto_em = NULL WHERE id = %s", (a,))
+    b = pessoa()
+    cid = conversa()
+    mensagem(cid, 15)
+    passar(cfg(a, b), [cid])
+    assert dono(cid) == b
+
+
+def test_a_tela_diz_painel_fechado_e_nao_offline():
+    """🚨 `M12`: "parada porque as duas estão offline" e "parada porque
+    ninguém está com o painel aberto" não podem sair com a mesma frase.
+
+    🚨 E A LIÇÃO DE COMO ESTE TESTE NASCEU: a primeira versão chamou
+    `distribuicao.definir_config`, que grava na `config` DE PRODUÇÃO -- a fila
+    real ficou desligada, apontando para estes atendentes de teste, até eu
+    restaurar do dump das 02:40. O cabeçalho deste arquivo avisa em maiúsculas,
+    e o aviso estava certo. `situacao(cfg=...)` é a porta de teste que faltava.
+    """
+    a = pessoa(painel_ha_min=90)
+    b = pessoa(painel_ha_min=90)
+    sit = distribuicao.situacao(cfg=cfg(a, b))
+    assert sit["parada"] is True
+    assert sit["parada_motivo"] == "painel fechado"
+    assert sit["primeiro_disponivel"] is False
+
+
+def test_a_tela_diz_offline_quando_o_motivo_e_offline():
+    a = pessoa("offline")
+    b = pessoa("offline")
+    sit = distribuicao.situacao(cfg=cfg(a, b))
+    assert sit["parada"] is True
+    assert "offline" in sit["parada_motivo"].lower()
+
+
+def test_nenhum_teste_deste_arquivo_escreve_na_config_real():
+    """🚨 A trava que faltava, escrita depois do estrago: se algum teste daqui
+    voltar a chamar `definir_config`, este teste acusa -- comparando o retrato
+    da configuração real antes e depois de uma passada completa."""
+    chaves = ("distribuicao_ligada", "distribuicao_primeiro",
+              "distribuicao_reserva", "distribuicao_minutos",
+              "distribuicao_ligada_em")
+    antes = {k: banco.um("SELECT valor FROM config WHERE chave = %s", (k,)) for k in chaves}
+    a = pessoa()
+    cid = conversa()
+    mensagem(cid, 15)
+    passar(cfg(a), [cid])
+    distribuicao.situacao(cfg=cfg(a))
+    depois = {k: banco.um("SELECT valor FROM config WHERE chave = %s", (k,)) for k in chaves}
+    assert antes == depois, "um teste escreveu na configuração real da distribuição"
+
+
+def test_painel_fechado_nao_impede_transferencia_a_mao():
+    """A trava é **só** da fila. Transferência à mão passa por
+    `conversas.transferir`, que olha offline e afastamento -- nunca o painel."""
+    a = pessoa(painel_ha_min=600)
+    cid = conversa()
+    r = conversas.transferir(cid, None, a, "manual")
+    assert r["ok"] is True and dono(cid) == a
 
 
 def test_nao_liga_sem_escolher_quem_recebe():

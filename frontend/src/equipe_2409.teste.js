@@ -74,7 +74,7 @@ function estadoPadrao() {
       id: 1, nome: 'Ana Souza', login: 'ana', email: 'ana@movisat.com.br',
       perfil: 'atendimento', estado: 'disponivel', tem_foto: false,
       max_conversas: null, ativo: true, enviar_com_enter: true,
-      estados_possiveis: ['disponivel', 'ausente', 'nao_perturbe', 'offline'],
+      estados_possiveis: ['disponivel', 'ausente', 'offline'],
     },
   }
 }

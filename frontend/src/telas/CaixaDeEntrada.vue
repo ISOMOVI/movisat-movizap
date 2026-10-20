@@ -579,13 +579,22 @@ async function trocarTipo(nova) {
 }
 
 /* 🔵 07/10 — o tipo do contato governa dois detalhes da ficha:
-   - LEAD deixa o nome do contato editável (decisão dele); fora de lead o nome
-     fica só-leitura, mas o que foi salvo permanece, porque mora em `contato`.
+   - LEAD deixa o nome do contato editável (decisão dele); fora dos tipos
+     editáveis o nome fica só-leitura, mas o que foi salvo permanece, porque
+     mora em `contato`.
    - TÉCNICO esconde "Empresas vinculadas" e "Vincular a uma empresa": técnico é
-     pessoa, não se liga a empresa. */
+     pessoa, não se liga a empresa.
+   🔵 19/10 — TÉCNICO entrou na mesma regra de nome do LEAD, por decisão
+   dele: *"para tecnicos, adicione ele na regra do tipo 'LEAD' que permite
+   editar o nome"*. Motivo real: os técnicos importados chegaram com o nome do
+   WhatsApp divergindo do cadastro (7 conversas em 08/10), e quem atende precisa
+   corrigir dali mesmo. A trava de identidade não muda: isto edita o NOME do
+   contato, não o telefone nem o vínculo. */
+const RELACOES_COM_NOME_EDITAVEL = ['lead', 'tecnico']
 const relacaoContato = computed(() => aberta.value?.empresa?.contato?.relacao || '')
 const ehTecnico = computed(() => relacaoContato.value === 'tecnico')
-const ehLead = computed(() => relacaoContato.value === 'lead')
+const nomeEditavel = computed(
+  () => RELACOES_COM_NOME_EDITAVEL.includes(relacaoContato.value))
 
 const rascunhoNome = ref('')
 const salvandoNome = ref(false)
@@ -3497,10 +3506,10 @@ function carregarMidiasDaConversa(c) {
                      acionam nada; anunciá-los na ficha promete recurso que não
                      existe, sobre um eixo que não é do atendimento. -->
                 <dt>Contato</dt>
-                <!-- 🔵 07/10: LEAD deixa o nome do contato editável. Fora de
-                     lead, só-leitura. O que foi salvo permanece ao trocar de
-                     tipo, porque mora em `contato.nome`. -->
-                <dd v-if="ehLead" class="gaveta__nome-edit">
+                <!-- 🔵 07/10: LEAD deixa o nome do contato editável; 🔵 19/10:
+                     TÉCNICO também. Nos outros tipos, só-leitura. O que foi salvo
+                     permanece ao trocar de tipo, porque mora em `contato.nome`. -->
+                <dd v-if="nomeEditavel" class="gaveta__nome-edit">
                   <input
                     v-model="rascunhoNome"
                     class="campo__entrada campo__entrada--compacto"
@@ -3645,8 +3654,10 @@ function carregarMidiasDaConversa(c) {
                 </dd>
 
                 <!-- 🔵 07/10: LEAD sem empresa também edita o nome. Só quando
-                     já existe contato (o nome mora nele). -->
-                <template v-if="ehLead && aberta.empresa && aberta.empresa.contato">
+                     já existe contato (o nome mora nele). 🔵 19/10: vale para
+                     técnico também, e é aqui que cai, porque técnico não tem
+                     empresa por desenho. -->
+                <template v-if="nomeEditavel && aberta.empresa && aberta.empresa.contato">
                   <dt>Nome</dt>
                   <dd class="gaveta__nome-edit">
                     <input

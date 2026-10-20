@@ -37,7 +37,6 @@ const DIAS_CURTOS = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb']
 const ESTADOS = [
   { valor: 'disponivel', rotulo: 'Disponível' },
   { valor: 'ausente', rotulo: 'Em pausa' },
-  { valor: 'nao_perturbe', rotulo: 'Não perturbe' },
   { valor: 'offline', rotulo: 'Fora do expediente' },
 ]
 /* ⚠️ Os rótulos são os MESMOS da Minha conta: o mesmo estado com dois nomes
@@ -1103,7 +1102,6 @@ async function salvar() {
 .estado::before { content: ''; width: 8px; height: 8px; border-radius: 50%; background: var(--texto-apagado); }
 .estado--disponivel::before { background: var(--ok); }
 .estado--ausente::before { background: var(--aviso); }
-.estado--nao_perturbe::before { background: var(--erro); }
 
 /* O interruptor Ativo/Inativo (25/09): mesmo desenho do da Geral. */
 .interruptor { display: flex; align-items: flex-start; gap: var(--e-3); cursor: pointer; }

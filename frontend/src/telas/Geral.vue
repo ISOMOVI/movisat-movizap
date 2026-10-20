@@ -39,6 +39,16 @@ const jornadaAtiva = ref(false)
    ou 'não'"*). As duas nascem desligadas; um PUT só grava as duas. */
 const presenca = ref(null)
 let retratoPresenca = ''
+/* 🔵 19/10: a hora da última mudança da régua, no fuso de quem olha. O
+   backend manda ISO; formatar aqui evita uma segunda verdade sobre fuso. */
+const quandoMudou = computed(() => {
+  const iso = presenca.value?.ultima_mudanca?.em
+  if (!iso) return ''
+  const d = new Date(iso)
+  return Number.isNaN(d.getTime())
+    ? '' : d.toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })
+})
+
 const presencaMudou = computed(() =>
   presenca.value !== null && JSON.stringify(presenca.value) !== retratoPresenca)
 
@@ -101,6 +111,7 @@ async function salvarPresenca() {
       ...presenca.value,
       minutos_ausente: Number(presenca.value.minutos_ausente),
       minutos_offline: Number(presenca.value.minutos_offline),
+      minutos_painel_fila: Number(presenca.value.minutos_painel_fila),
     })
     retratoPresenca = JSON.stringify(presenca.value)
     recado.value = 'Regras de status e mensagem de fim de expediente salvas.'
@@ -186,9 +197,63 @@ onMounted(carregar)
           </label>
           <p class="apagado pequeno">
             Conta só ação de atendimento: enviar, assumir, entrar, transferir,
-            concluir. Ficar com a tela aberta sem agir não conta. Quem o sistema
-            pôs como ausente ou offline volta a <strong>Disponível</strong> na
-            próxima ação; o que a pessoa escolhe na Minha conta, o sistema não desfaz.
+            concluir. Ficar com a tela aberta sem agir não conta para voltar a
+            <strong>Disponível</strong>. Quem o sistema pôs como ausente ou offline
+            volta a Disponível na próxima ação; o que a pessoa escolhe na Minha
+            conta, o sistema não desfaz.
+          </p>
+          <!-- 🔵 19/10, a regra dele, FECHADA na segunda volta do dia:
+               *"dentro da jornada cadastrada, impossível ficar fora do expediente,
+               e se for colocado offline, volta automaticamente ao enviar mensagem
+               para online"*. De manhã este mesmo cartão dizia que o offline
+               voltava quando a pessoa fechava o painel -- deixou de ser verdade na
+               mesma tarde, e texto que não acompanha o comportamento é defeito. -->
+          <p class="aviso aviso--info pequeno">
+            <i class="bi bi-info-circle aviso__icone" aria-hidden="true"></i>
+            <span><strong>Dentro da jornada cadastrada ninguém fica "fora do
+            expediente"</strong>: o máximo pelo tempo é <strong>Ausente</strong>, e
+            quem for posto fora volta a <strong>Disponível</strong> na primeira
+            mensagem que enviar. O campo "Offline depois de" vale <strong>fora do
+            turno</strong>, e para quem não tem jornada cadastrada em Atendentes.</span>
+          </p>
+          <!-- 🔵 19/10: o terceiro número, que ele pediu ajustável. 🚨 Ele NÃO
+               mexe no status de ninguém -- mexe em quem RECEBE. Sem ele, quem sai
+               às 15h com o navegador fechado seguiria na fila até as 18h, porque o
+               offline por tempo deixou de existir dentro do turno. -->
+          <div class="regra">
+            <label class="campo regra__campo">
+              <span class="campo__rotulo">Sai da fila com o painel fechado há</span>
+              <span class="regra__entrada">
+                <input v-model="presenca.minutos_painel_fila" class="campo__entrada"
+                       type="number" min="2" max="1440" />
+                <span class="apagado">min</span>
+              </span>
+            </label>
+          </div>
+          <p class="apagado pequeno">
+            Quem está com o painel fechado há mais que isso <strong>para de receber
+            conversa distribuída</strong>, mas continua aceitando
+            <strong>transferência à mão</strong> — quem transfere é avisado. Isto
+            não muda o status dela na tela.
+          </p>
+          <!-- 🔵 19/10: *"a Geral não diz os valores em vigor"*. 🚨 O que se
+               mostra é a última vez que a régua MUDOU alguém -- não existe carimbo
+               de "passada", e ler `atualizado_em` seria mentira (nome, foto e
+               afastamento carimbam a mesma coluna). Por isso o texto diz, em
+               palavras, que silêncio significa "não mexeu em ninguém". -->
+          <p class="apagado pequeno">
+            <template v-if="presenca.ultima_mudanca">
+              A régua passa a cada 1 min. A última vez que mexeu em alguém foi
+              <strong>{{ quandoMudou }}</strong>
+              ({{ presenca.ultima_mudanca.ausentes }} para ausente,
+              {{ presenca.ultima_mudanca.offline }} para offline,
+              {{ presenca.ultima_mudanca.curados }} devolvido(s) à jornada).
+            </template>
+            <template v-else>
+              A régua passa a cada 1 min e ainda não mexeu em ninguém desde que isto
+              passou a ser registrado — o que não quer dizer que ela não esteja
+              rodando.
+            </template>
           </p>
           <div class="regra">
             <label class="campo regra__campo">
@@ -249,9 +314,9 @@ onMounted(carregar)
           <p class="apagado pequeno">
             No <strong>início</strong> do turno de cada atendente o status volta a
             <strong>Disponível</strong>; no <strong>fim</strong>, vai a
-            <strong>Fora do expediente</strong>. Quem fica offline por inatividade
-            <strong>dentro</strong> do turno aparece como <strong>Ausente</strong>,
-            não "fora do expediente". Precisa da jornada cadastrada em Atendentes.
+            <strong>Fora do expediente</strong>. Dentro do turno, com o painel
+            aberto, o tempo não leva ninguém a offline -- para em
+            <strong>Ausente</strong>. Precisa da jornada cadastrada em Atendentes.
           </p>
         </div>
       </section>

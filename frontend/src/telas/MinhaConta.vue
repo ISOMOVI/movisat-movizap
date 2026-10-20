@@ -63,19 +63,40 @@ async function salvarNome () {
   }
 }
 
-/* 🚨 O RÓTULO É DA PESSOA, O VALOR É DO BANCO. `nao_perturbe` é o que o
-   `CHECK` aceita; "Não perturbe" é o que se lê. Misturar os dois faria a tela
-   mostrar nome de coluna para quem atende. */
+/* 🚨 O RÓTULO É DA PESSOA, O VALOR É DO BANCO: `ausente` é o que o `CHECK`
+   aceita, "Em pausa" é o que se lê. Misturar os dois faria a tela mostrar nome
+   de coluna para quem atende.
+   🔵 19/10: eram quatro estados; o "Não perturbe" saiu na migração 068. */
 const ESTADOS = [
   { valor: 'disponivel', rotulo: 'Disponível', cor: 'ok',
     ajuda: 'Recebendo conversa normalmente.' },
   { valor: 'ausente', rotulo: 'Em pausa', cor: 'aviso',
     ajuda: 'Almoço, reunião, café. Você volta hoje.' },
-  { valor: 'nao_perturbe', rotulo: 'Não perturbe', cor: 'erro',
-    ajuda: 'Está no painel, mas concentrado em outra coisa.' },
   { valor: 'offline', rotulo: 'Fora do expediente', cor: '',
     ajuda: 'Encerrou o dia. Enquanto estiver assim, não recebe conversa transferida.' },
 ]
+
+/* 🚨 19/10 — A LISTA DE CIMA NÃO MANDA MAIS SOZINHA. O backend diz quais
+   estados existem (`estados_possiveis`, de `GET /api/eu/perfil`), e até hoje
+   NINGUÉM usava esse campo: os botões saíam só da lista escrita aqui. Resultado
+   medido ao tirar o "não perturbe": o backend deixou de aceitar o valor e o
+   botão continuou na tela, dando 400 em quem clicasse. Agora a lista local diz
+   o RÓTULO e a AJUDA, e o backend diz QUAIS -- que é a divisão certa. */
+const estadosOferecidos = computed(() => {
+  const aceitos = perfil.value?.estados_possiveis
+  if (!Array.isArray(aceitos) || !aceitos.length) return ESTADOS
+  return ESTADOS.filter((e) => aceitos.includes(e.valor))
+})
+
+/* 🔵 19/10, regra dele: *"dentro da jornada cadastrada, impossível ficar fora
+   do expediente"*. O botão fica travado com o motivo ESCRITO ao lado -- `title`
+   não é rótulo (`M10`) e no celular nem existe.
+   🚨 Quem barra é o backend (`presenca.definir_estado_manual`): isto aqui
+   explica, não protege. E `em_jornada` vem do perfil, lido no `mount`, então
+   às 18:00 o botão só destrava no F5 -- por isso o 400 do servidor é o portão
+   de verdade, e o `catch` relê o perfil. */
+const foraDoExpedienteTravado = computed(
+  () => Boolean(perfil.value?.em_jornada))
 
 const estadoAtual = computed(
   () => ESTADOS.find((e) => e.valor === perfil.value?.estado) || null,
@@ -304,12 +325,13 @@ onMounted(carregar)
           </div>
           <div class="conta__estados">
             <button
-              v-for="e in ESTADOS"
+              v-for="e in estadosOferecidos"
               :key="e.valor"
               type="button"
               class="conta__estado"
               :class="{ 'conta__estado--ativo': perfil.estado === e.valor }"
-              :disabled="salvando || afastado"
+              :disabled="salvando || afastado
+                         || (e.valor === 'offline' && foraDoExpedienteTravado)"
               :aria-pressed="perfil.estado === e.valor"
               @click="definirEstado(e.valor)"
             >
@@ -317,7 +339,13 @@ onMounted(carregar)
                     aria-hidden="true"></span>
               <span class="conta__estado-texto">
                 <strong>{{ e.rotulo }}</strong>
-                <small class="apagado">{{ e.ajuda }}</small>
+                <small v-if="e.valor === 'offline' && foraDoExpedienteTravado"
+                       class="apagado">
+                  Você está dentro do seu turno, então este estado não dá. Use
+                  <strong>Em pausa</strong> se precisar parar — no fim do turno
+                  o sistema põe você fora do expediente sozinho.
+                </small>
+                <small v-else class="apagado">{{ e.ajuda }}</small>
               </span>
             </button>
           </div>
@@ -478,7 +506,6 @@ onMounted(carregar)
 }
 .conta__bolinha--disponivel   { background: var(--ok); }
 .conta__bolinha--ausente      { background: var(--aviso); }
-.conta__bolinha--nao_perturbe { background: var(--erro); }
 .conta__bolinha--offline      { background: var(--texto-apagado); }
 
 .conta__foto-linha { display: flex; align-items: flex-start; gap: var(--e-3); }

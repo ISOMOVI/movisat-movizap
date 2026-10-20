@@ -3520,3 +3520,172 @@ tiveram na tela. Clicando, a lista: nome e hora de cada uma.
 
 **Provado:** 11 testes em `tests/teste_nota_vista.py` e 9 em
 `frontend/src/visto_por_1510.teste.js`.
+
+
+## 19/10 — três pedidos dele, medidos antes de escritos
+
+### LIG_1.1 — o REC de cada PC na faixa de cobertura
+
+🔵 *"ajuste a mensagem do painel atual (...) inserindo no fim de cada linha de
+o REC está ativado ou não"*.
+
+O que fez o pedido existir: em 19/10, **4 dos 5 PCs com agente estavam com a
+gravação automática desligada** no MicroSIP, e a faixa dizia "30 ligações" de
+um PC que não tinha gravado nenhuma delas. Medido: 3404 com 32 ligações e 20
+gravações; 3348 com 30 e **zero**; 3399 com 11 e zero; 3401 com 3 e zero; 3405
+com 116 e zero.
+
+- 🚨 **TRÊS estados, não dois.** O agente só fala do problema: manda
+  `gravacao automatica desligada no MicroSIP` quando `Settings.autoRecording`
+  ≠ 1, e **cala quando está ligada**. Então "REC ligado" é a ausência do aviso
+  na **última** passada, e isso só vale para quem já falou. PC que nunca fez
+  passada recebe **"REC não informado"** — dizer "ligado" ali seria a tela
+  mentindo (`M12`).
+- Quem não tem agente **não ganha chip nenhum**: a pergunta nem existe, e ele
+  continua na linha "Sem agente".
+- A régua mora no backend (`ligacoes_consulta.rec_do_agente`), uma função pura
+  que a suíte exercita nos quatro casos; a tela só escolhe rótulo e cor.
+
+**Provado:** 5 testes em `tests/teste_ligacoes_consulta.py` e 2 em
+`frontend/src/ligacoes_1510.teste.js`.
+
+### ATD_1.2 — TÉCNICO edita o nome, como LEAD
+
+🔵 *"para tecnicos, adicione ele na regra do tipo 'LEAD' que permite editar o
+nome"*.
+
+O caso real são os técnicos importados em 02/10: o nome do WhatsApp divergia do
+cadastro em 7 conversas (08/10), e quem atende não tinha como corrigir dali.
+A regra virou uma lista (`RELACOES_COM_NOME_EDITAVEL = ['lead', 'tecnico']`),
+nos dois lugares da ficha — com empresa e sem empresa, que é o caso do técnico
+por desenho.
+
+⚠️ **A trava de identidade não mudou:** isto edita o `contato.nome`, nunca o
+telefone nem o vínculo. O backend já não filtrava por tipo — a regra era só da
+tela, e continua sendo.
+
+### CFG_7.1 — logado dentro da jornada não cai em offline
+
+🔵 *"o status dos atendentes devem permanecer online ou ausente quando logados
+dentro da jornada"*. Veio de ver o Thiago offline estando logado.
+
+🚨 **O sistema não sabia quem estava logado.** O único relógio era
+`ultima_acao_em`, e "ação" é **escrever** (mensagem, nota, chat interno, anexo,
+editar, apagar, reagir). Quem passava a manhã lendo conversa não tocava o
+relógio: ia a `ausente` em 30 min e a `offline` em 60, logado e olhando a tela.
+
+O sinal que faltava já existia e ninguém usava: **a Caixa pede a lista a cada
+8 s** enquanto a aba vive. Essa rota passou a carimbar `atendente.painel_visto_em`
+(migração 067), no máximo uma escrita por minuto por pessoa.
+
+- **Dentro da jornada + painel carimbado nos últimos 5 min:** a régua **não**
+  põe em offline. O máximo é `ausente`.
+- **`ausente` continua valendo**, e isto é de propósito: 30 min sem escrever é
+  real, e dizer "disponível" para quem largou a aba aberta seria outra tela
+  mentindo. Só `offline` barra distribuição; `ausente` não.
+- **Painel fechado volta ao de antes:** 5 min depois o carimbo envelhece e o
+  offline por tempo volta a valer.
+- **Fora da jornada, nada muda.** E quem **não tem jornada cadastrada** não
+  entra na proteção: jornada vazia é "ninguém disse quando", e supor 24 h
+  deixaria a pessoa fora do offline para sempre.
+- ⚠️ **O carimbo não é ação:** não devolve ninguém a "disponível" e não zera
+  `ultima_acao_em`. Se contasse, abrir a Caixa zeraria o relógio de todo mundo
+  e a régua nunca marcaria ninguém — há teste só para isso.
+- ⚠️ **Escolha manual continua intocada.** Quem escolhe "Fora do expediente"
+  na Minha conta fica assim, dentro ou fora da jornada — e era isso que o
+  Thiago tinha (`estado_automatico = false`). A régua nova não o conserta;
+  **decisão dele** se o sistema deve recusar essa escolha dentro do turno.
+- **Os textos da Geral foram corrigidos junto**, porque passaram a mentir: a
+  frase "ficar com a tela aberta sem agir não conta" virou "não conta para
+  voltar a Disponível", e o cartão ganhou o aviso do novo teto.
+
+**Provado:** 9 testes em `tests/teste_presenca.py` (50 no arquivo).
+
+
+## 19/10, segunda volta — a jornada manda no status (CFG_7.1, CFG_10.1, ATD_1.1)
+
+🔵 A regra dele, fechando o que de manhã eu tinha lido pela metade: *"dentro da
+jornada cadastrada, impossível ficar fora do expediente e se for colocado offline,
+volta automaticamente ao enviar mensagem para online e segue regras de tempo para
+ausencia"*. E, revendo as seis propostas: *"pode remover esse status então"* (o Não
+perturbe), *"se for ausente já cria caixa de aviso de ausência"*, e o prazo da fila
+**ajustável na Geral**.
+
+### O que ficou de pé, por dentro
+
+`presenca.aplicar_regra` passa a régua em **três tempos, e a ordem é o desenho**:
+
+1. **offline** — só para quem está **fora** da jornada (ou sem jornada cadastrada);
+2. **curativo** — tira do offline quem está **dentro** da jornada, sem afastamento;
+3. **ausente** — por último, de propósito: quem o curativo acabou de tirar do
+   offline e está parado há mais de meia hora sai **na mesma passada** como "em
+   pausa". 🚨 Medido ao vivo com o curativo no fim: **três pessoas ficaram um minuto
+   inteiro aparecendo como "Disponível" sem ter aberto o painel**.
+
+E mais três pontas, porque "impossível" só é invariante se alguém **cura**, e não
+apenas se a régua deixa de causar:
+
+- `definir_estado_manual` **recusa** `offline` dentro da jornada, com a frase que diz
+  o caminho ("use Em pausa… no fim do turno o sistema põe você fora sozinho").
+  🚨 Quem barra é o backend; a Minha conta desabilita o botão e **escreve o motivo em
+  texto** (`title` não é rótulo, `M10`).
+- `registrar_acao` passa a desfazer o `offline` **mesmo escolhido à mão**, dentro da
+  jornada. 🚨 Só `offline`: "em pausa" escolhido fica, senão o único estado de uso
+  que sobrou deixaria de existir para quem escreve uma mensagem.
+- ⚠️ **Dois filtros de afastamento que faltavam.** Sem eles, qualquer nota ou reação
+  de quem está de férias a poria "Disponível" com o afastamento de pé; e a borda de
+  início do turno — defeito **anterior a hoje**, que estava latente porque a régua
+  corrigia em 60 min — acordaria o afastado todo dia às 08:00.
+
+### A trava de FILA, que é outra pergunta
+
+🚨 Sem ela, `B1a` **mataria a reserva da distribuição**: `_destino` só caía da Ludmila
+para a Erika quando `pode_receber` falhava, isto é, **só por offline** — e offline
+dentro da jornada deixou de existir. A fila ficaria na Ludmila das 08h às 18h e o
+"4a" (parada sem destino) nunca mais dispararia.
+
+Então: **painel fechado há mais de 15 min (ajustável) sai da distribuição
+automática**, e continua aceitando transferência à mão.
+
+- Mora em `distribuicao._pode_receber_da_fila`, usada pelo `_destino` **e** pelo
+  `situacao()` — a mesma função nos dois, senão a tela diria "vai para a Ludmila"
+  enquanto a fila ia para a Erika.
+- 🚨 **Não** mora em `presenca.pode_receber`: aquela régua serve também o substituto
+  de afastamento, e barrar ali significaria não conseguir afastar alguém porque o
+  substituto não estava com a aba aberta.
+- `situacao()` devolve `parada_motivo`, para o aviso não chamar "painel fechado" de
+  "offline" (`M12`).
+- 🚨 **O carimbo do painel ganhou um segundo ponto.** Antes só a lista da Caixa
+  escrevia `painel_visto_em` — quem passasse 20 min no Chat interno sairia da fila
+  **trabalhando**. Agora o pedido de notificações também carimba, e ele roda em toda
+  tela (`Notificador.vue` no `App.vue`), sem código novo no navegador.
+
+### "Não perturbe" saiu (migração 068)
+
+Medido antes de propor: ele **não perturbava nada**. Quem barra receber conversa é
+`presenca.pode_receber`, e lá só `offline` e afastamento barram — a pessoa marcava,
+continuava recebendo distribuição e transferência, e o botão não dizia isso. Zero
+linhas no banco usavam o valor.
+
+⚠️ E a remoção expôs um campo morto: **`estados_possiveis`**, que o backend manda em
+`GET /api/eu/perfil`, **não era usado por tela nenhuma** — os botões saíam de uma
+lista escrita à mão na Minha conta. Tirar o valor do backend não tirava o botão. Agora
+a lista local diz o **rótulo** e o backend diz **quais**, que é a divisão certa.
+
+### A Geral passou a dizer os três números e a última passada
+
+Os três que governam o status ficam no mesmo cartão: ausente, offline (fora do turno)
+e **sai-da-fila**. E uma linha nova: *"a régua passa a cada 1 min; a última vez que
+mexeu em alguém foi …"*. 🚨 **Não existe carimbo de "passada"** e ler
+`atendente.atualizado_em` seria mentira — nome, foto, times e afastamento carimbam a
+mesma coluna. Grava-se o que é verdade (a última vez que a régua **mudou** alguém,
+com as contagens), e o texto diz, em palavras, que silêncio significa *não mexeu em
+ninguém*, não *não rodou*.
+
+**Provado:** `tests/teste_presenca.py` e `tests/teste_distribuicao.py` (a trava de
+fila, o curativo, a recusa dentro do turno, o afastado que não é ressuscitado, e o
+"em pausa" que não é desfeito). Suítes: **1478 Python, 292 JS**.
+
+🔴 **Não entrou, e segue na fila:** o aviso de "em pausa" ao transferir e ao
+convidar; o rótulo único nas telas de Atendentes e na lista "Começar conversa" do
+chat; o "painel aberto agora" em Atendentes; e o "online há X min" no chat interno.
