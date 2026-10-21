@@ -8,3 +8,4 @@ httpx==0.28.1
 psycopg[binary]>=3.2
 # upload de anexo do e-mail (FastAPI exige para multipart/form-data)
 python-multipart>=0.0.9
+fpdf2==2.8.9

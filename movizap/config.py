@@ -53,7 +53,19 @@ class Settings:
         "https://movizap.movisat.com.br/api/auth/google/callback")
     google_dominio: str = _ler("MOVIZAP_GOOGLE_DOMINIO", "movisat.com.br")
 
+    # 🚨 DECLARADO DESDE SEMPRE E SEM UM ÚNICO USO ATÉ 21/10 -- eram as duas
+    # únicas ocorrências do nome no projeto. Agora a ponte de OS o usa
+    # (`movizap/fpsl_ponte.py`).
+    #
+    # ⚠️ O valor do `.env` aponta para a 8005, que é um **nginx** repassando
+    # para a aplicação em `127.0.0.1:8004` (medido em 21/10, `fpsl.conf:116`,
+    # escutando em `0.0.0.0`). O padrão da ponte é 8004, direto; este valor
+    # continua ganhando quando está no `.env`.
     fpsl_base_url: str = _ler("FPSL_BASE_URL", "http://127.0.0.1:8005")
+
+    # 21/10: autentica a ponte de leitura de OS no FPSL. Vazio = ponte
+    # desligada, e a tela diz isso em vez de mostrar lista vazia.
+    ponte_fpsl_segredo: str = _ler("PONTE_FPSL_SEGREDO", "")
 
     # ---- banco (migração 001, 2026-08-05) ----
     db_host: str = _ler("MOVIZAP_DB_HOST", "127.0.0.1")

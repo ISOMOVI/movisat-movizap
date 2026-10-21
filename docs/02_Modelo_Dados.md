@@ -1880,3 +1880,55 @@ fila**, e toda conversa passaria a mostrar "assumiu a conversa" no lugar da
 última fala do cliente. Achado pela suíte inteira, não por leitura.
 ⚠️ A exclusão é do **evento**, não da nota: nota é coisa que uma pessoa
 escreveu, e vê-la na prévia informa.
+
+---
+
+### Agendamento de serviço e orçamento (migração 069, 21/10)
+
+🔵 Decisão 7 dele (19/10): **o MoviZap é o dono do agendamento**; a escrita no
+Harmonit é 2º passo. 🚨 Medido antes de escrever: **a OS não tem campo de data
+agendada em lugar nenhum** — `data_previsao` é a previsão do Harmonit, e o
+resto é texto livre no checklist. Por isso o compromisso tem casa própria.
+
+**`agendamento`** — o compromisso.
+
+| Coluna | O que é |
+|---|---|
+| `conversa_id` | a conversa de **origem** (a do técnico) |
+| `tecnico_contato_id` | o técnico, `contato(id)` |
+| `cliente_harmonit_id` | 🚨 **text**, e não int: é o tipo de `cliente.harmonit_id` deste lado, e é a **chave da ponte** com a OS do FPSL |
+| `cliente_nome` | retrato, para a tela não depender do Harmonit no ar |
+| `inicio` / `fim` | `timestamptz` |
+| `endereco` | 🔵 decisão 11: o operador **digita**, sugerido com o último usado |
+| `responsavel_cliente` | quem acompanha o técnico; nulo até o cliente confirmar |
+| `estado` | CHECK: `rascunho`, `aguardando`, `confirmado`, `cancelado` |
+| `orcamento_id` | o documento que foi junto, se houve |
+| `criado_por`, `criado_em`, `confirmado_em`, `cancelado_em`, `motivo_cancelamento` | o rastro |
+
+**`agendamento_os`** — N OS por compromisso: `agendamento_id`, `numero_os`,
+`placa`, PK composta, cascata. ⚠️ A placa vem do `oficinas_json` da OS e é
+**nula com frequência** (só 236 das 572 OS têm oficina) — a tela diz "sem
+placa registrada" em vez de desenhar vazio.
+
+🚨 **"Uma OS não entra em dois compromissos ativos" NÃO É CONSTRAINT.** A
+tabela não carrega estado, e duplicar o estado nas duas criaria duas versões
+do mesmo fato. A regra mora em `agendamento.criar`, com `FOR UPDATE` na mesma
+transação da inserção, e tem teste. ⚠️ E não dá para usar `DISTINCT` junto do
+`FOR UPDATE`: o Postgres recusa — achado por teste, não por leitura.
+
+**`orcamento`** — `numero` (**UNIQUE**), `tecnico_contato_id`, `conversa_id`,
+`total_centavos`, `midia_id` (o PDF, reaproveitando a mídia da conversa),
+`criado_por`, `criado_em`.
+
+**`orcamento_item`** — `orcamento_id`, `ordem`, `servico`,
+`preco_unit_centavos`, `quantidade` (numeric), `unidade` (CHECK `un`/`km`),
+`valor_centavos`.
+
+🚨 **Dinheiro em centavos, inteiro**, do começo ao fim: documento com valor não
+usa float. 🔵 Decisão 13 dele: deslocamento é **por km** — a `unidade` é dado
+da linha, e é ela que faz o PDF imprimir "77,7 km" em vez de "77.7 un".
+
+**A numeração** mora no `config`, chave `orcamento_proximo_numero`, com aba
+própria no `/config` (`CFG_13.1`, só owner). 🚨 **O número só se gasta quando o
+PDF existe** — reservar antes deixaria buraco na sequência toda vez que alguém
+fechasse o modal.

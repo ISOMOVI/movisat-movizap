@@ -6,16 +6,19 @@
    /api/telas — este componente não tem uma linha de "se for admin, mostra".
    Acrescentar uma tela é mexer em `movizap/telas.py`; aqui não se toca.
 
-   O agrupamento por módulo sai do prefixo do código (ATD_, CAD_, CFG_), que
-   é imutável por regra do registro. É apresentação, não permissão.
+   🚨 O AGRUPAMENTO DEIXOU DE SAIR DO PREFIXO EM 21/10. Grupo e subgrupo são
+   dados da tela (`movizap/telas.py`), porque o código é imutável e deduzir o
+   grupo dele impedia pôr "Ligações" dentro de Atendimento. Continua sendo
+   apresentação, não permissão.
    ============================================================================ */
 import { computed, onMounted, onUnmounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 
 import { sessao, sair } from '../estado/sessao.js'
 import { api } from '../api/cliente.js'
 
 const router = useRouter()
+const rota = useRoute()
 
 // 🔵 Erika pediu o selo de mensagem nova (15/09) -- a API já existia
 // (`/api/chat/nao-lidas`, "o selo do menu" na própria docstring) e nada a
@@ -81,17 +84,98 @@ function alternarColapso() {
 // precisa de posição fixa nem de tocar em nenhum outro componente.
 const visualCompacto = computed(() => colapsado.value && !emHover.value)
 
-const NOME_DO_MODULO = {
-  ATD: 'Atendimento',
-  CAD: 'Cadastro',
-  CFG: 'Configuração',
-  LIG: 'Ligações',
-  REL: 'Relatórios',
+/* 🔵 19/10, pedido dele: o menu abre "em grupos e subgrupos", que ficam
+   abertos até clicar de novo, e a escolha é lembrada por pessoa. Vários
+   grupos podem ficar abertos ao mesmo tempo -- é decisão dele, não economia
+   de código: fechar um ao abrir outro esconderia justamente o item de onde a
+   pessoa acabou de sair.
+
+   Chave própria, no mesmo desenho (e com o mesmo `try/catch` silencioso) do
+   `CHAVE_COLAPSADO` acima: sem localStorage o menu abre e não lembra, que é
+   degradar, não quebrar. */
+const CHAVE_GRUPOS = 'movizap_menu_grupos'
+
+function lerGruposSalvos() {
+  try {
+    const cru = localStorage.getItem(CHAVE_GRUPOS)
+    return cru ? new Set(JSON.parse(cru)) : null
+  } catch {
+    return null // storage bloqueado ou JSON estragado: cai no padrão.
+  }
 }
 
-/** Agrupa preservando a ordem em que o backend mandou. */
+const fechados = ref(new Set())
+const salvoCarregado = ref(false)
+
+/** 🚨 Guarda-se o que está FECHADO, não o que está aberto.
+
+    Grupo novo (e a tela Agendamentos vem aí) nasce ABERTO para quem já tem
+    escolha gravada. Se a lista fosse de abertos, toda entrega nova nasceria
+    escondida para quem usa o painel há mais tempo -- e ninguém descobriria,
+    porque para mim, de conta limpa, apareceria. */
+function carregarUmaVez() {
+  if (salvoCarregado.value) return
+  const salvo = lerGruposSalvos()
+  if (salvo) fechados.value = salvo
+  salvoCarregado.value = true
+}
+carregarUmaVez()
+
+function gravarFechados() {
+  try {
+    localStorage.setItem(CHAVE_GRUPOS, JSON.stringify([...fechados.value]))
+  } catch {
+    // Não lembra na próxima visita -- não é motivo pra travar o clique.
+  }
+}
+
+/** O grupo da tela aberta agora -- ele NASCE ABERTO, mesmo se estiver na
+    lista de fechados: menu que esconde o item em que a pessoa está é o
+    mesmo defeito do rótulo que mente. */
+const grupoDaTelaAtual = computed(() => {
+  const codigo = rota?.meta?.codigo
+  if (!codigo) return null
+  const tela = sessao.telas.find((t) => t.codigo === codigo)
+  return tela ? tela.grupo : null
+})
+
+function estaAberto(nome) {
+  if (nome === grupoDaTelaAtual.value) return true
+  return !fechados.value.has(nome)
+}
+
+function alternarGrupo(nome) {
+  const proximo = new Set(fechados.value)
+  if (proximo.has(nome)) proximo.delete(nome)
+  else proximo.add(nome)
+  fechados.value = proximo
+  gravarFechados()
+}
+
+/* 🚨 NO MENU COMPACTO NÃO EXISTE ACORDEÃO. O nome do grupo some por CSS
+   (`.menu--compacto .menu__grupo-nome`), e sem ele não há onde clicar para
+   reabrir: um grupo fechado sumiria sem volta. Compacto mostra tudo. */
+function mostrarItens(nome) {
+  return visualCompacto.value || estaAberto(nome)
+}
+
+/* 🟡 Defeito que o acordeão CRIA, e que o acordeão tem de resolver: com o
+   grupo fechado, o selo de mensagem nova do chat interno some junto com o
+   item -- e o selo existe exatamente para quem não está olhando a tela. O
+   cabeçalho fechado passa a carregá-lo. */
+function temChatInterno(grupo) {
+  return grupo.subgrupos.some((s) => s.telas.some((t) => t.codigo === 'ATD_6.1'))
+}
+
+/** Agrupa em dois níveis, preservando a ordem em que o backend mandou.
+
+    🚨 GRUPO SEM NENHUMA TELA VISÍVEL NÃO É DESENHADO -- e é isso que deixa
+    "Painéis › Operacional" existir no registro sem mentir na tela. Vale
+    igual para permissão: quem não tem nenhuma tela do grupo não vê o grupo,
+    porque ele é construído a partir das telas que chegaram, nunca de uma
+    lista fixa aqui. */
 const grupos = computed(() => {
-  const porModulo = new Map()
+  const porGrupo = new Map()
   for (const tela of sessao.telas) {
     // rota com parâmetro (/atendimento/{id}) não é item de menu: só se chega
     // nela a partir de outra tela.
@@ -105,14 +189,24 @@ const grupos = computed(() => {
     // e têm de continuar: é essa lista que a guarda de rota usa para saber o
     // que este usuário pode abrir.
     if (tela.aba_de) continue
-    const modulo = tela.codigo.split('_')[0]
-    if (!porModulo.has(modulo)) porModulo.set(modulo, [])
-    porModulo.get(modulo).push(tela)
+    // ⚠️ Fallback do fallback: backend antigo (ou tela sem grupo) ainda cai
+    // no prefixo. O MoviZap serve o `dist` do disco -- tela e backend podem
+    // ficar um passo fora de sincronia no meio de uma publicação.
+    const nome = tela.grupo || tela.codigo.split('_')[0]
+    if (!porGrupo.has(nome)) porGrupo.set(nome, new Map())
+    const sub = tela.subgrupo || ''
+    const subgrupos = porGrupo.get(nome)
+    if (!subgrupos.has(sub)) subgrupos.set(sub, [])
+    subgrupos.get(sub).push(tela)
   }
-  return [...porModulo].map(([modulo, telas]) => ({
-    modulo,
-    nome: NOME_DO_MODULO[modulo] || modulo,
-    telas,
+  return [...porGrupo].map(([nome, subgrupos]) => ({
+    nome,
+    // O subgrupo vazio ('') não desenha rótulo: tela sem subgrupo pendura
+    // direto no grupo, como era antes desta entrega. E vem primeiro por
+    // ordenação explícita, não por sorte da ordem de inserção.
+    subgrupos: [...subgrupos]
+      .sort(([a], [b]) => (a === '' ? -1 : b === '' ? 1 : 0))
+      .map(([sub, telas]) => ({ nome: sub, telas })),
   }))
 })
 
@@ -145,27 +239,56 @@ function encerrar() {
     </div>
 
     <nav class="menu__nav" aria-label="Telas">
-      <div v-for="grupo in grupos" :key="grupo.modulo" class="menu__grupo">
-        <p class="menu__grupo-nome">{{ grupo.nome }}</p>
-        <RouterLink
-          v-for="tela in grupo.telas"
-          :key="tela.codigo"
-          :to="tela.rota"
-          class="menu__link"
-          active-class="menu__link--ativo"
-          :title="tela.codigo"
+      <div v-for="grupo in grupos" :key="grupo.nome" class="menu__grupo">
+        <!-- O nome do grupo era um <p> sem clique até 21/10. Virou botão para
+             abrir e fechar; no menu compacto ele some por CSS, e por isso o
+             `mostrarItens` ignora o acordeão lá. -->
+        <button
+          class="menu__grupo-nome"
+          type="button"
+          :aria-expanded="estaAberto(grupo.nome)"
+          :title="estaAberto(grupo.nome) ? 'Fechar grupo' : 'Abrir grupo'"
+          @click="alternarGrupo(grupo.nome)"
         >
-          <i class="bi" :class="tela.icone" aria-hidden="true"></i>
-          <span class="menu__titulo">{{ tela.titulo }}</span>
+          <span>{{ grupo.nome }}</span>
           <span
-            v-if="tela.codigo === 'ATD_6.1' && naoLidas > 0"
-            class="menu__selo"
+            v-if="!mostrarItens(grupo.nome) && temChatInterno(grupo) && naoLidas > 0"
+            class="menu__selo menu__selo--grupo"
             :class="{ 'menu__selo--mencao': mencoes > 0 }"
-            :title="mencoes > 0
-              ? `${mencoes} vez(es) em que te chamaram pelo nome, de ${naoLidas} não lida(s)`
-              : `${naoLidas} mensagem(ns) nova(s) no chat interno`"
+            :title="`${naoLidas} mensagem(ns) nova(s) no chat interno, dentro deste grupo fechado`"
           >{{ naoLidas > 99 ? '99+' : naoLidas }}</span>
-        </RouterLink>
+          <i
+            class="bi menu__seta"
+            :class="estaAberto(grupo.nome) ? 'bi-chevron-down' : 'bi-chevron-right'"
+            aria-hidden="true"
+          ></i>
+        </button>
+
+        <template v-if="mostrarItens(grupo.nome)">
+          <div v-for="sub in grupo.subgrupos" :key="sub.nome" class="menu__sub">
+            <p v-if="sub.nome" class="menu__sub-nome">{{ sub.nome }}</p>
+            <RouterLink
+              v-for="tela in sub.telas"
+              :key="tela.codigo"
+              :to="tela.rota"
+              class="menu__link"
+              :class="{ 'menu__link--sub': sub.nome }"
+              active-class="menu__link--ativo"
+              :title="tela.codigo"
+            >
+              <i class="bi" :class="tela.icone" aria-hidden="true"></i>
+              <span class="menu__titulo">{{ tela.titulo }}</span>
+              <span
+                v-if="tela.codigo === 'ATD_6.1' && naoLidas > 0"
+                class="menu__selo"
+                :class="{ 'menu__selo--mencao': mencoes > 0 }"
+                :title="mencoes > 0
+                  ? `${mencoes} vez(es) em que te chamaram pelo nome, de ${naoLidas} não lida(s)`
+                  : `${naoLidas} mensagem(ns) nova(s) no chat interno`"
+              >{{ naoLidas > 99 ? '99+' : naoLidas }}</span>
+            </RouterLink>
+          </div>
+        </template>
       </div>
 
       <p v-if="!grupos.length" class="menu__vazio">
@@ -252,14 +375,43 @@ function encerrar() {
 .menu__nav { flex: 1 1 auto; overflow-y: auto; min-height: 0; }
 
 .menu__grupo + .menu__grupo { margin-top: var(--e-4); }
+/* Era um <p>; virou botão em 21/10 (acordeão). O reset aqui é o que impede
+   o botão de herdar o visual de botão do tema -- o rótulo tem de continuar
+   parecendo rótulo, só que clicável. */
 .menu__grupo-nome {
-  padding: 0 var(--e-3) var(--e-2);
+  display: flex;
+  align-items: center;
+  gap: var(--e-2);
+  width: 100%;
+  padding: 4px var(--e-3) var(--e-2);
+  border: none;
+  background: transparent;
+  font-family: inherit;
   font-size: var(--txt-xs);
   font-weight: var(--peso-forte);
+  text-align: left;
   text-transform: uppercase;
   letter-spacing: .06em;
   color: rgba(148, 163, 184, .62);
+  cursor: pointer;
+  border-radius: var(--r-sm);
+  transition: color var(--tempo-rapido) var(--curva);
 }
+.menu__grupo-nome:hover { color: var(--menu-texto-forte); }
+.menu__seta { margin-left: auto; font-size: 10px; flex: none; }
+.menu__selo--grupo { margin-left: 0; }
+
+/* O subgrupo só ganha rótulo quando tem nome. Hoje nenhuma tela usa -- a
+   estrutura existe porque "Painéis › Operacional" já está declarado no
+   registro e nasce vazio por decisão dele. */
+.menu__sub-nome {
+  padding: var(--e-2) var(--e-3) 4px calc(var(--e-3) + 12px);
+  margin: 0;
+  font-size: var(--txt-xs);
+  letter-spacing: .04em;
+  color: rgba(148, 163, 184, .5);
+}
+.menu__link--sub { padding-left: calc(var(--e-3) + 12px); }
 
 .menu__link {
   display: flex;
@@ -350,6 +502,7 @@ function encerrar() {
 .menu--compacto .menu__nome,
 .menu--compacto .menu__titulo,
 .menu--compacto .menu__grupo-nome,
+.menu--compacto .menu__sub-nome,
 .menu--compacto .menu__acao-texto { display: none; }
 .menu--compacto .menu__topo { flex-direction: column; align-items: center; gap: var(--e-2); padding: 0; }
 .menu--compacto .menu__marca { align-items: center; padding: 0; }
@@ -365,6 +518,7 @@ function encerrar() {
   .menu__nome,
   .menu__titulo,
   .menu__grupo-nome,
+  .menu__sub-nome,
   .menu__acao-texto { display: none; }
   .menu__topo { flex-direction: column; align-items: center; gap: var(--e-2); padding: 0; }
   .menu__marca { align-items: center; padding-left: 0; padding-right: 0; }

@@ -34,6 +34,7 @@ import Fila from '../telas/Fila.vue'
 import Informativos from '../telas/Informativos.vue'
 import Historico from '../telas/Historico.vue'
 import Ligacoes from '../telas/Ligacoes.vue'
+import Agendamentos from '../telas/Agendamentos.vue'
 import ChatInterno from '../telas/ChatInterno.vue'
 import Atendentes from '../telas/Atendentes.vue'
 import Times from '../telas/Times.vue'
@@ -91,6 +92,15 @@ const rotas = [
     name: 'ATD_5.1',
     component: Historico,
     meta: { codigo: 'ATD_5.1', titulo: 'Histórico' },
+  },
+  {
+    // 🔵 Decisão 14 dele (19/10): Agendamentos é tela, em Atendimento, aberta
+    // a todo atendente. Fora de /atendimento no caminho porque não é uma
+    // conversa: é o calendário do que foi combinado nas conversas.
+    path: '/agendamentos',
+    name: 'ATD_7.1',
+    component: Agendamentos,
+    meta: { codigo: 'ATD_7.1', titulo: 'Agendamentos' },
   },
   {
     // Fora de /atendimento: ligação do MicroSIP não é conversa de WhatsApp, e
@@ -241,6 +251,13 @@ const rotas = [
     name: 'CFG_11.1',
     component: Configuracoes,
     meta: { codigo: 'CFG_11.1', titulo: 'Notificações' },
+  },
+  {
+    // 🔵 Decisão 9 dele (19/10): a numeração do orçamento, só do owner.
+    path: '/config/orcamento',
+    name: 'CFG_13.1',
+    component: Configuracoes,
+    meta: { codigo: 'CFG_13.1', titulo: 'Orçamento' },
   },
   {
     // 🔵 25/09 (Plano 3): Padrões, Minhas notas e Formulários.

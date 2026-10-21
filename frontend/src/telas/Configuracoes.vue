@@ -39,6 +39,7 @@ import RegistroDeTelas from './RegistroDeTelas.vue'
 import MinhaConta from './MinhaConta.vue'
 import Notificacoes from './Notificacoes.vue'
 import MensagensRapidas from './MensagensRapidas.vue'
+import OrcamentoNumeracao from './OrcamentoNumeracao.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -58,6 +59,7 @@ const COMPONENTE = {
   'CFG_10.1': MinhaConta,
   'CFG_11.1': Notificacoes,
   'CFG_12.1': MensagensRapidas,
+  'CFG_13.1': OrcamentoNumeracao,
 }
 // Atalhos fica ANTES de Telas: e preferencia de quem usa, nao registro do
 // sistema -- e quem procura ajuste pessoal nao vai olhar no fim da fila.
@@ -65,7 +67,9 @@ const COMPONENTE = {
 // "Minha conta" fica ao lado de Atalhos: as duas são da PESSOA, não do
 // sistema, e quem procura ajuste pessoal procura as duas juntas.
 // "Notificações" (24/09) fica junto de Minha conta: é ajuste da PESSOA.
-const ORDEM = ['CFG_7.1', 'CFG_2.1', 'CFG_1.1', 'CFG_5.1', 'CFG_4.1', 'CFG_3.1', 'CFG_10.1', 'CFG_11.1', 'CFG_12.1', 'CFG_6.1', 'CFG_8.1', 'CFG_9.1']
+// 'Orçamento' (21/10) entra junto das do SISTEMA, antes das da pessoa: é
+// numeração de documento, não preferência de quem usa.
+const ORDEM = ['CFG_7.1', 'CFG_2.1', 'CFG_1.1', 'CFG_5.1', 'CFG_4.1', 'CFG_3.1', 'CFG_13.1', 'CFG_10.1', 'CFG_11.1', 'CFG_12.1', 'CFG_6.1', 'CFG_8.1', 'CFG_9.1']
 
 /* Título curto para a aba. O do registro é bom para o menu e comprido para uma
    barra de abas ("IA — prompt" vira só "IA", porque a escada mora aqui). */
@@ -82,6 +86,7 @@ const ROTULO = {
   'CFG_10.1': 'Minha conta',
   'CFG_11.1': 'Notificações',
   'CFG_12.1': 'Mensagens rápidas',
+  'CFG_13.1': 'Orçamento',
 }
 
 /* 🚨 SÓ AS ABAS QUE ESTE USUÁRIO ENXERGA. A permissão continua sendo por tela,

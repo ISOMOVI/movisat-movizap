@@ -27,6 +27,7 @@ TELAS = [
         "rota": "/inicio",
         "icone": "bi-house",
         "descricao": "O que precisa de gente agora.",
+        "grupo": "Início",
         "permissao": "atendimento",
         "fase": 1,
     },
@@ -40,6 +41,7 @@ TELAS = [
         "rota": "/email",
         "icone": "bi-envelope",
         "descricao": "Caixa de e-mail, separada do WhatsApp.",
+        "grupo": "E-mail",
         "permissao": "atendimento",
         "fase": 1,
     },
@@ -50,6 +52,7 @@ TELAS = [
         "rota": "/atendimento",
         "icone": "bi-chat-dots",
         "descricao": "Conversas abertas, por canal e por time.",
+        "grupo": "Atendimento",
         "permissao": "atendimento",
         "fase": 1,
     },
@@ -59,6 +62,7 @@ TELAS = [
         "rota": "/atendimento/{id}",
         "icone": "bi-chat-text",
         "descricao": "A conversa em si, com a ficha do cliente ao lado.",
+        "grupo": "Atendimento",
         "permissao": "atendimento",
         "fase": 1,
     },
@@ -68,6 +72,7 @@ TELAS = [
         "rota": "/atendimento/fila",
         "icone": "bi-list-ol",
         "descricao": "Conversas esperando atendente.",
+        "grupo": "Atendimento",
         "permissao": "atendimento",
         "fase": 1,
     },
@@ -79,6 +84,7 @@ TELAS = [
         "rota": "/atendimento/historico",
         "icone": "bi-clock-history",
         "descricao": "Conversas encerradas, pesquisáveis.",
+        "grupo": "Atendimento",
         "permissao": "atendimento",
         "fase": 1,
     },
@@ -89,6 +95,7 @@ TELAS = [
         "rota": "/cadastro/clientes",
         "icone": "bi-building",
         "descricao": "Clientes, sincronizados do Harmonit ou criados aqui.",
+        "grupo": "Cadastro",
         "permissao": "cadastro",
         "fase": 1,
     },
@@ -98,6 +105,7 @@ TELAS = [
         "rota": "/cadastro/contatos",
         "icone": "bi-person-lines-fill",
         "descricao": "Pessoas, seus telefones e papéis.",
+        "grupo": "Cadastro",
         "permissao": "cadastro",
         "fase": 1,
     },
@@ -110,6 +118,7 @@ TELAS = [
         # 🔵 `equipe` e não `owner` desde 24/09: o `admin` administra a equipe
         # (ver PERFIS). O que protege o owner DENTRO da tela está em `main.py`,
         # `_so_owner_mexe_no_owner` -- a permissão da tela não basta.
+        "grupo": "Cadastro",
         "permissao": "equipe",
         "fase": 1,
     },
@@ -119,6 +128,7 @@ TELAS = [
         "rota": "/cadastro/times",
         "icone": "bi-diagram-2",
         "descricao": "Times que recebem transferência, e quem está em cada um.",
+        "grupo": "Cadastro",
         "permissao": "equipe",
         "fase": 1,
     },
@@ -160,6 +170,7 @@ TELAS = [
         # `/config` em `owner`, as duas telas PESSOAIS não tinham entrada
         # nenhuma: 9 dos 10 atendentes ativos só chegariam nelas digitando a
         # URL. A tabela de preferência tinha UMA linha, a do owner.
+        "grupo": "Configuração",
         "permissao": "atendimento",
         "fase": 1,
     },
@@ -350,6 +361,7 @@ TELAS = [
         "rota": "/informativos",
         "icone": "bi-megaphone",
         "descricao": "Disparo de boleto e aviso, com ritmo e teto por hora.",
+        "grupo": "Atendimento",
         "permissao": "informativos",
         "fase": 1,
     },
@@ -362,6 +374,7 @@ TELAS = [
         # ⚠️ "entre atendentes" e não "com cliente" -- a descrição aparece na
         # CFG_9.1 e é o que distingue esta tela da caixa de entrada.
         "descricao": "Conversa entre atendentes. Não sai para o cliente.",
+        "grupo": "Atendimento",
         "permissao": "atendimento",
         "fase": 1,
     },
@@ -396,15 +409,57 @@ TELAS = [
         # `ligacao_exportacao` deixa de ser detalhe: é a única resposta para
         # "quem levou o quê".
         #
-        # ⚠️ Módulo novo (LIG): `MenuLateral.NOME_DO_MODULO` precisa conhecê-lo,
-        # senão o menu mostra o prefixo cru.
+        # ⚠️ Módulo novo (LIG). Até 21/10 o menu tirava o nome do grupo do
+        # prefixo, e `LIG` precisava estar no mapa do `MenuLateral` para não
+        # aparecer cru. 🔵 Em 19/10 ele pediu Ligações DENTRO de Atendimento:
+        # por isso esta tela leva `grupo` explícito abaixo, e o prefixo `LIG`
+        # sobrou só como fallback em `GRUPO_PELO_PREFIXO`.
         "codigo": "LIG_1.1",
         "titulo": "Ligações",
         "rota": "/ligacoes",
         "icone": "bi-telephone",
         "descricao": "Ligações do MicroSIP: por cliente, atendente, data ou número.",
+        "grupo": "Atendimento",
         "permissao": "atendimento",
         "fase": 1,
+    },
+    # ---- ATD_7.1: a tela de Agendamentos (21/10) ----
+    {
+        # 🔵 Decisão 14 dele (19/10): **Agendamentos é TELA**, em Atendimento,
+        # **aberta a todo atendente** -- por isso `atendimento`, e não
+        # permissão própria concedida perfil a perfil.
+        #
+        # 🚨 ISTO NÃO É O `agenda.py`. Aquele é a agenda do Google que alimenta
+        # a tela Início, e o topo dele diz desde que nasceu que **não é um
+        # calendário** -- virar calendário faria a Início deixar de ser "o que
+        # precisa de você". O calendário é esta tela.
+        #
+        # ⚠️ Código conferido contra `CODIGOS_APOSENTADOS` (só `ATD_4.1`).
+        "codigo": "ATD_7.1",
+        "titulo": "Agendamentos",
+        "rota": "/agendamentos",
+        "icone": "bi-calendar-check",
+        "descricao": "Os serviços agendados: semana, grid e as ações de cada compromisso.",
+        "permissao": "atendimento",
+        "grupo": "Atendimento",
+        "fase": 1,
+    },
+    # ---- CFG_13.1: a numeração do orçamento (21/10) ----
+    {
+        # 🔵 Decisão 9 dele: numeração própria do orçamento, com **aba de
+        # configuração exclusiva do owner**.
+        #
+        # ⚠️ `aba_de` -> não vira item de menu, e é assim que as outras CFG_*
+        # funcionam: a casca é o `/config`, e cada aba tem a permissão dela.
+        "codigo": "CFG_13.1",
+        "titulo": "Orçamento",
+        "rota": "/config/orcamento",
+        "icone": "bi-receipt",
+        "descricao": "O próximo número de orçamento a ser emitido.",
+        "permissao": "owner",
+        "grupo": "Configuração",
+        "fase": 1,
+        "aba_de": "CFG_0.1",
     },
     {
         "codigo": "REL_1.1",
@@ -462,6 +517,54 @@ CODIGOS_APOSENTADOS = {"ATD_4.1"}
 CODIGOS_VALIDOS = {t["codigo"] for t in TELAS}
 PERMISSOES_VALIDAS = {t["permissao"] for t in TELAS}
 
+# ---------------------------------------------------------------------------
+# Agrupamento do menu -- APRESENTAÇÃO, não permissão.
+#
+# 🚨 ATÉ 21/10 O GRUPO SAÍA DO PREFIXO DO CÓDIGO, dentro do `MenuLateral.vue`.
+# Era isso que tornava impossível pôr "Ligações" dentro de Atendimento sem
+# mudar o código da tela -- e código é imutável por regra deste registro.
+# Agora o grupo é DADO da tela, e o prefixo virou só o fallback.
+#
+# ⚠️ O FALLBACK É OBRIGATÓRIO. Tela sem `grupo` continua caindo onde caía
+# ontem; sem ele, toda tela que esta entrega não tocou mudaria de lugar, e
+# rótulo que sai do lugar é regressão.
+GRUPO_PELO_PREFIXO = {
+    "ATD": "Atendimento",
+    "CAD": "Cadastro",
+    "CFG": "Configuração",
+    "EML": "E-mail",
+    "INI": "Início",
+    "LIG": "Ligações",
+    "REL": "Relatórios",
+}
+
+# Os grupos que EXISTEM, e os subgrupos de cada um.
+#
+# 🔵 19/10, decisão dele: o menu abre em "grupos e subgrupos", e
+# **Painéis › Operacional nasce vazio** -- o grupo é criado aqui e só aparece
+# na tela quando tiver a primeira tela dentro. É o `MenuLateral` que não
+# desenha grupo sem item visível; esta lista só declara que ele existe.
+#
+# ⚠️ A ORDEM NA TELA NÃO SAI DAQUI, e sim da ordem de `TELAS` -- o menu
+# preserva a ordem em que o backend manda, e `INI_1.1` é a primeira da lista
+# de propósito (a rota `/` redireciona para `sessao.telas[0].rota`). Esta
+# lista é a declaração do que existe; quem ordena é o registro acima.
+GRUPOS = {
+    "Início": [],
+    "E-mail": [],
+    "Atendimento": [],
+    "Cadastro": [],
+    "Configuração": [],
+    "Relatórios": [],
+    "Painéis": ["Operacional"],
+}
+
+
+def grupo_da(tela: dict) -> str:
+    """O grupo de menu desta tela. Sem `grupo` gravado, vale o prefixo."""
+    prefixo = tela["codigo"].split("_")[0]
+    return tela.get("grupo") or GRUPO_PELO_PREFIXO.get(prefixo, prefixo)
+
 
 class CodigoDeTelaInvalido(Exception):
     """Levantada quando uma rota referencia um código que não existe.
@@ -515,6 +618,11 @@ def do_usuario(usuario: dict) -> list[dict]:
             "rota": t["rota"],
             "icone": t["icone"],
             "aba_de": t.get("aba_de"),
+            # 21/10: o menu deixou de deduzir o grupo do prefixo. Vale a mesma
+            # advertência do `aba_de` acima -- campo que não entra nesta
+            # montagem à mão fica no registro e nunca chega à tela.
+            "grupo": grupo_da(t),
+            "subgrupo": t.get("subgrupo"),
         }
         for t in ativas()
         if pode_acessar(usuario, t["codigo"])

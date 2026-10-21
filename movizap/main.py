@@ -44,6 +44,9 @@ from . import ligacoes_alistar
 from . import ligacoes_consulta
 from . import relatorio_csv
 from . import mensagens_rapidas
+from . import agendamento
+from . import fpsl_ponte
+from . import orcamento as orcamento_mod
 from . import midia
 from . import operacao
 from . import preferencia
@@ -778,6 +781,282 @@ def ligacoes_da_conversa(conversa_id: int, dias: int = ligacoes_consulta.DIAS_PA
                 "por_sentido": {s: [] for s in ligacoes.SENTIDOS},
                 "cobertura": {"com_agente": 0, "atendentes": 0}}
     return ligacoes_consulta.do_telefone(conversa["telefone_e164"], dias)
+
+
+@app.get("/api/agendamento/clientes")
+def clientes_para_agendar(meses: int = 6,
+                          usuario: dict = Depends(auth.requer_tela("ATD_1.2"))):
+    """Os clientes que podem receber agendamento — a etapa 2 da aba Agendar.
+
+    🔵 Decisão 5 dele (19/10): lista **só clientes com OS em aberto** nos
+    últimos 6 meses.
+
+    🚨 O NOME SAI DAQUI, A CONTAGEM SAI DE LÁ. O FPSL devolve `cliente_id` do
+    Harmonit e quantas OS; o nome vem do cadastro deste lado, cruzado pelo
+    `harmonit_id`. Mandar o nome pelo FPSL criaria uma segunda versão do
+    cadastro, e as duas divergiriam no primeiro cliente renomeado.
+
+    ⚠️ Cliente com OS e **sem cadastro aqui** não é descartado: ele volta com
+    `nome: null` e `sem_cadastro: true`. Sumir com ele faria a lista mentir
+    por omissão -- a OS existe, o agendamento é possível, falta o cadastro.
+    """
+    try:
+        contagem = fpsl_ponte.clientes_com_os(meses=meses)
+    except fpsl_ponte.FpslIndisponivel as e:
+        # 🚨 503 E NÃO LISTA VAZIA. Vazio aqui faria a tela dizer "nenhum
+        # cliente", e o operador agendaria por cima de serviço existente.
+        raise HTTPException(status_code=503, detail=str(e))
+
+    if not contagem:
+        return {"meses": meses, "clientes": []}
+
+    cadastrados = banco.varios(
+        "SELECT id, nome, harmonit_id FROM cliente WHERE harmonit_id = ANY(%s)",
+        (list(contagem),),
+    )
+    por_harmonit = {c["harmonit_id"]: c for c in cadastrados}
+    clientes = [
+        {
+            "harmonit_id": hid,
+            "cliente_id": (por_harmonit.get(hid) or {}).get("id"),
+            "nome": (por_harmonit.get(hid) or {}).get("nome"),
+            "sem_cadastro": hid not in por_harmonit,
+            "quantas_os": quantas,
+        }
+        for hid, quantas in contagem.items()
+    ]
+    # Com nome primeiro, em ordem alfabética: a busca da etapa 2 é por nome, e
+    # quem não tem nome não seria achado por ela de todo jeito.
+    clientes.sort(key=lambda c: (c["sem_cadastro"], (c["nome"] or "").upper()))
+    return {"meses": meses, "clientes": clientes}
+
+
+@app.get("/api/agendamento/clientes/{harmonit_id}/os")
+def os_do_cliente_para_agendar(harmonit_id: str, meses: int = 6, abertas: int = 1,
+                               usuario: dict = Depends(auth.requer_tela("ATD_1.2"))):
+    """As OS daquele cliente, para marcar uma ou várias.
+
+    ⚠️ `veiculos` vem vazio com frequência: só 236 das 572 OS têm oficina, e é
+    da oficina que sai a placa. A tela tem de dizer "sem placa registrada" em
+    vez de desenhar uma coluna em branco.
+    """
+    try:
+        lista = fpsl_ponte.os_do_cliente(harmonit_id, meses=meses, abertas=bool(abertas))
+    except fpsl_ponte.FpslIndisponivel as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    return {
+        "harmonit_id": harmonit_id,
+        "meses": meses,
+        "os": lista,
+        # Quantas já estão presas a um compromisso ativo -- a tela marca e não
+        # deixa escolher de novo (uma OS não entra em dois agendamentos ativos).
+        "ja_agendadas": agendamento.os_ja_agendadas([o["numero_os"] for o in lista]),
+    }
+
+
+class ItemDeOrcamento(BaseModel):
+    servico: str = Field(min_length=1, max_length=120)
+    preco_unit: str = Field(min_length=1, max_length=20)
+    quantidade: str = Field(min_length=1, max_length=20)
+    unidade: str = Field(default="un", max_length=4)
+
+
+class OrcamentoEntrada(BaseModel):
+    ordens: list[int] = Field(default_factory=list, max_length=30)
+    itens: list[ItemDeOrcamento] = Field(min_length=1, max_length=30)
+
+
+@app.get("/api/orcamento/catalogo")
+def catalogo_do_orcamento(usuario: dict = Depends(auth.requer_tela("ATD_1.2"))):
+    """Os dois serviços do catálogo — 🔵 decisão 12 dele, lista fechada."""
+    return {"catalogo": orcamento_mod.catalogo(),
+            "proximo_numero": orcamento_mod.proximo_numero()}
+
+
+@app.get("/api/conversas/{conversa_id}/orcamentos")
+def orcamentos_da_conversa(conversa_id: int,
+                           usuario: dict = Depends(auth.requer_tela("ATD_1.2"))):
+    return {"orcamentos": orcamento_mod.da_conversa(conversa_id)}
+
+
+@app.post("/api/conversas/{conversa_id}/orcamento")
+def emitir_orcamento(conversa_id: int, entrada: OrcamentoEntrada,
+                     usuario: dict = Depends(auth.requer_tela("ATD_1.2"))):
+    """Emite o orçamento e **manda o PDF na conversa**.
+
+    🚨 O número só se gasta aqui, com o PDF já montado. O modal aberto e
+    fechado não consome numeração.
+    """
+    conversa = banco.um(
+        """SELECT c.id, c.contato_id, ct.nome AS contato_nome, ct.relacao
+             FROM conversa c LEFT JOIN contato ct ON ct.id = c.contato_id
+            WHERE c.id = %s""", (conversa_id,))
+    if not conversa:
+        raise HTTPException(status_code=404, detail="Conversa não encontrada.")
+    if not conversa["contato_id"]:
+        # O orçamento sai NO NOME DO TÉCNICO: sem contato não há de quem.
+        raise HTTPException(
+            status_code=400,
+            detail="Esta conversa não tem contato cadastrado — o orçamento "
+                   "sai no nome do técnico.")
+
+    def enviar(dados, mime, nome):
+        return conversas.responder_com_arquivo(
+            conversa_id, dados, mime, nome, atendente_id=usuario.get("id"))
+
+    try:
+        return orcamento_mod.emitir(
+            conversa_id=conversa_id,
+            tecnico_contato_id=conversa["contato_id"],
+            tecnico_nome=conversa["contato_nome"] or "",
+            ordens=entrada.ordens,
+            itens=[i.model_dump() for i in entrada.itens],
+            criado_por=usuario.get("id"),
+            enviar_na_conversa=enviar,
+        )
+    except orcamento_mod.SemNumeracao as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+class NumeracaoEntrada(BaseModel):
+    proximo_numero: int = Field(ge=1, le=99_999_999)
+
+
+@app.get("/api/config/orcamento-numero")
+def ler_numeracao(usuario: dict = Depends(auth.requer_tela("CFG_13.1"))):
+    """A aba `CFG_13.1`, exclusiva do owner (🔵 decisão 9 dele)."""
+    return {"proximo_numero": orcamento_mod.proximo_numero()}
+
+
+@app.put("/api/config/orcamento-numero")
+def gravar_numeracao(entrada: NumeracaoEntrada,
+                     usuario: dict = Depends(auth.requer_tela("CFG_13.1"))):
+    orcamento_mod.definir_proximo_numero(entrada.proximo_numero)
+    return {"proximo_numero": orcamento_mod.proximo_numero()}
+
+
+class OrdemDoAgendamento(BaseModel):
+    numero_os: int
+    placa: str | None = Field(default=None, max_length=20)
+
+
+class AgendamentoEntrada(BaseModel):
+    conversa_id: int
+    cliente_harmonit_id: str = Field(min_length=1, max_length=32)
+    cliente_nome: str = Field(min_length=1, max_length=200)
+    inicio: datetime
+    fim: datetime | None = None
+    endereco: str | None = Field(default=None, max_length=400)
+    ordens: list[OrdemDoAgendamento] = Field(min_length=1, max_length=30)
+    orcamento_id: int | None = None
+
+
+@app.get("/api/agendamentos")
+def agendamentos_do_periodo(de: date, ate: date,
+                            usuario: dict = Depends(auth.requer_tela("ATD_7.1"))):
+    """O carrossel e o grid da tela `ATD_7.1`."""
+    if (ate - de).days > 93:
+        raise HTTPException(status_code=400, detail="Período longo demais.")
+    return {"de": de, "ate": ate, "agendamentos": agendamento.do_periodo(de, ate)}
+
+
+@app.get("/api/agendamentos/{agendamento_id}")
+def um_agendamento(agendamento_id: int,
+                   usuario: dict = Depends(auth.requer_tela("ATD_7.1"))):
+    achado = agendamento.por_id(agendamento_id)
+    if not achado:
+        raise HTTPException(status_code=404, detail="Agendamento não encontrado.")
+    return achado
+
+
+@app.get("/api/agendamento/endereco-sugerido/{harmonit_id}")
+def endereco_sugerido(harmonit_id: str,
+                      usuario: dict = Depends(auth.requer_tela("ATD_1.2"))):
+    """🔵 Decisão 11 dele: sugerido com o último usado — o operador digita."""
+    return {"endereco": agendamento.ultimo_endereco(harmonit_id)}
+
+
+@app.post("/api/agendamentos")
+def criar_agendamento(entrada: AgendamentoEntrada,
+                      usuario: dict = Depends(auth.requer_tela("ATD_1.2"))):
+    conversa = banco.um("SELECT contato_id FROM conversa WHERE id = %s",
+                        (entrada.conversa_id,))
+    if not conversa:
+        raise HTTPException(status_code=404, detail="Conversa não encontrada.")
+    if not conversa["contato_id"]:
+        raise HTTPException(
+            status_code=400,
+            detail="Esta conversa não tem contato — o agendamento é do técnico "
+                   "desta conversa.")
+    try:
+        novo = agendamento.criar(
+            conversa_id=entrada.conversa_id,
+            tecnico_contato_id=conversa["contato_id"],
+            cliente_harmonit_id=entrada.cliente_harmonit_id,
+            cliente_nome=entrada.cliente_nome,
+            inicio=entrada.inicio, fim=entrada.fim, endereco=entrada.endereco,
+            ordens=[o.model_dump() for o in entrada.ordens],
+            criado_por=usuario.get("id"), orcamento_id=entrada.orcamento_id,
+        )
+    except agendamento.OsJaAgendada as e:
+        # 409 e não 400: não é pedido malformado, é conflito com o que existe.
+        raise HTTPException(status_code=409, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return agendamento.por_id(novo)
+
+
+class ConfirmacaoEntrada(BaseModel):
+    responsavel_cliente: str = Field(min_length=1, max_length=200)
+
+
+@app.get("/api/agendamento/aguardando/{harmonit_id}")
+def aguardando_confirmacao(harmonit_id: str,
+                           usuario: dict = Depends(auth.requer_tela("ATD_1.2"))):
+    """A aba Confirmar: o que espera confirmação daquele cliente."""
+    return {"agendamentos": agendamento.aguardando_do_cliente(harmonit_id)}
+
+
+@app.post("/api/agendamentos/{agendamento_id}/confirmar")
+def confirmar_agendamento(agendamento_id: int, entrada: ConfirmacaoEntrada,
+                          usuario: dict = Depends(auth.requer_tela("ATD_1.2"))):
+    try:
+        mudou = agendamento.confirmar(agendamento_id, entrada.responsavel_cliente)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    if not mudou:
+        raise HTTPException(status_code=409,
+                            detail="Este agendamento não está esperando confirmação.")
+    return agendamento.por_id(agendamento_id)
+
+
+class CancelamentoEntrada(BaseModel):
+    motivo: str = Field(min_length=1, max_length=400)
+
+
+@app.post("/api/agendamentos/{agendamento_id}/cancelar")
+def cancelar_agendamento(agendamento_id: int, entrada: CancelamentoEntrada,
+                         usuario: dict = Depends(auth.requer_tela("ATD_7.1"))):
+    if not agendamento.cancelar(agendamento_id, entrada.motivo):
+        raise HTTPException(status_code=409, detail="Já estava cancelado.")
+    return agendamento.por_id(agendamento_id)
+
+
+class ReagendamentoEntrada(BaseModel):
+    inicio: datetime
+    fim: datetime | None = None
+
+
+@app.post("/api/agendamentos/{agendamento_id}/reagendar")
+def reagendar_agendamento(agendamento_id: int, entrada: ReagendamentoEntrada,
+                          usuario: dict = Depends(auth.requer_tela("ATD_7.1"))):
+    """⚠️ Reagendar ESQUECE a confirmação: ela era daquela data."""
+    if not agendamento.reagendar(agendamento_id, entrada.inicio, entrada.fim):
+        raise HTTPException(status_code=409,
+                            detail="Agendamento cancelado não se reagenda.")
+    return agendamento.por_id(agendamento_id)
 
 
 @app.get("/api/conversas/buscar-empresa")

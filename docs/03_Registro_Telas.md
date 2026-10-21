@@ -32,6 +32,43 @@ MOD_a.b[.c]
 
 ---
 
+## Grupo e subgrupo do menu (21/10)
+
+🔵 Pedido dele em 19/10: o menu abrindo **em grupos e subgrupos**, que ficam
+abertos até clicar de novo, e **Ligações dentro de Atendimento**.
+
+🚨 **O grupo saía do PREFIXO do código até 21/10**, num mapa dentro do
+`MenuLateral.vue`. Como o código é imutável por regra deste registro, mover
+uma tela de grupo era impossível sem fazer o código mentir. Agora:
+
+| Onde | O que |
+|---|---|
+| `telas.py` | cada tela pode trazer `grupo` e `subgrupo` |
+| `telas.GRUPO_PELO_PREFIXO` | o **fallback**: tela sem `grupo` cai onde caía antes |
+| `telas.GRUPOS` | os grupos que **existem**, e os subgrupos de cada um |
+| `telas.do_usuario()` | leva os dois campos ao frontend |
+| `MenuLateral.vue` | desenha dois níveis e o acordeão |
+
+⚠️ **O fallback não é zelo, é a regressão que ele evita:** sem ele, toda tela
+que uma entrega não tocar muda de lugar em silêncio.
+
+🚨 **Grupo sem nenhuma tela visível não é desenhado.** É o que deixa
+**Painéis › Operacional** existir declarado e nascer vazio (decisão dele),
+sem mentir na tela. Vale igual para permissão: quem não tem nenhuma tela do
+grupo não vê o grupo.
+
+**Agrupar não reordena.** A ordem na tela é a de `TELAS`, e `INI_1.1` é a
+primeira de propósito — a rota `/` redireciona para `sessao.telas[0].rota`.
+
+**O acordeão guarda o que está FECHADO**, em `localStorage`
+(`movizap_menu_grupos`), por pessoa e por navegador. Guardar os abertos faria
+toda tela nova nascer escondida para quem já usa o painel. O grupo da tela
+aberta agora nasce aberto mesmo se estiver gravado como fechado, e no menu
+compacto não há acordeão: o nome do grupo some por CSS, então os itens
+aparecem todos.
+
+---
+
 ## Telas — espelho de `movizap/telas.py`
 
 > 🚨 **ESTA TABELA É A ÚNICA.** Até 12/08 este arquivo tinha **duas** tabelas
@@ -73,6 +110,8 @@ MOD_a.b[.c]
 | `CFG_12.1` | Mensagens rápidas | `/config/mensagens-rapidas` | `atendimento` | 1 |
 | `CFG_2.2` | IA — analytics | `/config/ia/analytics` | `owner` | 2 |
 | `LIG_1.1` | Ligações | `/ligacoes` | `atendimento` | 1 |
+| `ATD_7.1` | Agendamentos | `/agendamentos` | `atendimento` | 1 |
+| `CFG_13.1` | Orçamento (numeração) | `/config/orcamento` | `owner` | 1 |
 | `REL_1.1` | Relatórios | `/relatorios` | `owner` | 3 |
 
 🚨 **AS SEIS TELAS `CFG_*` SÃO ABAS DA `CFG_0.1` DESDE 27/08** (decisão do
@@ -132,6 +171,8 @@ O campo **`icone`** deste registro é o que o menu desenha, e ele é **a fonte
 | `ATD_5.1` Histórico | `bi-clock-history` | menu |
 | `ATD_6.1` Chat interno | `bi-chat-left-dots` | menu |
 | `LIG_1.1` Ligações | `bi-telephone` | menu |
+| `ATD_7.1` Agendamentos | `bi-calendar-check` | menu |
+| `CFG_13.1` Orçamento | `bi-receipt` | aba |
 | `ATD_3.1` Informativos | `bi-megaphone` | menu |
 | `CAD_1.1` Clientes | `bi-building` | menu |
 | `CAD_1.2` Contatos | `bi-person-lines-fill` | menu |

@@ -28,6 +28,7 @@ import { corDaInicial, iniciais } from '../util/avatar.js'
 import { corDoEstado, rotuloDoEstado } from '../util/estado.js'
 import AjudaDaTela from '../componentes/AjudaDaTela.vue'
 import BotaoMensagensRapidas from '../componentes/BotaoMensagensRapidas.vue'
+import ModalAgendar from '../componentes/ModalAgendar.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -1669,6 +1670,20 @@ function inserirNoCampo(texto) {
     el?.setSelectionRange(ini + texto.length, ini + texto.length)
   })
 }
+/* 🔵 19/10, decisão 4 dele: o botão Agendar fica JUNTO de anexo, áudio e
+   mensagem rápida -- atrás do `+`. O modal é componente à parte: esta tela já
+   tem mais de seis mil linhas, e três abas novas aqui dentro seriam três
+   coisas a mais para quebrar junto. */
+const agendarAberto = ref(false)
+
+/* O cliente da conversa, quando há. ⚠️ Em conversa de TÉCNICO isto é vazio
+   por desenho (decisão dele de 07/10): `contato.cliente_id` é NULL, e a
+   escolha do cliente é feita dentro do modal, com busca própria. */
+const clienteHarmonitDaConversa = computed(
+  () => aberta.value?.empresa?.cliente?.harmonit_id || '')
+const clienteNomeDaConversa = computed(
+  () => aberta.value?.empresa?.cliente?.nome || '')
+
 const mencionados = ref([])
 const listaArroba = ref([])
 const arrobaEscolhido = ref(0)
@@ -4321,6 +4336,17 @@ function carregarMidiasDaConversa(c) {
                   <i class="bi bi-mic" aria-hidden="true"></i>
                 </button>
 
+                <!-- 🔵 Decisão 4 dele: aqui dentro, com os outros três.
+                     ⚠️ ÍCONE **E** PALAVRA, pela régua escrita nesta tela:
+                     "ganha palavra o que age sobre a conversa". -->
+                <button class="botao botao--contorno"
+                        type="button"
+                        title="Orçamento, agendamento e confirmação"
+                        @click="agendarAberto = true; outroAberto = false">
+                  <i class="bi bi-calendar-plus" aria-hidden="true"></i>
+                  <span>Agendar</span>
+                </button>
+
                 <label class="botao botao--contorno botao--icone"
                        :title="`Anexar arquivo (até ${TETO_ANEXOS})`">
                   <i class="bi bi-paperclip" aria-hidden="true"></i>
@@ -5004,6 +5030,17 @@ function carregarMidiasDaConversa(c) {
       </div>
     </div>
   </div>
+
+  <ModalAgendar
+    v-if="agendarAberto && aberta"
+    :conversa-id="aberta.id"
+    :relacao="relacaoContato"
+    :contato-nome="aberta?.empresa?.contato?.nome || ''"
+    :cliente-harmonit-id="clienteHarmonitDaConversa"
+    :cliente-nome="clienteNomeDaConversa"
+    @fechar="agendarAberto = false"
+    @inserir="inserirNoCampo"
+  />
 </template>
 
 <style scoped>

@@ -3689,3 +3689,64 @@ fila, o curativo, a recusa dentro do turno, o afastado que não é ressuscitado,
 🔴 **Não entrou, e segue na fila:** o aviso de "em pausa" ao transferir e ao
 convidar; o rótulo único nas telas de Atendentes e na lista "Começar conversa" do
 chat; o "painel aberto agora" em Atendentes; e o "online há X min" no chat interno.
+
+---
+
+## 21/10 — Agendamentos: o menu em grupos, o orçamento e o compromisso
+
+🔵 Pedido dele de 19/10, em quatro partes: **Ligações para dentro de
+Atendimento** · o menu **abrindo em grupos e subgrupos** · o grupo
+**Painéis › Operacional** · e a tela **Agendamentos**, servida por um botão
+**Agendar** na conversa, com três abas. Plano fechado em
+`.claude\plans\1-n-o-dentro-da-merry-raven.md`, com 14 decisões dele.
+
+### O menu (todas as telas)
+
+Grupo e subgrupo passaram a ser **dado da tela** (`telas.py`), com fallback
+pelo prefixo para nada sair do lugar. O nome do grupo virou botão: abre e
+fecha, vários abertos ao mesmo tempo, lembrado por pessoa em `localStorage`
+(`movizap_menu_grupos`, guardando **o que está fechado**). Grupo sem nenhuma
+tela visível não é desenhado — é o que deixa **Painéis › Operacional** existir
+declarado e nascer vazio. Detalhe em `docs/03_Registro_Telas.md`.
+
+### `ATD_7.1` — Agendamentos
+
+🔵 Decisão 14 dele: **é tela**, em Atendimento, **aberta a todo atendente**.
+Mostra o carrossel da semana (ontem, hoje e os 5 próximos), o grid do dia com
+hora, cliente, técnico, placas, OS, endereço, responsável, orçamento e estado,
+e as ações de cada linha: reagendar, cancelar com motivo, reenviar confirmação
+e abrir a conversa de origem.
+
+🚨 **A tela diz a cobertura:** só aparece aqui o que foi agendado pelo
+MoviZap. Mesma régua da faixa da aba Ligações — ausência não pode parecer
+"não tem".
+
+### `ATD_1.2` — o botão Agendar, atrás do `+`
+
+🔵 Decisão 4 dele: o Agendar fica **junto de anexo, áudio e mensagem rápida**.
+Leva ícone **e** palavra, pela régua de rótulo escrita na própria tela ("ganha
+palavra o que age sobre a conversa"). A aba que abre depende do contato:
+técnico vê **Orçamento** e **Agendar**; cliente vê **Confirmar**. Em conversa
+sem contato o botão **explica por que não dá**, em vez de sumir.
+
+O orçamento é documento numerado, com PDF anexado à conversa. 🚨 **O número só
+se gasta quando o PDF existe** — reservar antes deixaria buraco na sequência
+toda vez que alguém fechasse o modal. 🔵 Decisão 13: deslocamento é **por km**,
+e o PDF imprime "77,7 km" (o documento de hoje imprime "77.7 un", e é isso que
+faz a coluna parecer trocada). 🔵 Decisão 12: o catálogo tem **dois itens**,
+com os nomes tirados do Harmonit uma vez, em 21/10: `KM DESLOCAMENTO` (6971) e
+`PAGAMENTO DE TECNICO` (653939) — os mesmos ids que o Painel Financeiro do
+FPSL já usa. Emitir orçamento **não depende do Harmonit estar no ar**.
+
+### `CFG_13.1` — a numeração do orçamento (só owner)
+
+O próximo número a ser emitido. ⚠️ A aba diz, em texto, que mudá-lo pode
+**repetir documento já emitido pelo sistema atual**, que segue existindo fora
+desta VPS.
+
+### A ponte com o FPSL
+
+As OS vivem no FPSL (SQLite, `os_historico`); o MoviZap é Postgres. A ponte é
+de **leitura**, autenticada por segredo compartilhado, e cruza pelo
+`harmonit_id`. ⚠️ **Lista vazia e FPSL fora do ar são coisas diferentes**: a
+falha sobe como erro legível, nunca como "este cliente não tem OS".
