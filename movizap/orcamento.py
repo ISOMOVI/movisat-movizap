@@ -227,10 +227,10 @@ def emitir(*, conversa_id: int, tecnico_contato_id: int, tecnico_nome: str,
            enviar_na_conversa=None) -> dict:
     """Gera o PDF, gasta o número e grava — nesta ordem.
 
-    `enviar_na_conversa(dados, mime, nome)` é injetado por quem chama (o
-    `main.py` passa `conversas.responder_com_arquivo`). Fica como parâmetro
-    para o teste poder emitir sem mandar nada a ninguém: **teste não fala com
-    o WhatsApp**.
+    `enviar_na_conversa(dados, mime, nome, legenda)` é injetado por quem chama
+    (o `main.py` embrulha `conversas.responder_com_arquivo`). Fica como
+    parâmetro para o teste poder emitir sem mandar nada a ninguém: **teste não
+    fala com o WhatsApp**.
 
     🚨 A ORDEM É O DESENHO. O PDF é montado ANTES de o número ser gasto, e o
     número é gasto na MESMA transação em que o orçamento é gravado. Assim:
@@ -255,8 +255,10 @@ def emitir(*, conversa_id: int, tecnico_contato_id: int, tecnico_nome: str,
 
         cur.execute(
             "INSERT INTO orcamento (numero, tecnico_contato_id, conversa_id, "
-            "    total_centavos, criado_por) VALUES (%s,%s,%s,%s,%s) RETURNING id",
-            (numero, tecnico_contato_id, conversa_id, total, criado_por))
+            "    total_centavos, criado_por, ordens_os) "
+            "VALUES (%s,%s,%s,%s,%s,%s) RETURNING id",
+            (numero, tecnico_contato_id, conversa_id, total, criado_por,
+             [int(o) for o in ordens]))
         orcamento_id = cur.fetchone()["id"]
         for item in linhas:
             cur.execute(
@@ -277,13 +279,56 @@ def emitir(*, conversa_id: int, tecnico_contato_id: int, tecnico_nome: str,
         # 🚨 O ENVIO É DEPOIS DO COMMIT, e a falha dele NÃO desfaz o
         # orçamento: o documento existe, está numerado, e o atendente pode
         # reenviar. Desfazer aqui abriria buraco na sequência.
-        envio = enviar_na_conversa(pdf, "application/pdf", nome_do_arquivo(numero))
-        resultado["enviado"] = envio
-        if envio and envio.get("ok") and envio.get("midia_id"):
-            banco.executar("UPDATE orcamento SET midia_id = %s WHERE id = %s",
-                           (envio["midia_id"], orcamento_id))
-            resultado["midia_id"] = envio["midia_id"]
+        #
+        # 🚨 E A FALHA NÃO PODE VIRAR ERRO DA EMISSÃO. Em 21/10, no primeiro
+        # uso real dele, um erro meu na chamada do envio estourou DEPOIS do
+        # commit: o orçamento nº 1 existia, o número já tinha sido gasto, e a
+        # tela só disse "erro ao gerar PDF". Quem emite tem de receber o
+        # documento que existe, e o aviso de que o envio não foi.
+        resultado["enviado"] = _enviar(pdf, numero, orcamento_id,
+                                       enviar_na_conversa)
+        if resultado["enviado"].get("midia_id"):
+            resultado["midia_id"] = resultado["enviado"]["midia_id"]
     return resultado
+
+
+def _enviar(pdf: bytes, numero: int, orcamento_id: int, enviar_na_conversa) -> dict:
+    """Manda o PDF e amarra a mídia ao orçamento. Nunca estoura."""
+    try:
+        envio = enviar_na_conversa(pdf, "application/pdf",
+                                   nome_do_arquivo(numero),
+                                   f"Orçamento nº {numero}")
+    except Exception as e:  # noqa: BLE001 -- aqui engolir é o comportamento certo
+        log.exception("orçamento %s emitido, e o envio falhou", numero)
+        return {"ok": False, "motivo": f"O documento foi gerado, mas o envio "
+                                       f"falhou: {type(e).__name__}: {e}"}
+    if envio and envio.get("ok") and envio.get("midia_id"):
+        banco.executar("UPDATE orcamento SET midia_id = %s WHERE id = %s",
+                       (envio["midia_id"], orcamento_id))
+    return envio or {"ok": False, "motivo": "o envio não respondeu nada"}
+
+
+def reenviar(orcamento_id: int, enviar_na_conversa) -> dict:
+    """Remonta o PDF de um orçamento já emitido e manda de novo.
+
+    🚨 NÃO GASTA NÚMERO NOVO. É o conserto para o caso em que o documento
+    existe e o envio falhou -- emitir outro deixaria dois números para o mesmo
+    serviço, que é exatamente o buraco que a numeração tenta evitar.
+    """
+    guardado = por_id(orcamento_id)
+    if not guardado:
+        raise ValueError("orçamento não encontrado")
+    pdf = montar_pdf(
+        numero=guardado["numero"],
+        tecnico=guardado.get("tecnico_nome") or "",
+        # As OS vêm da própria linha: é o que faz o reenvio ser o MESMO papel.
+        ordens=list(guardado.get("ordens_os") or []),
+        itens=guardado["itens"],
+        total_centavos=guardado["total_centavos"],
+        data=guardado.get("criado_em"),
+    )
+    envio = _enviar(pdf, guardado["numero"], orcamento_id, enviar_na_conversa)
+    return {"id": orcamento_id, "numero": guardado["numero"], "enviado": envio}
 
 
 def por_id(orcamento_id: int) -> dict | None:

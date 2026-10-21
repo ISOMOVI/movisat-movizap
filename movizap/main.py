@@ -900,9 +900,12 @@ def emitir_orcamento(conversa_id: int, entrada: OrcamentoEntrada,
             detail="Esta conversa não tem contato cadastrado — o orçamento "
                    "sai no nome do técnico.")
 
-    def enviar(dados, mime, nome):
+    def enviar(dados, mime, nome, legenda):
+        # 🚨 `legenda` É POSICIONAL em `responder_com_arquivo`, e omiti-la
+        # estourava DEPOIS do commit: em 21/10 isso gastou o número 1 e
+        # devolveu 500 para uma emissão que tinha dado certo.
         return conversas.responder_com_arquivo(
-            conversa_id, dados, mime, nome, atendente_id=usuario.get("id"))
+            conversa_id, dados, mime, nome, legenda, usuario.get("id"))
 
     try:
         return orcamento_mod.emitir(
@@ -918,6 +921,25 @@ def emitir_orcamento(conversa_id: int, entrada: OrcamentoEntrada,
         raise HTTPException(status_code=503, detail=str(e))
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/api/conversas/{conversa_id}/orcamento/{orcamento_id}/reenviar")
+def reenviar_orcamento(conversa_id: int, orcamento_id: int,
+                       usuario: dict = Depends(auth.requer_tela("ATD_1.2"))):
+    """Remonta e manda de novo um orçamento já emitido.
+
+    🚨 NÃO GASTA NÚMERO NOVO. Existe para o caso em que o documento foi
+    gerado e o envio falhou: emitir outro deixaria dois números para o mesmo
+    serviço.
+    """
+    def enviar(dados, mime, nome, legenda):
+        return conversas.responder_com_arquivo(
+            conversa_id, dados, mime, nome, legenda, usuario.get("id"))
+
+    try:
+        return orcamento_mod.reenviar(orcamento_id, enviar)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
 
 
 class NumeracaoEntrada(BaseModel):
@@ -1005,7 +1027,18 @@ def criar_agendamento(entrada: AgendamentoEntrada,
         raise HTTPException(status_code=409, detail=str(e))
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    return agendamento.por_id(novo)
+
+    # 🔵 Decisao 7 dele, ligada em 21/10: o compromisso tambem vai para a OS
+    # do Harmonit. 🚨 NUNCA DERRUBA O AGENDAMENTO -- o dono e este lado, e a
+    # recusa fica gravada e volta na resposta para a tela poder dizer.
+    resposta = agendamento.por_id(novo)
+    try:
+        resposta["harmonit"] = agendamento.levar_ao_harmonit(novo)
+    except Exception as e:  # noqa: BLE001
+        log.exception("agendamento %s criado e a escrita no Harmonit falhou", novo)
+        resposta["harmonit"] = {"ligado": True, "quantas_foram": 0,
+                                "erro": f"{type(e).__name__}: {e}"}
+    return resposta
 
 
 class ConfirmacaoEntrada(BaseModel):
@@ -3675,6 +3708,37 @@ def definir_jornada_ativa(dados: JornadaAtiva,
     quem configura o painel.
     """
     return operacao.definir_jornada_ativa(dados.ligada)
+
+
+class EscritaHarmonit(BaseModel):
+    ligada: bool
+
+
+@app.get("/api/config/agendamento-harmonit")
+def ver_escrita_harmonit(usuario: dict = Depends(auth.requer_tela("ATD_1.2"))):
+    """Quem AGENDA precisa saber se a OS também vai para o Harmonit.
+
+    Ler é de quem usa a tela; ligar é da `CFG_7.1`, abaixo — mesma régua da
+    jornada, que mudou de casa em 28/08 pelo mesmo motivo.
+    """
+    return {"ligada": agendamento.escreve_no_harmonit()}
+
+
+@app.put("/api/config/agendamento-harmonit")
+def definir_escrita_harmonit(dados: EscritaHarmonit,
+                             usuario: dict = Depends(auth.requer_tela("CFG_7.1"))):
+    """🚨 INTERRUPTOR DO SISTEMA: muda o que acontece fora deste painel.
+
+    🔵 Ligado por decisão dele em 21/10, depois do relatório do teste na OS
+    16991. Desligado, o compromisso vive só no MoviZap e a OS é citada pelo
+    número — que era o comportamento até aqui.
+    """
+    banco.executar(
+        "UPDATE config SET valor = %s, atualizado_em = now() WHERE chave = %s",
+        ("true" if dados.ligada else "false",
+         agendamento.CHAVE_ESCREVE_HARMONIT))
+    # A confirmação é RELER o estado, nunca o que eu acabei de mandar.
+    return {"ligada": agendamento.escreve_no_harmonit()}
 
 
 class PresencaConfig(BaseModel):

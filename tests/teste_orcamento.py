@@ -100,9 +100,10 @@ def base():
 
 
 def _emitir(base, itens=None, ordens=(17015,), recebidos=None):
-    def enviar(dados, mime, nome):
+    def enviar(dados, mime, nome, legenda):
         if recebidos is not None:
-            recebidos.append({"bytes": len(dados), "mime": mime, "nome": nome})
+            recebidos.append({"bytes": len(dados), "mime": mime, "nome": nome,
+                              "legenda": legenda})
         # Sem `midia_id`: o teste não grava mídia nem fala com o WhatsApp.
         return {"ok": True}
 
@@ -235,6 +236,64 @@ class TestOQueFicaGravado:
         assert recebidos[0]["mime"] == "application/pdf"
         assert recebidos[0]["nome"] == f"Orcamento_{emitido['numero']}.pdf"
         assert recebidos[0]["bytes"] > 1000
+        # A legenda diz o que é, no balão: anexo sem legenda vira "o que é
+        # este PDF?" três mensagens depois.
+        assert recebidos[0]["legenda"] == f"Orçamento nº {emitido['numero']}"
+
+
+class TestQuandoOEnvioFALHA:
+    """🚨 O defeito que o primeiro uso real dele achou, em 21/10.
+
+    A chamada do envio estava errada (`legenda` é posicional), e o erro
+    estourava DEPOIS do commit: o orçamento nº 1 existia, o número já tinha
+    sido gasto, e a tela só dizia "erro ao gerar PDF". Quem emite tem de
+    receber o documento que existe, e o aviso de que o envio não foi.
+    """
+
+    def test_falha_no_envio_nao_derruba_a_emissao(self, base):
+        def explode(dados, mime, nome, legenda):
+            raise TypeError("responder_com_arquivo() missing 1 required "
+                            "positional argument: 'legenda'")
+
+        antes = orcamento.proximo_numero()
+        emitido = orcamento.emitir(
+            conversa_id=base["conversa"], tecnico_contato_id=base["tecnico"],
+            tecnico_nome="Franck", ordens=[17015], itens=ITENS,
+            criado_por=base["atendente"], enviar_na_conversa=explode)
+        # O documento existe, com número.
+        assert emitido["numero"] == antes
+        assert orcamento.por_id(emitido["id"]) is not None
+        # E o aviso diz o que houve, em vez de sumir.
+        assert emitido["enviado"]["ok"] is False
+        assert "envio" in emitido["enviado"]["motivo"]
+
+    def test_reenviar_manda_o_MESMO_papel_e_nao_gasta_numero(self, base):
+        papeis = []
+
+        def guardar(dados, mime, nome, legenda):
+            papeis.append({"nome": nome, "bytes": len(dados)})
+            return {"ok": True}
+
+        emitido = _emitir(base, ordens=(17015, 17016))
+        antes = orcamento.proximo_numero()
+        devolta = orcamento.reenviar(emitido["id"], guardar)
+        assert devolta["numero"] == emitido["numero"]
+        assert orcamento.proximo_numero() == antes, "reenviar gastou número"
+        assert papeis[-1]["nome"] == f"Orcamento_{emitido['numero']}.pdf"
+
+    def test_as_OS_ficam_gravadas_para_o_reenvio_sair_igual(self, base):
+        """🚨 Sem isto o reenvio imprimiria "Ordem(ns) de serviço(s): -".
+
+        Documento numerado que muda de conteúdo é pior que documento que não
+        sai -- e as OS só existiam no pedido que gerou o PDF.
+        """
+        emitido = _emitir(base, ordens=(17015, 17016))
+        guardado = orcamento.por_id(emitido["id"])
+        assert list(guardado["ordens_os"]) == [17015, 17016]
+
+    def test_reenviar_orcamento_que_nao_existe_e_recusado(self):
+        with pytest.raises(ValueError):
+            orcamento.reenviar(999_999_999, lambda *a: {"ok": True})
 
 
 class TestOPDF:

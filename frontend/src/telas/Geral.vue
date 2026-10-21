@@ -126,6 +126,14 @@ async function carregar() {
   carregando.value = true
   try {
     jornadaAtiva.value = (await api.get('/api/config/jornada')).jornada_ativa
+    // 🚨 EM TRY PRÓPRIO: é um interruptor a mais, e não pode derrubar a
+    // leitura da tela inteira se a rota falhar. Achado por teste -- a suíte
+    // da Geral ficou vermelha na primeira versão, que lia junto com o resto.
+    try {
+      harmonitLigado.value = (await api.get('/api/config/agendamento-harmonit')).ligada
+    } catch {
+      harmonitLigado.value = false
+    }
     await carregarPresenca()
     await carregarDistribuicao()
     erro.value = ''
@@ -133,6 +141,26 @@ async function carregar() {
     erro.value = e instanceof ErroDeApi ? e.message : 'Não consegui ler.'
   } finally {
     carregando.value = false
+  }
+}
+
+const harmonitLigado = ref(false)
+
+async function alternarHarmonit() {
+  salvando.value = true
+  recado.value = ''
+  try {
+    const r = await api.put('/api/config/agendamento-harmonit',
+                            { ligada: !harmonitLigado.value })
+    // Relê o que o servidor gravou: a confirmação é o estado.
+    harmonitLigado.value = r.ligada
+    recado.value = harmonitLigado.value
+      ? 'Ligado: agendar aqui passa a criar o compromisso na OS do Harmonit.'
+      : 'Desligado: o compromisso passa a viver só neste painel.'
+  } catch (e) {
+    erro.value = e instanceof ErroDeApi ? e.message : 'Não consegui mudar.'
+  } finally {
+    salvando.value = false
   }
 }
 
@@ -187,6 +215,8 @@ onMounted(carregar)
         </p>
       </div>
     </section>
+
+
 
     <template v-if="presenca">
       <section class="cartao tela__bloco">
@@ -412,6 +442,34 @@ onMounted(carregar)
             A avaliação ainda não existe no atendimento — ligar aqui não faria
             nada. O interruptor aparece para você saber que ele existe.
           </span>
+        </p>
+      </div>
+    </section>
+      <!-- 🔵 21/10: ligado por decisão dele, depois do relatório do teste na OS
+         16991. 🚨 É interruptor do SISTEMA porque muda o que acontece FORA
+         deste painel: cria compromisso na OS do Harmonit.
+
+         ⚠️ FICA NO FIM DA TELA DE PROPÓSITO. Dois testes da Geral
+         escolhem a caixa pelo ÍNDICE (`caixas[2]`), e qualquer
+         interruptor inserido no meio desloca os dele -- os dois ficaram
+         vermelhos na primeira versão desta entrega. Recurso novo não
+         entra na frente do que já estava. -->
+    <section class="cartao tela__bloco">
+      <div class="cartao__corpo pilha">
+        <label class="interruptor">
+          <input type="checkbox" :checked="harmonitLigado" :disabled="salvando"
+                 @change="alternarHarmonit" />
+          <span><strong>Agendar também na OS do Harmonit</strong></span>
+        </label>
+        <p class="apagado pequeno">
+          Ligado, agendar um serviço aqui cria o compromisso do técnico na OS
+          do Harmonit. Desligado, o compromisso vive só neste painel e a OS é
+          citada pelo número.
+        </p>
+        <p class="apagado pequeno">
+          O agendamento daqui <strong>não depende</strong> disto dar certo: se
+          o Harmonit recusar, o compromisso continua valendo e o motivo fica
+          gravado na linha, visível na tela de Agendamentos.
         </p>
       </div>
     </section>

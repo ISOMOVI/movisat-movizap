@@ -220,6 +220,104 @@ class TestEnderecoEConsulta:
         assert a in ids
 
 
+class TestEscritaNoHarmonit:
+    """🔵 Ligada por decisão dele em 21/10, depois do relatório da OS 16991.
+
+    🚨 NENHUM DESTES TESTES FALA COM O HARMONIT. O que se protege é o
+    comportamento do lado de cá: a recusa não derruba o compromisso, o rastro
+    fica legível, e o interruptor chega por parâmetro — nunca lendo nem
+    escrevendo na `config` de produção.
+    """
+
+    def test_desligado_nao_chama_nada(self, base, monkeypatch):
+        def nao_deveria(**kwargs):
+            raise AssertionError("chamou o Harmonit com o interruptor desligado")
+
+        monkeypatch.setattr(agendamento.fpsl_ponte, "agendar_tecnico", nao_deveria)
+        a = _criar(base, [{"numero_os": 997050, "placa": None}])
+        r = agendamento.levar_ao_harmonit(
+            a, cfg={"agendamento_escreve_harmonit": "false"})
+        assert r == {"ligado": False, "resultados": []}
+
+    def test_a_config_chega_por_PARAMETRO(self, base):
+        """🚨 A régua de 19/10: teste não lê nem escreve a config real."""
+        assert agendamento.escreve_no_harmonit(
+            cfg={"agendamento_escreve_harmonit": "true"}) is True
+        assert agendamento.escreve_no_harmonit(
+            cfg={"agendamento_escreve_harmonit": "false"}) is False
+        assert agendamento.escreve_no_harmonit(cfg={}) is False
+
+    def test_uma_chamada_POR_OS(self, base, monkeypatch):
+        """Do lado de lá cada OS tem o seu técnico e o seu compromisso."""
+        chamadas = []
+
+        def fingir(**kwargs):
+            chamadas.append(kwargs)
+            return {"ok": True, "numero_os": kwargs["numero_os"],
+                    "agendamento_id": 900000 + len(chamadas)}
+
+        monkeypatch.setattr(agendamento.fpsl_ponte, "agendar_tecnico", fingir)
+        a = _criar(base, [{"numero_os": 997060, "placa": None},
+                          {"numero_os": 997061, "placa": None}])
+        r = agendamento.levar_ao_harmonit(
+            a, cfg={"agendamento_escreve_harmonit": "true"})
+        assert r["quantas_foram"] == 2
+        assert sorted(c["numero_os"] for c in chamadas) == [997060, 997061]
+        # O nome do técnico vai junto: é o único elo com o usuário do Harmonit.
+        assert all("tecnico_nome" in c for c in chamadas)
+
+    def test_recusa_do_harmonit_NAO_derruba_o_compromisso(self, base, monkeypatch):
+        """🚨 O MoviZap é o dono (decisão 7 dele)."""
+        monkeypatch.setattr(
+            agendamento.fpsl_ponte, "agendar_tecnico",
+            lambda **k: {"ok": False, "numero_os": k["numero_os"],
+                         "motivo": "TecnicoJaAgendado"})
+        a = _criar(base, [{"numero_os": 997070, "placa": None}])
+        r = agendamento.levar_ao_harmonit(
+            a, cfg={"agendamento_escreve_harmonit": "true"})
+        assert r["quantas_foram"] == 0
+        guardado = agendamento.por_id(a)
+        # O compromisso continua de pé...
+        assert guardado["estado"] == "aguardando"
+        # ...e o motivo fica GRAVADO, dizendo em qual OS.
+        assert "997070" in guardado["harmonit_erro"]
+        assert "TecnicoJaAgendado" in guardado["harmonit_erro"]
+        assert guardado["harmonit_agendamento_id"] is None
+        assert guardado["harmonit_em"] is None
+
+    def test_sucesso_grava_o_id_e_a_hora(self, base, monkeypatch):
+        monkeypatch.setattr(
+            agendamento.fpsl_ponte, "agendar_tecnico",
+            lambda **k: {"ok": True, "numero_os": k["numero_os"],
+                         "agendamento_id": 944780})
+        a = _criar(base, [{"numero_os": 997080, "placa": None}])
+        agendamento.levar_ao_harmonit(
+            a, cfg={"agendamento_escreve_harmonit": "true"})
+        guardado = agendamento.por_id(a)
+        assert guardado["harmonit_agendamento_id"] == 944780
+        assert guardado["harmonit_em"] is not None
+        assert guardado["harmonit_erro"] is None
+
+    def test_ponte_fora_do_ar_vira_MOTIVO_e_nao_excecao(self, monkeypatch):
+        """🚨 Agendar não pode estourar porque o FPSL caiu.
+
+        Aqui a diferença com a LEITURA é de propósito: ler devolvendo lista
+        vazia mentiria ("este cliente não tem OS"), então a leitura estoura.
+        Escrever não tem esse risco -- o compromisso já está gravado aqui --,
+        e o que interessa é registrar o motivo.
+        """
+        import httpx
+
+        def cai(*a, **k):
+            raise httpx.ConnectError("sem rota")
+
+        monkeypatch.setattr(fpsl_ponte.httpx, "post", cai)
+        r = fpsl_ponte.agendar_tecnico(
+            numero_os=16991, inicio=datetime.now(timezone.utc), tecnico_nome="X")
+        assert r["ok"] is False
+        assert "FPSL" in r["motivo"]
+
+
 class TestPonteComOFpsl:
     def test_fpsl_fora_do_ar_estoura_em_vez_de_devolver_vazio(self, monkeypatch):
         """🚨 O teste que justifica o módulo existir."""

@@ -145,6 +145,52 @@ describe('aba Orçamento', () => {
   })
 })
 
+describe('🚨 emitido e NÃO enviado é um terceiro caso', () => {
+  async function emitir(resposta) {
+    estado.respostas['/api/conversas/1/orcamento'] = resposta
+    const tela = montarModal()
+    await flushPromises()
+    await tela.findAll('tbody input')[0].setValue('1,00')
+    await tela.findAll('tbody input')[1].setValue('77,7')
+    await tela.findAll('button').find((b) => b.text().includes('Gerar e anexar'))
+      .trigger('click')
+    await flushPromises()
+    return tela
+  }
+
+  it('envio ok diz que o PDF foi para a conversa', async () => {
+    const tela = await emitir({ id: 9, numero: 1668, total_centavos: 7770,
+                                enviado: { ok: true } })
+    expect(tela.text()).toContain('O PDF foi para')
+    expect(tela.text()).not.toContain('Reenviar o PDF')
+  })
+
+  it('envio falho diz que o número JÁ FOI USADO e oferece reenviar', async () => {
+    const tela = await emitir({
+      id: 9, numero: 1668, total_centavos: 7770,
+      enviado: { ok: false, motivo: 'o WhatsApp recusou' } })
+    expect(tela.text()).toContain('o PDF não chegou à conversa')
+    expect(tela.text()).toContain('o WhatsApp recusou')
+    expect(tela.text()).toContain('reenvie este mesmo documento')
+    expect(tela.findAll('button').some((b) => b.text().includes('Reenviar o PDF')))
+      .toBe(true)
+  })
+
+  it('reenviar não emite outro: chama a rota do mesmo orçamento', async () => {
+    const tela = await emitir({
+      id: 9, numero: 1668, total_centavos: 7770,
+      enviado: { ok: false, motivo: 'caiu' } })
+    estado.respostas['/api/conversas/1/orcamento/9/reenviar'] = {
+      numero: 1668, enviado: { ok: true } }
+    await tela.findAll('button').find((b) => b.text().includes('Reenviar o PDF'))
+      .trigger('click')
+    await flushPromises()
+    expect(estado.posts.map((p) => p.rota))
+      .toContain('/api/conversas/1/orcamento/9/reenviar')
+    expect(tela.text()).toContain('O PDF foi para')
+  })
+})
+
 describe('aba Agendar', () => {
   it('não avança do passo 1 sem data e hora', async () => {
     const tela = montarModal()

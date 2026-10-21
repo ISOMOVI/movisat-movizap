@@ -15,6 +15,7 @@ tabelas criaria duas versões do mesmo fato. A regra tem teste.
 import logging
 
 from . import banco
+from . import fpsl_ponte
 
 log = logging.getLogger(__name__)
 
@@ -121,6 +122,66 @@ def criar(*, conversa_id: int, tecnico_contato_id: int, cliente_harmonit_id: str
     return novo
 
 
+CHAVE_ESCREVE_HARMONIT = "agendamento_escreve_harmonit"
+
+
+def escreve_no_harmonit(cfg: dict | None = None) -> bool:
+    """O interruptor. 🚨 Mora no `config`, como todo interruptor do sistema.
+
+    `cfg` existe para o TESTE não tocar na configuração de produção — mesmo
+    desenho de `distribuicao.distribuir(cfg=...)`. Foi um teste meu escrevendo
+    direto na `config` que desligou a distribuição por nove minutos em 19/10.
+    """
+    if cfg is not None:
+        return str(cfg.get(CHAVE_ESCREVE_HARMONIT, "false")).lower() == "true"
+    linha = banco.um("SELECT valor FROM config WHERE chave = %s",
+                     (CHAVE_ESCREVE_HARMONIT,))
+    return bool(linha) and str(linha["valor"]).lower() == "true"
+
+
+def levar_ao_harmonit(agendamento_id: int, *, cfg: dict | None = None) -> dict:
+    """Cria o compromisso na OS do Harmonit e grava o rastro (migração 070).
+
+    🚨 NUNCA DERRUBA O COMPROMISSO. O MoviZap é o dono (decisão 7 dele): se o
+    Harmonit recusar, o agendamento continua de pé e o motivo fica GRAVADO,
+    legível, na própria linha. Falha silenciosa viraria "achei que tinha ido".
+
+    ⚠️ UMA CHAMADA POR OS. Um compromisso pode cobrir várias OS, e do lado de
+    lá cada OS tem o seu técnico e o seu compromisso -- não existe "agendar as
+    três de uma vez".
+    """
+    if not escreve_no_harmonit(cfg):
+        return {"ligado": False, "resultados": []}
+
+    linha = por_id(agendamento_id)
+    if not linha:
+        raise ValueError("agendamento não encontrado")
+
+    resultados = []
+    for ordem in linha["ordens"]:
+        resultados.append(fpsl_ponte.agendar_tecnico(
+            numero_os=ordem["numero_os"],
+            inicio=linha["inicio"],
+            fim=linha["fim"],
+            tecnico_nome=linha.get("tecnico_nome"),
+        ))
+
+    bons = [r for r in resultados if r.get("ok")]
+    # 🚨 O rastro guarda o PRIMEIRO id que voltou e TODOS os motivos de recusa:
+    # dizer só "deu erro" obrigaria a abrir o log para saber em qual OS.
+    erros = "; ".join(
+        f"OS {r.get('numero_os')}: {r.get('motivo')}"
+        for r in resultados if not r.get("ok"))
+    banco.executar(
+        "UPDATE agendamento SET harmonit_agendamento_id = %s, "
+        "       harmonit_em = CASE WHEN %s THEN now() ELSE NULL END, "
+        "       harmonit_erro = %s WHERE id = %s",
+        (bons[0]["agendamento_id"] if bons else None, bool(bons),
+         erros or None, agendamento_id))
+    return {"ligado": True, "resultados": resultados,
+            "quantas_foram": len(bons), "erro": erros or None}
+
+
 def confirmar(agendamento_id: int, responsavel_cliente: str) -> bool:
     """O cliente confirmou, e disse quem acompanha o técnico.
 
@@ -193,7 +254,8 @@ _CAMPOS = (
     "a.id, a.conversa_id, a.tecnico_contato_id, a.cliente_harmonit_id, "
     "a.cliente_nome, a.inicio, a.fim, a.endereco, a.responsavel_cliente, "
     "a.estado, a.orcamento_id, a.criado_em, a.confirmado_em, a.cancelado_em, "
-    "a.motivo_cancelamento, c.nome AS tecnico_nome, at.nome AS criado_por_nome, "
+    "a.motivo_cancelamento, a.harmonit_agendamento_id, a.harmonit_em, "
+    "a.harmonit_erro, c.nome AS tecnico_nome, at.nome AS criado_por_nome, "
     "o.numero AS orcamento_numero"
 )
 _DE = (

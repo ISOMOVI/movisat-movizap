@@ -101,6 +101,23 @@ async function emitirOrcamento() {
   }
 }
 
+async function reenviarOrcamento() {
+  if (!orcamentoEmitido.value) return
+  ocupado.value = true
+  erro.value = ''
+  try {
+    const r = await api.post(
+      `/api/conversas/${props.conversaId}/orcamento/${orcamentoEmitido.value.id}/reenviar`)
+    // Relê o resultado do envio em vez de assumir que foi: a confirmação é o
+    // estado, nunca o fato de o botão ter sido clicado.
+    orcamentoEmitido.value = { ...orcamentoEmitido.value, enviado: r.enviado }
+  } catch (e) {
+    erro.value = e?.message || 'Não deu para reenviar.'
+  } finally {
+    ocupado.value = false
+  }
+}
+
 /* ------------------------------------------------------------------ Agendar */
 const passo = ref(1)
 const quando = ref('')
@@ -342,11 +359,35 @@ onMounted(() => {
 
         <!-- ------------------------------------------------- aba Orçamento -->
         <div v-if="aba === 'orcamento'" class="agm__corpo">
-          <p v-if="orcamentoEmitido" class="aviso aviso--ok">
-            Orçamento <b>nº {{ orcamentoEmitido.numero }}</b> emitido —
-            R$ {{ emReais(orcamentoEmitido.total_centavos) }}. O PDF foi para a
-            conversa.
-          </p>
+          <!-- 🚨 EMITIDO E NÃO ENVIADO É UM TERCEIRO CASO, e precisa de
+               nome próprio: o documento existe, o número já foi gasto, e só o
+               envio falhou. Em 21/10 isso apareceu como "erro ao gerar PDF",
+               que era falso nas três palavras. -->
+          <template v-if="orcamentoEmitido">
+            <p v-if="orcamentoEmitido.enviado && orcamentoEmitido.enviado.ok"
+               class="aviso aviso--ok">
+              Orçamento <b>nº {{ orcamentoEmitido.numero }}</b> emitido —
+              R$ {{ emReais(orcamentoEmitido.total_centavos) }}. O PDF foi para
+              a conversa.
+            </p>
+            <template v-else>
+              <p class="aviso aviso--atencao">
+                Orçamento <b>nº {{ orcamentoEmitido.numero }}</b> foi gerado —
+                R$ {{ emReais(orcamentoEmitido.total_centavos) }} —, mas
+                <b>o PDF não chegou à conversa</b>:
+                {{ (orcamentoEmitido.enviado && orcamentoEmitido.enviado.motivo)
+                   || 'o envio não respondeu' }}.
+                O número já foi usado, então reenvie este mesmo documento em
+                vez de emitir outro.
+              </p>
+              <div class="agm__acoes">
+                <button class="botao botao--primario" type="button"
+                        :disabled="ocupado" @click="reenviarOrcamento">
+                  {{ ocupado ? 'Reenviando…' : 'Reenviar o PDF' }}
+                </button>
+              </div>
+            </template>
+          </template>
 
           <template v-else>
             <p class="agm__dica">
@@ -411,11 +452,26 @@ onMounted(() => {
 
         <!-- --------------------------------------------------- aba Agendar -->
         <div v-else-if="aba === 'agendar'" class="agm__corpo">
-          <p v-if="agendado" class="aviso aviso--ok">
-            Agendado para <b>{{ dataBr(agendado.inicio) }} às {{ horaBr(agendado.inicio) }}</b>,
-            esperando a confirmação do cliente. Abra a conversa do cliente para
-            confirmar e enviar os avisos.
-          </p>
+          <template v-if="agendado">
+            <p class="aviso aviso--ok">
+              Agendado para <b>{{ dataBr(agendado.inicio) }} às {{ horaBr(agendado.inicio) }}</b>,
+              esperando a confirmação do cliente. Abra a conversa do cliente para
+              confirmar e enviar os avisos.
+            </p>
+            <!-- 🚨 A ESCRITA NO HARMONIT TEM VOZ PRÓPRIA. Ela pode falhar sem
+                 derrubar o compromisso (o dono é o MoviZap), e calar a recusa
+                 faria o operador achar que a OS foi agendada lá também. -->
+            <p v-if="agendado.harmonit && agendado.harmonit.ligado
+                     && agendado.harmonit.quantas_foram"
+               class="aviso aviso--ok">
+              A OS também foi agendada no Harmonit.
+            </p>
+            <p v-else-if="agendado.harmonit && agendado.harmonit.erro"
+               class="aviso aviso--atencao">
+              O compromisso vale aqui, mas <b>não foi agendado no Harmonit</b>:
+              {{ agendado.harmonit.erro }}
+            </p>
+          </template>
 
           <template v-else>
             <ol class="agm__passos">

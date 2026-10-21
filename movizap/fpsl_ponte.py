@@ -98,6 +98,62 @@ def os_do_cliente(harmonit_id: str, meses: int = 6, abertas: bool = True) -> lis
     return dados.get("os") or []
 
 
+def _postar(caminho: str, corpo: dict) -> dict:
+    """Igual ao `_pedir`, do outro verbo. 🚨 Falha NUNCA vira sucesso mudo."""
+    if not configurada():
+        raise FpslIndisponivel(
+            "a ponte com o FPSL não está configurada neste servidor")
+    try:
+        r = httpx.post(
+            _base() + caminho,
+            json=corpo,
+            headers={"X-Ponte-Key": settings.ponte_fpsl_segredo},
+            # Mais folgado que a leitura: esta chamada fala com o Harmonit por
+            # dentro, e o Harmonit é lento. Ainda assim tem teto: o operador
+            # está esperando um clique.
+            timeout=25.0,
+        )
+    except httpx.TimeoutException:
+        raise FpslIndisponivel("o FPSL não respondeu no tempo") from None
+    except httpx.HTTPError as e:
+        log.warning("falha de rede no POST %s: %s", caminho, e)
+        raise FpslIndisponivel("não foi possível falar com o FPSL") from None
+    if r.status_code == 401:
+        raise FpslIndisponivel(
+            "o FPSL recusou a chave da ponte (os dois .env estão iguais?)")
+    if r.status_code >= 400:
+        raise FpslIndisponivel(f"o FPSL respondeu {r.status_code}")
+    try:
+        return r.json()
+    except ValueError:
+        raise FpslIndisponivel("o FPSL respondeu algo que não é JSON") from None
+
+
+def agendar_tecnico(*, numero_os: int, inicio, fim=None,
+                    tecnico_nome: str | None = None) -> dict:
+    """Cria o compromisso na OS do Harmonit, pela ponte.
+
+    🔵 Decisão 7 dele: a escrita no Harmonit é o **2º passo**, e ele mandou
+    ligá-la em 21/10, depois do relatório do teste na OS 16991.
+
+    🚨 DEVOLVE `{"ok": False, "motivo": ...}` EM VEZ DE ESTOURAR quando o
+    Harmonit recusa — recusa é resposta, não falha de ponte. Quem chama grava
+    o motivo ao lado do compromisso, e o agendamento do MoviZap continua
+    valendo: o dono é este lado.
+    """
+    corpo = {
+        "numero_os": int(numero_os),
+        "inicio": inicio.isoformat() if hasattr(inicio, "isoformat") else inicio,
+        "tecnico_nome": tecnico_nome or None,
+    }
+    if fim is not None:
+        corpo["fim"] = fim.isoformat() if hasattr(fim, "isoformat") else fim
+    try:
+        return _postar("/api/os/agendar-tecnico", corpo)
+    except FpslIndisponivel as e:
+        return {"ok": False, "numero_os": int(numero_os), "motivo": str(e)}
+
+
 def clientes_com_os(meses: int = 6, abertas: bool = True) -> dict[str, int]:
     """`harmonit_id` -> quantas OS, para a etapa 2 da aba Agendar.
 

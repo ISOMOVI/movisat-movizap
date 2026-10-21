@@ -1932,3 +1932,41 @@ da linha, e é ela que faz o PDF imprimir "77,7 km" em vez de "77.7 un".
 própria no `/config` (`CFG_13.1`, só owner). 🚨 **O número só se gasta quando o
 PDF existe** — reservar antes deixaria buraco na sequência toda vez que alguém
 fechasse o modal.
+
+### O agendamento no Harmonit, e as OS do orçamento (migração 070, 21/10)
+
+🔵 *"pode deixar ligado e seguir com o plano"*, depois do relatório do teste na
+OS 16991. É o **2º passo** da decisão 7 dele.
+
+**`agendamento`** ganhou o rastro da escrita: `harmonit_agendamento_id` (o
+`agendamentoId` do lado de lá), `harmonit_em` (quando deu certo) e
+`harmonit_erro` (a recusa, em texto cru — a rota é crua, e a única forma de
+descobrir um motivo novo é lê-lo).
+
+🚨 **A escrita nunca derruba o compromisso.** O MoviZap é o dono: se o Harmonit
+recusar, o agendamento continua valendo aqui e o motivo fica gravado na linha.
+Falha silenciosa viraria "achei que tinha ido".
+
+**O que o teste na OS 16991 mediu, e desenha tudo isto:**
+
+| Medido | Consequência |
+|---|---|
+| `id: 0` **cria** (nasceu o agendamento 944767, conferido relendo a OS) | é assim que a rota é chamada |
+| com o `id` de um compromisso existente, **recusa** (`TecnicoJaAgendado`) | não se reagenda por cima |
+| `agendado` continua `false` depois de agendar | o campo **não** quer dizer "tem compromisso" |
+| a OS traz os técnicos na chave **`tecnico`**, no singular | chutar o nome fez o primeiro script relatar "sem técnico" numa OS com três |
+| o corpo da OS **não traz `clienteId`** | ele sai da `os_historico` |
+
+⚠️ **O elo técnico ↔ usuário do Harmonit é o NOME**, e não existe tabela
+ligando os dois: o MoviZap conhece o técnico como contato de WhatsApp. Por isso
+a ponte **recusa e lista os nomes** quando não casa, em vez de escolher
+sozinha — agendar no técnico errado é pior que não agendar.
+
+**`orcamento.ordens_os`** (`bigint[]`) — os números de OS impressos no
+documento. 🚨 Não estavam sendo guardados: o PDF imprime "Ordem(ns) de
+serviço(s)", e sem a coluna um **reenvio produziria papel diferente com o mesmo
+número**. Achado no primeiro uso real dele, em 21/10.
+
+**O interruptor** é a chave `agendamento_escreve_harmonit` no `config`, com
+caixa na `CFG_7.1` (Geral) — e **nasceu ligada por decisão dele**, que é a
+exceção, não a régua desta casa.
