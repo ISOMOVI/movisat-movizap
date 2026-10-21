@@ -160,10 +160,17 @@ def levar_ao_harmonit(agendamento_id: int, *, cfg: dict | None = None) -> dict:
     # 🔵 A trava é o E-MAIL do cadastro do Harmonit, e quem o encontra é o
     # TELEFONE do contato (decisão dele, 21/10). O nome vai junto só para a
     # recusa ficar legível.
-    telefone = banco.um(
-        "SELECT e164 FROM contato_telefone WHERE contato_id = %s "
-        " ORDER BY principal DESC, id LIMIT 1",
-        (linha["tecnico_contato_id"],))
+    # 🔵 21/10: se o contato já tem VÍNCULO gravado, ele manda -- é
+    # identidade (`usuarioId` da OS = `tecnico_id` do cadastro), não
+    # semelhança. O telefone fica como caminho de quem ainda não foi
+    # vinculado, e é o que a varredura diária vai resolvendo.
+    contato = banco.um(
+        """SELECT ct.harmonit_tecnico_id,
+                  (SELECT e164 FROM contato_telefone
+                    WHERE contato_id = ct.id
+                    ORDER BY principal DESC, id LIMIT 1) AS e164
+             FROM contato ct WHERE ct.id = %s""",
+        (linha["tecnico_contato_id"],)) or {}
 
     resultados = []
     for ordem in linha["ordens"]:
@@ -171,7 +178,8 @@ def levar_ao_harmonit(agendamento_id: int, *, cfg: dict | None = None) -> dict:
             numero_os=ordem["numero_os"],
             inicio=linha["inicio"],
             fim=linha["fim"],
-            tecnico_telefone=telefone["e164"] if telefone else None,
+            tecnico_telefone=contato.get("e164"),
+            tecnico_id=contato.get("harmonit_tecnico_id"),
             tecnico_nome=linha.get("tecnico_nome"),
         ))
 

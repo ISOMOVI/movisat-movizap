@@ -1970,3 +1970,44 @@ número**. Achado no primeiro uso real dele, em 21/10.
 **O interruptor** é a chave `agendamento_escreve_harmonit` no `config`, com
 caixa na `CFG_7.1` (Geral) — e **nasceu ligada por decisão dele**, que é a
 exceção, não a régua desta casa.
+
+### O contato técnico ligado ao cadastro do Harmonit (migração 071, 21/10)
+
+🔵 Pedido dele: *"podemos pensar em um vínculo de dados técnicos dentro do
+cadastro do tipo 'técnico', assim já traz sugerido pelo número dele... para
+técnicos novos ou ainda sem o tipo 'técnico' no nome"*.
+
+**`contato`** ganhou quatro colunas — mesmo desenho do `cliente.harmonit_id`,
+que já era o precedente da casa:
+
+| Coluna | O que é |
+|---|---|
+| `harmonit_tecnico_id` | o `tecnico_id` do cadastro (tabela `tecnicos` do FPSL, sincronizada 1×/dia por `sync_tecnicos`) |
+| `harmonit_tecnico_nome` | retrato do nome — 🚨 **é o que o orçamento imprime** |
+| `harmonit_vinculo_origem` | CHECK `automatico` / `manual` |
+| `harmonit_vinculo_em` | quando foi gravado |
+
+🚨 **A chave é o TELEFONE**, porque o e-mail do técnico no Harmonit **é o
+telefone dele** (`Franck` → `997394026@movisat.com.br`, contato
+`+5519997394026`). 🔵 Decisão dele: tenta **9 dígitos, depois 8** (número
+antigo sem o nono), e **só vincula com candidato único**. Medido na primeira
+passada: **186 vínculos** (179 pelos nove + 7 pelos oito), zero ambíguos, 117
+contatos de técnico sem cadastro correspondente.
+
+🚨 **`manual` nunca é tocado pela varredura.** É o que sustenta a exceção dele
+(o `6168` aponta para o Iago, `tecnico_id` 7493): pelo telefone aquele número
+jamais casaria, porque `iago@movisat.com.br` não é numérico e está marcado
+como **usuário do sistema**, não técnico de campo.
+
+🚨 **A varredura nunca muda o `relacao` do contato.** Trocar para `tecnico`
+esconde empresas na ficha e muda regra de negócio — continua sendo clique de
+gente. O contato que casa e ainda não é do tipo vira **sugestão**, não ação.
+
+⚠️ **Na escrita no Harmonit, o vínculo gravado ganha do telefone**, porque é
+identidade e não semelhança: o `usuarioId` de cada técnico da OS **é o
+`tecnico_id` do cadastro** (medido: Iago 7493, Franck 14262, iguais dos dois
+lados).
+
+**O interruptor** é `tecnico_vinculo_ligado` no `config` e **nasceu ligado por
+decisão dele** — exceção consciente à régua da casa, porque a varredura só
+grava o que a trava do agendamento já calcula ao vivo.

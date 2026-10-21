@@ -1450,6 +1450,7 @@ async function abrir(id) {
     resposta.value = lerRascunho(id)
     // 🔵 07/10: semeia o rascunho do nome (editável quando o tipo for Lead).
     rascunhoNome.value = aberta.value?.empresa?.contato?.nome || ''
+    carregarVinculoTecnico()
     nomeSalvo.value = false
     carregarParticipantes(id)
     carregarMidiasDaConversa(aberta.value)
@@ -1675,6 +1676,64 @@ function inserirNoCampo(texto) {
    tem mais de seis mil linhas, e três abas novas aqui dentro seriam três
    coisas a mais para quebrar junto. */
 const agendarAberto = ref(false)
+
+/* 🔵 21/10, pedido dele: o contato tipo técnico mostra a qual cadastro do
+   Harmonit ele está ligado -- *"já traz sugerido pelo número dele"*. A
+   varredura diária mantém os automáticos; o que for escolhido aqui vira
+   MANUAL e ela não encosta mais (é assim que a exceção do 6168 → Iago vive).
+
+   ⚠️ A ficha não depende disto responder: vínculo é informação a mais, e
+   falha aqui não pode esvaziar a ficha inteira. */
+const vinculoTecnico = ref(null)
+const vinculoCarregando = ref(false)
+const buscaTecnico = ref('')
+const tecnicosAchados = ref([])
+const vinculoErro = ref('')
+
+async function carregarVinculoTecnico() {
+  vinculoTecnico.value = null
+  vinculoErro.value = ''
+  const contatoId = aberta.value?.empresa?.contato?.id
+  if (!contatoId || !ehTecnico.value) return
+  vinculoCarregando.value = true
+  try {
+    vinculoTecnico.value = await api.get(`/api/contatos/${contatoId}/tecnico-harmonit`)
+  } catch (e) {
+    vinculoErro.value = e instanceof ErroDeApi ? e.message : 'Não consegui ler o vínculo.'
+  } finally {
+    vinculoCarregando.value = false
+  }
+}
+
+async function buscarTecnicoHarmonit() {
+  vinculoErro.value = ''
+  try {
+    const r = await api.get(
+      `/api/tecnicos-harmonit?busca=${encodeURIComponent(buscaTecnico.value)}`)
+    tecnicosAchados.value = r.tecnicos || []
+  } catch (e) {
+    vinculoErro.value = e instanceof ErroDeApi ? e.message : 'Não consegui buscar.'
+  }
+}
+
+async function definirVinculoTecnico(tecnicoId) {
+  const contatoId = aberta.value?.empresa?.contato?.id
+  if (!contatoId) return
+  vinculoCarregando.value = true
+  vinculoErro.value = ''
+  try {
+    // Relê o que ficou gravado, em vez de montar a resposta aqui.
+    vinculoTecnico.value = await api.put(
+      `/api/contatos/${contatoId}/tecnico-harmonit`,
+      { harmonit_tecnico_id: tecnicoId })
+    tecnicosAchados.value = []
+    buscaTecnico.value = ''
+  } catch (e) {
+    vinculoErro.value = e instanceof ErroDeApi ? e.message : 'Não consegui gravar.'
+  } finally {
+    vinculoCarregando.value = false
+  }
+}
 
 /* O cliente da conversa, quando há. ⚠️ Em conversa de TÉCNICO isto é vazio
    por desenho (decisão dele de 07/10): `contato.cliente_id` é NULL, e a
@@ -3457,6 +3516,69 @@ function carregarMidiasDaConversa(c) {
               </button>
             </div>
 
+            <!-- 🔵 21/10: o vínculo com o cadastro de técnicos do Harmonit.
+                 🚨 É daqui que sai o NOME QUE O ORÇAMENTO IMPRIME -- *"mesmo
+                 que nomeiem errado, ele vai trazer no orçamento o nome do
+                 cadastro harmonit"*. -->
+            <div v-if="ehTecnico" class="gaveta__bloco vinculo">
+              <p class="vinculo__titulo">Técnico no Harmonit</p>
+
+              <p v-if="vinculoCarregando" class="vinculo__fraco">Lendo…</p>
+
+              <template v-else-if="vinculoTecnico && vinculoTecnico.harmonit_tecnico_id">
+                <p class="vinculo__nome">
+                  {{ vinculoTecnico.harmonit_tecnico_nome }}
+                  <small>
+                    ({{ vinculoTecnico.harmonit_vinculo_origem === 'manual'
+                        ? 'vinculado à mão' : 'pelo telefone' }})
+                  </small>
+                </p>
+                <p class="vinculo__fraco">
+                  É este o nome que sai no orçamento.
+                </p>
+                <button class="botao botao--pequeno botao--contorno" type="button"
+                        @click="definirVinculoTecnico(null)">Desvincular</button>
+              </template>
+
+              <template v-else>
+                <p class="vinculo__fraco">
+                  <template v-if="vinculoTecnico && vinculoTecnico.sugestao">
+                    Pelo telefone, parece ser
+                    <b>{{ vinculoTecnico.sugestao.nome }}</b>.
+                  </template>
+                  <template v-else>
+                    Este telefone não bate com nenhum cadastro de técnico do
+                    Harmonit. O orçamento sai com o nome daqui.
+                  </template>
+                </p>
+                <button v-if="vinculoTecnico && vinculoTecnico.sugestao"
+                        class="botao botao--pequeno"
+                        type="button"
+                        @click="definirVinculoTecnico(vinculoTecnico.sugestao.tecnico_id)">
+                  Vincular a {{ vinculoTecnico.sugestao.nome }}
+                </button>
+
+                <div class="vinculo__busca">
+                  <input v-model="buscaTecnico" class="campo__entrada"
+                         placeholder="Buscar no cadastro por nome ou e-mail"
+                         @keyup.enter="buscarTecnicoHarmonit" />
+                  <button class="botao botao--pequeno botao--contorno" type="button"
+                          @click="buscarTecnicoHarmonit">Buscar</button>
+                </div>
+                <ul v-if="tecnicosAchados.length" class="vinculo__lista">
+                  <li v-for="t in tecnicosAchados" :key="t.tecnico_id">
+                    <button type="button" class="vinculo__item"
+                            @click="definirVinculoTecnico(t.tecnico_id)">
+                      <span>{{ t.nome }}</span>
+                      <small>{{ t.email }}</small>
+                    </button>
+                  </li>
+                </ul>
+              </template>
+
+              <p v-if="vinculoErro" class="aviso aviso--erro">{{ vinculoErro }}</p>
+            </div>
+
             <div v-if="empresasAbertas && !ehTecnico" class="gaveta__bloco">
               <p v-if="buscandoEmpresas" class="apagado pequeno">consultando…</p>
               <p v-else-if="!empresas.length" class="apagado pequeno">
@@ -5044,6 +5166,18 @@ function carregarMidiasDaConversa(c) {
 </template>
 
 <style scoped>
+.vinculo { display: flex; flex-direction: column; gap: var(--e-2); }
+.vinculo__titulo { margin: 0; font-size: var(--txt-xs); text-transform: uppercase; letter-spacing: .06em; color: var(--texto-fraco); }
+.vinculo__nome { margin: 0; font-size: var(--txt-md); font-weight: var(--peso-forte); }
+.vinculo__nome small { font-weight: 400; color: var(--texto-fraco); }
+.vinculo__fraco { margin: 0; font-size: var(--txt-sm); color: var(--texto-fraco); }
+.vinculo__busca { display: flex; gap: var(--e-2); }
+/* 16px: abaixo disso o iOS dá zoom ao focar (padrão dos quatro painéis). */
+.vinculo__busca .campo__entrada { flex: 1; font-size: 16px; }
+.vinculo__lista { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; max-height: 200px; overflow-y: auto; }
+.vinculo__item { display: flex; flex-direction: column; align-items: flex-start; width: 100%; padding: var(--e-2); border: var(--borda-fina) solid var(--borda); border-radius: var(--r-sm); background: var(--superficie-2); color: inherit; text-align: left; cursor: pointer; }
+.vinculo__item small { color: var(--texto-fraco); }
+
 /* 🔵 23/09: o estado de quem responde (util/estado.js decide a cor). */
 .estado-bolinha {
   display: inline-block; width: 8px; height: 8px; border-radius: 50%;

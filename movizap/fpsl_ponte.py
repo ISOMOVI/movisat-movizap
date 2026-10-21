@@ -142,8 +142,18 @@ def tecnico_do_harmonit(telefone: str) -> dict:
         return {"achado": False, "motivo": str(e)}
 
 
+def tecnicos_do_harmonit(ativos: bool = True) -> dict:
+    """O cadastro de técnicos, para a varredura de vínculo.
+
+    🚨 ESTOURA quando a ponte cai, em vez de devolver lista vazia: vazio aqui
+    faria a varredura relatar "nenhum casou" como se fosse fato.
+    """
+    return _pedir("/api/os/tecnicos", {"ativos": 1 if ativos else 0})
+
+
 def agendar_tecnico(*, numero_os: int, inicio, fim=None,
                     tecnico_telefone: str | None = None,
+                    tecnico_id: int | None = None,
                     tecnico_nome: str | None = None) -> dict:
     """Cria o compromisso na OS do Harmonit, pela ponte.
 
@@ -159,6 +169,7 @@ def agendar_tecnico(*, numero_os: int, inicio, fim=None,
         "numero_os": int(numero_os),
         "inicio": inicio.isoformat() if hasattr(inicio, "isoformat") else inicio,
         "tecnico_telefone": tecnico_telefone or None,
+        "tecnico_id": tecnico_id or None,
         "tecnico_nome": tecnico_nome or None,
     }
     if fim is not None:

@@ -47,6 +47,7 @@ from . import mensagens_rapidas
 from . import agendamento
 from . import fpsl_ponte
 from . import orcamento as orcamento_mod
+from . import tecnico_vinculo
 from . import midia
 from . import operacao
 from . import preferencia
@@ -166,12 +167,21 @@ async def ciclo_de_vida(app: FastAPI):
     parar_presenca = asyncio.Event()
     tarefa_presenca = asyncio.create_task(presenca.rodar(parar_presenca))
 
+    # 🔵 21/10: a varredura que liga o contato tipo técnico ao cadastro do
+    # Harmonit pelo telefone. Nasce LIGADA por decisão dele -- e faz uma
+    # passada já na subida, porque esperar 24 h faria o recurso nascer sem
+    # efeito nenhum.
+    parar_vinculo = asyncio.Event()
+    tarefa_vinculo = asyncio.create_task(tecnico_vinculo.rodar(parar_vinculo))
+
     yield
 
     parar_vigia.set()
     parar_conversas.set()
     parar_presenca.set()
-    for tarefa in (tarefa_vigia, tarefa_conversas, tarefa_presenca):
+    parar_vinculo.set()
+    for tarefa in (tarefa_vigia, tarefa_conversas, tarefa_presenca,
+                   tarefa_vinculo):
         try:
             await asyncio.wait_for(tarefa, timeout=5)
         except asyncio.TimeoutError:
@@ -889,6 +899,8 @@ def emitir_orcamento(conversa_id: int, entrada: OrcamentoEntrada,
     """
     conversa = banco.um(
         """SELECT c.id, c.contato_id, ct.nome AS contato_nome, ct.relacao,
+                  ct.harmonit_tecnico_id, ct.harmonit_tecnico_nome,
+                  ct.harmonit_vinculo_origem,
                   (SELECT e164 FROM contato_telefone
                     WHERE contato_id = ct.id
                     ORDER BY principal DESC, id LIMIT 1) AS e164
@@ -913,7 +925,15 @@ def emitir_orcamento(conversa_id: int, entrada: OrcamentoEntrada,
     # desencontrado seria pior que um nome fora do padrão.
     nome_no_documento = conversa["contato_nome"] or ""
     cadastro = {"achado": False}
-    if conversa["e164"]:
+    if conversa["harmonit_tecnico_nome"]:
+        # 🔵 21/10: o VÍNCULO GRAVADO manda. É ele que a varredura diária
+        # mantém, e é por ele que a exceção dele (6168 → Iago) funciona --
+        # pelo telefone, aquele número nunca acharia o Iago.
+        nome_no_documento = conversa["harmonit_tecnico_nome"]
+        cadastro = {"achado": True, "nome": nome_no_documento,
+                    "tecnico_id": conversa["harmonit_tecnico_id"],
+                    "origem": conversa["harmonit_vinculo_origem"]}
+    elif conversa["e164"]:
         cadastro = fpsl_ponte.tecnico_do_harmonit(conversa["e164"])
         if cadastro.get("achado"):
             nome_no_documento = cadastro["nome"]
@@ -3729,6 +3749,90 @@ def definir_jornada_ativa(dados: JornadaAtiva,
     quem configura o painel.
     """
     return operacao.definir_jornada_ativa(dados.ligada)
+
+
+class VinculoDoTecnico(BaseModel):
+    harmonit_tecnico_id: int | None = None
+
+
+@app.get("/api/contatos/{contato_id}/tecnico-harmonit")
+def ver_vinculo_do_tecnico(contato_id: int,
+                           usuario: dict = Depends(auth.requer_tela("ATD_1.2"))):
+    """O vínculo deste contato com o cadastro de técnicos do Harmonit.
+
+    Devolve também a SUGESTÃO pelo telefone quando não há vínculo — é o
+    *"já traz sugerido pelo número dele"* do pedido dele.
+    """
+    atual = tecnico_vinculo.do_contato(contato_id)
+    if atual is None:
+        raise HTTPException(status_code=404, detail="Contato não encontrado.")
+    resposta = dict(atual)
+    if not atual["harmonit_tecnico_id"]:
+        telefone = banco.um(
+            "SELECT e164 FROM contato_telefone WHERE contato_id = %s "
+            " ORDER BY principal DESC, id LIMIT 1", (contato_id,))
+        if telefone:
+            achado = fpsl_ponte.tecnico_do_harmonit(telefone["e164"])
+            resposta["sugestao"] = achado if achado.get("achado") else None
+            resposta["motivo"] = achado.get("motivo")
+    return resposta
+
+
+@app.put("/api/contatos/{contato_id}/tecnico-harmonit")
+def gravar_vinculo_do_tecnico(contato_id: int, dados: VinculoDoTecnico,
+                              usuario: dict = Depends(auth.requer_tela("ATD_1.2"))):
+    """Vincula ou desvincula à mão.
+
+    🚨 O QUE ENTRA AQUI VIRA `manual`, e a varredura diária **nunca mais
+    encosta**. É isto que sustenta a exceção dele: o 6168 aponta para o Iago,
+    que nenhuma regra automática alcançaria (`iago@movisat.com.br` não é
+    numérico e está marcado como usuário do sistema).
+    """
+    if dados.harmonit_tecnico_id is None:
+        tecnico_vinculo.desvincular(contato_id)
+        return tecnico_vinculo.do_contato(contato_id)
+    try:
+        lista = (fpsl_ponte.tecnicos_do_harmonit(ativos=False) or {}).get("tecnicos") or []
+    except fpsl_ponte.FpslIndisponivel as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    achado = next((t for t in lista
+                   if t["tecnico_id"] == dados.harmonit_tecnico_id), None)
+    if not achado:
+        raise HTTPException(
+            status_code=404,
+            detail="Este técnico não está no cadastro do Harmonit.")
+    tecnico_vinculo.vincular(contato_id, achado, "manual")
+    return tecnico_vinculo.do_contato(contato_id)
+
+
+@app.get("/api/tecnicos-harmonit")
+def listar_tecnicos_harmonit(busca: str = "",
+                             usuario: dict = Depends(auth.requer_tela("ATD_1.2"))):
+    """O cadastro do Harmonit, para a busca do vínculo à mão.
+
+    ⚠️ Inclui os marcados como usuário do sistema (`ativos=False`): é
+    exatamente neles que mora a exceção dele.
+    """
+    try:
+        lista = (fpsl_ponte.tecnicos_do_harmonit(ativos=False) or {}).get("tecnicos") or []
+    except fpsl_ponte.FpslIndisponivel as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    termo = busca.strip().upper()
+    if termo:
+        lista = [t for t in lista
+                 if termo in (t["nome"] or "").upper()
+                 or termo in (t["email"] or "").upper()]
+    return {"tecnicos": lista[:50]}
+
+
+@app.get("/api/tecnicos-harmonit/pendencias")
+def pendencias_do_vinculo(usuario: dict = Depends(auth.requer_tela("CFG_7.1"))):
+    """Os três buracos de cadastro, separados — juntá-los num número só
+    esconderia o que fazer com cada um."""
+    try:
+        return tecnico_vinculo.pendencias()
+    except fpsl_ponte.FpslIndisponivel as e:
+        raise HTTPException(status_code=503, detail=str(e))
 
 
 class EscritaHarmonit(BaseModel):
