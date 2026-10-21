@@ -738,12 +738,20 @@ def midia_escondida(midia_id: int, eu: int) -> bool:
     download só conferia se a pessoa está na sala. O id é sequencial: com o
     número na mão (ou guardado de antes de apagar), o arquivo saía igual.
     Mesma regra de 05/10 -- apagada, só o owner vê.
+
+    🚨 20/10: o dedupe por hash (`midia.guardar`) reaproveita o MESMO `midia_id`
+    quando a mesma mídia é mandada mais de uma vez na mesma sala -- então duas
+    mensagens podem apontar pro mesmo `midia_id`. A conferência olhava só "existe
+    ALGUMA mensagem apagada com este midia_id", e isso escondia o anexo até de
+    quem tinha a mensagem original intacta (Erika mandou em dobro pra Aline e
+    apagou a duplicata; a original ficou 404). Agora só esconde se NENHUMA
+    mensagem viva ainda referencia este midia_id.
     """
     if _eh_owner(eu):
         return False
     return banco.um(
-        "SELECT 1 FROM chat_mensagem WHERE midia_id = %s AND apagada_em IS NOT NULL",
-        (midia_id,)) is not None
+        "SELECT 1 FROM chat_mensagem WHERE midia_id = %s AND apagada_em IS NULL",
+        (midia_id,)) is None
 
 
 # ── Editar/apagar a própria mensagem (25/09, item B) ─────────────────────────

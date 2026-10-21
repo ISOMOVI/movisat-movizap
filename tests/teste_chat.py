@@ -427,6 +427,29 @@ class TestApagadaSoOOwnerVe:
             banco.executar("DELETE FROM chat_mensagem WHERE sala_id = %s", (s,))
             banco.executar("DELETE FROM midia WHERE sala_id = %s", (s,))
 
+    def test_duplicata_apagada_NAO_esconde_a_original(self, gente, monkeypatch, tmp_path):
+        """🚨 20/10: Erika mandou o mesmo arquivo em dobro pra Aline e apagou a
+        duplicata. O dedupe por hash (`midia.guardar`) reaproveita o mesmo
+        `midia_id` nas duas mensagens -- a original ficou 404 pra Aline porque
+        `midia_escondida` escondia por `midia_id`, não por mensagem."""
+        from movizap import midia
+        monkeypatch.setattr(midia, "RAIZ", tmp_path)
+        self._vira_owner(gente["ana"])
+        s = chat.abrir_direta(gente["ana"], gente["bruno"])["sala_id"]
+        r1 = chat.escrever_com_arquivo(s, gente["bruno"], b"mesmo arquivo em dobro",
+                                       "application/pdf", "x.pdf", "")
+        r2 = chat.escrever_com_arquivo(s, gente["bruno"], b"mesmo arquivo em dobro",
+                                       "application/pdf", "x.pdf", "")
+        try:
+            assert r1["midia_id"] == r2["midia_id"]
+            md = r1["midia_id"]
+            chat.apagar_propria(s, r2["mensagem_id"], gente["bruno"])
+            assert chat.midia_escondida(md, gente["carla"]) is False
+            assert chat.midia_escondida(md, gente["ana"]) is False
+        finally:
+            banco.executar("DELETE FROM chat_mensagem WHERE sala_id = %s", (s,))
+            banco.executar("DELETE FROM midia WHERE sala_id = %s", (s,))
+
     def test_NAO_da_para_sair_de_uma_sala_DIRETA(self, gente):
         s = chat.abrir_direta(gente["ana"], gente["bruno"])["sala_id"]
         assert chat.sair_do_grupo(s, gente["ana"])["ok"] is False
