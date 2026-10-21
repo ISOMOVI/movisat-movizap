@@ -364,29 +364,48 @@ onMounted(() => {
                envio falhou. Em 21/10 isso apareceu como "erro ao gerar PDF",
                que era falso nas três palavras. -->
           <template v-if="orcamentoEmitido">
+            <!-- 🚨 A CADEIA v-if/v-else NÃO PODE SER CORTADA AO MEIO. Pôr um
+                 <p> entre o `v-if` e o `v-else` fez os dois avisos saírem
+                 juntos: "o PDF foi" e "o PDF não chegou", na mesma tela.
+                 Achado por teste. -->
             <p v-if="orcamentoEmitido.enviado && orcamentoEmitido.enviado.ok"
                class="aviso aviso--ok">
               Orçamento <b>nº {{ orcamentoEmitido.numero }}</b> emitido —
               R$ {{ emReais(orcamentoEmitido.total_centavos) }}. O PDF foi para
               a conversa.
             </p>
-            <template v-else>
-              <p class="aviso aviso--atencao">
-                Orçamento <b>nº {{ orcamentoEmitido.numero }}</b> foi gerado —
-                R$ {{ emReais(orcamentoEmitido.total_centavos) }} —, mas
-                <b>o PDF não chegou à conversa</b>:
-                {{ (orcamentoEmitido.enviado && orcamentoEmitido.enviado.motivo)
-                   || 'o envio não respondeu' }}.
-                O número já foi usado, então reenvie este mesmo documento em
-                vez de emitir outro.
-              </p>
-              <div class="agm__acoes">
-                <button class="botao botao--primario" type="button"
-                        :disabled="ocupado" @click="reenviarOrcamento">
-                  {{ ocupado ? 'Reenviando…' : 'Reenviar o PDF' }}
-                </button>
-              </div>
-            </template>
+            <p v-else class="aviso aviso--atencao">
+              Orçamento <b>nº {{ orcamentoEmitido.numero }}</b> foi gerado —
+              R$ {{ emReais(orcamentoEmitido.total_centavos) }} —, mas
+              <b>o PDF não chegou à conversa</b>:
+              {{ (orcamentoEmitido.enviado && orcamentoEmitido.enviado.motivo)
+                 || 'o envio não respondeu' }}.
+              O número já foi usado, então reenvie este mesmo documento em vez
+              de emitir outro.
+            </p>
+
+            <!-- 🔵 21/10, decisão dele: o documento leva o nome do CADASTRO DO
+                 HARMONIT, achado pelo telefone do contato. A tela diz qual
+                 nome saiu — descobrir isso abrindo o PDF seria tarde. -->
+            <p v-if="orcamentoEmitido.tecnico_do_harmonit
+                     && orcamentoEmitido.tecnico_do_harmonit.achado"
+               class="agm__dica">
+              Saiu em nome de <b>{{ orcamentoEmitido.tecnico_nome }}</b>, como
+              está no cadastro do Harmonit.
+            </p>
+            <p v-else-if="orcamentoEmitido.tecnico_nome" class="aviso aviso--atencao">
+              Não achei este técnico no cadastro do Harmonit pelo telefone do
+              contato, então o documento saiu com o nome daqui:
+              <b>{{ orcamentoEmitido.tecnico_nome }}</b>.
+            </p>
+
+            <div v-if="!(orcamentoEmitido.enviado && orcamentoEmitido.enviado.ok)"
+                 class="agm__acoes">
+              <button class="botao botao--primario" type="button"
+                      :disabled="ocupado" @click="reenviarOrcamento">
+                {{ ocupado ? 'Reenviando…' : 'Reenviar o PDF' }}
+              </button>
+            </div>
           </template>
 
           <template v-else>

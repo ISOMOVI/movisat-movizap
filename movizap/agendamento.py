@@ -157,12 +157,21 @@ def levar_ao_harmonit(agendamento_id: int, *, cfg: dict | None = None) -> dict:
     if not linha:
         raise ValueError("agendamento não encontrado")
 
+    # 🔵 A trava é o E-MAIL do cadastro do Harmonit, e quem o encontra é o
+    # TELEFONE do contato (decisão dele, 21/10). O nome vai junto só para a
+    # recusa ficar legível.
+    telefone = banco.um(
+        "SELECT e164 FROM contato_telefone WHERE contato_id = %s "
+        " ORDER BY principal DESC, id LIMIT 1",
+        (linha["tecnico_contato_id"],))
+
     resultados = []
     for ordem in linha["ordens"]:
         resultados.append(fpsl_ponte.agendar_tecnico(
             numero_os=ordem["numero_os"],
             inicio=linha["inicio"],
             fim=linha["fim"],
+            tecnico_telefone=telefone["e164"] if telefone else None,
             tecnico_nome=linha.get("tecnico_nome"),
         ))
 

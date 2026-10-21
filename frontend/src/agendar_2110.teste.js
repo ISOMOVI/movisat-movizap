@@ -158,6 +158,24 @@ describe('🚨 emitido e NÃO enviado é um terceiro caso', () => {
     return tela
   }
 
+  it('diz o nome do CADASTRO DO HARMONIT que saiu no documento', async () => {
+    const tela = await emitir({
+      id: 9, numero: 1668, total_centavos: 7770, enviado: { ok: true },
+      tecnico_nome: 'Franck',
+      tecnico_do_harmonit: { achado: true, nome: 'Franck' } })
+    expect(tela.text()).toContain('Saiu em nome de')
+    expect(tela.text()).toContain('cadastro do Harmonit')
+  })
+
+  it('avisa quando NÃO achou o técnico no cadastro e usou o nome daqui', async () => {
+    const tela = await emitir({
+      id: 9, numero: 1668, total_centavos: 7770, enviado: { ok: true },
+      tecnico_nome: 'Franck | Campinas - SP',
+      tecnico_do_harmonit: { achado: false, motivo: 'nenhum tecnico' } })
+    expect(tela.text()).toContain('Não achei este técnico no cadastro')
+    expect(tela.text()).toContain('Franck | Campinas - SP')
+  })
+
   it('envio ok diz que o PDF foi para a conversa', async () => {
     const tela = await emitir({ id: 9, numero: 1668, total_centavos: 7770,
                                 enviado: { ok: true } })

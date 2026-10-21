@@ -888,7 +888,10 @@ def emitir_orcamento(conversa_id: int, entrada: OrcamentoEntrada,
     fechado não consome numeração.
     """
     conversa = banco.um(
-        """SELECT c.id, c.contato_id, ct.nome AS contato_nome, ct.relacao
+        """SELECT c.id, c.contato_id, ct.nome AS contato_nome, ct.relacao,
+                  (SELECT e164 FROM contato_telefone
+                    WHERE contato_id = ct.id
+                    ORDER BY principal DESC, id LIMIT 1) AS e164
              FROM conversa c LEFT JOIN contato ct ON ct.id = c.contato_id
             WHERE c.id = %s""", (conversa_id,))
     if not conversa:
@@ -900,6 +903,21 @@ def emitir_orcamento(conversa_id: int, entrada: OrcamentoEntrada,
             detail="Esta conversa não tem contato cadastrado — o orçamento "
                    "sai no nome do técnico.")
 
+    # 🔵 21/10, decisão dele: o documento leva **o nome do cadastro do
+    # Harmonit**, achado pelo TELEFONE do contato (o e-mail do técnico lá é o
+    # telefone dele). *"mesmo que nomeiem errado, ele vai trazer no orcamento
+    # o nome do cadastro harmonit"*.
+    #
+    # ⚠️ Não achar NÃO impede emitir: cai no nome do contato e a resposta diz
+    # isso, para a tela avisar. Orçamento preso por causa de um cadastro
+    # desencontrado seria pior que um nome fora do padrão.
+    nome_no_documento = conversa["contato_nome"] or ""
+    cadastro = {"achado": False}
+    if conversa["e164"]:
+        cadastro = fpsl_ponte.tecnico_do_harmonit(conversa["e164"])
+        if cadastro.get("achado"):
+            nome_no_documento = cadastro["nome"]
+
     def enviar(dados, mime, nome, legenda):
         # 🚨 `legenda` É POSICIONAL em `responder_com_arquivo`, e omiti-la
         # estourava DEPOIS do commit: em 21/10 isso gastou o número 1 e
@@ -908,15 +926,18 @@ def emitir_orcamento(conversa_id: int, entrada: OrcamentoEntrada,
             conversa_id, dados, mime, nome, legenda, usuario.get("id"))
 
     try:
-        return orcamento_mod.emitir(
+        emitido = orcamento_mod.emitir(
             conversa_id=conversa_id,
             tecnico_contato_id=conversa["contato_id"],
-            tecnico_nome=conversa["contato_nome"] or "",
+            tecnico_nome=nome_no_documento,
             ordens=entrada.ordens,
             itens=[i.model_dump() for i in entrada.itens],
             criado_por=usuario.get("id"),
             enviar_na_conversa=enviar,
         )
+        emitido["tecnico_nome"] = nome_no_documento
+        emitido["tecnico_do_harmonit"] = cadastro
+        return emitido
     except orcamento_mod.SemNumeracao as e:
         raise HTTPException(status_code=503, detail=str(e))
     except ValueError as e:

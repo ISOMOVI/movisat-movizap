@@ -129,7 +129,21 @@ def _postar(caminho: str, corpo: dict) -> dict:
         raise FpslIndisponivel("o FPSL respondeu algo que não é JSON") from None
 
 
+def tecnico_do_harmonit(telefone: str) -> dict:
+    """O cadastro do técnico no Harmonit, pelo telefone do contato.
+
+    🔵 Decisão dele, 21/10: o orçamento leva **o nome do cadastro do
+    Harmonit**. 🚨 Não achar NÃO é erro: devolve `{"achado": False}` e quem
+    chama usa o nome do contato, dizendo isso na tela.
+    """
+    try:
+        return _pedir("/api/os/tecnico-por-telefone", {"telefone": telefone})
+    except FpslIndisponivel as e:
+        return {"achado": False, "motivo": str(e)}
+
+
 def agendar_tecnico(*, numero_os: int, inicio, fim=None,
+                    tecnico_telefone: str | None = None,
                     tecnico_nome: str | None = None) -> dict:
     """Cria o compromisso na OS do Harmonit, pela ponte.
 
@@ -144,6 +158,7 @@ def agendar_tecnico(*, numero_os: int, inicio, fim=None,
     corpo = {
         "numero_os": int(numero_os),
         "inicio": inicio.isoformat() if hasattr(inicio, "isoformat") else inicio,
+        "tecnico_telefone": tecnico_telefone or None,
         "tecnico_nome": tecnico_nome or None,
     }
     if fim is not None:

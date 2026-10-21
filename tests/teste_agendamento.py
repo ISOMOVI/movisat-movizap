@@ -34,6 +34,10 @@ pytest.importorskip("psycopg")
 
 from movizap import agendamento, banco, fpsl_ponte, operacao  # noqa: E402
 
+# 🚨 A TRAVA DO TÉCNICO (casar pelo e-mail) MORA NO FPSL, e o teste dela mora
+# lá: `fpsl_weso/tests/teste_ponte_movizap.py`. Importar aquele pacote daqui
+# quebra em `pydantic_settings` -- são dois projetos e dois venvs.
+
 ENV = Path("/home/claude/movizap_painel/.env")
 pytestmark = pytest.mark.skipif(
     not ENV.exists() or "MOVIZAP_DB_SENHA" not in ENV.read_text(encoding="utf-8"),
@@ -263,7 +267,10 @@ class TestEscritaNoHarmonit:
             a, cfg={"agendamento_escreve_harmonit": "true"})
         assert r["quantas_foram"] == 2
         assert sorted(c["numero_os"] for c in chamadas) == [997060, 997061]
-        # O nome do técnico vai junto: é o único elo com o usuário do Harmonit.
+        # 🔵 21/10: o que casa é o TELEFONE do contato (o e-mail do técnico no
+        # Harmonit é o telefone dele). O nome vai junto só para a recusa ser
+        # legível -- ele NÃO valida nada.
+        assert all("tecnico_telefone" in c for c in chamadas)
         assert all("tecnico_nome" in c for c in chamadas)
 
     def test_recusa_do_harmonit_NAO_derruba_o_compromisso(self, base, monkeypatch):
