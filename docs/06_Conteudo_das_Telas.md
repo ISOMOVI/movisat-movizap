@@ -4870,3 +4870,41 @@ tela com conteúdo. **É dele apagar.**
 
 **Suítes depois da auditoria: 1746 Python · 440 JS** (eram 1713/440 antes
 dela; 33 testes novos).
+
+### 🔍 22/10 — e CONFERIR A DOCUMENTAÇÃO ACHOU TRÊS COISAS QUE FALTAVAM
+
+Ele perguntou duas vezes *"tudo documentado?"*. Em vez de responder, procurei o
+que **não** estava — por `grep`, lugar por lugar. Os três achados foram
+consertados no mesmo dia, e **nenhum deles era de código do dia**: eram as
+pontas que ficam fora do repositório e do diff.
+
+**1. 🚨 `forms.movisat.com.br` não estava no `03_Exposicao_de_Rede.md`.** Um
+domínio **público, sem login**, aberto hoje, fora do documento cuja única
+função é dizer *"o que está aberto, e por quê"* — o mesmo tipo de buraco que
+aquele doc nasceu para fechar em 11/08, quando a API do Evolution respondia na
+internet. **Corrigido:** entrou na tabela de hosts e ganhou seção própria, com
+os três caminhos que passam, o 403 genérico, as zonas de `limit_req`, o
+certificado e o aviso dos dois formulários que perderam o reCAPTCHA.
+
+**2. 🚨 A pasta de anexos dos formulários não estava em backup NENHUM.** O
+`backup_midia.sh` espelha `/home/claude/movizap_midia`; o anexo de formulário
+mora em `/home/claude/movizap_formularios_anexos` e ficou de fora. E o conteúdo
+dela é o **pior de perder**: é a **única cópia** de um documento que o cliente
+mandou (contrato social, comprovante de endereço) — o banco guarda o
+**caminho**, não o arquivo, e no e-mail o Gmail tem a cópia, aqui ninguém tem.
+**Corrigido:** o script passou a espelhar **duas** pastas, cada uma com o seu
+instantâneo datado e a conferência de contagem dos dois lados. ⚠️ Pasta que
+ainda não existe é **pulada com aviso no log**, não erro — ela só nasce no
+primeiro upload; e **uma pasta que falha não impede a outra**, mas o script
+sai diferente de zero, senão o cron ficaria calado. Rodado de verdade em
+22/10: mídia **4.597 arquivos** intactos, anexos **0** (como esperado).
+
+**3. O `.env` de um install novo não teria o segredo dos formulários.** O
+`gerar_env.py` não o gerava, então máquina nova nasceria com o segredo
+**derivado do `jwt_secret`** — que está escrito como *fallback*, não como
+normal. **Corrigido:** a chave passou a ser gerada no `.env` novo.
+
+⚠️ **A lição, que vale além destes três:** o diff de hoje estava documentado; o
+que faltava era tudo o que vive **fora do repositório** — nginx, cron, backup,
+`.env`. "Documentado" não é "o código tem comentário": é *alguém que não estava
+aqui consegue achar isto depois*.

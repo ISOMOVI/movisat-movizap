@@ -36,6 +36,16 @@ if not senha:
 
 pwd_ctx = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
+# 🔵 22/10/2026: o segredo dos tokens dos formularios publicos. Assina a
+# abertura do formulario (o tempo minimo de preenchimento) e o desafio -- e
+# NENHUM dos dois e credencial de ninguem.
+#
+# 🚨 SEGREDO PROPRIO, NUNCA O `jwt_secret`: os dois tokens saem para a
+# internet. O `movizap/formularios.py` deriva um do jwt_secret quando este
+# falta, e AVISA no log -- mas derivacao e fallback, nao o normal. Sem esta
+# linha, maquina nova nasceria no fallback em silencio.
+FORMULARIOS_SEGREDO = secrets.token_hex(32)
+
 conteudo = f"""# MoviZap -- gerado automaticamente. NUNCA versionar.
 APP_NOME=MoviZap
 DOMINIO=movizap.movisat.com.br
@@ -47,6 +57,10 @@ MOVIZAP_ADMIN_LOGIN=movizap
 MOVIZAP_ADMIN_SENHA_HASH={pwd_ctx.hash(senha)}
 
 FPSL_BASE_URL=http://127.0.0.1:8005
+
+# ---- formularios publicos (Etapa 1, 2026-10-22) ----
+# Assina a abertura do formulario e o desafio. NAO e credencial.
+MOVIZAP_FORMULARIOS_SEGREDO={FORMULARIOS_SEGREDO}
 """
 
 # grava com 600 desde o nascimento, não depois -- não existe janela aberta

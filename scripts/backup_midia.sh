@@ -1,6 +1,17 @@
 #!/usr/bin/env bash
 #
-# Espelho da pasta de mídia do MoviZap — instantâneos datados, 14 dias.
+# Espelho das pastas de ARQUIVO do MoviZap — instantâneos datados, 14 dias.
+#
+# 🔵 22/10/2026: passou a espelhar DUAS pastas. A segunda é
+# `/home/claude/movizap_formularios_anexos`, o anexo que chega pelos
+# formulários públicos -- e ela estava fora de backup nenhum, o MESMO buraco
+# que este script foi escrito para fechar em 22/09, repetido com uma pasta
+# nova.
+#
+# 🚨 E ESSA É A PIOR DE PERDER: o anexo de formulário é a ÚNICA cópia de um
+# documento que o cliente mandou (contrato social, comprovante de endereço). No
+# e-mail o Gmail guarda a cópia; aqui, ninguém guarda. O banco grava o CAMINHO
+# do arquivo, nunca o arquivo.
 #
 # 🚨 POR QUE ESTE SCRIPT EXISTE (22/09/2026). A pasta `/home/claude/movizap_midia`
 # NÃO ESTAVA EM BACKUP NENHUM, e ninguém tinha percebido:
@@ -32,17 +43,32 @@
 
 set -uo pipefail
 
-ORIGEM="/home/claude/movizap_midia"
-DESTINO="/home/claude/backups/midia"
+# As pastas espelhadas, "origem:destino". ⚠️ A ordem importa só para o log.
+PASTAS=(
+    "/home/claude/movizap_midia:/home/claude/backups/midia"
+    "/home/claude/movizap_formularios_anexos:/home/claude/backups/formularios_anexos"
+)
 RETER_DIAS=14
 HOJE="$(date +%F)"
+
+echo "=== $(date '+%F %T') backup dos arquivos do MoviZap ==="
+
+falhou=0
+for par in "${PASTAS[@]}"; do
+ORIGEM="${par%%:*}"
+DESTINO="${par##*:}"
 ALVO="$DESTINO/$HOJE"
 
-echo "=== $(date '+%F %T') backup da mídia do MoviZap ==="
+echo "-- $ORIGEM"
 
+# ⚠️ ORIGEM QUE NÃO EXISTE NÃO É ERRO AQUI, e a diferença é deliberada: a
+# pasta de anexos só nasce no primeiro upload, e um dia sem anexo nenhum não
+# pode fazer o cron gritar. ⚠️ Mas ela também não é ignorada em silêncio: o
+# log diz que não existe, para "sem backup" e "sem arquivo" não se
+# confundirem.
 if [ ! -d "$ORIGEM" ]; then
-    echo "  ERRO: origem não existe: $ORIGEM"
-    exit 1
+    echo "  pulada: a pasta ainda não existe"
+    continue
 fi
 
 mkdir -p "$DESTINO"
@@ -75,14 +101,18 @@ if rsync -a --delete "${LINK[@]}" "$ORIGEM/" "$ALVO.parcial/"; then
     if [ "$n_origem" -ne "$n_copia" ]; then
         echo "  ERRO: origem tem $n_origem arquivos e a cópia tem $n_copia"
         echo "  o instantâneo fica como .parcial para análise"
-        exit 1
+        # 🚨 UMA PASTA QUE FALHA NÃO IMPEDE A OUTRA DE SER SALVA, e o script
+        # ainda sai diferente de zero no fim -- senão o cron ficaria calado.
+        falhou=1
+        continue
     fi
     rm -rf "$ALVO"
     mv "$ALVO.parcial" "$ALVO"
     echo "  ok: $n_copia arquivos em $ALVO ($(du -sh "$ALVO" | cut -f1) aparentes)"
 else
     echo "  ERRO: rsync falhou; o .parcial fica para análise"
-    exit 1
+    falhou=1
+    continue
 fi
 
 # Poda. ⚠️ NUNCA apaga o último que sobrou: se algo estiver errado com as
@@ -99,3 +129,11 @@ for velho in $(ls -1d "$DESTINO"/20* 2>/dev/null | sort); do
 done
 echo "  podados: $podados instantâneo(s) com mais de $RETER_DIAS dias"
 echo "  total em disco: $(du -sh "$DESTINO" | cut -f1)"
+
+done
+
+if [ "$falhou" -ne 0 ]; then
+    echo "=== terminou COM FALHA em pelo menos uma pasta ==="
+    exit 1
+fi
+echo "=== ok ==="
