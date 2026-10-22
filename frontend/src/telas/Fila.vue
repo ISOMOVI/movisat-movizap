@@ -2,7 +2,7 @@
 /* ============================================================================
    ATD_1.3 — Fila.
    ----------------------------------------------------------------------------
-   Não é a caixa de entrada filtrada: a caixa mostra o que é SEU, a fila mostra
+   Não é o WhatsApp filtrado: o WhatsApp mostra o que é SEU, a fila mostra
    o que não é de NINGUÉM — responsabilidade coletiva.
 
    🚨 O BALDE "SEM TRIAGEM" VEM PRIMEIRO. Quem atribui time é a triagem, e a
@@ -85,7 +85,7 @@ function quem(c) {
     <header class="tela__cabecalho">
       <div>
         <h1>Fila</h1>
-        <AjudaDaTela>Conversas sem dono. A caixa de entrada mostra o que é seu; aqui é o que não é de ninguém.</AjudaDaTela>
+        <AjudaDaTela>Conversas sem dono. O WhatsApp mostra o que é seu; aqui é o que não é de ninguém.</AjudaDaTela>
       </div>
       <span class="chip" :class="totalEsperando ? 'chip--aviso' : 'chip--ok'">
         {{ totalEsperando }} esperando

@@ -936,6 +936,39 @@ bateu com a medição manual.
 | `na_lixeira_desde` | quando a varredura viu esta mensagem na lixeira do Gmail. NULL = não está lá. Volta a NULL se a pessoa restaurar — no Gmail **ou** no painel |
 | `sumida_do_gmail_em` | quando a varredura deixou de achar a mensagem em **qualquer lugar** do Gmail. NULL = ainda existe, de algum jeito |
 
+### 🚨 Em qual aba cada estado aparece — e o filtro que decide isso (22/10)
+
+A tabela acima diz o que cada coluna **significa**. Faltava o que custou um
+defeito em 22/10: **em qual aba cada estado cai.** São três estados e três
+abas, e o filtro tem de conhecer os três.
+
+| estado | `na_lixeira_desde` | `sumida_do_gmail_em` | aba |
+|---|---|---|---|
+| ativa no Gmail | NULL | NULL | **Entrada** (ou Arquivadas, se `arquivada`) |
+| na lixeira / spam | preenchido | NULL | **Lixeira** |
+| sumiu da lixeira | preenchido | preenchido | **Lixeira** |
+| **sumiu sem passar pela lixeira** | **NULL** | preenchido | **Lixeira** (🔵 decisão dele, 22/10) |
+
+🚨 **A ÚLTIMA LINHA É A QUE ENGANA, e enganou.** "Sumida" **não** é "na
+lixeira": a mensagem pode ir de ativa a inexistente **entre duas varreduras**
+(apagada de vez, ou purgada pelos 30 dias do Gmail) e nunca ser vista na
+lixeira. Até 22/10 a aba Entrada só excluía `na_lixeira_desde` e a aba Lixeira
+só olhava essa mesma flag — então **73 mensagens que já não existiam no Gmail
+ficaram presas na Entrada**, e o selo do menu contava 56 delas como não lidas
+(dizia 61 onde a verdade eram 5).
+
+🚨 **O FILTRO MORA NUM LUGAR SÓ**, em `movizap/main.py`: `FILTRO_ENTRADA`,
+`FILTRO_ARQUIVADAS`, `FILTRO_LIXEIRA` e `filtro_da_caixa()`. Ele estava
+**copiado à mão** na rota da lista e no contador do selo, e foi a cópia que
+divergiu. Quem precisar do filtro **lê a constante** — há teste que reprova
+quem escrever as condições de novo (`tests/teste_filtro_sumida.py`,
+`TestOFiltroEUmSo`).
+
+⚠️ **E a mensagem sumida não aceita escrita no Gmail:** `messages/{id}/modify`
+devolve 404. A tela esconde "marcar não lida", "Arquivar", "Excluir" e
+"Restaurar" para ela, e deixa só "Responder" (que compõe mensagem nova e não
+toca na original) — ver `semEscritaNoGmail` no `Email.vue`.
+
 🚨 **NUNCA PERDEMOS O CONTEÚDO**, e é a diferença para o caso análogo do
 WhatsApp (045): texto, HTML e anexos já foram baixados na importação.
 "Sumida do Gmail" não apaga nada nosso — só registra que **lá** não existe

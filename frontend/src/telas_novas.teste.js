@@ -48,9 +48,9 @@ import Geral from './telas/Geral.vue'
 import MinhaConta from './telas/MinhaConta.vue'
 
 const CATALOGO = [
-  { acao: 'proxima', tela: 'Caixa de entrada', padrao: 'j',
+  { acao: 'proxima', tela: 'WhatsApp', padrao: 'j',
     descricao: 'Próxima conversa', perigo: false },
-  { acao: 'assumir', tela: 'Caixa de entrada', padrao: 'a',
+  { acao: 'assumir', tela: 'WhatsApp', padrao: 'a',
     descricao: 'Assumir a conversa aberta', perigo: true,
     aviso: 'Assume na hora, sem perguntar.' },
   { acao: 'email_arquivar', tela: 'E-mail', padrao: 'e',
@@ -90,7 +90,7 @@ describe('CFG_6.1 — Atalhos', () => {
     const w = mount(Atalhos)
     await assentar(w)
     expect(w.text()).toContain('Atalhos de teclado')
-    expect(w.text()).toContain('Caixa de entrada')
+    expect(w.text()).toContain('WhatsApp')
     expect(w.text()).toContain('E-mail')
     expect(w.text()).toContain('Próxima conversa')
   })

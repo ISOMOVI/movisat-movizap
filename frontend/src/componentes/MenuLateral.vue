@@ -15,6 +15,7 @@ import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import { sessao, sair } from '../estado/sessao.js'
+import { notificacoes } from '../estado/notificacoes.js'
 import { api } from '../api/cliente.js'
 
 const router = useRouter()
@@ -24,6 +25,56 @@ const rota = useRoute()
 // (`/api/chat/nao-lidas`, "o selo do menu" na própria docstring) e nada a
 // chamava: mensagem no chat interno só se descobria abrindo a tela.
 const naoLidas = ref(0)
+
+/* 🔵 22/10, pedido dele: o selo do Chat interno passa a ter irmãos -- o do
+   WhatsApp (*"conforme notificações da aba 'Minhas'"*) e o do E-mail (não
+   lidos), e o cabeçalho de "Atendimento" fechado mostra A SOMA DOS TRÊS.
+
+   🚨 OS DOIS NOVOS NÃO ABREM UM TERCEIRO RITMO. O `Notificador.vue` está
+   montado no `App.vue` e já pergunta `/api/eu/notificacoes` de 8 em 8 s em
+   TODA tela; o número de "Minhas" e o de e-mail saem de lá, do estado
+   reativo, sem uma requisição nova. Selo que pisca em dois relógios
+   diferentes (8 s e 15 s) mostraria soma que não bate com as partes por
+   alguns segundos, e "a bolinha não pode discordar da aba" é a regra desta
+   casa desde 24/09.
+
+   ⚠️ O do Chat interno continua tendo chamada própria porque `nao-lidas` e
+   `mencoes` exigem a ATD_6.1 e trazem a conta de menção separada (a que muda
+   a COR do selo) -- juntá-los a esta rota é uma limpeza de outro dia. */
+const naoLidasWhatsapp = computed(() => notificacoes.abas?.minhas || 0)
+const naoLidosEmail = computed(() => notificacoes.email_nao_lidos || 0)
+
+/* A soma que o grupo fechado carrega. Os três, sempre -- inclusive quando um
+   deles é zero: é a mesma conta, só sem a parcela. */
+const somaDoGrupo = computed(
+  () => naoLidasWhatsapp.value + naoLidas.value + naoLidosEmail.value)
+
+/* O selo de um item qualquer. Fora destes três códigos não há selo: devolver
+   0 é o que faz o `v-if` do template não desenhar nada. */
+function seloDaTela(codigo) {
+  if (codigo === 'ATD_1.1') return naoLidasWhatsapp.value
+  if (codigo === 'ATD_6.1') return naoLidas.value
+  if (codigo === 'EML_1.1') return naoLidosEmail.value
+  return 0
+}
+
+function textoDoSelo(codigo) {
+  if (codigo === 'ATD_1.1') {
+    return `${naoLidasWhatsapp.value} conversa(s) sua(s) com mensagem não lida`
+  }
+  if (codigo === 'EML_1.1') {
+    return `${naoLidosEmail.value} e-mail(s) não lido(s) na entrada`
+  }
+  return mencoes.value > 0
+    ? `${mencoes.value} vez(es) em que te chamaram pelo nome, de ${naoLidas.value} não lida(s)`
+    : `${naoLidas.value} mensagem(ns) nova(s) no chat interno`
+}
+
+/* 🚨 QUANTOS SÃO SÓ 99+ NO DESENHO. O número real vai no `title`, porque
+   "99+" no cabeçalho fechado é a única informação que a pessoa tem. */
+function curto(n) {
+  return n > 99 ? '99+' : String(n)
+}
 
 /* 🟡 S11, feito em 15/09: `/api/chat/mencoes` tem conta SEPARADA de propósito
    ("40 não lidas num grupo é rotina; UMA em que te chamaram pelo nome não
@@ -163,8 +214,15 @@ function mostrarItens(nome) {
    grupo fechado, o selo de mensagem nova do chat interno some junto com o
    item -- e o selo existe exatamente para quem não está olhando a tela. O
    cabeçalho fechado passa a carregá-lo. */
-function temChatInterno(grupo) {
-  return grupo.subgrupos.some((s) => s.telas.some((t) => t.codigo === 'ATD_6.1'))
+/* 🔵 22/10: era só o Chat interno; passou a ser qualquer um dos três que
+   têm selo. O grupo fechado some com o item E com o aviso dele, e o aviso é
+   justamente para quem não está olhando -- valia para o chat em 21/10 e vale
+   igual para o WhatsApp e para o e-mail agora. */
+const CODIGOS_COM_SELO = ['ATD_1.1', 'ATD_6.1', 'EML_1.1']
+
+function temSelo(grupo) {
+  return grupo.subgrupos.some(
+    (s) => s.telas.some((t) => CODIGOS_COM_SELO.includes(t.codigo)))
 }
 
 /** Agrupa em dois níveis, preservando a ordem em que o backend mandou.
@@ -252,11 +310,13 @@ function encerrar() {
         >
           <span>{{ grupo.nome }}</span>
           <span
-            v-if="!mostrarItens(grupo.nome) && temChatInterno(grupo) && naoLidas > 0"
+            v-if="!mostrarItens(grupo.nome) && temSelo(grupo) && somaDoGrupo > 0"
             class="menu__selo menu__selo--grupo"
             :class="{ 'menu__selo--mencao': mencoes > 0 }"
-            :title="`${naoLidas} mensagem(ns) nova(s) no chat interno, dentro deste grupo fechado`"
-          >{{ naoLidas > 99 ? '99+' : naoLidas }}</span>
+            :title="`${somaDoGrupo} não lida(s) neste grupo fechado: `
+              + `${naoLidasWhatsapp} no WhatsApp, ${naoLidas} no chat interno, `
+              + `${naoLidosEmail} no e-mail`"
+          >{{ curto(somaDoGrupo) }}</span>
           <i
             class="bi menu__seta"
             :class="estaAberto(grupo.nome) ? 'bi-chevron-down' : 'bi-chevron-right'"
@@ -279,13 +339,13 @@ function encerrar() {
               <i class="bi" :class="tela.icone" aria-hidden="true"></i>
               <span class="menu__titulo">{{ tela.titulo }}</span>
               <span
-                v-if="tela.codigo === 'ATD_6.1' && naoLidas > 0"
+                v-if="seloDaTela(tela.codigo) > 0"
                 class="menu__selo"
-                :class="{ 'menu__selo--mencao': mencoes > 0 }"
-                :title="mencoes > 0
-                  ? `${mencoes} vez(es) em que te chamaram pelo nome, de ${naoLidas} não lida(s)`
-                  : `${naoLidas} mensagem(ns) nova(s) no chat interno`"
-              >{{ naoLidas > 99 ? '99+' : naoLidas }}</span>
+                :class="{
+                  'menu__selo--mencao': tela.codigo === 'ATD_6.1' && mencoes > 0,
+                }"
+                :title="textoDoSelo(tela.codigo)"
+              >{{ curto(seloDaTela(tela.codigo)) }}</span>
             </RouterLink>
           </div>
         </template>

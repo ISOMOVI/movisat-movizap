@@ -51,15 +51,20 @@ def pool():
 
 @pytest.fixture(autouse=True)
 def sem_google(monkeypatch):
-    """🚨 Nenhum teste fala com o Gmail. `_mexer_rotulo` é o ponto único por
-    onde estrela, não-lida e arquivar passam -- mockar aqui cobre os três."""
+    """🚨 Nenhum teste fala com o Gmail, e o duplo fica na BORDA.
+
+    ⚠️ 22/10: o duplo era no `_mexer_rotulo`, que era só rede. Depois que o
+    espelho dos rótulos locais entrou nessa função, trocá-la inteira passou a
+    desligar **regra** junto com a rede -- e o teste de restaurar reprovou com
+    o código certo. Agora o duplo é no `_modificar_no_gmail`, que é só a
+    chamada HTTP: o espelho local roda de verdade, e nada fala com o Google.
+    """
     chamadas = []
 
-    def falso(mensagem_id, poe, tira, o_que):
-        chamadas.append({"id": mensagem_id, "poe": poe, "tira": tira})
-        return {"ok": True}
+    def falso(linha, poe, tira, o_que):
+        chamadas.append({"id": linha["id"], "poe": poe, "tira": tira})
 
-    monkeypatch.setattr(gmail, "_mexer_rotulo", falso)
+    monkeypatch.setattr(gmail, "_modificar_no_gmail", falso)
     yield chamadas
 
 
@@ -77,13 +82,28 @@ def cena():
         """INSERT INTO email_conta (endereco, provedor, ativa, atendente_id)
            VALUES (%s, 'gmail', true, %s) RETURNING id""",
         (ENDERECO, ids["dono"]))["id"]
+    # 🚨 O `INBOX` NASCE COM A MENSAGEM desde 22/10: a Entrada passou a exigir
+    # esse rótulo, que é como o Gmail diz "está na caixa de entrada". Sem ele
+    # estas três seriam mensagens ARQUIVADAS, e o `GET /api/email/mensagens`
+    # (que abre na Entrada) vinha vazio -- foi assim que estes testes
+    # reprovaram, por fixture irreal e não por defeito do código.
+    rotulo_inbox = banco.um(
+        """INSERT INTO email_marcador (conta_id, id_externo, nome, natureza)
+           VALUES (%s, 'INBOX', 'INBOX', 'sistema')
+           ON CONFLICT (conta_id, id_externo)
+           DO UPDATE SET nome = email_marcador.nome RETURNING id""",
+        (conta,))["id"]
     msgs = []
     for i in range(3):
-        msgs.append(banco.um(
+        mid = banco.um(
             """INSERT INTO email_mensagem (conta_id, id_externo, remetente,
                                            assunto, lida)
                VALUES (%s, %s, 'quem@fora.com', %s, true) RETURNING id""",
-            (conta, f"zz-acoes-{i}", f"assunto {i}"))["id"])
+            (conta, f"zz-acoes-{i}", f"assunto {i}"))["id"]
+        banco.executar(
+            """INSERT INTO email_mensagem_marcador (mensagem_id, marcador_id)
+               VALUES (%s, %s) ON CONFLICT DO NOTHING""", (mid, rotulo_inbox))
+        msgs.append(mid)
     yield {"conta": conta, "msgs": msgs, **ids}
     limpar()
 
@@ -204,13 +224,12 @@ class TestLote:
         outras não acontecerem."""
         chamadas = {"n": 0}
 
-        def as_vezes_falha(mensagem_id, poe, tira, o_que):
+        def as_vezes_falha(linha, poe, tira, o_que):
             chamadas["n"] += 1
             if chamadas["n"] == 2:
                 raise gmail.GmailIndisponivel("caiu")
-            return {"ok": True}
 
-        monkeypatch.setattr(gmail, "_mexer_rotulo", as_vezes_falha)
+        monkeypatch.setattr(gmail, "_modificar_no_gmail", as_vezes_falha)
         r = _cliente("dono").post("/api/email/lote", json={
             "ids": cena["msgs"], "acao": "estrela"})
         corpo = r.json()

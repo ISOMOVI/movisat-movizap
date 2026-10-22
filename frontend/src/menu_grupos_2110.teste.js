@@ -47,7 +47,7 @@ import MenuLateral from './componentes/MenuLateral.vue'
 
 const CATALOGO = [
   { codigo: 'INI_1.1', titulo: 'Início', rota: '/inicio', icone: 'bi-house', aba_de: null, grupo: 'Início', subgrupo: null },
-  { codigo: 'ATD_1.1', titulo: 'Caixa de entrada', rota: '/atendimento', icone: 'bi-chat-dots', aba_de: null, grupo: 'Atendimento', subgrupo: null },
+  { codigo: 'ATD_1.1', titulo: 'WhatsApp', rota: '/atendimento', icone: 'bi-chat-dots', aba_de: null, grupo: 'Atendimento', subgrupo: null },
   { codigo: 'ATD_6.1', titulo: 'Chat interno', rota: '/chat', icone: 'bi-chat-left-dots', aba_de: null, grupo: 'Atendimento', subgrupo: null },
   // 🔵 O pedido que abriu o assunto: Ligações DENTRO de Atendimento, sem
   // mudar o código da tela (que é imutável).
@@ -91,7 +91,7 @@ describe('grupos vindos do backend', () => {
     const tela = montar()
     const atendimento = tela.findAll('.menu__grupo')[1]
     expect(atendimento.findAll('.menu__titulo').map((n) => n.text()))
-      .toEqual(['Caixa de entrada', 'Chat interno', 'Ligações'])
+      .toEqual(['WhatsApp', 'Chat interno', 'Ligações'])
   })
 
   it('não desenha grupo sem nenhuma tela visível', () => {
@@ -107,7 +107,7 @@ describe('grupos vindos do backend', () => {
 
   it('desenha o rótulo do subgrupo e recolhe as telas dele', () => {
     const tela = montar([
-      { codigo: 'ATD_1.1', titulo: 'Caixa de entrada', rota: '/atendimento', icone: 'bi-chat', aba_de: null, grupo: 'Painéis', subgrupo: 'Operacional' },
+      { codigo: 'ATD_1.1', titulo: 'WhatsApp', rota: '/atendimento', icone: 'bi-chat', aba_de: null, grupo: 'Painéis', subgrupo: 'Operacional' },
     ])
     expect(tela.find('.menu__sub-nome').text()).toBe('Operacional')
     expect(tela.find('.menu__link--sub').exists()).toBe(true)
@@ -119,7 +119,7 @@ describe('acordeão', () => {
     const tela = montar()
     await tela.findAll('.menu__grupo-nome')[2].trigger('click') // Cadastro
     expect(titulosVisiveis(tela)).not.toContain('Clientes')
-    expect(titulosVisiveis(tela)).toContain('Caixa de entrada')
+    expect(titulosVisiveis(tela)).toContain('WhatsApp')
   })
 
   it('mantém VÁRIOS grupos abertos ao mesmo tempo (decisão dele)', async () => {
@@ -127,7 +127,7 @@ describe('acordeão', () => {
     // Abrir/fechar um não pode mexer no outro.
     await tela.findAll('.menu__grupo-nome')[2].trigger('click')
     expect(titulosVisiveis(tela)).toContain('Início')
-    expect(titulosVisiveis(tela)).toContain('Caixa de entrada')
+    expect(titulosVisiveis(tela)).toContain('WhatsApp')
   })
 
   it('lembra a escolha por pessoa, no localStorage', async () => {
@@ -153,7 +153,7 @@ describe('acordeão', () => {
     const tela = montar()
     // A rota atual é ATD_1.1 -- o grupo dela não pode esconder o item em que
     // a pessoa está.
-    expect(titulosVisiveis(tela)).toContain('Caixa de entrada')
+    expect(titulosVisiveis(tela)).toContain('WhatsApp')
     expect(titulosVisiveis(tela)).not.toContain('Clientes')
   })
 

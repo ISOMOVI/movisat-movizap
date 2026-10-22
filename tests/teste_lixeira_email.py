@@ -4,9 +4,10 @@
 espelhado o uso?" -- e resolve de quebra a lacuna que a mesma pergunta
 achou: "arquivada" existe desde a 014 e nunca teve tela própria.
 
-🚨 O GMAIL É MOCKADO, mesma regra do teste_email_acoes.py: `_mexer_rotulo`
-é o ponto único por onde estrela, não-lida, arquivar, excluir e restaurar
-passam -- mockar aqui cobre os cinco sem falar com a rede.
+🚨 O GMAIL É MOCKADO, mesma regra do teste_email_acoes.py: o duplo fica em
+`_modificar_no_gmail`, a chamada HTTP por onde estrela, não-lida, arquivar,
+excluir e restaurar passam -- cobre os cinco sem falar com a rede, e deixa o
+espelho dos rótulos LOCAIS rodar de verdade (22/10).
 """
 import sys
 from pathlib import Path
@@ -50,11 +51,14 @@ def pool():
 def sem_google(monkeypatch):
     chamadas = []
 
-    def falso(mensagem_id, poe, tira, o_que):
-        chamadas.append({"id": mensagem_id, "poe": poe, "tira": tira, "o_que": o_que})
-        return {"ok": True}
+    # ⚠️ 22/10: o duplo desceu de `_mexer_rotulo` para `_modificar_no_gmail`.
+    # O primeiro deixou de ser só rede quando o espelho dos rótulos locais
+    # entrou nele -- e este teste foi justamente o que reprovou por isso, com
+    # o código certo. Duplo na borda; a regra roda.
+    def falso(linha, poe, tira, o_que):
+        chamadas.append({"id": linha["id"], "poe": poe, "tira": tira, "o_que": o_que})
 
-    monkeypatch.setattr(gmail, "_mexer_rotulo", falso)
+    monkeypatch.setattr(gmail, "_modificar_no_gmail", falso)
     yield chamadas
 
 

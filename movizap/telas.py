@@ -31,24 +31,10 @@ TELAS = [
         "permissao": "atendimento",
         "fase": 1,
     },
-    # ---- EML: e-mail ----
-    # 🚨 MÓDULO PRÓPRIO, NÃO ATD. Decisão do usuário em 10/08: "jamais
-    # misturemos whatsapp com gmail, nunca". Caixa própria, marcadores
-    # próprios, fila própria -- e o código diz isso antes do primeiro clique.
-    {
-        "codigo": "EML_1.1",
-        "titulo": "E-mail",
-        "rota": "/email",
-        "icone": "bi-envelope",
-        "descricao": "Caixa de e-mail, separada do WhatsApp.",
-        "grupo": "E-mail",
-        "permissao": "atendimento",
-        "fase": 1,
-    },
     # ---- ATD: atendimento ----
     {
         "codigo": "ATD_1.1",
-        "titulo": "Caixa de entrada",
+        "titulo": "WhatsApp",
         "rota": "/atendimento",
         "icone": "bi-chat-dots",
         "descricao": "Conversas abertas, por canal e por time.",
@@ -67,13 +53,50 @@ TELAS = [
         "fase": 1,
     },
     {
+        "codigo": "ATD_6.1",
+        "titulo": "Chat interno",
+        "rota": "/chat",
+        "icone": "bi-chat-left-dots",
+        # ⚠️ "entre atendentes" e não "com cliente" -- a descrição aparece na
+        # CFG_9.1 e é o que distingue esta tela da caixa de entrada.
+        "descricao": "Conversa entre atendentes. Não sai para o cliente.",
+        "grupo": "Atendimento",
+        "permissao": "atendimento",
+        "fase": 1,
+    },
+    {
+        # 🚨 MÓDULO PRÓPRIO, NÃO ATD -- e continua sendo. Decisão do usuário em
+        # 10/08: *"jamais misturemos whatsapp com gmail, nunca"*. Caixa
+        # própria, marcadores próprios, fila própria, código `EML`, rota e
+        # permissão próprias. Foi ela que aposentou a `ATD_4.1`.
+        #
+        # 🔵 22/10, decisão dele: no MENU o item passa a morar dentro de
+        # "Atendimento", abaixo do Chat interno (*"pessoal deu feedback que é
+        # melhor nessa ordem"*), e ele confirmou que é **só visual**. Por isso
+        # muda o `grupo` e NADA mais: o módulo não se mistura, só o lugar em
+        # que o menu o desenha. Grupo é apresentação, não permissão -- é o que
+        # o cabeçalho deste arquivo diz desde 21/10.
+        #
+        # ⚠️ O grupo "E-mail" continua declarado em GRUPOS e fica VAZIO. O
+        # MenuLateral não desenha grupo sem tela visível, então ele some da
+        # tela sozinho -- igual a "Painéis › Operacional".
+        "codigo": "EML_1.1",
+        "titulo": "E-mail",
+        "rota": "/email",
+        "icone": "bi-envelope",
+        "descricao": "Caixa de e-mail, separada do WhatsApp.",
+        "grupo": "Atendimento",
+        "permissao": "atendimento",
+        "fase": 1,
+    },
+    {
         "codigo": "ATD_1.3",
         "titulo": "Fila",
         "rota": "/atendimento/fila",
         "icone": "bi-list-ol",
         "descricao": "Conversas esperando atendente.",
         "grupo": "Atendimento",
-        "permissao": "atendimento",
+        "permissao": "equipe",
         "fase": 1,
     },
     {
@@ -85,7 +108,7 @@ TELAS = [
         "icone": "bi-clock-history",
         "descricao": "Conversas encerradas, pesquisáveis.",
         "grupo": "Atendimento",
-        "permissao": "atendimento",
+        "permissao": "equipe",
         "fase": 1,
     },
     # ---- CAD: cadastro ----
@@ -366,18 +389,6 @@ TELAS = [
         "fase": 1,
     },
     # ---- reservados: código já ocupado, tela ainda não existe ----
-    {
-        "codigo": "ATD_6.1",
-        "titulo": "Chat interno",
-        "rota": "/chat",
-        "icone": "bi-chat-left-dots",
-        # ⚠️ "entre atendentes" e não "com cliente" -- a descrição aparece na
-        # CFG_9.1 e é o que distingue esta tela da caixa de entrada.
-        "descricao": "Conversa entre atendentes. Não sai para o cliente.",
-        "grupo": "Atendimento",
-        "permissao": "atendimento",
-        "fase": 1,
-    },
     {
         "codigo": "CFG_2.2",
         "titulo": "IA — analytics",

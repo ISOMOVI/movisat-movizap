@@ -30,10 +30,37 @@ class TestGrupoChegaAoFrontend:
         assert por_codigo["LIG_1.1"]["codigo"] == "LIG_1.1"
 
     def test_inicio_e_email_tem_nome_de_verdade(self):
-        """Antes de hoje `INI` e `EML` não estavam no mapa do menu e saíam crus."""
+        """Antes de 21/10 `INI` e `EML` não estavam no mapa do menu e saíam crus.
+
+        🔵 22/10: o E-mail passou a morar DENTRO de "Atendimento", abaixo do
+        Chat interno (*"pessoal deu feedback que é melhor nessa ordem"*), e ele
+        confirmou que é só visual -- o módulo continua `EML`, com rota, caixa e
+        permissão próprias. Por isso o grupo esperado mudou e o resto não.
+
+        🚨 A DEFESA ORIGINAL CONTINUA AQUI, e é a segunda linha de cada par:
+        o que este teste existe para impedir é o grupo sair CRU ("EML", "INI").
+        Trocar o destino do EML não pode levar essa garantia embora.
+        """
         por_codigo = {t["codigo"]: t for t in telas.do_usuario({"owner": True})}
         assert por_codigo["INI_1.1"]["grupo"] == "Início"
-        assert por_codigo["EML_1.1"]["grupo"] == "E-mail"
+        assert por_codigo["INI_1.1"]["grupo"] != "INI"
+        assert por_codigo["EML_1.1"]["grupo"] == "Atendimento"
+        assert por_codigo["EML_1.1"]["grupo"] != "EML"
+
+    def test_o_fallback_do_EML_continua_apontando_para_E_mail(self):
+        """⚠️ O grupo do EML_1.1 agora vem GRAVADO na tela, não do prefixo --
+        mas o fallback tem de continuar correto. Tela sem `grupo` (backend um
+        passo atrás da tela, que o `M16` diz que acontece) cai aqui, e cair
+        em "E-mail" é degradar; cair em "EML" seria rótulo cru na tela."""
+        assert telas.grupo_da({"codigo": "EML_1.1"}) == "E-mail"
+
+    def test_o_grupo_E_mail_ficou_declarado_e_vazio(self):
+        """🚨 TELA QUE MENTE É DEFEITO, e grupo vazio não mente: ele existe no
+        registro e o `MenuLateral` não desenha grupo sem tela visível -- como
+        "Painéis › Operacional" desde 19/10. Este teste é o que impede alguém
+        "limpar" a entrada de GRUPOS e levar o fallback de cima com ela."""
+        assert "E-mail" in telas.GRUPOS
+        assert not [t for t in telas.ativas() if telas.grupo_da(t) == "E-mail"]
 
 
 class TestFallbackPeloPrefixo:

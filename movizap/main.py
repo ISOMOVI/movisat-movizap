@@ -1254,6 +1254,92 @@ def google_inicio():
     return RedirectResponse(google_auth.url_de_entrada(), status_code=302)
 
 
+# ---------------------------------------------------------------------------
+# 🚨 O FILTRO DAS ABAS DE E-MAIL MORA AQUI, UMA VEZ SÓ.
+#
+# Até 22/10 ele estava copiado à mão: uma vez em `/api/email/mensagens` e,
+# depois do selo do menu, outra em `_email_nao_lidos`. As duas cópias
+# discordaram no mesmo dia em que a segunda nasceu -- o selo mostrava 61 onde
+# a verdade eram 5, porque a cópia não conhecia `sumida_do_gmail_em`.
+#
+# A varredura do Gmail (`gmail.sincronizar_exclusoes`, cron de 15 min) grava
+# TRÊS estados, e qualquer filtro de aba tem de conhecer os três:
+#
+#   ativa no Gmail .............. as duas flags em NULL
+#   na lixeira ou no spam ....... `na_lixeira_desde`
+#   não existe mais no Gmail .... `sumida_do_gmail_em`
+#
+# ⚠️ "Sumida" NÃO é "na lixeira", e foi essa confusão que custou o defeito:
+# ela pode ir de ativa a inexistente ENTRE DUAS VARREDURAS (apagada de vez, ou
+# purgada pelos 30 dias do Gmail) e nunca ser vista na lixeira. Por isso a
+# Lixeira olha as DUAS flags: senão a mensagem não cai em aba nenhuma.
+#
+# 🔵 Decisão dele (22/10): a sumida aparece na Lixeira, marcada como "só a
+# nossa cópia" -- é a única cópia que existe, e esconder seria perdê-la de
+# vista.
+def _tem_rotulo(id_externo: str) -> str:
+    """Trecho que diz "esta mensagem carrega este rótulo do Gmail".
+
+    🚨 O rótulo é a VERDADE DO GMAIL; as colunas `arquivada`,
+    `na_lixeira_desde` e `sumida_do_gmail_em` são a nossa. Onde as duas
+    discordam, quem manda sobre "em que lugar isto está" é o Gmail -- foi
+    discordância assim que fez o selo contar uma mensagem que o Gmail já tinha
+    arquivado (22/10).
+
+    ⚠️ LIMITE MEDIDO, e ele importa: os rótulos são gravados **uma vez, na
+    importação, e nunca mais atualizados** -- há um único `INSERT` (no caminho
+    de importação de `gmail.ler`) e um único `DELETE` (do `UNREAD`, em
+    `marcar_lida`). A varredura de 15 min compara só **ids**, não rótulos.
+    Então `INBOX` aqui é a foto do dia em que a mensagem entrou: arquivar no
+    Gmail DEPOIS disso não chega até nós. Ressincronizar rótulos é frente
+    própria -- está anotada, e é mais caro (listar é barato, baixar é caro).
+    """
+    return ("EXISTS (SELECT 1 FROM email_mensagem_marcador mm "
+            "          JOIN email_marcador mk ON mk.id = mm.marcador_id "
+            "         WHERE mm.mensagem_id = e.id "
+            f"          AND mk.id_externo = '{id_externo}')")
+
+
+# Nem na lixeira, nem apagada de vez: a mensagem ainda é de alguma caixa.
+_VIVA = "e.na_lixeira_desde IS NULL AND e.sumida_do_gmail_em IS NULL"
+
+# 🚨 A ORDEM DESTAS QUATRO É O QUE GARANTE "EXATAMENTE UMA CAIXA".
+#
+#   arquivada pelo painel ....... Arquivadas  (a nossa coluna tem precedência)
+#   tem INBOX ................... Entrada
+#   tem SENT e não tem INBOX .... Enviados
+#   não tem nenhum dos dois ..... Arquivadas  (= arquivada no Gmail)
+#   na lixeira ou sumida ........ Lixeira     (ganha de todas)
+#
+# Medido na caixa real em 22/10: 1 mensagem tem INBOX **e** SENT (a Entrada
+# ganha dela, e por isso Enviados exige `NOT tem(INBOX)`), e 1 não tem nenhum
+# dos dois -- é o "Alerta de segurança" do Google, arquivado no Gmail. Sem a
+# última linha da tabela ela cairia em caixa NENHUMA, que é exatamente o
+# defeito das 73 sumidas da volta anterior.
+FILTRO_ENTRADA = (f"NOT e.arquivada AND {_VIVA} AND {_tem_rotulo('INBOX')}")
+FILTRO_ENVIADOS = (f"NOT e.arquivada AND {_VIVA} "
+                   f"AND {_tem_rotulo('SENT')} AND NOT {_tem_rotulo('INBOX')}")
+FILTRO_ARQUIVADAS = (
+    f"{_VIVA} AND (e.arquivada OR "
+    f"(NOT {_tem_rotulo('INBOX')} AND NOT {_tem_rotulo('SENT')}))")
+FILTRO_LIXEIRA = ("(e.na_lixeira_desde IS NOT NULL "
+                  "OR e.sumida_do_gmail_em IS NOT NULL)")
+
+# As quatro, na ordem em que a tela as desenha.
+CAIXAS = ("entrada", "enviados", "arquivadas", "lixeira")
+
+
+def filtro_da_caixa(caixa: str) -> str:
+    """O `WHERE` da caixa pedida. Caixa desconhecida cai na entrada."""
+    if caixa == "lixeira":
+        return FILTRO_LIXEIRA
+    if caixa == "arquivadas":
+        return FILTRO_ARQUIVADAS
+    if caixa == "enviados":
+        return FILTRO_ENVIADOS
+    return FILTRO_ENTRADA
+
+
 def _caixas_do_usuario(usuario: dict) -> list[dict]:
     """As caixas de e-mail de quem está logado — as que ELE conectou.
 
@@ -1328,7 +1414,7 @@ def email_marcadores(conta_id: int | None = None,
 def email_mensagens(marcador: str = "", busca: str = "", limite: int = 60,
                     conta_id: int | None = None, caixa: str = "entrada",
                     usuario: dict = Depends(auth.requer_tela("EML_1.1"))):
-    """A lista da caixa, com três abas -- `caixa=entrada|arquivadas|lixeira`.
+    """A lista da caixa, com quatro abas -- `caixa=entrada|enviados|arquivadas|lixeira`.
 
     🚨 ATÉ 17/09 SÓ HAVIA "ENTRADA", e a nota aqui dizia "ninguém quer
     lixeira num painel de atendimento". Medido no mesmo dia: 46% da caixa
@@ -1343,14 +1429,10 @@ def email_mensagens(marcador: str = "", busca: str = "", limite: int = 60,
     if not contas:
         return {"mensagens": []}
 
-    if caixa == "lixeira":
-        condicoes = ["e.na_lixeira_desde IS NOT NULL", "e.conta_id = ANY(%s)"]
-    elif caixa == "arquivadas":
-        condicoes = ["e.arquivada", "e.na_lixeira_desde IS NULL",
-                     "e.conta_id = ANY(%s)"]
-    else:
-        condicoes = ["NOT e.arquivada", "e.na_lixeira_desde IS NULL",
-                     "e.conta_id = ANY(%s)"]
+    # 🚨 22/10: as três condições saíam escritas aqui, e a cópia feita em
+    # `_email_nao_lidos` divergiu no mesmo dia. Agora vêm do `filtro_da_caixa`,
+    # que é o único lugar onde elas existem -- ver o bloco acima dele.
+    condicoes = [filtro_da_caixa(caixa), "e.conta_id = ANY(%s)"]
     params: list = [contas]
 
     # 🚨 O PARÂMETRO EXISTIA E ERA IGNORADO. A tela mandava `?marcador=SENT` e
@@ -3400,6 +3482,38 @@ class MinhaNotificacao(BaseModel):
     volume: int
 
 
+def _email_nao_lidos(eu: int) -> int:
+    """Quantos nao lidos na ENTRADA das caixas que esta pessoa conectou.
+
+    🔵 22/10, pedido dele: o selo de nao lidas do E-mail no menu, junto do do
+    WhatsApp e do Chat interno, e os tres somados no cabecalho fechado.
+
+    🚨 MESMO FILTRO DA ABA "ENTRADA", E AGORA LITERALMENTE O MESMO: os dois
+    leem `FILTRO_ENTRADA`, que existe num lugar só. Até 22/10 esta função
+    tinha uma CÓPIA do `WHERE` da aba, e a cópia não conhecia
+    `sumida_do_gmail_em` -- o selo mostrava 61 não lidas onde a verdade eram
+    5, porque 56 delas já não existiam no Gmail. A docstring prometia "mesmo
+    filtro" enquanto o código fazia outro: `M12` dentro do próprio comentário
+    que eu escrevi.
+
+    ⚠️ Selo que conta arquivada, lixeira ou sumida manda a pessoa abrir a tela
+    para procurar uma mensagem que a tela não mostra. O `abas.minhas` existe
+    desde 24/09 com essa regra: a bolinha conta pela MESMA régua da lista.
+
+    ⚠️ Quem nunca conectou caixa recebe 0, nao erro: a rota serve todo mundo,
+    inclusive quem nao tem a EML_1.1. `_caixas_do_usuario` ja trata isso do
+    lado da tela; aqui a subconsulta vazia faz o mesmo sozinha.
+    """
+    linha = banco.um(
+        f"""SELECT count(*) AS quantas
+             FROM email_mensagem e
+            WHERE e.conta_id IN (SELECT id FROM email_conta
+                                  WHERE atendente_id = %s AND ativa)
+              AND NOT e.lida
+              AND {FILTRO_ENTRADA}""", (eu,))
+    return int(linha["quantas"] if linha else 0)
+
+
 @app.get("/api/eu/notificacoes")
 def minhas_notificacoes(usuario: dict = Depends(auth.get_usuario)):
     """🔵 24/09 -- o que o verificador de notificações (em toda tela) precisa.
@@ -3423,7 +3537,8 @@ def minhas_notificacoes(usuario: dict = Depends(auth.get_usuario)):
     eu = _atendente_do_usuario(usuario)
     if not eu:
         return {"ativa": False, "tom": "classico", "volume": 3,
-                "abas": {"minhas": 0, "time": 0}, "assumidas": [], "donas": []}
+                "abas": {"minhas": 0, "time": 0}, "email_nao_lidos": 0,
+                "assumidas": [], "donas": []}
     # 🚨 19/10: O SEGUNDO CARIMBO DO PAINEL, e ele é o que importa. O
     # primeiro (na lista da Caixa) só prova painel aberto para quem está NA
     # Caixa -- quem passa 20 min no Chat interno, na Fila ou em Contatos
@@ -3443,6 +3558,9 @@ def minhas_notificacoes(usuario: dict = Depends(auth.get_usuario)):
         "ativa": bool(linha and linha["notificacao_ativa"]),
         **preferencia.notificacao(eu),
         "abas": {"minhas": len(minhas), "time": len(do_time)},
+        # 🔵 22/10: o terceiro selo do menu. Sai daqui, e nao de rota
+        # propria, porque esta rota ja bate em toda tela -- um ritmo so.
+        "email_nao_lidos": _email_nao_lidos(eu),
         # Todas as que são MINHAS (lidas ou não): é o que separa "uma conversa
         # minha voltou a ter mensagem" de "chegou uma conversa NOVA para mim"
         # -- a nova toca mesmo acima do teto de 4 (decisão dele).

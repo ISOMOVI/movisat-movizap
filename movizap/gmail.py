@@ -343,6 +343,25 @@ def _mexer_rotulo(mensagem_id: int, poe: list[str], tira: list[str],
     if not linha:
         return {"ok": False, "motivo": "Mensagem não encontrada."}
 
+    _modificar_no_gmail(linha, poe, tira, o_que)
+    _espelhar_rotulos(mensagem_id, linha["conta_id"], poe, tira)
+    return {"ok": True}
+
+
+def _modificar_no_gmail(linha: dict, poe: list[str], tira: list[str],
+                        o_que: str) -> None:
+    """A CHAMADA DE REDE, e só ela. É aqui que os testes põem o duplo.
+
+    🚨 ESTA FUNÇÃO EXISTE PARA O DUPLO TER ONDE ENCOSTAR. Até 22/10 os testes
+    trocavam o `_mexer_rotulo` inteiro, o que cumpria a intenção deles ("nenhum
+    teste fala com o Gmail") enquanto aquela função era só rede. Quando o
+    espelho local entrou nela, o duplo passou a desligar **regra**, não só
+    rede: o teste de restaurar reprovou por causa do duplo, com o código certo.
+
+    Duplo se põe na BORDA. Duplo que cobre regra para de provar a regra, e
+    fica verde em produção quebrada ou vermelho em produção boa sem distinguir
+    os dois.
+    """
     token = _token_de_acesso(linha)
     corpo = {}
     if poe:
@@ -356,7 +375,45 @@ def _mexer_rotulo(mensagem_id: int, poe: list[str], tira: list[str],
     if r.status_code != 200:
         raise GmailIndisponivel(
             f"O Gmail recusou {o_que} ({r.status_code}).")
-    return {"ok": True}
+
+
+def _espelhar_rotulos(mensagem_id: int, conta_id: int,
+                      poe: list[str], tira: list[str]) -> None:
+    """Repete AQUI o que acabamos de mandar o Gmail fazer com os rótulos.
+
+    🚨 SEM ISTO O ESTADO LOCAL MENTE, e desde 22/10 ele decide em que CAIXA a
+    mensagem aparece (a Entrada exige o rótulo `INBOX`). O caso que a suíte
+    pegou: `restaurar` punha `INBOX` no Gmail, limpava `na_lixeira_desde`
+    aqui, e **não gravava o marcador** -- a mensagem restaurada ia para
+    Arquivadas em vez da Entrada.
+
+    É a mesma lição que o corpo da `restaurar` já carregava sobre o lado do
+    Gmail (*"o `untrash` sozinho não devolve o `INBOX`"*), agora do lado de
+    cá: operação que mexe em rótulo tem de mexer nos DOIS lugares, ou os dois
+    divergem e ninguém sabe qual é a verdade.
+
+    ⚠️ Fica num ponto único de propósito -- `_mexer_rotulo` é por onde
+    estrela, não-lida, arquivar, excluir e restaurar passam. Espelhar em cada
+    chamador é o defeito que o cabeçalho daquela função já proíbe.
+    """
+    for rotulo in poe or []:
+        marcador = banco.um(
+            """INSERT INTO email_marcador (conta_id, id_externo, nome, natureza)
+               VALUES (%s, %s, %s, 'sistema')
+               ON CONFLICT (conta_id, id_externo)
+               DO UPDATE SET nome = email_marcador.nome
+               RETURNING id""", (conta_id, rotulo, rotulo))["id"]
+        banco.executar(
+            """INSERT INTO email_mensagem_marcador (mensagem_id, marcador_id)
+               VALUES (%s, %s) ON CONFLICT DO NOTHING""",
+            (mensagem_id, marcador))
+    for rotulo in tira or []:
+        banco.executar(
+            """DELETE FROM email_mensagem_marcador mm
+                USING email_marcador mk
+                WHERE mk.id = mm.marcador_id AND mm.mensagem_id = %s
+                  AND mk.conta_id = %s AND mk.id_externo = %s""",
+            (mensagem_id, conta_id, rotulo))
 
 
 def estrela(mensagem_id: int, ligada: bool) -> dict:

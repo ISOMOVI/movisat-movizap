@@ -13,6 +13,16 @@ export const notificacoes = reactive({
   tom: 'classico',
   volume: 3,
   abas: { minhas: 0, time: 0 },
+  /* 🔵 22/10: os não lidos da ENTRADA do e-mail, para o selo do menu. Mora
+     aqui, e não numa chamada do MenuLateral, porque este estado já é
+     preenchido de 8 em 8 s em toda tela -- o selo do e-mail e o do WhatsApp
+     são o mesmo dado, lido uma vez.
+
+     🚨 DECLARADO AQUI DE PROPÓSITO, mesmo sendo `reactive`. Campo que só
+     existe depois da primeira resposta faz o menu desenhar `undefined` no
+     primeiro quadro, e deixa o arquivo que É a lista do estado sem dizer que
+     ele existe. */
+  email_nao_lidos: 0,
   assumidasNaoLidas: 0,
   /* 🔵 25/09: a conversa aberta na Caixa agora. Com a tela à vista, ela não
      toca (`decidirToque`); a Caixa escreve, o Notificador lê. */

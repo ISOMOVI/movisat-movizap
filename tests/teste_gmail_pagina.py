@@ -104,7 +104,20 @@ class TestAsDuasDatasNaoSeConfundem:
         # ⚠️ O `_sem_comentario` tira docstrings, e o SQL do INSERT vive numa
         # tripla aspa -- ele sumia junto. Aqui o fonte vai inteiro.
         corpo = FONTE.read_text(encoding="utf-8")
-        i = corpo.index("INSERT INTO email_mensagem")
+        # 🚨 A ÂNCORA TEM DE SER EXATA. Até 22/10 ela era
+        # `"INSERT INTO email_mensagem"`, que é PREFIXO de
+        # `"INSERT INTO email_mensagem_marcador"` -- e quando o espelho dos
+        # rótulos locais entrou no `gmail.py`, o `index()` passou a recortar a
+        # janela daquele outro INSERT. O teste reprovou com a regra que ele
+        # defende intacta: âncora que é prefixo de outro nome não identifica
+        # nada, é a mesma armadilha do `grep` por palavra suposta (`M15`).
+        #
+        # ⚠️ E a primeira correção que eu tentei foi
+        # `"INSERT INTO email_mensagem (conta_id"` -- âncora suposta trocada
+        # por outra âncora suposta, porque o INSERT real quebra a linha antes
+        # das colunas. O que distingue a tabela sem depender da formatação de
+        # hoje é o nome seguido de QUEBRA DE LINHA.
+        i = corpo.index("INSERT INTO email_mensagem\n")
         trecho = corpo[i:i + 1400]
         assert '_quando(_cabecalho(cabecalhos, "Date"))' in trecho, (
             "`enviado_em` deixou de vir do cabecalho Date -- a caixa passaria "

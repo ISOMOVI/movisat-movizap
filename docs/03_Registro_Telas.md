@@ -84,11 +84,11 @@ aparecem todos.
 | Código | Tela | Rota | Permissão | Fase |
 |---|---|---|---|---|
 | `INI_1.1` | Início | `/inicio` | `atendimento` | 1 |
-| `ATD_1.1` | Caixa de entrada | `/atendimento` | `atendimento` | 1 |
+| `ATD_1.1` | WhatsApp | `/atendimento` | `atendimento` | 1 |
 | `ATD_1.2` | Conversa | `/atendimento/{id}` | `atendimento` | 1 |
-| `ATD_1.3` | Fila | `/atendimento/fila` | `atendimento` | 1 |
+| `ATD_1.3` | Fila | `/atendimento/fila` | `equipe` | 1 |
 | `ATD_3.1` | Informativos | `/informativos` | `informativos` | 1 |
-| `ATD_5.1` | Histórico | `/atendimento/historico` | `atendimento` | 1 |
+| `ATD_5.1` | Histórico | `/atendimento/historico` | `equipe` | 1 |
 | `ATD_6.1` | Chat interno | `/chat` | `atendimento` | 1 |
 | `EML_1.1` | E-mail | `/email` | `atendimento` | 1 |
 | `CAD_1.1` | Clientes | `/cadastro/clientes` | `cadastro` | 1 |
@@ -166,7 +166,7 @@ O campo **`icone`** deste registro é o que o menu desenha, e ele é **a fonte
 |---|---|---|
 | `INI_1.1` Início | `bi-house` | menu |
 | `EML_1.1` E-mail | `bi-envelope` | menu |
-| `ATD_1.1` Caixa de entrada | `bi-chat-dots` | menu |
+| `ATD_1.1` WhatsApp | `bi-chat-dots` | menu |
 | `ATD_1.2` Conversa | `bi-chat-text` | fora do menu (rota com parâmetro) |
 | `ATD_1.3` Fila | `bi-list-ol` | menu |
 | `ATD_5.1` Histórico | `bi-clock-history` | menu |

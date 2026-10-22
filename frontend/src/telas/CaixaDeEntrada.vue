@@ -1583,7 +1583,7 @@ function pedirParaAssumir() {
   if (aberta.value.estado === 'resolvida') {
     perguntar(
       'Reabrir esta conversa?',
-      'Ela sai do Histórico, volta para a caixa de entrada e você passa a '
+      'Ela sai do Histórico, volta para o WhatsApp e você passa a '
         + 'responder por ela. O tempo de atendimento é recontado no próximo '
         + 'encerramento.',
       'Reabrir e assumir',
@@ -2868,7 +2868,7 @@ function carregarMidiasDaConversa(c) {
           <!-- O título e os dois números, que antes ficavam numa faixa acima
                da tela inteira. Aqui eles ficam ao lado do que contam. -->
           <div class="lista__titulo">
-            <h1>Caixa de entrada</h1>
+            <h1>WhatsApp</h1>
             <AjudaDaTela titulo="O que esta tela faz e o que a busca alcança">
               As conversas do WhatsApp, suas e da fila. A busca procura no nome
               do WhatsApp, no cadastro, no telefone (pedaço serve:

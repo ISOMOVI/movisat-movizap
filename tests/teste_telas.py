@@ -145,7 +145,7 @@ class TestIntegridadeDoRegistro:
 
 class TestBusca:
     def test_por_codigo_encontra(self):
-        assert telas.por_codigo("ATD_1.1")["titulo"] == "Caixa de entrada"
+        assert telas.por_codigo("ATD_1.1")["titulo"] == "WhatsApp"
 
     def test_por_codigo_estoura_em_codigo_inexistente(self):
         # estourar é de propósito: é erro de programação, não de uso
@@ -294,7 +294,14 @@ class TestPortaDoConfig:
                           and t.get("aba_de") != "CFG_0.1"}
         # 🔵 25/09: e a CFG_12.1 -- *"Owner e admin criam as do tipo
         # 'Padrões'"* (e os Formulários), o que exige ver a aba.
-        esperado = de_atendimento | {"CAD_2.1", "CAD_2.2", "CFG_10.1", "CFG_11.1",
+        # 🔵 22/10: a Fila e o Histórico passaram de `atendimento` para
+        # `equipe` (*"Itens Fila, Histórico não só aparecem para Admin e
+        # Owner"*). O admin continua vendo as duas, porque tem `equipe` -- mas
+        # elas deixaram de entrar por `de_atendimento`, e por isso vêm
+        # nomeadas aqui. O conjunto segue FECHADO: é esta linha que tem de
+        # mudar quando a decisão dele mudar, não o assert.
+        esperado = de_atendimento | {"ATD_1.3", "ATD_5.1",
+                                     "CAD_2.1", "CAD_2.2", "CFG_10.1", "CFG_11.1",
                                      "CFG_12.1"}
         assert vistas == esperado
         assert not vistas & {"CAD_1.1", "CAD_1.2", "ATD_3.1", "CFG_6.1"}

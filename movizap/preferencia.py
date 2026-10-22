@@ -54,17 +54,17 @@ CHAVE_ENTER_ENVIA = "enviar_com_enter"
 # ⚠️ `perigo` marca o que MUDA ESTADO sem perguntar. A tela usa isso para
 # avisar antes de a pessoa ligar, em vez de ela descobrir apertando.
 ATALHOS = [
-    {"acao": "proxima", "tela": "Caixa de entrada", "padrao": "j",
+    {"acao": "proxima", "tela": "WhatsApp", "padrao": "j",
      "descricao": "Próxima conversa", "perigo": False},
-    {"acao": "anterior", "tela": "Caixa de entrada", "padrao": "k",
+    {"acao": "anterior", "tela": "WhatsApp", "padrao": "k",
      "descricao": "Conversa anterior", "perigo": False},
-    {"acao": "buscar", "tela": "Caixa de entrada", "padrao": "/",
+    {"acao": "buscar", "tela": "WhatsApp", "padrao": "/",
      "descricao": "Ir para o campo de busca", "perigo": False},
-    {"acao": "assumir", "tela": "Caixa de entrada", "padrao": "a",
+    {"acao": "assumir", "tela": "WhatsApp", "padrao": "a",
      "descricao": "Assumir a conversa aberta",
      "perigo": True,
      "aviso": "Assume na hora, sem perguntar. A conversa passa a ser sua."},
-    {"acao": "concluir", "tela": "Caixa de entrada", "padrao": "c",
+    {"acao": "concluir", "tela": "WhatsApp", "padrao": "c",
      "descricao": "Abrir o concluir atendimento",
      "perigo": False,
      "aviso": "Abre a janela de concluir; quem conclui é o botão dela."},

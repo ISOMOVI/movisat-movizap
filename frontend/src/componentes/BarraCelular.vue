@@ -67,7 +67,7 @@ function encerrar() {
           {{ selo(notificacoes.abas.minhas) }}
         </span>
       </span>
-      Caixa de entrada
+      WhatsApp
     </RouterLink>
     <RouterLink v-if="temChat" to="/chat" class="barra-celular__item"
                 :class="{ 'barra-celular__item--aqui': noChat }">

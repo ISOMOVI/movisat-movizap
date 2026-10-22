@@ -69,6 +69,19 @@ def cena():
         """INSERT INTO email_mensagem (conta_id, id_externo, remetente, assunto)
            VALUES (%s, 'zz-externo-1', 'quem@fora.com', 'assunto secreto')
            RETURNING id""", (conta,))["id"]
+    # 🚨 O `INBOX` É PARTE DE "MENSAGEM NA CAIXA" desde 22/10: a Entrada passou
+    # a exigir o rótulo, que é como o Gmail diz onde a mensagem está. Sem ele
+    # esta seria uma mensagem ARQUIVADA, e o teste do dono reprovava por
+    # fixture irreal -- não por falha da barreira que ele defende.
+    rotulo = banco.um(
+        """INSERT INTO email_marcador (conta_id, id_externo, nome, natureza)
+           VALUES (%s, 'INBOX', 'INBOX', 'sistema')
+           ON CONFLICT (conta_id, id_externo)
+           DO UPDATE SET nome = email_marcador.nome RETURNING id""",
+        (conta,))["id"]
+    banco.executar(
+        """INSERT INTO email_mensagem_marcador (mensagem_id, marcador_id)
+           VALUES (%s, %s) ON CONFLICT DO NOTHING""", (msg, rotulo))
     yield {"conta": conta, "mensagem": msg, **ids}
     limpar()
 

@@ -2334,11 +2334,11 @@ conversa tentando andar na lista, sem ter como saber por quê.
 
 | Tela | Ação | Padrão | Age sem perguntar? |
 |---|---|---|---|
-| Caixa de entrada | próxima conversa | `j` | não |
-| Caixa de entrada | conversa anterior | `k` | não |
-| Caixa de entrada | ir para a busca | `/` | não |
-| Caixa de entrada | **assumir a conversa** | `a` | 🔴 **sim** |
-| Caixa de entrada | abrir o concluir | `c` | não — abre a janela |
+| WhatsApp | próxima conversa | `j` | não |
+| WhatsApp | conversa anterior | `k` | não |
+| WhatsApp | ir para a busca | `/` | não |
+| WhatsApp | **assumir a conversa** | `a` | 🔴 **sim** |
+| WhatsApp | abrir o concluir | `c` | não — abre a janela |
 | E-mail | próxima / anterior | `j` `k` | não |
 | E-mail | responder | `r` | não |
 | E-mail | **arquivar** | `e` | 🔴 **sim** |
@@ -4031,3 +4031,527 @@ grupos"*): a ficha de grupo com participantes e as quatro ações, os
 participantes oferecidos com o número como rótulo quando não houver nome, o
 "diga por que a lista está vazia" quando o Evolution recusa, e o registro da
 menção enviada.
+
+---
+
+## 22/10 — a aba Atendimento: ordem, nome, porta e os três selos
+
+🔵 **Pedido dele, numa frase:** *"Na Aba 'atendimento' do movizap, deixar na
+orde 'Caixa de entrada' (mudar nome para Whatsapp); abaixo colocar o 'Chat
+Interno' e em seguida 'E-mail's' - Itens Fila, Histórico não só aparecem para
+Admin e Owner; tbm veja que a quantidade de notificações que aparece no 'Chat
+interno' deve aparecer tbm na aba 'Whatsapp' (antiga 'Caixa de entrada' a esse
+ponto), conforme notificações da aba 'Minhas' e o mesmo para 'e-mail's' (não
+lidos) e na Aba "Atendimento', quando fechada informar a soma dos 3."*
+
+Confirmação dele antes de executar: *"siga com os ajustes do painel, isso mesmo
+somente visual para e-mail, pessoal deu feedback que é melhor nessa ordem"*.
+
+### O que entrou
+
+| ponta | onde | como |
+|---|---|---|
+| **"Caixa de entrada" virou "WhatsApp"** | `telas.py` (`ATD_1.1`) + 9 lugares que o operador lê | o menu é desenhado a partir de `/api/telas`, então o título sai do registro |
+| **Ordem: WhatsApp › Chat interno › E-mail** | `telas.py`, movendo os dicts | a ordem do menu **é** a ordem do registro — nenhum mecanismo novo |
+| **E-mail dentro do grupo Atendimento** | `EML_1.1` ganhou `grupo: "Atendimento"` | **só visual**, decisão dele |
+| **Fila e Histórico só para Admin e Owner** | `ATD_1.3` e `ATD_5.1`: `atendimento` → `equipe` | permissão que já existia; `PERFIS` dá `equipe` a owner + admin, e a mais ninguém |
+| **Selo de não lidas no WhatsApp** | `MenuLateral.vue`, lendo `notificacoes.abas.minhas` | o mesmo número da aba "Minhas" |
+| **Selo de não lidos no E-mail** | `_email_nao_lidos` em `/api/eu/notificacoes` | mesmo filtro da aba "Entrada" |
+| **Soma dos três no grupo fechado** | `somaDoGrupo` no cabeçalho | com as três parcelas nomeadas no `title` |
+
+Resultado medido, por perfil:
+
+| perfil | o que vê em Atendimento |
+|---|---|
+| `owner` | WhatsApp · Chat interno · E-mail · Fila · Histórico · Informativos · Ligações · Agendamentos |
+| `admin` | WhatsApp · Chat interno · E-mail · Fila · Histórico · Ligações · Agendamentos |
+| `atendimento` | WhatsApp · Chat interno · E-mail · Ligações · Agendamentos |
+
+### 🚨 `"jamais misturemos whatsapp com gmail"` — e por que isto não viola
+
+A decisão dele de 10/08 aposentou o código `ATD_4.1` e criou o módulo `EML`.
+Ela continua inteira: o E-mail tem código, rota, caixa, marcadores, fila e
+permissão próprios, e nada disso foi tocado. O que mudou é **um campo de
+apresentação** (`grupo`), que o cabeçalho do `telas.py` chama de apresentação,
+não permissão, desde 21/10. Ele confirmou isso em voz alta — *"isso mesmo
+somente visual para e-mail"* — antes da execução.
+
+O grupo `"E-mail"` continua declarado em `GRUPOS` e ficou **vazio**. O
+`MenuLateral` não desenha grupo sem tela visível, então ele sai da tela
+sozinho, como "Painéis › Operacional" desde 19/10. Três testes novos guardam
+isso: o grupo declarado, o fallback do prefixo ainda apontando para "E-mail"
+(para o caso de backend um passo atrás da tela), e o grupo ficar vazio.
+
+### 🚨 O selo não abre um terceiro ritmo de polling
+
+O `MenuLateral` já tinha chamada própria a cada 15 s (`/api/chat/nao-lidas` e
+`/api/chat/mencoes`). Os dois selos novos **não** criaram uma terceira: o
+`Notificador.vue` está montado no `App.vue`, roda em **toda tela** a cada 8 s,
+e o contador de e-mail entrou **na resposta que ele já busca**. Rota nova
+significaria um relógio a mais no navegador para o mesmo selo.
+
+⚠️ **O do Chat interno continua com chamada própria**, de propósito:
+`/api/chat/mencoes` exige a `ATD_6.1` e traz a conta de **menção** separada —
+a que muda a **cor** do selo. Unificar os três numa resposta é limpeza de
+outro dia, e exigiria mexer em permissão. A soma nunca discorda das parcelas
+(as três saem das mesmas três variáveis); só a parcela do chat pode estar
+alguns segundos mais velha.
+
+### 🚨 O filtro do selo de e-mail é o da aba "Entrada", e isso não é detalhe
+
+`_email_nao_lidos` conta `NOT lida AND NOT arquivada AND na_lixeira_desde IS
+NULL`, nas caixas que **esta pessoa** conectou e que estão `ativa` — o mesmo
+`WHERE` que `/api/email/mensagens?caixa=entrada` usa desde 17/09.
+
+Selo que contasse arquivada ou lixeira mandaria a pessoa abrir a tela para
+procurar uma mensagem que **a tela não mostra**. É a `M12` chegando pelo
+número em vez do texto. É a mesma regra que o `abas.minhas` segue desde 24/09
+("a bolinha não pode discordar da aba"), e foi por ela que este filtro foi
+escolhido em vez de um `count` simples.
+
+⚠️ **Quem não conectou caixa recebe `0`, não erro.** A rota serve todo mundo,
+inclusive quem não tem a `EML_1.1`, e um erro ali apagaria também o selo do
+WhatsApp e o do Chat interno, que vêm na mesma resposta. Medido: 61 não lidos
+na única caixa conectada do sistema (atendente 121), `0` para quem não tem
+caixa.
+
+🔴 **Hoje só existe UMA caixa de e-mail conectada em todo o MoviZap.** O selo
+de e-mail, na prática, só aparece para o owner até alguém mais conectar a sua.
+
+### 🚨 Dois defeitos meus, no mesmo dia, achados antes de ele ver
+
+**1. A varredura do rótulo era sensível a caixa.** O `grep` da Fase 0 procurou
+`"Caixa de entrada"` com C maiúsculo e achou 9 lugares. Três textos que o
+operador **lê** escrevem `"caixa de entrada"` em minúsculo, no meio da frase,
+e passaram batido:
+
+- `Fila.vue`, o `<AjudaDaTela>`: *"A caixa de entrada mostra o que é seu"*
+- `CaixaDeEntrada.vue`, o modal de reabrir: *"volta para a caixa de entrada"*
+- `Fila.vue`, o cabeçalho do arquivo
+
+O `M13` diz que a varredura lê a tela e não o seletor. **Falta o irmão disso:
+ler a tela também não é chutar a forma da palavra.** Varredura de rótulo se faz
+sem sensibilidade a caixa, sempre. Quem achou foi um segundo `grep -i` que eu
+rodei por outro motivo.
+
+**2. Eu lia um campo que ninguém gravava, e as duas suítes ficaram verdes.** O
+`MenuLateral` passou a ler `notificacoes.email_nao_lidos`; a rota passou a
+devolver o número; e o `ler()` do `Notificador` **copia campo a campo** — a
+linha do meio não existia. Em produção o selo do e-mail ficaria **sempre em
+branco** e a soma do grupo fechado sairia sem essa parcela.
+
+🚨 **Nenhuma das duas suítes podia pegar:** os testes do menu setam
+`notificacoes.email_nao_lidos` à mão, porque o que eles defendem é o **desenho**
+do selo; e nenhum teste ligava a resposta da rota ao estado. É a família do
+`M9` — placar verde não vê —, mas **por dentro do estado em vez do layout**. O
+que pegou foi ler a cadeia inteira antes do build: **quem devolve → quem grava
+→ quem lê**.
+
+É literalmente a lição que o `do_usuario` do `telas.py` carrega escrita no
+corpo desde 27/08: *"esta função monta a resposta À MÃO, e é por isso que o
+campo novo precisa estar listado aqui"*. Eu li esse comentário nesta mesma
+sessão, para outra coisa, e repeti o defeito que ele descreve.
+
+Os 4 testes que entraram em `notificacoes_2509.teste.js` defendem o elo —
+**e 3 deles foram provados vermelhos** com a linha removida de propósito, antes
+de eu deixá-los no verde. (O quarto, "zero é valor", passa dos dois jeitos: é
+documentação, não defesa, e está marcado como tal.)
+
+### O que foi deixado em pé de propósito
+
+- `Email.vue`: `INBOX: 'Caixa de entrada'` é a pasta do **Gmail**, outro
+  significado, dentro da tela de e-mail. Trocar ali seria **introduzir** o erro.
+  Conferido no bundle publicado: é a única ocorrência que sobrou.
+- Os comentários que **narram** história (`avatar.js`, `ChatInterno.vue`,
+  `App.vue`, `Clientes.vue`, `sessao.js`, `Inicio.vue`): diário não se
+  reescreve.
+- **Informativos, Ligações e Agendamentos** ficaram depois dos três, na ordem
+  em que já estavam. Ele não os citou; não inventei posição para eles.
+
+### Testes
+
+**1624 Python** (eram 1613) e **396 JS** (eram 392). Os novos:
+
+| arquivo | quantos | o que defende |
+|---|---|---|
+| `tests/teste_selo_email.py` | 9 | o filtro do contador, a caixa de outra pessoa, caixa inativa, e quem não tem caixa receber 0 |
+| `frontend/src/selos_menu_2210.teste.js` | 13 | os três selos, o zero não desenhar, 99+, a soma no grupo fechado, e a cor da menção ficar só no chat |
+| `notificacoes_2509.teste.js` | +4 | o elo que faltava (3 provados vermelhos sem a correção) |
+| `tests/teste_menu_grupos.py` | +2 | o fallback do `EML` e o grupo "E-mail" declarado e vazio |
+
+Alterados por mudança pedida, não por conserto: `teste_telas.py` (o título, e
+o conjunto fechado do admin, que agora nomeia `ATD_1.3`/`ATD_5.1` porque elas
+saíram de `permissao == "atendimento"`), `menu_grupos_2110.teste.js` e
+`telas_novas.teste.js` (fixtures que imitam o backend).
+
+### Ordem de publicação (`M16`)
+
+Backend primeiro: `telas.py` + `main.py` → restart → conferido ao vivo.
+Depois `preferencia.py` (o rótulo dos 5 atalhos, que é backend e eu quase
+deixei na fase do frontend) → segundo restart. Só então `npm run build`. Em
+nenhum momento a tela pediu o que o servidor ainda não sabia responder.
+
+### 🔴 Falta dele — `M9`, e nada aqui substitui
+
+1. **Abrir o menu** e ver a ordem, o nome "WhatsApp" e os três selos. Nenhum
+   teste vê o selo caber nos 18px do item, nem a cor, nem se ele cobre o
+   rótulo.
+2. **Fechar o grupo "Atendimento"** e conferir a soma — e que o `title` nomeia
+   as três parcelas.
+3. **Entrar como `atendimento`** e confirmar que Fila e Histórico não aparecem.
+4. **Abrir a CFG_6.1 (Atalhos)** e ver se os 5 atalhos agora dizem "WhatsApp".
+
+---
+
+## 22/10, segunda volta — o e-mail: a mensagem que sumiu do Gmail
+
+🔵 **Pedido dele:** *"agora parece que o e-mail não esta validando as não lidas
+corretamente conforme integração gmail, talvez esteja considerando lixeira
+ainda, o que não pode, evidentemnte"*.
+
+**O palpite acertou o alvo e errou a flag.** A lixeira estava sendo excluída
+corretamente; quem entrava era a irmã dela.
+
+### A causa
+
+A varredura (`gmail.sincronizar_exclusoes`, cron de 15 min — dados frescos, não
+era defasagem) grava **três** estados, e o filtro das abas conhecia **dois**:
+
+| estado no Gmail | flag | o filtro conhecia? |
+|---|---|---|
+| ativa | as duas em `NULL` | sim |
+| na lixeira / spam | `na_lixeira_desde` | sim |
+| **não existe mais** | `sumida_do_gmail_em` | **não** |
+
+Medido na caixa real (conta 2, 826 mensagens):
+
+| | antes | depois |
+|---|---|---|
+| **selo do menu** | **61** | **5** |
+| aba Entrada | 394 msgs, **73 sumidas** | 321 msgs, **0 sumidas** |
+| aba Lixeira | 432 | 505 (`+73`) |
+
+As contas fecham: 394 − 73 = 321 e 432 + 73 = 505.
+
+⚠️ **O sincronismo de leitura nunca foi o problema:** `lida` e o rótulo
+`UNREAD` do Gmail concordam **perfeitamente** — zero divergências em 826
+mensagens, nos dois sentidos. E as 358 não lidas que estão na lixeira sempre
+foram excluídas certo.
+
+### 🚨 O defeito era da TELA, e o selo só pôs um número em cima dele
+
+A aba "Entrada" mostrava as 73 desde sempre; a rolagem da lista escondia. Ao
+criar o selo (22/10, primeira volta) eu copiei o `WHERE` da aba **de propósito**
+— "a bolinha não pode discordar da aba" — e **herdei o defeito junto**.
+
+É da família do `M15`: eu li o `WHERE` e copiei, em vez de ler **o que cada
+flag significa**. A coluna `sumida_do_gmail_em` estava no `SELECT` logo ao
+lado, com um comentário dizendo que é *"sumiu de vez, isto é só a nossa
+cópia"*. Passei por ele e não perguntei por que não estava no `WHERE`.
+
+### 🚨 O segundo buraco, pelo outro lado
+
+A aba Lixeira filtrava só por `na_lixeira_desde`. A mensagem que foi de ativa a
+inexistente **entre duas varreduras** (apagada de vez no Gmail, ou purgada
+pelos 30 dias) nunca passou pela lixeira — e ficava **presa na Entrada para
+sempre**. Eram as 73. Das 266 sumidas, as outras 193 tinham as duas flags e
+caíam na Lixeira certo.
+
+🔵 **Decisão dele (opção 1):** a sumida vai para a **Lixeira**, marcada como
+*"só a nossa cópia"*. Esconder de todas as abas perderia de vista a única cópia
+que existe — o Gmail já não tem a dele, e o conteúdo (texto, HTML, anexos) foi
+baixado na importação.
+
+### A correção
+
+| parte | o que mudou |
+|---|---|
+| **A** | Entrada e Arquivadas passam a exigir `sumida_do_gmail_em IS NULL` |
+| **A** | Lixeira passa a `(na_lixeira_desde IS NOT NULL OR sumida_do_gmail_em IS NOT NULL)` — **sem isso as 73 desapareceriam de todas as abas**, que é pior que estarem na errada |
+| **B** | `_email_nao_lidos` usa o mesmo filtro |
+| **C** | `FILTRO_ENTRADA` / `FILTRO_ARQUIVADAS` / `FILTRO_LIXEIRA` + `filtro_da_caixa()`, num lugar só |
+
+### 🚨 A parte C importa mais que A e B
+
+O filtro existia **copiado à mão em dois lugares**, e foi isso que deixou o
+selo errar junto. Agora é **um** fragmento nomeado, lido pela lista e pelo
+contador, e dois testes defendem a **causa**:
+
+- `test_o_selo_e_igual_ao_que_a_aba_entrada_mostra` — não afirma nenhum
+  filtro; afirma que os **dois caminhos dão o mesmo número**
+- `test_a_lista_e_o_contador_leem_a_MESMA_constante` — lê o próprio `main.py` e
+  reprova quem voltar a escrever as condições à mão
+
+⚠️ **Limite honesto desses dois:** eles pegam **divergência**, não um filtro
+errado-mas-compartilhado. Com o filtro antigo nos dois lugares, o primeiro
+passa. Quem pega filtro errado são os casos nomeados por estado
+(`test_a_sumida_nao_aparece_na_entrada` e irmãos) — e desses, **6 de 14 foram
+provados vermelhos** com o filtro antigo restaurado de propósito.
+
+### 🚨 A tela: quatro botões que mentiam, e fui eu que os tornei alcançáveis
+
+Para uma mensagem que não existe mais no Gmail, **toda** escrita devolve
+**404** (`messages/{id}/modify` → `GmailIndisponivel` → 503 na tela): "marcar
+não lida", "Arquivar", "Excluir" e "Restaurar".
+
+E o pior: o botão **"Restaurar"** ficava **colado no aviso** que diz
+*"Não dá para restaurar lá"*. `M12` na forma mais crua que existe.
+
+Isso era **latente** antes de hoje — a sumida ficava presa na Entrada, onde o
+botão era "Excluir". **Mover as sumidas para a Lixeira é o que pôs o
+"Restaurar" na frente delas.** Eu criei o alcance, então consertar faz parte da
+mudança, não é escopo novo.
+
+O que a tela ganhou:
+
+- **chip "só a nossa cópia"** na lista — antes o aviso só existia com a
+  mensagem **aberta**, e na Lixeira convivem agora duas coisas diferentes (a
+  que dá para restaurar e a que não existe mais). Sem a marca, distinguir
+  custava um clique por mensagem
+- um `computed` só, `semEscritaNoGmail`, governando as quatro ações — quatro
+  condições separadas divergiriam na primeira correção
+- **"Responder" FICA**: compõe mensagem nova, não toca na original. É a única
+  ação que ainda faz sentido sobre uma cópia órfã
+- o aviso passou a dizer o que saiu e por quê (*"não dá para restaurar,
+  arquivar nem excluir lá; só responder"*) — com os botões fora, ele é a
+  **única** explicação, e botão que desaparece sem palavra é o rótulo que
+  mente, pelo avesso
+
+### Testes
+
+**1638 Python** (eram 1624) e **406 JS** (eram 396).
+
+| arquivo | quantos | provados vermelhos sem a correção |
+|---|---|---|
+| `tests/teste_filtro_sumida.py` | 14 | **6** |
+| `frontend/src/email_sumida_2210.teste.js` | 10 | **5** |
+
+⚠️ **Um defeito na primeira versão do meu próprio teste JS:** a fixture da
+sumida vinha com `na_lixeira_desde` preenchido, e nesse caso "Arquivar" e
+"Excluir" **já estavam escondidos pela condição antiga** — os testes passavam
+sem defender nada. As 73 reais têm `na_lixeira_desde` **nulo**. Corrigida a
+fixture para o caso real, os vermelhos subiram de 4 para 5.
+
+### Ordem de publicação (`M16`)
+
+Backend (`main.py`) → restart → conferido ao vivo (selo 5, abas 321/0/505) →
+testes → só então `npm run build`.
+
+⚠️ **Houve uma janela**, entre o restart e o build, em que o backend já movia
+as sumidas para a Lixeira e o frontend publicado era o antigo: nela, o botão
+"Restaurar" estava à vista para as 73. Foi curta e o build a fechou, mas é o
+mesmo padrão do `M16` — meio deploy não é "metade pronta". Da próxima vez numa
+mudança que **move dados entre telas**, o frontend tem de ir no mesmo passo.
+
+### 🔴 Falta dele (`M9`)
+
+1. **Comparar o selo com o Gmail.** Deve dizer **5**. Se o seu Gmail mostrar
+   outro número, a causa é outra e eu volto a medir antes de mexer — esta é a
+   confirmação que só ele pode dar.
+2. **Abrir a Lixeira**: as 73 novas com o chip *"só a nossa cópia"*, as outras
+   sem.
+3. **Abrir uma delas**: sem Restaurar, Arquivar e não-lida; com Responder e o
+   aviso.
+4. **Abrir uma que está só na lixeira**: "Restaurar" tem de estar lá, e
+   funcionar.
+5. **Conferir a Entrada**: 321 mensagens, nenhuma com o chip.
+
+---
+
+## 22/10, terceira volta — as quatro caixas pelo modelo do Gmail
+
+🔵 **Dois pedidos dele, no mesmo passo:** *"siga com a 2"* (a Entrada e o selo
+passam a exigir o rótulo `INBOX`) e *"enviadas devem ter seu proprio grupo,
+igual no Gmail"*.
+
+🔵 **E o porquê, que ele deu:** *"precsamos ter ela funcionando, depois dos
+formularios, vamos ter caixas fixas logadas compartilhadas, então para
+chegarmos la, precisamos que funciona a pessoal"*. A caixa pessoal é o ensaio
+da caixa compartilhada — defeito que hoje é chato com uma conta, com várias
+viraria outro problema.
+
+### ⚠️ Antes de tudo: um número que eu dei errado
+
+Na volta anterior eu afirmei que *"a aba Entrada está mostrando 219 mensagens
+enviadas"*. **Estava errado.** Eu medi chamando a rota **sem** o parâmetro
+`marcador`, e a tela manda `marcador=INBOX` — dá para ver no log:
+`GET /api/email/mensagens?marcador=INBOX&busca=&caixa=lixeira&conta_id=2`.
+
+| | |
+|---|---|
+| Entrada **como a tela pede** | 101 msgs, **0** não lidas |
+| Entrada como eu medi (sem marcador) | 321 msgs, 1 não lida |
+
+A aba Entrada **nunca** mostrou as enviadas. O defeito real era mais estreito:
+**a tela filtrava por `INBOX` e o selo não** — e por isso o selo dizia 1 onde a
+tela e o Gmail diziam 0. É o mesmo erro de método do `M15` outra vez: medi uma
+coisa parecida com a que importava.
+
+### 🚨 Mas a medição errada achou um defeito verdadeiro: a duplicação
+
+"Entrada" existia em **dois controles** — as abas de caixa
+(Entrada/Arquivadas/Lixeira) e a lista de **marcadores** (Caixa de
+entrada/Enviados/Com estrela/...) — e a tela mandava **os dois juntos** ao
+servidor.
+
+Consequência medida: **11 mensagens enviadas que estão na lixeira ficavam
+invisíveis**, porque a aba Lixeira era filtrada pelo rótulo da Entrada. E a
+barra "onde estou" escrevia *"Caixa de entrada"* **com a Lixeira aberta** —
+`M12` que ninguém viu, porque os dois controles concordavam por acidente
+enquanto o marcador começava em `INBOX`.
+
+🔵 O modelo que ele pediu, e que resolve os dois: **caixa é LUGAR, marcador é
+ETIQUETA.** `INBOX` e `SENT` saem da lista de marcadores porque viraram lugar;
+sobram "Com estrela", "Importantes" e as etiquetas dele.
+
+### As quatro caixas, e a ordem que garante "exatamente uma"
+
+| precedência | condição | caixa |
+|---|---|---|
+| 1 | `na_lixeira_desde` ou `sumida_do_gmail_em` | **Lixeira** |
+| 2 | nossa coluna `arquivada` | **Arquivadas** |
+| 3 | tem `INBOX` | **Entrada** |
+| 4 | tem `SENT` e **não** tem `INBOX` | **Enviados** |
+| 5 | não tem nenhum dos dois | **Arquivadas** (= arquivada no Gmail) |
+
+Medido na caixa real para decidir cada linha:
+
+- **1** mensagem tem `INBOX` **e** `SENT` → a Entrada ganha (linha 4 exige
+  `NOT INBOX`). Isso mantém "exatamente uma caixa" verdadeiro; o Gmail
+  mostraria nas duas, e essa é a diferença aceita de propósito.
+- **1** mensagem não tem nenhum dos dois → é o *"Alerta de segurança"* do
+  Google, não lido desde 22/04, **arquivado no Gmail**. Sem a linha 5 ela
+  cairia em caixa **nenhuma** — o mesmo defeito das 73 sumidas, que custou a
+  volta anterior do mesmo dia. **Foi por ter acabado de errar nisso que eu
+  procurei por ela.**
+- **0** mensagens têm a coluna `arquivada` — a aba Arquivadas estava vazia, e
+  ganhou a primeira ocupante de verdade.
+
+⚠️ **A linha 2 parece redundante e não é:** arquivar pelo painel chama o Gmail
+para tirar o `INBOX` **lá**, mas não apaga o marcador **local** (só o `UNREAD`
+é apagado, em `marcar_lida`). Sem a nossa coluna com precedência, a mensagem
+arquivada pelo painel voltaria para a Entrada.
+
+### O resultado
+
+| caixa | antes | agora |
+|---|---|---|
+| **Entrada** | 101 (via marcador) | **101** |
+| **Enviados** | só via marcador | **219** |
+| **Arquivadas** | 0 | **1** |
+| **Lixeira** | 505, sem as enviadas | **505**, com as **11** |
+| **selo** | **1** | **0** — bate com o Gmail |
+
+**826 mensagens, cada uma em exatamente uma caixa, soma igual ao total.** Não é
+inspeção: é consulta que confere as quatro por mensagem.
+
+### 🚨 O limite que fica escrito no código
+
+Os rótulos do Gmail são gravados **uma vez, na importação, e nunca mais
+atualizados** — medido: existe **um** `INSERT` (no caminho de importação de
+`gmail.ler`) e **um** `DELETE` (do `UNREAD`, em `marcar_lida`). A varredura de
+15 min compara **ids**, não rótulos.
+
+Então `INBOX` é a **foto do dia da importação**: arquivar no Gmail *depois*
+disso não chega até nós. Hoje isso não aparece, porque a mensagem que motivou
+a correção já estava arquivada **antes** de entrar. Ressincronizar rótulos é
+frente própria, mais cara (o `docs/02` registra a régua: *"listar é barato,
+baixar é caro"*), e está anotada — não prometida.
+
+### Testes
+
+**1651 Python** (eram 1638) e **410 JS** (eram 406).
+
+| arquivo | o que entrou |
+|---|---|
+| `tests/teste_filtro_sumida.py` | `TestEnviadosEhLugar` (6) + 4 casos de rótulo na parametrização de "exatamente uma caixa" |
+| `tests/teste_selo_email.py` | `TestOSeloEhSoDaENTRADA` (3): sem `INBOX` não conta, enviada não conta, com `INBOX` conta |
+| `frontend/src/email_sumida_2210.teste.js` | as 4 abas na ordem, as etiquetas **sem** Entrada/Enviados, e o pedido mandando `caixa=lixeira&marcador=` |
+
+🚨 **As fixtures dos testes precisaram ganhar RÓTULO, e isso é parte do
+conserto.** Antes, "mensagem na Entrada" era `NOT arquivada AND viva`, e uma
+linha sem rótulo nenhum servia de fixture. Com a Entrada exigindo `INBOX`, essa
+linha passa a cair em Arquivadas — **e está certo**. A fixture é que era
+irreal: mensagem de caixa de entrada sempre tem `INBOX` no Gmail. Afrouxar o
+filtro para a fixture passar seria escrever o defeito no código para agradar o
+teste.
+
+⚠️ **E um teste JS que precisou de aparato novo:** metade do defeito não estava
+no que a tela **desenhava**, e sim no que ela **mandava** (`caixa=lixeira` junto
+com `marcador=INBOX`). O duplo de `api.get` passou a **registrar as rotas
+pedidas** — sem isso nenhum teste de DOM veria: a lista só vinha vazia, e vazio
+parece "não tem mensagem".
+
+### 🔴 Falta dele (`M9`)
+
+1. **O selo deve estar em branco** (0). Confirmar contra o Gmail.
+2. **As quatro abas**: Entrada 101 · Enviados 219 · Arquivadas 1 · Lixeira 505.
+3. **A lista de etiquetas** não deve mais oferecer "Caixa de entrada" nem
+   "Enviados" — só "Com estrela", "Importantes" e as dele.
+4. **Abrir a Lixeira e procurar uma enviada**: eram 11 invisíveis.
+5. **A barra de cima** deve dizer o lugar onde ele está, não "Caixa de
+   entrada" em toda aba.
+
+### O que a suíte achou nesta volta — e só uma coisa era fixture
+
+**1. 🚨 Defeito de produção que esta mudança IA INTRODUZIR.** `restaurar()`
+punha o `INBOX` **no Gmail** e limpava `na_lixeira_desde` **aqui**, mas nunca
+gravava o marcador local. Com a Entrada passando a exigir `INBOX`, restaurar da
+lixeira mandaria a mensagem para **Arquivadas**.
+
+A ironia está escrita no corpo da própria `restaurar`, desde 17/09, sobre o
+outro lado: *"o `untrash` SOZINHO NÃO DEVOLVE O `INBOX` (...) sem ele a pessoa
+clicaria 'restaurar' e o e-mail sumiria de vez visualmente, mesmo sem ter sido
+apagado."* Mesmo defeito, mesma frase, outro lado da casa.
+
+Consertado no **ponto único** (`_mexer_rotulo`, por onde estrela, não-lida,
+arquivar, excluir e restaurar passam — o cabeçalho dela já proíbe cópias, pela
+lição do `_condicao_busca`). Isso corrigiu de passagem três buracos que ninguém
+pediu: `arquivar(True)` deixava o `INBOX` local, `marcar_nao_lida` gravava
+`lida = false` sem o marcador `UNREAD`, e `excluir` não gravava `TRASH`.
+
+**2. 🚨 O DUPLO DOS TESTES FICOU IRREAL, por minha causa.** Os dois arquivos de
+teste trocavam `gmail._mexer_rotulo` inteiro por um falso, e a docstring deles
+diz a intenção: *"Nenhum teste fala com o Gmail."* Enquanto aquela função era
+**só rede**, trocá-la inteira cumpria isso. Quando o espelho local entrou nela,
+o duplo passou a desligar **regra** junto com a rede — e o teste de restaurar
+**reprovou com o código certo**.
+
+A chamada HTTP saiu para `_modificar_no_gmail`, e o duplo desceu para lá. Agora
+os testes não tocam a rede **e** exercitam o espelho de verdade: ganharam
+cobertura em vez de perder.
+
+> **A regra que fica: duplo se põe na BORDA, nunca no meio da regra.** Duplo
+> que cobre regra para de provar a regra — e o sintoma é o pior que existe,
+> porque fica verde em produção quebrada ou vermelho em produção boa, sem
+> distinguir os dois.
+
+**3. Fixtures irreais em quatro arquivos** (`teste_selo_email`,
+`teste_filtro_sumida`, `teste_email_acoes`, `teste_caixa_por_atendente`):
+mensagens nascendo **sem rótulo nenhum**. Corrigidas as **fixtures**, não o
+filtro — mensagem de caixa de entrada sempre tem `INBOX` no Gmail, e afrouxar o
+filtro para a fixture passar seria escrever o defeito no código para agradar o
+teste, sendo que o defeito era exatamente contar uma mensagem arquivada.
+
+**4. 🚨 Uma âncora de teste que era PREFIXO de outro nome.**
+`teste_gmail_pagina.py` recorta o fonte do `gmail.py` com
+`corpo.index("INSERT INTO email_mensagem")` — e isso casa com
+`"INSERT INTO email_mensagem_marcador"`. A função nova entrou **antes** no
+arquivo, o `index()` passou a recortar a janela errada, e o teste reprovou com a
+regra que ele defende (`enviado_em` vem do cabeçalho `Date`) **intacta**.
+
+⚠️ **E nesse eu errei duas vezes:** troquei a âncora suposta por **outra âncora
+suposta** (`"INSERT INTO email_mensagem (conta_id"`), chutando a formatação — o
+`INSERT` real quebra a linha antes das colunas. Só acertou quando fui **ler** o
+arquivo: a âncora exata é o nome da tabela seguido de **quebra de linha**. É o
+`M15` dentro da correção do próprio `M15`.
+
+### Ordem de publicação (`M16`)
+
+`main.py` → restart → conferido ao vivo → `gmail.py` (o espelho) → **segundo
+restart** → suítes fechadas → `npm run build`. O backend nunca ficou atrás da
+tela.
+
+### Placar
+
+**1651 Python** (eram 1638) e **410 JS** (eram 406).

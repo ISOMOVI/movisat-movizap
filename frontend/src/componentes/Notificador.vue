@@ -85,6 +85,11 @@ async function ler() {
   notificacoes.tom = r.tom
   notificacoes.volume = r.volume
   notificacoes.abas = r.abas || { minhas: 0, time: 0 }
+  /* 🚨 ESTA CÓPIA É CAMPO A CAMPO, e é por isso que esta linha tem de existir.
+     Em 22/10 o selo do e-mail no menu ficou em branco por ela faltar: a rota
+     devolvia o número e o menu o lia, mas nada no meio gravava. Suíte verde
+     dos dois lados -- quem pega isto é ler a cadeia, não o placar. */
+  notificacoes.email_nao_lidos = r.email_nao_lidos || 0
   notificacoes.assumidasNaoLidas = (r.assumidas || []).length
 
   // 🔵 25/09: a conversa aberta com a tela à vista não toca.

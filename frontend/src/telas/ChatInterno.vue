@@ -1081,7 +1081,7 @@ function quando(iso) {
     <p class="barra-interna" role="note">
       <i class="bi bi-shield-lock-fill" aria-hidden="true"></i>
       <strong>Conversa interna.</strong>
-      <span>Nada aqui chega ao cliente — para falar com ele, use a Caixa de entrada.</span>
+      <span>Nada aqui chega ao cliente — para falar com ele, use o WhatsApp.</span>
     </p>
 
     <header class="tela__cabecalho">

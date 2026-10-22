@@ -27,7 +27,17 @@ import { codigosPermitidos } from '../estado/sessao.js'
 const marcadores = ref([])
 const mensagens = ref([])
 const aberta = ref(null)
-const marcadorAtual = ref('INBOX')
+/* 🚨 VAZIO, não 'INBOX'. Quem diz em que LUGAR estou é `caixaAtual`; o
+   marcador é etiqueta, e começar numa etiqueta filtrava a caixa toda por ela.
+   Vazio = "sem filtro de etiqueta", e o backend pula o `EXISTS` quando vem
+   assim. */
+const marcadorAtual = ref('')
+
+/* O nome do LUGAR onde estou, mais a etiqueta se houver uma escolhida. */
+const NOMES_DE_CAIXA = {
+  entrada: 'Entrada', enviados: 'Enviados',
+  arquivadas: 'Arquivadas', lixeira: 'Lixeira',
+}
 // 🔵 17/09: as duas abas que faltavam -- "arquivada" existia desde sempre
 // sem tela nenhuma para ver de novo, e "sumiu do Gmail" não era detectado.
 const caixaAtual = ref('entrada')
@@ -315,6 +325,13 @@ async function baixarAnexo(indice, anexo) {
 /* 🚨 A API do Gmail devolve identificador interno: `INBOX`, `CATEGORY_UPDATES`,
    `UNREAD`. Ninguém que abre uma caixa de e-mail deveria descobrir que existe
    uma API por trás -- aqui eles viram nome de gente. */
+/* 🚨 22/10: a mensagem que sumiu do Gmail não aceita NENHUMA escrita lá --
+   `modify` devolve 404 e o painel mostra 503. Antes de hoje ela ficava presa
+   na aba Entrada; agora está na Lixeira, ao lado do botão "Restaurar", e esse
+   botão ficava colado num aviso dizendo que restaurar não dá. Um `computed` só
+   governa as quatro ações, para não haver quatro condições divergindo. */
+const semEscritaNoGmail = computed(() => Boolean(aberta.value?.sumida_do_gmail_em))
+
 const NOMES = {
   INBOX: 'Caixa de entrada',
   SENT: 'Enviados',
@@ -337,11 +354,23 @@ const ESTRELAS_DO_GMAIL = [
   'GREEN_STAR', 'YELLOW_BANG', 'ORANGE_GUILLEMET', 'RED_BANG',
   'PURPLE_QUESTION', 'BLUE_INFO', 'GREEN_CHECK',
 ]
-const ESCONDIDOS = ['SPAM', 'TRASH', 'CHAT', 'DRAFT', ...ESTRELAS_DO_GMAIL]
+/* 🚨 22/10: `INBOX` e `SENT` ENTRARAM NESTA LISTA porque viraram CAIXA, não
+   etiqueta (*"enviadas devem ter seu proprio grupo, igual no Gmail"*). Antes
+   "Entrada" aparecia em dois controles ao mesmo tempo, e a tela mandava os
+   dois juntos -- era isso que escondia 11 enviadas dentro da Lixeira. */
+const ESCONDIDOS = ['SPAM', 'TRASH', 'CHAT', 'DRAFT', 'INBOX', 'SENT',
+                    ...ESTRELAS_DO_GMAIL]
 
 function rotulo(m) {
   return NOMES[m.id_externo] || m.nome
 }
+
+const ondeEstou = computed(() => {
+  const lugar = NOMES_DE_CAIXA[caixaAtual.value] || 'Entrada'
+  const etiqueta = marcadorAtual.value
+  if (!etiqueta) return lugar
+  return `${lugar} › ${NOMES[etiqueta] || etiqueta}`
+})
 
 const visiveis = computed(() =>
   marcadores.value
@@ -408,7 +437,8 @@ async function trocarCaixa(id) {
   localStorage.setItem('movizap.email.caixa', String(id))
   aberta.value = null
   marcadas.value = []
-  marcadorAtual.value = 'INBOX'
+  marcadorAtual.value = ''
+  caixaAtual.value = 'entrada'
   await carregarMarcadores()
   await carregar()
 }
@@ -679,12 +709,19 @@ async function buscarNovos() {
 function trocar(id) {
   marcadorAtual.value = id
   aberta.value = null
+  marcadas.value = []
   carregar()
 }
 
 function trocarAba(id) {
   caixaAtual.value = id
   aberta.value = null
+  /* 🚨 SOLTAR A ETIQUETA AO TROCAR DE LUGAR. Sem esta linha, ir para a
+     Lixeira mantinha `marcador=INBOX` e a Lixeira mostrava só o que tinha o
+     rótulo da Entrada -- 11 mensagens enviadas ficavam invisíveis lá dentro
+     (medido em 22/10). Etiqueta escolhida num lugar não segue para o outro. */
+  marcadorAtual.value = ''
+  marcadas.value = []
   carregar()
 }
 
@@ -801,10 +838,17 @@ onUnmounted(() => document.removeEventListener('keydown', atalho))
 
     <!-- 🔵 17/09: Entrada, Arquivadas e Lixeira. As duas últimas não tinham
          tela nenhuma antes -- "arquivada" só tirava da vista, sem lugar
-         para ver de novo, e exclusão no Gmail nem era detectada. -->
+         para ver de novo, e exclusão no Gmail nem era detectada.
+
+         🔵 22/10: entrou **Enviados**, pedido dele (*"enviadas devem ter seu
+         proprio grupo, igual no Gmail"*), na posição que o Gmail usa. Ela
+         existia só como marcador, e por isso o único jeito de ver as
+         enviadas era trocar de etiqueta -- com "Entrada" aparecendo nos dois
+         controles ao mesmo tempo. -->
     <div class="caixas caixas--secundaria" role="tablist">
       <button v-for="ab in [
                 { id: 'entrada', rotulo: 'Entrada', icone: 'bi-inbox' },
+                { id: 'enviados', rotulo: 'Enviados', icone: 'bi-send' },
                 { id: 'arquivadas', rotulo: 'Arquivadas', icone: 'bi-archive' },
                 { id: 'lixeira', rotulo: 'Lixeira', icone: 'bi-trash' },
               ]"
@@ -827,7 +871,12 @@ onUnmounted(() => document.removeEventListener('keydown', atalho))
                 @click="alternarMenu">
           <i class="bi bi-list" aria-hidden="true"></i>
         </button>
-        <strong>{{ NOMES[marcadorAtual] || marcadorAtual || 'Todas' }}</strong>
+        <!-- 🚨 ESTA LINHA DIZIA A ETIQUETA, NÃO O LUGAR, e com o marcador
+             começando em 'INBOX' ela escrevia "Caixa de entrada" mesmo com a
+             aba Lixeira aberta: `M12`, e ninguém tinha visto porque os dois
+             controles concordavam por acidente. Agora diz o lugar, e a
+             etiqueta só entra quando há uma escolhida. -->
+        <strong>{{ ondeEstou }}</strong>
         <span class="apagado pequeno">{{ mensagens.length }} mensagens</span>
       </div>
 
@@ -1121,6 +1170,15 @@ onUnmounted(() => document.removeEventListener('keydown', atalho))
               <span v-if="m.cliente_nome" class="chip chip--pequeno email__cliente">
                 {{ m.cliente_nome }}
               </span>
+              <!-- 🔵 22/10: na Lixeira convivem duas coisas diferentes -- a
+                   que dá para restaurar no Gmail e a que já não existe lá.
+                   Sem esta marca, descobrir qual é qual custa um clique por
+                   mensagem, e o aviso só aparecia com ela aberta. -->
+              <span v-if="m.sumida_do_gmail_em"
+                    class="chip chip--pequeno email__orfa"
+                    title="Removida do Gmail — esta é a única cópia que existe">
+                só a nossa cópia
+              </span>
             </span>
           </button>
         </div>
@@ -1144,7 +1202,8 @@ onUnmounted(() => document.removeEventListener('keydown', atalho))
                         title="Responder (r)" @click="responder(false)">
                   <i class="bi bi-reply" aria-hidden="true"></i> Responder
                 </button>
-                <button class="botao botao--pequeno botao--fantasma botao--icone"
+                <button v-if="!semEscritaNoGmail"
+                        class="botao botao--pequeno botao--fantasma botao--icone"
                         type="button" title="Marcar como não lida (u)"
                         aria-label="Marcar como não lida"
                         @click="marcarNaoLida(aberta)">
@@ -1154,7 +1213,7 @@ onUnmounted(() => document.removeEventListener('keydown', atalho))
                      e pela régua de 28/08 ela tem palavra. O envelope de
                      "não lida" fica só ícone -- é convenção de caixa de
                      correio e o atalho `u` está no ícone de ajuda. -->
-                <button v-if="!aberta.na_lixeira_desde"
+                <button v-if="!aberta.na_lixeira_desde && !semEscritaNoGmail"
                         class="botao botao--pequeno botao--fantasma"
                         type="button" title="Arquivar (e)"
                         @click="arquivarAberta">
@@ -1164,14 +1223,18 @@ onUnmounted(() => document.removeEventListener('keydown', atalho))
                 <!-- 🔵 17/09: excluir e restaurar, espelhando o Gmail --
                      um ou outro, nunca os dois, porque não faz sentido
                      restaurar o que não está na lixeira. -->
-                <button v-if="!aberta.na_lixeira_desde"
+                <button v-if="!aberta.na_lixeira_desde && !semEscritaNoGmail"
                         class="botao botao--pequeno botao--fantasma"
                         type="button" title="Excluir"
                         @click="excluirAberta">
                   <i class="bi bi-trash" aria-hidden="true"></i>
                   Excluir
                 </button>
-                <button v-else
+                <!-- 🚨 NADA DE "RESTAURAR" NUMA MENSAGEM QUE NÃO EXISTE MAIS.
+                     Este botão ficava colado no aviso logo abaixo, que diz
+                     exatamente que restaurar não dá -- e o Gmail devolve 404.
+                     O aviso explica; o botão só prometia. -->
+                <button v-else-if="!semEscritaNoGmail"
                         class="botao botao--pequeno botao--contorno"
                         type="button" title="Restaurar para a Caixa"
                         @click="restaurarAberta">
@@ -1179,10 +1242,14 @@ onUnmounted(() => document.removeEventListener('keydown', atalho))
                   Restaurar
                 </button>
               </div>
+              <!-- 🚨 ESTE AVISO FICOU SENDO A ÚNICA EXPLICAÇÃO, desde que os
+                   botões que não funcionam saíram (22/10). Então ele diz o que
+                   some e por quê -- botão que desaparece sem palavra é o
+                   mesmo defeito do rótulo que mente, pelo avesso. -->
               <p v-if="aberta.sumida_do_gmail_em" class="aviso aviso--erro pequeno">
                 <i class="bi bi-exclamation-triangle" aria-hidden="true"></i>
-                Removida do Gmail — esta é a cópia que já tínhamos. Não dá
-                para restaurar lá.
+                Removida do Gmail — esta é a única cópia que existe. Não dá
+                para restaurar, arquivar nem excluir lá; só responder.
               </p>
             </div>
             <p class="apagado pequeno mono">
@@ -1340,6 +1407,10 @@ onUnmounted(() => document.removeEventListener('keydown', atalho))
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   color: var(--texto-fraco);
 }
+/* 🔵 22/10: a marca da mensagem órfã, na Lixeira. Mesma forma do chip do
+   cliente, cor de aviso -- é informação de ESTADO, não de identidade, e o
+   chip do cliente ao lado continua sendo quem a mensagem é. */
+.email__orfa { flex: none; white-space: nowrap; background: var(--aviso-fundo, #fdecea); color: var(--aviso-texto, #a32018); }
 .email__cliente { flex: none; max-width: 130px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .email__quando { flex: none; width: 46px; text-align: right; font-variant-numeric: tabular-nums; }
 
