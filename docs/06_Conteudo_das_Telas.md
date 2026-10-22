@@ -4789,3 +4789,84 @@ FPSL ainda não tem — **criar OS** (`SalvarOrdemServico` com `id: 0`) e
 `os_ponte.py:_corpo_de_escrita` (relê, remonta inteira, grava, relê e compara
 os 39 campos). Elas dependem do mapa formulário → `problemaId`, que é decisão
 dele.
+
+## 22/10 — 🔍 AUDITORIA DO DIA (pedido dele: *"quer documentar e auditar os feitos?"*)
+
+Medida, não afirmada. O que ela achou, e o que foi feito no mesmo dia:
+
+### 🔴 1. As dez rotas que entraram hoje não tinham teste HTTP nenhum
+
+**17 arquivos** desta suíte usam `TestClient`, e as rotas de 22/10 não. A mais
+exposta do projeto — o **POST público de formulário**, que qualquer um na
+internet alcança — estava provada só por `curl` meu, à mão.
+
+**Fechado:** `tests/teste_rotas_formularios.py`, **33 testes** cobrindo as três
+rotas públicas, as seis do painel de solicitações e a do painel da Operação.
+Entre eles: a isca responde sucesso e **não grava**; envio sem o carimbo de
+abertura é recusado; anexo em campo que não aceita arquivo é recusado;
+formulário desligado responde **404 igual a slug inexistente**; e o que é
+interno (`nosso_nome`, `problema_id`, `bitrix_id`) **não sai** na resposta
+pública.
+
+⚠️ É a mesma lição de 21/10, quando a auditoria dele achou três módulos em
+produção sem teste Python: **prova ao vivo não substitui teste.** O `curl`
+provou o dia; só o teste prova a semana que vem.
+
+### 🔴 2. Três funções que a tela usa e nenhum teste chamava
+
+`formularios.listar_solicitacoes` (a lista da FRM_1.1, com os filtros de
+formulário e estado), `formularios.lista_para_o_painel` (o cabeçalho com a
+contagem de novas) e `formularios.registrar_envio`. Mais `desafio_sempre`,
+`nome_legivel` (a desduplicação) e `paineis._resumo`. **Todas cobertas agora.**
+
+### 🚨 3. A suíte nova passou na primeira rodada e REPROVOU na segunda
+
+Achado contra mim mesmo, e o mais útil do dia. Cada envio bom chama
+`registrar_envio`, que conta no **SQLite do `ratelimit`** — e esse contador
+**sobrevive ao processo e ao restart, de propósito**. Em duas rodadas os envios
+de teste passaram de 5 na mesma hora, a rota passou a exigir a conta de somar,
+e todo teste seguinte recebia *"Responda a conta para enviar"* no lugar da
+frase esperada.
+
+**Remédio:** a fixture `contador_limpo` apaga os eventos da chave
+`formulario|testclient` antes e depois de cada teste — só essa chave, porque o
+contador dos IPs reais é de produção. Confirmado com **três rodadas seguidas**,
+33 verdes em cada.
+
+⚠️ **O que isso ensina além do conserto:** teste que escreve em contador
+compartilhado não é determinístico, e *"passou"* na primeira rodada é a forma
+mais convincente de esconder isso.
+
+### 🚨 4. Cinco textos passaram a mentir quando o grupo "Painéis" ganhou tela
+
+`M12`, e cada um era verdadeiro quando foi escrito: *"Painéis › Operacional
+nasce vazio"* aparecia no cabeçalho de `GRUPOS`, em dois comentários de telas,
+no `MenuLateral` (duas vezes) e no **`docs/03`**. Desde a `PNL_1.1` o grupo tem
+tela e o subgrupo não existe — quem lesse aprenderia errado, e quem fosse
+escrever o segundo painel procuraria um subgrupo que saiu.
+
+**Corrigidos os cinco**, com o exemplo trocado pelo que é verdade hoje: o grupo
+declarado e vazio passou a ser o **"E-mail"**.
+⚠️ O **`docs/06` não entra nessa correção**: ele é diário, e entrada datada
+descreve o que era verdade naquele dia.
+
+### ✅ O que a auditoria conferiu e estava certo
+
+| conferido | estado |
+|---|---|
+| migrações aplicadas | **076** é a última, e o `validar_miolo.py` confirma (58 tabelas) |
+| segredo dos tokens públicos | no `.env`, 64 caracteres, **sem** o aviso de derivação no log |
+| pasta de anexos | `/home/claude/movizap_formularios_anexos`, modo **700**, vazia |
+| superfície do host público | `/f/`, `/pub/assets/` e `/api/publico/` passam; `/api/conversas` e `/inicio` dão **403**; a raiz dá 404 |
+| formulário desligado | **404 na API**, igual a slug inexistente |
+| sobras de teste | nenhum formulário `ZZ_`, nenhum anexo, nenhum evento de contador de teste |
+| árvore do git | limpa (fora os `.bak_` do dia, que são o desfazer) |
+
+### 🔴 A única sobra deliberada
+
+A **solicitação 39** (`zz Externo · zz Pastelaria Velasco`) continua no banco,
+de propósito: é a prova de ponta a ponta pela internet, e serve para ele ver a
+tela com conteúdo. **É dele apagar.**
+
+**Suítes depois da auditoria: 1746 Python · 440 JS** (eram 1713/440 antes
+dela; 33 testes novos).

@@ -52,10 +52,15 @@ uma tela de grupo era impossível sem fazer o código mentir. Agora:
 ⚠️ **O fallback não é zelo, é a regressão que ele evita:** sem ele, toda tela
 que uma entrega não tocar muda de lugar em silêncio.
 
-🚨 **Grupo sem nenhuma tela visível não é desenhado.** É o que deixa
-**Painéis › Operacional** existir declarado e nascer vazio (decisão dele),
-sem mentir na tela. Vale igual para permissão: quem não tem nenhuma tela do
-grupo não vê o grupo.
+🚨 **Grupo sem nenhuma tela visível não é desenhado.** É o que deixa um grupo
+existir declarado e nascer vazio (decisão dele) sem mentir na tela. Vale igual
+para permissão: quem não tem nenhuma tela do grupo não vê o grupo.
+
+⚠️ **O exemplo mudou em 22/10.** Era "Painéis › Operacional"; o grupo
+**Painéis** ganhou a `PNL_1.1` (Operação) e o subgrupo "Operacional" **saiu**
+— ele nunca teve tela, e o painel chama-se "Operação". Hoje o grupo declarado
+e vazio é o **"E-mail"**, porque o item do e-mail mora dentro de
+"Atendimento".
 
 **Agrupar não reordena.** A ordem na tela é a de `TELAS`, e `INI_1.1` é a
 primeira de propósito — a rota `/` redireciona para `sessao.telas[0].rota`.

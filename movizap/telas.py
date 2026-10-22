@@ -79,7 +79,8 @@ TELAS = [
         #
         # ⚠️ O grupo "E-mail" continua declarado em GRUPOS e fica VAZIO. O
         # MenuLateral não desenha grupo sem tela visível, então ele some da
-        # tela sozinho -- igual a "Painéis › Operacional".
+        # tela sozinho. 🚨 Hoje ele é o ÚNICO assim: "Painéis" era o outro
+        # exemplo e ganhou tela em 22/10 (a `PNL_1.1`).
         "codigo": "EML_1.1",
         "titulo": "E-mail",
         "rota": "/email",
@@ -148,10 +149,13 @@ TELAS = [
         # Historico. Nao e `atendimento` porque a solicitacao traz dado de
         # cadastro (CNPJ, endereco, valor) de quem ainda nao e cliente.
         #
-        # ⚠️ O GRUPO E "Atendimento" DE PROPOSITO, e nao "Paineis": os quatro
-        # paineis por situacao da OS sao a Etapa 3, e ate eles existirem o
-        # grupo "Paineis" continua vazio -- o MenuLateral nao desenha grupo
-        # sem tela visivel.
+        # ⚠️ O GRUPO E "Atendimento" DE PROPOSITO, e nao "Paineis": esta tela e
+        # a CAIXA do que chega (ler, mudar estado, baixar anexo), e painel e
+        # outra coisa -- fila que se movimenta pela situacao da OS.
+        #
+        # 🚨 22/10, fim do dia: o grupo "Paineis" DEIXOU de estar vazio -- a
+        # `PNL_1.1` (Operacao) entrou nele. Esta tela continua em
+        # "Atendimento", e e decisao, nao sobra.
         "codigo": "FRM_1.1",
         "titulo": "Solicitações",
         "rota": "/solicitacoes",
@@ -627,10 +631,15 @@ GRUPO_PELO_PREFIXO = {
 
 # Os grupos que EXISTEM, e os subgrupos de cada um.
 #
-# 🔵 19/10, decisão dele: o menu abre em "grupos e subgrupos", e
-# **Painéis › Operacional nasce vazio** -- o grupo é criado aqui e só aparece
-# na tela quando tiver a primeira tela dentro. É o `MenuLateral` que não
-# desenha grupo sem item visível; esta lista só declara que ele existe.
+# 🔵 19/10, decisão dele: o menu abre em "grupos e subgrupos", e um grupo
+# pode ser criado aqui VAZIO -- ele só aparece na tela quando tiver a primeira
+# tela dentro. É o `MenuLateral` que não desenha grupo sem item visível; esta
+# lista só declara que ele existe.
+#
+# ⚠️ ATÉ 22/10 O EXEMPLO DISSO ERA "Painéis › Operacional". Não é mais: o
+# grupo "Painéis" ganhou a `PNL_1.1` e o subgrupo saiu (ver abaixo). Quem
+# ficou vazio e declarado é o **"E-mail"**, desde que o item do e-mail passou
+# a morar dentro de "Atendimento" -- por decisão dele, no mesmo dia.
 #
 # ⚠️ A ORDEM NA TELA NÃO SAI DAQUI, e sim da ordem de `TELAS` -- o menu
 # preserva a ordem em que o backend manda, e `INI_1.1` é a primeira da lista

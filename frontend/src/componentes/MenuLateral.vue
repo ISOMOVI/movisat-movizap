@@ -237,7 +237,9 @@ function temSelo(grupo) {
 /** Agrupa em dois níveis, preservando a ordem em que o backend mandou.
 
     🚨 GRUPO SEM NENHUMA TELA VISÍVEL NÃO É DESENHADO -- e é isso que deixa
-    "Painéis › Operacional" existir no registro sem mentir na tela. Vale
+    um grupo existir no registro sem mentir na tela. ⚠️ O exemplo era
+    "Painéis › Operacional"; desde 22/10 "Painéis" tem tela (a `PNL_1.1`) e o
+    grupo declarado e vazio é o "E-mail". Vale
     igual para permissão: quem não tem nenhuma tela do grupo não vê o grupo,
     porque ele é construído a partir das telas que chegaram, nunca de uma
     lista fixa aqui. */
@@ -471,9 +473,11 @@ function encerrar() {
 .menu__seta { margin-left: auto; font-size: 10px; flex: none; }
 .menu__selo--grupo { margin-left: 0; }
 
-/* O subgrupo só ganha rótulo quando tem nome. Hoje nenhuma tela usa -- a
-   estrutura existe porque "Painéis › Operacional" já está declarado no
-   registro e nasce vazio por decisão dele. */
+/* O subgrupo só ganha rótulo quando tem nome. 🚨 Hoje NENHUMA tela usa, e
+   nenhum grupo declara subgrupo: o único que declarava era "Painéis ›
+   Operacional", e o subgrupo saiu em 22/10 quando o painel da Operação entrou
+   como ITEM do grupo. A estrutura fica porque o menu em dois níveis é decisão
+   dele (19/10) e o próximo subgrupo entra sem código novo. */
 .menu__sub-nome {
   padding: var(--e-2) var(--e-3) 4px calc(var(--e-3) + 12px);
   margin: 0;
