@@ -4669,3 +4669,36 @@ tela esteja legível no celular.
 de-para **nome de origem → `nosso_nome`**, campo por campo: é a lista para ele
 revisar os 239. 🚨 **Sai do banco, não de um documento à parte** — documento
 com 239 linhas copiadas envelhece na primeira troca de nome.
+
+### 22/10 — 🔵 ELE LIGOU OS 15: OS 15 NO AR
+
+Pedido dele, textual: *"ligue todos os formulários no ar"*. Os 15 passaram a
+`ativo = true` e foram conferidos **um por um pela internet** (`/f/<slug>` 200 e
+a definição batendo o número de campos). São **15 links públicos vivos**:
+
+`ces` · `nps` · `suporte` · `demonstracao` · `teste-gratuito` · `contato` ·
+`ficha-cadastral` · `aditivo` · `substituicao-veiculos` · `rescisao` ·
+`administrativo` · `financeiro` · `credenciamento-tecnico` ·
+`pagamento-tecnicos` · `fornecedores`
+
+⚠️ **O que muda de fato com isso, e ele sabe:**
+
+1. 🔴 **Os três formulários com aceite de termo estão no ar SEM a caixa de
+   aceite** — teste gratuito, ficha cadastral e fornecedores. O motivo está
+   escrito acima: o termo que o Bitrix serve é *boilerplate em inglês* (*"Our
+   rules are straightforward…"*), e copiá-lo seria pior que não ter. **No
+   Bitrix esses três pedem o aceite; aqui, hoje, não.** Falta o texto dele.
+2. ⚠️ **Os dois que tinham reCAPTCHA no Bitrix** (ficha cadastral e
+   financeiras) agora se defendem pelas nossas quatro camadas: isca, 3 s
+   mínimos, limite por IP e a conta de somar depois de 5 envios do mesmo IP na
+   hora. Se aparecer abuso, o interruptor da `CFG_7.1` passa a pedir a conta
+   em **todo** envio — é um clique, e não exige entrega.
+3. ⚠️ **`product` (Aditivo e Substituição) é campo de TEXTO** nesta etapa: o
+   catálogo do Bitrix não tem equivalente nosso. Quem preencher digita o
+   produto.
+4. ⚠️ **O Bitrix continua no ar em paralelo.** Enquanto os dois existirem, a
+   mesma demanda pode entrar pelos dois caminhos; desligar o Bitrix é dele.
+
+✅ Antes de ligar, `scripts/conferir_formularios.py` deu **os 15 ENVIÁVEIS, 0
+problemas**. ⚠️ Isso prova que a validação aceita — **não** que os 36 campos da
+ficha cadastral estejam confortáveis no celular. Essa leitura é `M9`.
