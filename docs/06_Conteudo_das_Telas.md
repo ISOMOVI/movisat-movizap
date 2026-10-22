@@ -4621,3 +4621,51 @@ VPS"*), com lista branca de extensão, 10 MB por arquivo e 25 MB por envio.
 confirmar o mapa formulário → `problemaId` · o texto dos nossos termos de uso
 (o do Bitrix é *boilerplate* em inglês) · revisar os `nosso_nome` dos 239
 campos.
+
+### 22/10, ainda na Etapa 1 — os 15 carregados, e a conferência que roda antes de ligar
+
+Os **15 formulários estão carregados** (239 campos), cada um como linha em
+tabela. **Só o CES está ligado**; os outros 14 nascem desligados, e ligar é do
+owner, na própria tela de Solicitações.
+
+| formulário | campos | de pé no início | regras | arquivo | produto |
+|---|---|---|---|---|---|
+| CES | 5 | 5 | 0 | 0 | 0 |
+| NPS | 9 | 4 | 2 | 0 | 0 |
+| Suporte | 13 | 10 | 1 | 1 | 0 |
+| Demonstração | 15 | 15 | 0 | 0 | 0 |
+| Teste gratuito | 14 | 14 | 0 | 3 | 0 |
+| Contato | 8 | 8 | 0 | 0 | 0 |
+| Ficha cadastral | 36 | 26 | 2 | 3 | 0 |
+| Aditivo | 18 | 14 | 1 | 1 | 1 |
+| Substituição de veículos | 17 | 13 | 1 | 1 | 1 |
+| Rescisão | 17 | 9 | 2 | 0 | 0 |
+| Administrativas | 11 | 7 | 1 | 0 | 0 |
+| Financeiras | 10 | 7 | 1 | 0 | 0 |
+| Credenciamento técnico | 34 | 31 | 3 | 0 | 0 |
+| Pagamento de técnicos | 16 | 16 | 0 | 1 | 0 |
+| Fornecedores | 16 | 16 | 0 | 1 | 0 |
+
+🚨 **"De pé no início" é a coluna que o Bitrix não mostrava.** Na ficha
+cadastral, **10 dos 36** campos só existem depois de uma escolha; na rescisão,
+**8 dos 17**. É esse número que a regra condicional governa, e é por isso que
+campo escondido **some do registro** em vez de virar vazio.
+
+**`scripts/conferir_formularios.py` — a conferência antes de ligar.** Ligar um
+formulário é abrir uma porta para a internet, e defeito de definição só
+apareceria com um cliente real preso numa tela que não envia. O script
+**preenche cada formulário em voltas**, como gente (escolher uma opção faz
+nascer campo novo), **uma vez por opção do primeiro campo de lista** — que nos
+15 é sempre o gatilho (pessoa física/jurídica, tipo de solicitação) — e diz
+`ENVIAVEL` ou `TRAVA`. Também confere que a contagem bate com o
+`mapa_bruto.json`, que o `nosso_nome` é único e legível, e se existe campo
+obrigatório que nenhuma regra alcança (seria formulário impossível de enviar).
+
+**Resultado em 22/10: os 15 ENVIÁVEIS**, 0 problemas. ⚠️ Isto não substitui o
+teste no navegador (`M9`): o script prova que a VALIDAÇÃO aceita, não que a
+tela esteja legível no celular.
+
+`venv/bin/python scripts/conferir_formularios.py --nomes <CODIGO>` imprime o
+de-para **nome de origem → `nosso_nome`**, campo por campo: é a lista para ele
+revisar os 239. 🚨 **Sai do banco, não de um documento à parte** — documento
+com 239 linhas copiadas envelhece na primeira troca de nome.
