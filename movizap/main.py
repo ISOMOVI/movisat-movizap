@@ -47,6 +47,7 @@ from . import mensagens_rapidas
 from . import agendamento
 from . import cep as cep_mod
 from . import formularios as formularios_mod
+from . import paineis as paineis_mod
 from . import fpsl_ponte
 from . import orcamento as orcamento_mod
 from . import tecnico_vinculo
@@ -4753,6 +4754,20 @@ def saude(request: Request):
         "telas_ativas": len(registro_telas.ativas()),
         "banco": banco.saude(),
     }
+
+
+# --------------------------------------------------------------- painéis
+#
+# 🔵 Etapa 3, primeira volta (22/10): só o da Operação, opção A (kanban pelas
+# situações da OS), por decisão dele depois dos mockups.
+#
+# ⚠️ UMA ROTA, NÃO QUATRO: o painel vem no caminho, e o módulo recusa os três
+# que ainda não existem com a frase que DIZ isso -- não com 404, que faria
+# parecer erro de digitação.
+
+@app.get("/api/paineis/{painel}")
+def ver_painel(painel: str, usuario: dict = Depends(auth.requer_tela("PNL_1.1"))):
+    return paineis_mod.quadro(painel)
 
 
 # ---------------------------------------------------- formulários próprios

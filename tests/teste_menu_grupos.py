@@ -82,15 +82,23 @@ class TestDeclaracaoDosGrupos:
         fora = usados - set(telas.GRUPOS)
         assert not fora, f"grupo usado e não declarado em GRUPOS: {fora}"
 
-    def test_paineis_operacional_existe_e_nasce_vazio(self):
-        """🔵 Decisão 3 dele: o grupo é criado, e só aparece quando tiver tela.
+    def test_paineis_ganhou_o_primeiro_habitante(self):
+        """🔵 19/10 o grupo nasceu declarado e VAZIO; 22/10 ele ganhou a
+        PNL_1.1 (o painel da Operação), por decisão dele depois dos mockups.
 
-        Quem garante que ele não é desenhado é o `MenuLateral` (grupo sem item
-        visível não vira linha). Aqui se garante o outro lado: que ele existe
-        declarado e que nenhuma tela entrou nele por engano.
+        🚨 E O SUBGRUPO "Operacional" SAIU -- fecha a pendência 6 do plano
+        (*"alinhar o nome do subgrupo com o painel"*). Ele nunca teve tela, e o
+        painel chama-se "Operação": manter os dois faria o menu desenhar
+        "Painéis › Operacional › Operação". Os quatro painéis são ITENS do
+        grupo, sem subgrupo.
+
+        ⚠️ Este teste mudou de nome junto com o comportamento. O antigo
+        afirmava "nasce vazio", e deixá-lo verde com a tela dentro exigiria
+        afrouxá-lo -- que é como um teste passa a mentir.
         """
-        assert telas.GRUPOS["Painéis"] == ["Operacional"]
-        assert not [t for t in telas.TELAS if telas.grupo_da(t) == "Painéis"]
+        assert telas.GRUPOS["Painéis"] == []
+        dentro = [t["codigo"] for t in telas.TELAS if telas.grupo_da(t) == "Painéis"]
+        assert dentro == ["PNL_1.1"]
 
 
 class TestGrupoNaoMexeEmPermissao:

@@ -112,6 +112,33 @@ TELAS = [
         "fase": 1,
     },
     {
+        # 🔵 22/10, decisao dele depois de ver os tres mockups lado a lado:
+        # *"vamos de A somente para a Operacao por enquanto, mas bem
+        # documentado para as demais futuramente"*.
+        #
+        # 🚨 O PRIMEIRO HABITANTE DO GRUPO "Paineis", que nasceu declarado e
+        # vazio em 19/10. As colunas sao as 11 situacoes da OS do Harmonit
+        # mais "Sem OS" e "Sem situacao" -- e o painel existe para a situacao
+        # PASSAR A SER USADA (*"hoje ainda nao usamos a situacao da OS"*).
+        #
+        # ⚠️ `owner` por ora, como o plano diz (Etapa 3). Nao e `equipe`: o
+        # card mostra a OS do Harmonit ao lado da solicitacao, e mover o card
+        # vai ESCREVER no ERP.
+        #
+        # ⚠️ MODULO PROPRIO `PNL`: painel nao e atendimento (nao se responde
+        # ninguem por ele) nem relatorio (nao se le e fecha) -- e uma fila que
+        # se movimenta. Os outros tres paineis entram como PNL_1.2, 1.3 e 1.4
+        # quando ele decidir, cada um com modulo e rota propria.
+        "codigo": "PNL_1.1",
+        "titulo": "Operação",
+        "rota": "/paineis/operacao",
+        "icone": "bi-kanban",
+        "descricao": "Solicitações da Operação pela situação da OS.",
+        "grupo": "Painéis",
+        "permissao": "owner",
+        "fase": 1,
+    },
+    {
         # 🔵 22/10: a tela que recebe o que chega pelos formularios proprios
         # (`forms.movisat.com.br`). Modulo `FRM`, nao ATD: formulario nao e
         # conversa -- tem definicao, tem campo obrigatorio e tem anexo, e
@@ -616,7 +643,12 @@ GRUPOS = {
     "Cadastro": [],
     "Configuração": [],
     "Relatórios": [],
-    "Painéis": ["Operacional"],
+    # 🔵 22/10: o subgrupo "Operacional" SAIU, e isto fecha a pendencia 6 do
+    # plano (*"alinhar o nome do subgrupo com o painel"*). Ele foi declarado em
+    # 19/10 e nunca teve tela; o painel dele chama-se "Operação", e manter os
+    # dois nomes faria o menu desenhar "Paineis › Operacional › Operação".
+    # Os quatro paineis sao ITENS do grupo, sem subgrupo.
+    "Painéis": [],
 }
 
 

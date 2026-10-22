@@ -30,24 +30,29 @@ from movizap import banco, formularios  # noqa: E402
 RAIZ = Path("/home/claude/movizap_painel")
 MAPA = RAIZ / "dados" / "formularios_bitrix" / "mapa_bruto.json"
 
-# codigo -> (id no Bitrix, slug publico, titulo, setor)
+# codigo -> (id no Bitrix, slug publico, titulo, setor, painel)
 # A ordem desta lista é a ordem na tela.
+#
+# 🔵 O PAINEL É O MAPA DELE (plano, §2.1), e mora AQUI -- uma fonte só. A
+# coluna `formulario.painel` (migração 075) é reescrita a cada carga, então
+# mover um formulário de painel é editar esta tabela e rodar a carga: sem
+# migração, sem deploy. `None` = *"SEM PAINEL — Contato"*, decisão dele.
 NOSSOS = [
-    ("CES",                 "70",  "ces",                    "Pesquisa CES",                          "Qualidade"),
-    ("NPS",                 "64",  "nps",                    "Pesquisa NPS",                          "Qualidade"),
-    ("SUPORTE",             "32",  "suporte",                "Suporte",                               "Suporte"),
-    ("DEMONSTRACAO",        "220", "demonstracao",           "Solicitação de demonstração",           "Comercial"),
-    ("TESTE_GRATUITO",      "96",  "teste-gratuito",         "Teste gratuito",                        "Comercial"),
-    ("CONTATO",             "30",  "contato",                "Contato",                               "Comercial"),
-    ("FICHA_CADASTRAL",     "98",  "ficha-cadastral",        "Ficha cadastral de novos clientes",     "Contratual"),
-    ("ADITIVO",             "14",  "aditivo",                "Aditivo contratual",                    "Contratual"),
-    ("SUBSTITUICAO",        "16",  "substituicao-veiculos",  "Substituição de veículos",              "Contratual"),
-    ("RESCISAO",            "10",  "rescisao",               "Rescisão contratual",                   "Contratual"),
-    ("ADMINISTRATIVO",      "36",  "administrativo",         "Solicitações administrativas",          "Administrativo"),
-    ("FINANCEIRO",          "34",  "financeiro",             "Solicitações financeiras",              "Financeiro"),
-    ("CREDENCIAMENTO",      "164", "credenciamento-tecnico", "Credenciamento de parceiros técnicos",  "Operações"),
-    ("PAGAMENTO_TECNICOS",  "184", "pagamento-tecnicos",     "Pagamento de parceiros técnicos",       "Financeiro"),
-    ("FORNECEDORES",        "238", "fornecedores",           "Fornecedores",                          "Administrativo"),
+    ("CES",                 "70",  "ces",                    "Pesquisa CES",                          "Qualidade", "pos_venda"),
+    ("NPS",                 "64",  "nps",                    "Pesquisa NPS",                          "Qualidade", "pos_venda"),
+    ("SUPORTE",             "32",  "suporte",                "Suporte",                               "Suporte", "operacao"),
+    ("DEMONSTRACAO",        "220", "demonstracao",           "Solicitação de demonstração",           "Comercial", "operacao"),
+    ("TESTE_GRATUITO",      "96",  "teste-gratuito",         "Teste gratuito",                        "Comercial", "operacao"),
+    ("CONTATO",             "30",  "contato",                "Contato",                               "Comercial", None),
+    ("FICHA_CADASTRAL",     "98",  "ficha-cadastral",        "Ficha cadastral de novos clientes",     "Contratual", "contratual"),
+    ("ADITIVO",             "14",  "aditivo",                "Aditivo contratual",                    "Contratual", "contratual"),
+    ("SUBSTITUICAO",        "16",  "substituicao-veiculos",  "Substituição de veículos",              "Contratual", "contratual"),
+    ("RESCISAO",            "10",  "rescisao",               "Rescisão contratual",                   "Contratual", "contratual"),
+    ("ADMINISTRATIVO",      "36",  "administrativo",         "Solicitações administrativas",          "Administrativo", "financeiro"),
+    ("FINANCEIRO",          "34",  "financeiro",             "Solicitações financeiras",              "Financeiro", "financeiro"),
+    ("CREDENCIAMENTO",      "164", "credenciamento-tecnico", "Credenciamento de parceiros técnicos",  "Operações", "operacao"),
+    ("PAGAMENTO_TECNICOS",  "184", "pagamento-tecnicos",     "Pagamento de parceiros técnicos",       "Financeiro", "financeiro"),
+    ("FORNECEDORES",        "238", "fornecedores",           "Fornecedores",                          "Administrativo", "financeiro"),
 ]
 
 
@@ -60,14 +65,15 @@ def main(pedidos: list[str]) -> None:
         conhecidos = ", ".join(n[0] for n in NOSSOS)
         sys.exit(f"codigo desconhecido. Conheco: {conhecidos}")
 
-    for ordem, (codigo, bitrix_id, slug, titulo, setor) in enumerate(alvo, start=1):
+    for ordem, (codigo, bitrix_id, slug, titulo, setor, painel) in enumerate(alvo, start=1):
         bruto = mapa.get(bitrix_id)
         if not bruto:
             sys.exit(f"{codigo}: o mapa nao tem o formulario {bitrix_id}")
         r = formularios.gravar_definicao(bruto, codigo=codigo, slug=slug,
                                          setor=setor, titulo=titulo,
-                                         ordem=ordem * 10)
-        print(f"{codigo:<20} /f/{slug:<24} campos={r['campos']:<3} "
+                                         painel=painel, ordem=ordem * 10)
+        print(f"{codigo:<20} /f/{slug:<24} painel={(painel or '-'):<11} "
+              f"campos={r['campos']:<3} "
               f"regras={r['regras']} escondidos_por_regra={r['escondidos']} "
               f"ativo={'sim' if r['ativo'] else 'NAO'}")
 

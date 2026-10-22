@@ -22,6 +22,7 @@
    uma porta para a internet). A rota também recusa quem não é.
    ============================================================================ */
 import { computed, onMounted, ref } from 'vue'
+import { useRoute } from 'vue-router'
 
 import { api, ErroDeApi } from '../api/cliente.js'
 import { sessao } from '../estado/sessao.js'
@@ -119,7 +120,18 @@ function tamanho(bytes) {
     : `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
-onMounted(carregar)
+/* 🔵 22/10: o painel da Operacao manda para ca com `?solicitacao=<id>` -- a
+   ficha completa e desta tela, e o painel nao repete a leitura dos 34 campos
+   do credenciamento. ⚠️ A lista carrega primeiro: abrir a ficha de uma
+   solicitacao que nao esta na lista filtrada ainda e correto -- o link veio de
+   fora. */
+const rota = useRoute()
+
+onMounted(async () => {
+  await carregar()
+  const pedida = Number(rota.query.solicitacao)
+  if (pedida) await abrir(pedida)
+})
 </script>
 
 <template>

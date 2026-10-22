@@ -37,6 +37,7 @@ import Ligacoes from '../telas/Ligacoes.vue'
 import Agendamentos from '../telas/Agendamentos.vue'
 import ChatInterno from '../telas/ChatInterno.vue'
 import Solicitacoes from '../telas/Solicitacoes.vue'
+import PainelOperacao from '../telas/PainelOperacao.vue'
 import Atendentes from '../telas/Atendentes.vue'
 import Times from '../telas/Times.vue'
 import Automacao from '../telas/Automacao.vue'
@@ -136,6 +137,17 @@ const rotas = [
     name: 'ATD_3.1',
     component: Informativos,
     meta: { codigo: 'ATD_3.1', titulo: 'Informativos' },
+  },
+
+  // 🔵 22/10: o PRIMEIRO painel, o da Operacao (opcao A, kanban pelas
+  // situacoes da OS). Escolha dele entre tres mockups: "vamos de A somente
+  // para a Operacao por enquanto". Os outros tres entram como PNL_1.2/1.3/1.4
+  // quando ele decidir -- cada um com tela propria, nao com um filtro aqui.
+  {
+    path: '/paineis/operacao',
+    name: 'PNL_1.1',
+    component: PainelOperacao,
+    meta: { codigo: 'PNL_1.1', titulo: 'Operação' },
   },
 
   // 🔵 22/10: a FRM_1.1, o que chega pelos formularios proprios.

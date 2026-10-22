@@ -92,6 +92,7 @@ aparecem todos.
 | `ATD_6.1` | Chat interno | `/chat` | `atendimento` | 1 |
 | `EML_1.1` | E-mail | `/email` | `atendimento` | 1 |
 | `FRM_1.1` | Solicitações | `/solicitacoes` | `equipe` | 1 |
+| `PNL_1.1` | Operação | `/paineis/operacao` | `owner` | 1 |
 | `CAD_1.1` | Clientes | `/cadastro/clientes` | `cadastro` | 1 |
 | `CAD_1.2` | Contatos | `/cadastro/contatos` | `cadastro` | 1 |
 | `CAD_2.1` | Atendentes | `/cadastro/atendentes` | `equipe` | 1 |
@@ -178,6 +179,7 @@ O campo **`icone`** deste registro é o que o menu desenha, e ele é **a fonte
 | `CFG_14.1` Vínculo dos técnicos | `bi-person-vcard` | aba |
 | `ATD_3.1` Informativos | `bi-megaphone` | menu |
 | `FRM_1.1` Solicitações | `bi-ui-checks` | menu |
+| `PNL_1.1` Operação | `bi-kanban` | menu (grupo Painéis) |
 | `CAD_1.1` Clientes | `bi-building` | menu |
 | `CAD_1.2` Contatos | `bi-person-lines-fill` | menu |
 | `CAD_2.1` Atendentes | `bi-people` | menu |

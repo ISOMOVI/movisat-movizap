@@ -130,8 +130,13 @@ class TestIntegridadeDoRegistro:
             # obrigatório e anexo, e nenhuma das três existe numa mensagem.
             # Pendurá-lo em ATD misturaria "cliente escreveu" e "cliente
             # preencheu".
+            #
+            # PNL entrou em 22/10 com o primeiro painel: painel nao e
+            # atendimento (nao se responde ninguem por ele) nem relatorio (nao
+            # se le e fecha) -- e uma fila que se movimenta, e mover o card vai
+            # escrever no Harmonit.
             assert modulo in {"INI", "EML", "ATD", "CAD", "CFG", "LIG", "REL",
-                              "FRM"}, t["codigo"]
+                              "FRM", "PNL"}, t["codigo"]
             assert numero, t["codigo"]
             for parte in numero.split("."):
                 assert parte.isdigit(), f"{t['codigo']}: parte não numérica"

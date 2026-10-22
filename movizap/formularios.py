@@ -403,7 +403,8 @@ def registrar(d: dict, valores: dict, arquivos: list | None = None,
 
 
 def gravar_definicao(bruto: dict, codigo: str, slug: str, setor: str,
-                     titulo: str | None = None, ordem: int = 100) -> dict:
+                     titulo: str | None = None, painel: str | None = None,
+                     ordem: int = 100) -> dict:
     """Escreve (ou reescreve) um formulário a partir da definição do Bitrix.
 
     🚨 IDEMPOTENTE PELO `bitrix_id`: rodar de novo não duplica nem apaga
@@ -431,19 +432,25 @@ def gravar_definicao(bruto: dict, codigo: str, slug: str, setor: str,
 
     linha = banco.um(
         """INSERT INTO formulario (codigo, slug, titulo, setor, botao,
-                                   bitrix_id, bitrix_sec, ordem)
-           VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                                   bitrix_id, bitrix_sec, painel, ordem)
+           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
            ON CONFLICT (codigo) DO UPDATE
               SET slug = EXCLUDED.slug, titulo = EXCLUDED.titulo,
                   setor = EXCLUDED.setor, botao = EXCLUDED.botao,
                   bitrix_id = EXCLUDED.bitrix_id,
                   bitrix_sec = EXCLUDED.bitrix_sec,
+                  -- 🚨 O PAINEL E REESCRITO A CADA CARGA, ao contrario de
+                  -- `ativo`: o mapa e decisao dele e vive no script, entao
+                  -- mudar de painel nao exige migracao nem deploy. `ativo`
+                  -- NAO entra nesta lista de proposito -- recarregar nao pode
+                  -- publicar formulario nenhum.
+                  painel = EXCLUDED.painel,
                   ordem = EXCLUDED.ordem, atualizado_em = now()
         RETURNING id, ativo""",
         (codigo, slug,
          (titulo or dados.get("title") or "").strip() or slug,
          setor, (dados.get("buttonCaption") or "Enviar").strip()[:60],
-         str(bruto.get("id")), bruto.get("sec"), ordem))
+         str(bruto.get("id")), bruto.get("sec"), painel, ordem))
 
     banco.executar("DELETE FROM formulario_campo WHERE formulario_id = %s",
                    (linha["id"],))

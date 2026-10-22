@@ -2198,3 +2198,40 @@ que são definição, saem em cascata.
 `/home/claude/movizap_formularios_anexos`, como o anexo de e-mail: dentro, ele
 entraria no git e no `dist` — e o `dist` é servido. `nome_original` é texto
 para ler, **nunca** caminho.
+
+## Migração 075 — a que painel cada formulário pertence
+
+🔵 O mapa é dele (plano, §2.1): **Operação** (Suporte · Demonstração · Teste
+gratuito · Credenciamento), **Pós venda** (NPS · CES), **Contratual** (Ficha
+cadastral · Aditivo · Substituição · Rescisão), **Financeiro** (Financeiras ·
+Pagamento de técnicos · Administrativas · Fornecedores) e **sem painel**
+(Contato).
+
+`formulario.painel` — `varchar(20)`, **anulável**, com CHECK em
+`operacao | pos_venda | contratual | financeiro`.
+🚨 **É coluna, não lista no código**, pelo mesmo motivo que a definição do
+formulário é dado: mover "Administrativas" de Financeiro para Contratual não
+pode exigir deploy.
+🚨 **O mapa vive em UM lugar** — a tabela `NOSSOS` do
+`scripts/carregar_formularios.py` — e é **reescrito a cada carga**
+(`painel = EXCLUDED.painel`). ⚠️ `ativo` **não** entra nessa lista: recarregar
+não publica formulário nenhum.
+⚠️ **Nulo é um valor legítimo**, e tem nome: *"SEM PAINEL — Contato"*.
+
+## Migração 076 — a situação da OS, guardada na solicitação
+
+Para o painel da Operação (opção A) ter colunas, a solicitação precisa saber
+em que situação está a OS dela.
+
+`formulario_solicitacao.situacao_id` · `situacao_em` · `situacao_erro`.
+🚨 **É CACHE, e o nome diz:** a verdade da situação é do Harmonit; aqui fica a
+última lida, **com a hora**. Sem a hora, a tela afirmaria a situação sem prazo.
+🚨 **Três estados distinguíveis, não dois:** `os_id` nulo (não virou OS) ·
+`os_id` com `situacao_id` nulo (tem OS e **nunca foi lida**) ·
+`situacao_id = 0` (lida, e o Harmonit respondeu zero — **127 das 574 OS** estão
+assim, medido em 22/10). Os três caem na mesma coluna da tela e continuam
+separados no banco.
+⚠️ `situacao_erro` segue a régua do `agendamento.endereco_os_erro` (073): nulo
+com `situacao_em` nulo = não tentou; nulo com data = deu certo.
+⚠️ **Ninguém escreve nestas colunas ainda** — a leitura e a escrita de
+`situacaoId` são da volta seguinte, e dependem de decisão dele.
