@@ -27,6 +27,30 @@ async function ativarBalao() {
 }
 
 const souOwner = computed(() => Boolean(sessao.usuario?.owner))
+
+/* 🔵 22/10: o aviso de solicitação de formulário, por pessoa -- como o tom
+   e o volume. ⚠️ O interruptor só aparece para quem TEM a FRM_1.1: esconder
+   um selo é uma coisa, oferecer ajuste de um aviso que nunca vai chegar seria
+   a tela mentindo. E nasce LIGADO, porque o aviso é o que ele pediu. */
+const temSolicitacoes = computed(
+  () => (sessao.telas || []).some((t) => t.codigo === 'FRM_1.1'))
+const avisoSolicitacao = ref(true)
+
+async function alternarAvisoSolicitacao() {
+  salvando.value = true
+  erro.value = ''
+  recado.value = ''
+  try {
+    const r = await api.put('/api/eu/aviso-solicitacao',
+                            { ligado: !avisoSolicitacao.value })
+    avisoSolicitacao.value = r.aviso_solicitacao
+    recado.value = 'Salvo.'
+  } catch (e) {
+    erro.value = e instanceof ErroDeApi ? e.message : 'Não consegui salvar.'
+  } finally {
+    salvando.value = false
+  }
+}
 const minha = ref(null)
 const equipe = ref([])
 const erro = ref('')
@@ -182,6 +206,29 @@ async function alternarPessoa(p) {
               O navegador só toca depois de um clique na página — clique em Testar de novo.
             </span>
           </div>
+        </div>
+      </section>
+
+      <!-- 🔵 22/10, pedido dele: *"controle de notificações no 'minha conta'
+           de cada usuário, igual as demais"*. É por pessoa, como o tom e o
+           volume -- e NASCE LIGADO, porque o aviso é o que ele pediu.
+
+           ⚠️ Só aparece para quem TEM a tela: o interruptor esconde um selo,
+           nunca dá acesso. Quem não tem a FRM_1.1 recebe zero de qualquer
+           forma, e ver aqui um aviso que nunca vai chegar seria `M12`. -->
+      <section v-if="temSolicitacoes" class="cartao tela__bloco">
+        <div class="cartao__corpo pilha">
+          <h2 class="cartao__titulo">Solicitações de formulário</h2>
+          <label class="interruptor">
+            <input type="checkbox" :checked="avisoSolicitacao"
+                   :disabled="salvando" @change="alternarAvisoSolicitacao" />
+            <span>{{ avisoSolicitacao ? 'Avisar' : 'Não avisar' }}</span>
+          </label>
+          <p class="apagado pequeno">
+            Ligado, o menu mostra quantas solicitações chegaram pelos
+            formulários e ainda estão como novas. Desligado, o número não
+            aparece para você — a tela Solicitações continua lá.
+          </p>
         </div>
       </section>
 

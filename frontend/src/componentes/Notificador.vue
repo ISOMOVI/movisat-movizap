@@ -90,6 +90,10 @@ async function ler() {
      devolvia o número e o menu o lia, mas nada no meio gravava. Suíte verde
      dos dois lados -- quem pega isto é ler a cadeia, não o placar. */
   notificacoes.email_nao_lidos = r.email_nao_lidos || 0
+  /* 🚨 CAMPO NOVO NÃO ENTRA SOZINHO: esta função COPIA campo a campo, e em
+     22/10 um campo que a rota devolvia e esta linha não copiava ficou valendo
+     zero na tela com as duas suítes verdes. */
+  notificacoes.solicitacoes_novas = r.solicitacoes_novas || 0
   notificacoes.assumidasNaoLidas = (r.assumidas || []).length
 
   // 🔵 25/09: a conversa aberta com a tela à vista não toca.

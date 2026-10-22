@@ -1,0 +1,178 @@
+{
+  "_sobre": [
+    "Os casos da regra condicional dos formularios, lidos pelas DUAS suites:",
+    "tests/teste_formularios.py (movizap/formularios.py:visiveis) e",
+    "frontend/src/formulario_2210.teste.js (src/util/regras_formulario.js).",
+    "",
+    "🚨 UM ARQUIVO SO, DE PROPOSITO. A mesma regra e avaliada no servidor (que",
+    "decide quem e obrigatorio e descarta campo escondido) e no navegador (que",
+    "mostra e esconde enquanto a pessoa preenche). Com dois conjuntos de casos,",
+    "as duas pontas divergiriam em silencio -- foi o que aconteceu em 22/10 com",
+    "um WHERE de e-mail copiado em dois lugares, que discordou no mesmo dia.",
+    "",
+    "Caso novo entra AQUI, e as duas suites o cobram sozinhas."
+  ],
+  "casos": [
+    {
+      "nome": "sem regra, todos de pe",
+      "campos": [
+        {"nome": "A", "tipo": "string", "visivel": true},
+        {"nome": "B", "tipo": "string", "visivel": true}
+      ],
+      "regras": [],
+      "valores": {},
+      "visiveis": ["A", "B"]
+    },
+    {
+      "nome": "alvo de show nasce escondido e continua escondido sem o valor",
+      "campos": [
+        {"nome": "A", "tipo": "list", "visivel": true},
+        {"nome": "B", "tipo": "string", "visivel": false}
+      ],
+      "regras": [
+        {"lista": [{"condition": {"target": "A", "operation": "=", "value": "1704"},
+                    "action": {"target": "B", "type": "show"}}]}
+      ],
+      "valores": {},
+      "visiveis": ["A"]
+    },
+    {
+      "nome": "a opcao certa mostra o campo",
+      "campos": [
+        {"nome": "A", "tipo": "list", "visivel": true},
+        {"nome": "B", "tipo": "string", "visivel": false}
+      ],
+      "regras": [
+        {"lista": [{"condition": {"target": "A", "operation": "=", "value": "1704"},
+                    "action": {"target": "B", "type": "show"}}]}
+      ],
+      "valores": {"A": "1704"},
+      "visiveis": ["A", "B"]
+    },
+    {
+      "nome": "a outra opcao nao mostra",
+      "campos": [
+        {"nome": "A", "tipo": "list", "visivel": true},
+        {"nome": "B", "tipo": "string", "visivel": false}
+      ],
+      "regras": [
+        {"lista": [{"condition": {"target": "A", "operation": "=", "value": "1704"},
+                    "action": {"target": "B", "type": "show"}}]}
+      ],
+      "valores": {"A": "1706"},
+      "visiveis": ["A"]
+    },
+    {
+      "nome": "hide esconde campo que estava de pe",
+      "campos": [
+        {"nome": "A", "tipo": "list", "visivel": true},
+        {"nome": "B", "tipo": "string", "visivel": true}
+      ],
+      "regras": [
+        {"lista": [{"condition": {"target": "A", "operation": "=", "value": "1666"},
+                    "action": {"target": "B", "type": "hide"}}]}
+      ],
+      "valores": {"A": "1666"},
+      "visiveis": ["A"]
+    },
+    {
+      "nome": "operacao any: qualquer valor serve, vazio nao",
+      "campos": [
+        {"nome": "A", "tipo": "string", "visivel": true},
+        {"nome": "B", "tipo": "string", "visivel": false}
+      ],
+      "regras": [
+        {"lista": [{"condition": {"target": "A", "operation": "any", "value": ""},
+                    "action": {"target": "B", "type": "show"}}]}
+      ],
+      "valores": {"A": "qualquer coisa"},
+      "visiveis": ["A", "B"]
+    },
+    {
+      "nome": "operacao any com espaco em branco nao conta como valor",
+      "campos": [
+        {"nome": "A", "tipo": "string", "visivel": true},
+        {"nome": "B", "tipo": "string", "visivel": false}
+      ],
+      "regras": [
+        {"lista": [{"condition": {"target": "A", "operation": "any", "value": ""},
+                    "action": {"target": "B", "type": "show"}}]}
+      ],
+      "valores": {"A": "   "},
+      "visiveis": ["A"]
+    },
+    {
+      "nome": "cadeia do credenciamento: A mostra B, B mostra C",
+      "campos": [
+        {"nome": "A", "tipo": "list", "visivel": true},
+        {"nome": "B", "tipo": "string", "visivel": false},
+        {"nome": "C", "tipo": "list", "visivel": false}
+      ],
+      "regras": [
+        {"lista": [{"condition": {"target": "A", "operation": "=", "value": "5854"},
+                    "action": {"target": "B", "type": "show"}}]},
+        {"lista": [{"condition": {"target": "B", "operation": "any", "value": ""},
+                    "action": {"target": "C", "type": "show"}}]}
+      ],
+      "valores": {"A": "5854", "B": "alguma coisa"},
+      "visiveis": ["A", "B", "C"]
+    },
+    {
+      "nome": "🚨 valor de campo ESCONDIDO nao manda em nada: sem A, B nao vale e C fica fora",
+      "campos": [
+        {"nome": "A", "tipo": "list", "visivel": true},
+        {"nome": "B", "tipo": "string", "visivel": false},
+        {"nome": "C", "tipo": "list", "visivel": false}
+      ],
+      "regras": [
+        {"lista": [{"condition": {"target": "A", "operation": "=", "value": "5854"},
+                    "action": {"target": "B", "type": "show"}}]},
+        {"lista": [{"condition": {"target": "B", "operation": "any", "value": ""},
+                    "action": {"target": "C", "type": "show"}}]}
+      ],
+      "valores": {"A": "9999", "B": "mandado por fora"},
+      "visiveis": ["A"]
+    },
+    {
+      "nome": "multipla escolha: basta uma das respostas casar",
+      "campos": [
+        {"nome": "A", "tipo": "list", "visivel": true},
+        {"nome": "B", "tipo": "string", "visivel": false}
+      ],
+      "regras": [
+        {"lista": [{"condition": {"target": "A", "operation": "=", "value": "4596"},
+                    "action": {"target": "B", "type": "show"}}]}
+      ],
+      "valores": {"A": ["4598", "4596"]},
+      "visiveis": ["A", "B"]
+    },
+    {
+      "nome": "operacao desconhecida nao mostra nem esconde",
+      "campos": [
+        {"nome": "A", "tipo": "string", "visivel": true},
+        {"nome": "B", "tipo": "string", "visivel": false},
+        {"nome": "C", "tipo": "string", "visivel": true}
+      ],
+      "regras": [
+        {"lista": [{"condition": {"target": "A", "operation": "contem", "value": "x"},
+                    "action": {"target": "B", "type": "show"}}]},
+        {"lista": [{"condition": {"target": "A", "operation": "contem", "value": "x"},
+                    "action": {"target": "C", "type": "hide"}}]}
+      ],
+      "valores": {"A": "xis"},
+      "visiveis": ["A", "C"]
+    },
+    {
+      "nome": "regra que aponta para campo que nao existe e ignorada",
+      "campos": [
+        {"nome": "A", "tipo": "list", "visivel": true}
+      ],
+      "regras": [
+        {"lista": [{"condition": {"target": "A", "operation": "=", "value": "1"},
+                    "action": {"target": "FANTASMA", "type": "show"}}]}
+      ],
+      "valores": {"A": "1"},
+      "visiveis": ["A"]
+    }
+  ]
+}

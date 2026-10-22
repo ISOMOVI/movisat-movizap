@@ -43,11 +43,16 @@ const naoLidas = ref(0)
    a COR do selo) -- juntá-los a esta rota é uma limpeza de outro dia. */
 const naoLidasWhatsapp = computed(() => notificacoes.abas?.minhas || 0)
 const naoLidosEmail = computed(() => notificacoes.email_nao_lidos || 0)
+/* 🔵 22/10: o quarto selo -- solicitações de formulário ainda novas. O número
+   já vem travado no backend por quem tem a FRM_1.1 e por quem não desligou o
+   aviso na CFG_11.1, então aqui não há regra nenhuma: zero não desenha nada. */
+const solicitacoesNovas = computed(() => notificacoes.solicitacoes_novas || 0)
 
 /* A soma que o grupo fechado carrega. Os três, sempre -- inclusive quando um
    deles é zero: é a mesma conta, só sem a parcela. */
 const somaDoGrupo = computed(
-  () => naoLidasWhatsapp.value + naoLidas.value + naoLidosEmail.value)
+  () => naoLidasWhatsapp.value + naoLidas.value + naoLidosEmail.value
+        + solicitacoesNovas.value)
 
 /* O selo de um item qualquer. Fora destes três códigos não há selo: devolver
    0 é o que faz o `v-if` do template não desenhar nada. */
@@ -55,6 +60,7 @@ function seloDaTela(codigo) {
   if (codigo === 'ATD_1.1') return naoLidasWhatsapp.value
   if (codigo === 'ATD_6.1') return naoLidas.value
   if (codigo === 'EML_1.1') return naoLidosEmail.value
+  if (codigo === 'FRM_1.1') return solicitacoesNovas.value
   return 0
 }
 
@@ -64,6 +70,9 @@ function textoDoSelo(codigo) {
   }
   if (codigo === 'EML_1.1') {
     return `${naoLidosEmail.value} e-mail(s) não lido(s) na entrada`
+  }
+  if (codigo === 'FRM_1.1') {
+    return `${solicitacoesNovas.value} solicitação(ões) nova(s) de formulário`
   }
   return mencoes.value > 0
     ? `${mencoes.value} vez(es) em que te chamaram pelo nome, de ${naoLidas.value} não lida(s)`
@@ -315,7 +324,8 @@ function encerrar() {
             :class="{ 'menu__selo--mencao': mencoes > 0 }"
             :title="`${somaDoGrupo} não lida(s) neste grupo fechado: `
               + `${naoLidasWhatsapp} no WhatsApp, ${naoLidas} no chat interno, `
-              + `${naoLidosEmail} no e-mail`"
+              + `${naoLidosEmail} no e-mail, `
+              + `${solicitacoesNovas} em solicitações`"
           >{{ curto(somaDoGrupo) }}</span>
           <i
             class="bi menu__seta"

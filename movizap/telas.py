@@ -111,6 +111,29 @@ TELAS = [
         "permissao": "equipe",
         "fase": 1,
     },
+    {
+        # 🔵 22/10: a tela que recebe o que chega pelos formularios proprios
+        # (`forms.movisat.com.br`). Modulo `FRM`, nao ATD: formulario nao e
+        # conversa -- tem definicao, tem campo obrigatorio e tem anexo, e
+        # nenhuma dessas tres coisas existe numa mensagem.
+        #
+        # ⚠️ `permissao: equipe` = owner e admin, a mesma regua da Fila e do
+        # Historico. Nao e `atendimento` porque a solicitacao traz dado de
+        # cadastro (CNPJ, endereco, valor) de quem ainda nao e cliente.
+        #
+        # ⚠️ O GRUPO E "Atendimento" DE PROPOSITO, e nao "Paineis": os quatro
+        # paineis por situacao da OS sao a Etapa 3, e ate eles existirem o
+        # grupo "Paineis" continua vazio -- o MenuLateral nao desenha grupo
+        # sem tela visivel.
+        "codigo": "FRM_1.1",
+        "titulo": "Solicitações",
+        "rota": "/solicitacoes",
+        "icone": "bi-ui-checks",
+        "descricao": "O que chega pelos formulários próprios.",
+        "grupo": "Atendimento",
+        "permissao": "equipe",
+        "fase": 1,
+    },
     # ---- CAD: cadastro ----
     {
         "codigo": "CAD_1.1",

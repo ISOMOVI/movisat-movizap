@@ -23,6 +23,13 @@ export const notificacoes = reactive({
      primeiro quadro, e deixa o arquivo que É a lista do estado sem dizer que
      ele existe. */
   email_nao_lidos: 0,
+  /* 🔵 22/10: as solicitações de formulário ainda `nova`, para o quarto selo
+     do menu. Vem da MESMA resposta de 8 em 8 s -- selo que pisca em dois
+     relógios mostra soma que não bate com as partes.
+
+     🚨 DECLARADO AQUI, como o do e-mail: campo que só existe depois da
+     primeira resposta faz o menu desenhar `undefined` no primeiro quadro. */
+  solicitacoes_novas: 0,
   assumidasNaoLidas: 0,
   /* 🔵 25/09: a conversa aberta na Caixa agora. Com a tela à vista, ela não
      toca (`decidirToque`); a Caixa escreve, o Notificador lê. */

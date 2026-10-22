@@ -18,6 +18,8 @@ node_modules/
 # `dist` e reconstruivel com `npm ci && npm run build`. Versionar bundle
 # minificado suja todo diff e mente sobre o que mudou de verdade.
 frontend/dist/
+# 2026-10-22: o build da pagina publica dos formularios, pelo mesmo motivo.
+frontend/dist_publico/
 .pytest_cache/
 
 # ---- dados e runtime ----

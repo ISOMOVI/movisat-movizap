@@ -127,6 +127,18 @@ class Settings:
     # vazar.
     ligacoes_senha_segredo: str = _ler("MOVIZAP_LIGACOES_SENHA_SEGREDO")
 
+    # ---- formulários públicos (Etapa 1, 22/10) ----
+    # 🚨 SEGREDO PRÓPRIO, como o das senhas de ramal: nunca o `jwt_secret`.
+    # Ele assina dois tokens que saem para a internet -- a abertura do
+    # formulário (para medir o tempo de preenchimento) e o desafio -- e
+    # nenhum dos dois é credencial de ninguém. Separar limita o estrago se um
+    # deles for analisado por quem recebeu o link.
+    #
+    # ⚠️ VAZIO NÃO DERRUBA O PAINEL: `movizap/formularios.py` deriva um
+    # segredo do `jwt_secret` e avisa no log. Formulário público é recurso
+    # novo, e recurso novo não pode impedir o serviço de subir.
+    formularios_segredo: str = _ler("MOVIZAP_FORMULARIOS_SEGREDO", "")
+
     # 🔵 15/10: *"Rotina da VPS verifica se os envios estão sendo feito
     # corretamente"*. Quem recebe o aviso do vigia (`scripts/agentes_mudos.py
     # --avisar-whatsapp`, no cron das 08:10 e 18:10). Vazio = não envia, só

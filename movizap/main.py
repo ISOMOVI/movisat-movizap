@@ -46,6 +46,7 @@ from . import relatorio_csv
 from . import mensagens_rapidas
 from . import agendamento
 from . import cep as cep_mod
+from . import formularios as formularios_mod
 from . import fpsl_ponte
 from . import orcamento as orcamento_mod
 from . import tecnico_vinculo
@@ -3561,6 +3562,15 @@ def minhas_notificacoes(usuario: dict = Depends(auth.get_usuario)):
         # 🔵 22/10: o terceiro selo do menu. Sai daqui, e nao de rota
         # propria, porque esta rota ja bate em toda tela -- um ritmo so.
         "email_nao_lidos": _email_nao_lidos(eu),
+        # 🔵 22/10: o QUARTO selo -- solicitacoes de formulario ainda novas.
+        # 🚨 Duas travas no mesmo numero: so quem tem a FRM_1.1 e so quem nao
+        # desligou o aviso na CFG_11.1. Sem a primeira, o selo contaria para
+        # quem clicaria e tomaria 403; sem a segunda, o pedido dele de
+        # *"controle de notificações... igual as demais"* nao existiria.
+        "solicitacoes_novas": (
+            formularios_mod.contar_novas()
+            if registro_telas.pode_acessar(usuario, "FRM_1.1")
+            and preferencia.aviso_solicitacao(eu) else 0),
         # Todas as que são MINHAS (lidas ou não): é o que separa "uma conversa
         # minha voltou a ter mensagem" de "chegou uma conversa NOVA para mim"
         # -- a nova toca mesmo acima do teto de 4 (decisão dele).
@@ -3606,6 +3616,23 @@ def _so_owner(usuario: dict) -> None:
     if not usuario.get("owner"):
         raise HTTPException(status_code=403,
                             detail="Você não tem permissão para esta alteração.")
+
+
+class MeuAvisoSolicitacao(BaseModel):
+    ligado: bool
+
+
+@app.put("/api/eu/aviso-solicitacao")
+def definir_meu_aviso_de_solicitacao(dados: MeuAvisoSolicitacao,
+                                     usuario: dict = Depends(auth.get_usuario)):
+    """🔵 22/10: *"controle de notificações no 'minha conta' de cada usuário,
+    igual as demais"*. Sem `requer_tela`, como as outras de `/api/eu/...`: é a
+    pessoa ajustando a si mesma."""
+    eu = _atendente_do_usuario(usuario)
+    if not eu:
+        raise HTTPException(status_code=400,
+                            detail="Sua conta não está vinculada a um atendente.")
+    return preferencia.definir_aviso_solicitacao(eu, dados.ligado)
 
 
 @app.get("/api/notificacoes/equipe")
@@ -4726,6 +4753,250 @@ def saude(request: Request):
         "telas_ativas": len(registro_telas.ativas()),
         "banco": banco.saude(),
     }
+
+
+# ---------------------------------------------------- formulários próprios
+#
+# 🔵 Etapa 1 (22/10): os formulários genéricos, em `forms.movisat.com.br`.
+#
+# 🚨 TRÊS ROTAS PÚBLICAS, E SÃO ESSAS TRÊS. O nginx do host público só deixa
+# passar `/f/`, `/pub/assets/` e `/api/publico/` -- todo o resto responde 403
+# lá. Aqui elas também não ganham `Depends(auth...)`: formulário aberto é
+# aberto, e o que protege o resto do painel é a permissão de cada rota, não a
+# obscuridade do caminho.
+#
+# ⚠️ POR QUE UM BUNDLE SEPARADO (`frontend/dist_publico`): o bundle do painel
+# publica `sourcemap: true`. Uma rota pública dentro do SPA faria qualquer
+# anônimo baixar o painel inteiro COM o código-fonte. A pergunta foi dele
+# (*"qual a mais segura para os links que terão acesso externos"*) e esta é a
+# resposta.
+
+
+def _publico_do_formulario(d: dict, ip: str | None) -> dict:
+    """O que a página pública pode ver -- e nada além.
+
+    🚨 `nosso_nome`, `bitrix_id`, `problema_id` e companhia NÃO SAEM DAQUI.
+    São nomes internos e números de catálogo do Harmonit; quem preenche o
+    formulário não tem o que fazer com eles, e o que não sai não vaza.
+    """
+    return {
+        "slug": d["slug"], "titulo": d["titulo"], "botao": d["botao"],
+        "descricao": d["descricao"],
+        "campos": [{"nome": c["nome"], "rotulo": c["rotulo"], "tipo": c["tipo"],
+                    "obrigatorio": c["obrigatorio"], "multiplo": c["multiplo"],
+                    "visivel": c["visivel"], "opcoes": c["opcoes"],
+                    "ajuda": c["ajuda"]}
+                   for c in d["campos"]],
+        "regras": [{"lista": r["lista"]} for r in d["regras"]],
+        "abertura": formularios_mod.abertura(),
+        "desafio": (formularios_mod.novo_desafio()
+                    if formularios_mod.exige_desafio(ip) else None),
+    }
+
+
+@app.get("/api/publico/formulario/{slug}")
+def formulario_publico(slug: str, request: Request):
+    try:
+        d = formularios_mod.definicao(slug)
+    except formularios_mod.FormularioNaoExiste:
+        raise HTTPException(status_code=404, detail="Formulário não encontrado.")
+    return _publico_do_formulario(d, ratelimit.ip_do_cliente(request))
+
+
+@app.get("/api/publico/desafio")
+def desafio_publico():
+    """Outra conta de somar, para quem errou a primeira."""
+    return formularios_mod.novo_desafio()
+
+
+@app.post("/api/publico/formulario/{slug}", status_code=201)
+async def enviar_formulario_publico(
+        slug: str, request: Request,
+        valores: str = Form("{}"),
+        abertura: str = Form(""),
+        isca: str = Form(""),
+        desafio_token: str = Form(""),
+        desafio_resposta: str = Form(""),
+        campos: list[str] = Form(default=[]),
+        arquivos: list[UploadFile] = File(default=[])):
+    """O envio. 🚨 A VALIDAÇÃO É AQUI, e é o ponto do módulo inteiro.
+
+    Medido em 22/10: o Bitrix aceitou `values=[]` vazio e criou o registro
+    15620. Lá a validação toda era no navegador -- e navegador é do cliente.
+    """
+    # ⚠️ Import local, como em `/api/ligacoes/agente/enviar`: `json` não está
+    # no topo deste arquivo, e as duas rotas que leem JSON de dentro de um
+    # multipart o importam aqui. Pôr no topo agora seria mudar o arquivo além
+    # do necessário; seguir o que já existe é o barato.
+    import json
+
+    ip = ratelimit.ip_do_cliente(request)
+    try:
+        d = formularios_mod.definicao(slug)
+    except formularios_mod.FormularioNaoExiste:
+        raise HTTPException(status_code=404, detail="Formulário não encontrado.")
+
+    # 🚨 A ISCA RECUSA EM SILÊNCIO, e responde o mesmo "recebemos" de sempre:
+    # robô que toma erro aprende a tentar de outro jeito. Nada é gravado.
+    if (isca or "").strip():
+        log.info("formulario %s: isca preenchida, envio descartado (ip %s)", slug, ip)
+        return {"ok": True, "mensagem": "Recebemos sua solicitação. "
+                                        "Em breve entraremos em contato."}
+
+    formularios_mod.conferir_abertura(abertura)
+    if formularios_mod.exige_desafio(ip):
+        formularios_mod.conferir_desafio(desafio_token, desafio_resposta)
+
+    try:
+        enviados = json.loads(valores or "{}")
+    except ValueError:
+        raise operacao.DadoInvalido("Não entendi os dados enviados.")
+    if not isinstance(enviados, dict):
+        raise operacao.DadoInvalido("Não entendi os dados enviados.")
+
+    # ⚠️ Os anexos chegam em duas listas paralelas (`campos` e `arquivos`),
+    # porque multipart com nome de campo dinâmico não dá para declarar. O
+    # servidor confere o par, e só aceita campo que EXISTE e é do tipo file.
+    de_arquivo = {c["nome"] for c in d["campos"] if c["tipo"] == "file"}
+    guardados: list[dict] = []
+    por_campo: dict = {}
+    total = 0
+    for i, enviado in enumerate(arquivos or []):
+        campo = campos[i] if i < len(campos) else ""
+        if campo not in de_arquivo:
+            raise operacao.DadoInvalido("Anexo em campo que não aceita arquivo.")
+        dados = await enviado.read()
+        total += len(dados)
+        if total > formularios_mod.TETO_ENVIO:
+            raise operacao.DadoInvalido(
+                f"Os anexos somam mais de "
+                f"{formularios_mod.TETO_ENVIO // (1024 * 1024)} MB.")
+        guardado = formularios_mod.guardar_arquivo(enviado.filename or "arquivo", dados)
+        guardado["campo"] = campo
+        guardado["mime"] = enviado.content_type
+        guardados.append(guardado)
+        por_campo.setdefault(campo, []).append(guardado)
+
+    limpo = formularios_mod.validar(d, enviados, por_campo)
+    r = formularios_mod.registrar(d, limpo, guardados, ip=ip)
+    formularios_mod.registrar_envio(ip)
+    return {"ok": True, "id": r["id"], "mensagem": r["mensagem"]}
+
+
+# ---- o painel (FRM_1.1) ----
+
+@app.get("/api/formularios")
+def listar_formularios(usuario: dict = Depends(auth.requer_tela("FRM_1.1"))):
+    return formularios_mod.lista_para_o_painel()
+
+
+@app.get("/api/formularios/{slug}/definicao")
+def definicao_do_formulario(slug: str,
+                            usuario: dict = Depends(auth.requer_tela("FRM_1.1"))):
+    """A definição inteira, inclusive de formulário DESLIGADO -- é por aqui que
+    ele confere o que vai publicar antes de ligar."""
+    try:
+        return formularios_mod.definicao(slug, so_ativo=False)
+    except formularios_mod.FormularioNaoExiste:
+        raise HTTPException(status_code=404, detail="Formulário não encontrado.")
+
+
+class FormularioAtivo(BaseModel):
+    ativo: bool
+
+
+@app.put("/api/formularios/{codigo}/ativo")
+def ligar_formulario(codigo: str, dados: FormularioAtivo,
+                     usuario: dict = Depends(auth.requer_tela("FRM_1.1"))):
+    """🚨 SÓ O OWNER PUBLICA. Ligar um formulário é abrir uma porta para a
+    internet, e a lista de quem pode fazer isso é de um."""
+    _so_owner(usuario)
+    linha = banco.um(
+        """UPDATE formulario SET ativo = %s, atualizado_em = now()
+            WHERE codigo = %s RETURNING codigo, slug, ativo""",
+        (dados.ativo, codigo.upper()))
+    if not linha:
+        raise HTTPException(status_code=404, detail="Formulário não encontrado.")
+    log.info("formulario %s %s por %s", linha["codigo"],
+             "ligado" if linha["ativo"] else "desligado", usuario.get("login"))
+    return linha
+
+
+@app.get("/api/solicitacoes")
+def listar_solicitacoes(formulario: str | None = None, estado: str | None = None,
+                        antes_de: int | None = None, limite: int = 50,
+                        usuario: dict = Depends(auth.requer_tela("FRM_1.1"))):
+    return formularios_mod.listar_solicitacoes(slug=formulario, estado=estado,
+                                               limite=limite, antes_de=antes_de)
+
+
+@app.get("/api/solicitacoes/{solicitacao_id}")
+def ver_solicitacao(solicitacao_id: int,
+                    usuario: dict = Depends(auth.requer_tela("FRM_1.1"))):
+    r = formularios_mod.uma(solicitacao_id)
+    if not r:
+        raise HTTPException(status_code=404, detail="Solicitação não encontrada.")
+    return r
+
+
+class EstadoDaSolicitacao(BaseModel):
+    estado: str
+
+
+@app.put("/api/solicitacoes/{solicitacao_id}/estado")
+def mudar_estado_da_solicitacao(solicitacao_id: int, dados: EstadoDaSolicitacao,
+                                usuario: dict = Depends(auth.requer_tela("FRM_1.1"))):
+    return formularios_mod.definir_estado(solicitacao_id, dados.estado,
+                                          _atendente_do_usuario(usuario))
+
+
+@app.get("/api/solicitacoes/{solicitacao_id}/arquivo/{arquivo_id}")
+def baixar_anexo_da_solicitacao(solicitacao_id: int, arquivo_id: int,
+                                usuario: dict = Depends(auth.requer_tela("FRM_1.1"))):
+    """🚨 O HOST PÚBLICO NUNCA SERVE ANEXO -- quem envia é a internet, quem lê
+    é a casa. E o caminho vem do BANCO, nunca da URL."""
+    r = formularios_mod.arquivo(solicitacao_id, arquivo_id)
+    if not r:
+        raise HTTPException(status_code=404, detail="Anexo não encontrado.")
+    caminho = pathlib.Path(r["caminho"])
+    if not caminho.is_file():
+        raise HTTPException(status_code=410, detail="O arquivo não está mais no disco.")
+    return FileResponse(caminho, filename=r["nome_original"],
+                        media_type=r["mime"] or "application/octet-stream")
+
+
+class DesafioSempre(BaseModel):
+    ligado: bool
+
+
+@app.get("/api/config/formulario-desafio")
+def ver_desafio_do_formulario(usuario: dict = Depends(auth.requer_tela("CFG_7.1"))):
+    return {"desafio_sempre": formularios_mod.desafio_sempre()}
+
+
+@app.put("/api/config/formulario-desafio")
+def definir_desafio_do_formulario(dados: DesafioSempre,
+                                  usuario: dict = Depends(auth.requer_tela("CFG_7.1"))):
+    """⚠️ Interruptor do SISTEMA, por isso em `/config › Geral` -- e nasce
+    desligado. Ligado, a conta de somar aparece em TODO envio; desligado, só
+    depois de 5 envios do mesmo IP na hora."""
+    return formularios_mod.definir_desafio_sempre(dados.ligado)
+
+
+# ------------------------------------------------- a página pública do form
+PUBLICO = RAIZ / "frontend" / "dist_publico"
+
+if PUBLICO.exists():
+    app.mount("/pub/assets", StaticFiles(directory=PUBLICO / "assets"),
+              name="pub_assets")
+
+    @app.get("/f/{slug}")
+    def pagina_do_formulario(slug: str):
+        """A página do formulário. 🚨 O MESMO `index.html` para todos os slugs:
+        quem busca a definição é a página, pela rota de API -- e é ela que dá
+        404 quando o formulário não existe ou está desligado."""
+        return FileResponse(PUBLICO / "index.html",
+                            headers={"Cache-Control": "no-cache"})
 
 
 # ---------------------------------------------------------------- frontend

@@ -36,6 +36,7 @@ import Historico from '../telas/Historico.vue'
 import Ligacoes from '../telas/Ligacoes.vue'
 import Agendamentos from '../telas/Agendamentos.vue'
 import ChatInterno from '../telas/ChatInterno.vue'
+import Solicitacoes from '../telas/Solicitacoes.vue'
 import Atendentes from '../telas/Atendentes.vue'
 import Times from '../telas/Times.vue'
 import Automacao from '../telas/Automacao.vue'
@@ -135,6 +136,17 @@ const rotas = [
     name: 'ATD_3.1',
     component: Informativos,
     meta: { codigo: 'ATD_3.1', titulo: 'Informativos' },
+  },
+
+  // 🔵 22/10: a FRM_1.1, o que chega pelos formularios proprios.
+  // 🚨 REGISTRO E ROTEADOR ANDAM JUNTOS: tela registrada no backend e ausente
+  // daqui aparece no menu e leva para "nao encontrada" -- aconteceu em 06/08
+  // com a ATD_5.1, e o `teste_router.py` compara os dois lados desde entao.
+  {
+    path: '/solicitacoes',
+    name: 'FRM_1.1',
+    component: Solicitacoes,
+    meta: { codigo: 'FRM_1.1', titulo: 'Solicitações' },
   },
 
   // ---- CAD: cadastro ----

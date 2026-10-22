@@ -2150,3 +2150,51 @@ endereço de volta provou o mapa. E pegou um erro meu: `solucaoTecnica` saía
 como `""` onde a OS tinha `null`, por causa de um `or ""`. A comparação acusou,
 `ok` voltou `False`, e a causa foi corrigida. Sem o no-op, isso teria ido para
 produção invisível.
+
+## Migração 074 — os formulários próprios, e eles são DADO
+
+🔵 22/10, decisão dele: *"nenhuma possibilidade irá usar o bitrix, esse
+projeto é movizap"*. Cinco tabelas novas.
+
+**`formulario`** — um por formulário: `codigo`, `slug` (o que aparece em
+`/f/<slug>`), `titulo`, `setor`, `botao`, `descricao`, `ativo`, `ordem`,
+`gera_os`, `problema_id`, `tipo_os_id`, `prioridade_id`, `bitrix_id`,
+`bitrix_sec`, `criado_em`, `atualizado_em`.
+🚨 `ativo` **nasce falso**: enquanto for, o link público responde 404. Quem
+liga é o owner, pela tela.
+🚨 `bitrix_id`/`bitrix_sec` são **procedência**, não destino — dizem de onde a
+definição foi lida em 22/10 (`dados/formularios_bitrix/mapa_bruto.json`).
+Nada neste projeto escreve no Bitrix.
+
+**`formulario_campo`** — `formulario_id`, `nome` (o nome de ORIGEM, ilegível
+de propósito: `DEAL_UF_CRM_DEAL_1649449139431` é campo personalizado do
+Bitrix, e o número é o timestamp em que alguém o criou), **`nosso_nome`** (o
+nome legível, derivado do rótulo e único por formulário), `rotulo`, `tipo`,
+`obrigatorio`, `multiplo`, `visivel`, `ordem`, `opcoes` (jsonb, com o `value`
+numérico do Bitrix — é ele que as regras comparam), `ajuda`.
+O CHECK de `tipo` tem os **15 tipos** medidos nos 239 campos: tipo
+desconhecido para na CARGA, não na tela do cliente.
+
+**`formulario_regra`** — `formulario_id`, `ordem`, `logica`, `lista` (jsonb,
+a estrutura do Bitrix como veio: `condition` → `action`, `show`/`hide`).
+🚨 Fica em UMA forma porque os DOIS lados a avaliam: o servidor
+(`movizap/formularios.py:visiveis`, que é a autoridade) e o navegador
+(`frontend/src/util/regras_formulario.js`). As duas suítes leem o mesmo
+arquivo de casos, `tests/casos_regras_formulario.json`.
+
+**`formulario_solicitacao`** — `formulario_id`, `criada_em`, `ip`, `valores`
+(jsonb, pela chave de ORIGEM), `estado` (`nova`/`em_andamento`/`concluida`),
+`lida_por`, `lida_em`, e já anuláveis para a Etapa 2/3: `conversa_id`,
+`contato_id`, `cliente_id`, `os_id`, `numero_ordem`.
+🚨 **É RETRATO**: não se reescreve quando a definição muda, e campo escondido
+por regra **não entra, nem vazio**.
+⚠️ A FK para `formulario` **não** é `ON DELETE CASCADE`, de propósito: apagar
+um formulário com solicitação recebida é recusado pelo banco. Campo e regra,
+que são definição, saem em cascata.
+
+**`formulario_arquivo`** — `solicitacao_id`, `campo`, `nome_original`,
+`caminho`, `bytes`, `mime`, `criado_em`.
+🚨 O arquivo fica **fora do projeto**, em
+`/home/claude/movizap_formularios_anexos`, como o anexo de e-mail: dentro, ele
+entraria no git e no `dist` — e o `dist` é servido. `nome_original` é texto
+para ler, **nunca** caminho.

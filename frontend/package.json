@@ -6,9 +6,10 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "vite build && vite build --config vite.publico.config.js",
     "preview": "vite preview",
-    "test": "vitest run"
+    "test": "vitest run",
+    "build:publico": "vite build --config vite.publico.config.js"
   },
   "dependencies": {
     "bootstrap-icons": "^1.11.3",

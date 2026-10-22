@@ -4555,3 +4555,69 @@ tela.
 ### Placar
 
 **1651 Python** (eram 1638) e **410 JS** (eram 406).
+
+## 22/10 — Formulários próprios: a FRM_1.1 e o link público
+
+🔵 Decisão dele: *"nenhuma possibilidade irá usar o bitrix, esse projeto é
+movizap"*. Os 15 formulários de `solicite.movisat.com.br` eram **Bitrix24 CRM
+Webforms** e concentravam toda a entrada de demanda da Movisat. Eles passam a
+viver aqui; o Bitrix fica no ar só até ele desligar.
+
+**O que entrou nesta primeira volta (Etapa 1):**
+
+- **`forms.movisat.com.br/f/<slug>`** — o formulário aberto, sem login. Nesta
+  volta no ar **só o CES** (5 campos); os outros 14 entram como DADO, depois
+  que ele validar este no navegador.
+- **`FRM_1.1` Solicitações** — a tela que recebe. Lista à esquerda, ficha à
+  direita, três estados (`nova`, `em_andamento`, `concluida`), anexo para
+  baixar. Grupo **Atendimento**, permissão **`equipe`** (owner e admin, a
+  mesma régua da Fila e do Histórico).
+- **o selo no menu** — o quarto, ao lado de WhatsApp, Chat interno e E-mail, e
+  somado no grupo fechado. Conta as solicitações `nova` **pela mesma coluna
+  que a tela filtra**.
+- **o interruptor por pessoa**, na `CFG_11.1` — pedido dele: *"controle de
+  notificações no 'minha conta' de cada usuário, igual as demais"*. Nasce
+  LIGADO, e só aparece para quem tem a FRM_1.1.
+- **o interruptor do sistema**, na `CFG_7.1` › Geral — pedir a conta de somar
+  em TODO envio. Nasce desligado, e fica **no fim da tela** (dois testes da
+  Geral escolhem a caixa pelo índice).
+
+🚨 **A definição do formulário é DADO, não arquivo.** `formulario`,
+`formulario_campo` e `formulario_regra` (migração 074) guardam campos,
+rótulos, opções com os IDs do Bitrix e as regras condicionais; **uma** tela os
+desenha (`CamposDoFormulario.vue`). Formulário novo é linha em tabela.
+
+🚨 **A validação é NOSSA, no servidor.** Medido em 22/10: o Bitrix aceitou
+`values=[]` vazio e criou o registro `15620` — toda a validação dos 239 campos
+era no navegador, e navegador é do cliente.
+
+🚨 **Campo escondido por regra SOME do registro**, não vira vazio: *"a pessoa
+não respondeu"* e *"a pergunta não foi feita"* são coisas diferentes.
+
+🚨 **Alvo de regra `show` nasce escondido, e isso foi medido:** nos 15
+formulários **nenhum** campo vem com `visible: false` no loader do Bitrix, e
+há **60 ações `show`**. Quem traduz é a carga. Confiar no `visible` faria todo
+campo condicional aparecer sempre.
+
+🚨 **O bundle público é separado** (`frontend/dist_publico`, servido em
+`/pub/assets` e `/f/{slug}`). Pergunta dele: *"qual a mais segura para os
+links que terão acesso externos"*. O bundle do painel publica `sourcemap:
+true` — uma rota pública dentro dele entregaria o código-fonte do painel a
+qualquer anônimo.
+
+**As defesas do envio, nesta ordem:** isca invisível → tempo mínimo de 3 s
+entre abrir e enviar (token assinado, sem sessão) → contagem de envios por IP
+→ e **só então** a conta de somar, servida por nós. Decisão dele: *"captcha no
+final pode se legal, mas tbm usam pelo cel então não pode virar entrave de
+processo"*.
+
+**Os anexos ficam isolados** em `/home/claude/movizap_formularios_anexos`,
+fora do projeto e fora do `dist` (*"isolar os anexos sem perder controle na
+VPS"*), com lista branca de extensão, 10 MB por arquivo e 25 MB por envio.
+⚠️ **O host público nunca serve anexo** — baixar é rota autenticada do painel.
+
+🔴 **O que ainda espera ele:** apagar os 14 registros de teste no Bitrix24
+(`resultId` 15620–15646) · dizer para onde cada formulário cai no CRM hoje ·
+confirmar o mapa formulário → `problemaId` · o texto dos nossos termos de uso
+(o do Bitrix é *boilerplate* em inglês) · revisar os `nosso_nome` dos 239
+campos.

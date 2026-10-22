@@ -243,3 +243,28 @@ def definir_notificacao(atendente_id: int, tom: str, volume: int) -> dict:
     _gravar(atendente_id, CHAVE_NOTIF_TOM, tom)
     _gravar(atendente_id, CHAVE_NOTIF_VOLUME, str(int(volume)))
     return {"ok": True, **notificacao(atendente_id)}
+
+# ============================================================================
+# AVISO DE SOLICITAÇÃO DE FORMULÁRIO — 22/10
+# ============================================================================
+# 🔵 Pedido dele: *"Item 1, porem controle de notificações no 'minha conta' de
+# cada usuário, igual as demais"*.
+#
+# 🚨 NASCE LIGADO, e é a exceção consciente à regra de "recurso novo nasce
+# desligado": o aviso É o pedido. Quem não quiser o desliga na CFG_11.1.
+# Ausência de linha, aqui, significa LIGADO -- como no `enviar_com_enter`.
+#
+# ⚠️ ELE SÓ VALE PARA QUEM TEM A TELA. Quem não tem a FRM_1.1 recebe 0 de
+# qualquer forma: o interruptor esconde um selo, nunca dá acesso.
+CHAVE_AVISO_SOLICITACAO = "aviso_solicitacao"
+
+
+def aviso_solicitacao(atendente_id: int | None) -> bool:
+    if not atendente_id:
+        return False
+    return _ler(atendente_id, CHAVE_AVISO_SOLICITACAO) != "false"
+
+
+def definir_aviso_solicitacao(atendente_id: int, ligado: bool) -> dict:
+    _gravar(atendente_id, CHAVE_AVISO_SOLICITACAO, "true" if ligado else "false")
+    return {"ok": True, "aviso_solicitacao": bool(ligado)}

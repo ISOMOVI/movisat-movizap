@@ -91,6 +91,7 @@ aparecem todos.
 | `ATD_5.1` | Histórico | `/atendimento/historico` | `equipe` | 1 |
 | `ATD_6.1` | Chat interno | `/chat` | `atendimento` | 1 |
 | `EML_1.1` | E-mail | `/email` | `atendimento` | 1 |
+| `FRM_1.1` | Solicitações | `/solicitacoes` | `equipe` | 1 |
 | `CAD_1.1` | Clientes | `/cadastro/clientes` | `cadastro` | 1 |
 | `CAD_1.2` | Contatos | `/cadastro/contatos` | `cadastro` | 1 |
 | `CAD_2.1` | Atendentes | `/cadastro/atendentes` | `equipe` | 1 |
@@ -176,6 +177,7 @@ O campo **`icone`** deste registro é o que o menu desenha, e ele é **a fonte
 | `CFG_13.1` Orçamento | `bi-receipt` | aba |
 | `CFG_14.1` Vínculo dos técnicos | `bi-person-vcard` | aba |
 | `ATD_3.1` Informativos | `bi-megaphone` | menu |
+| `FRM_1.1` Solicitações | `bi-ui-checks` | menu |
 | `CAD_1.1` Clientes | `bi-building` | menu |
 | `CAD_1.2` Contatos | `bi-person-lines-fill` | menu |
 | `CAD_2.1` Atendentes | `bi-people` | menu |
@@ -374,7 +376,7 @@ Fixa no rodapé de **toda** tela principal. Modelo mental: barra do Excel / bloc
 | Perfil | Permissões | Telas na prática |
 |---|---|---|
 | `owner` | todas | tudo, inclusive o que é exclusivo do owner |
-| `admin` | `atendimento` `equipe` | as de `atendimento` + `CAD_2.1` `CAD_2.2`; no `/config`, só `CFG_10.1`, `CFG_11.1` e `CFG_12.1` (25/09: *"Owner e admin criam"* os Padrões e Formulários) |
+| `admin` | `atendimento` `equipe` | as de `atendimento` + `ATD_1.3` `ATD_5.1` `CAD_2.1` `CAD_2.2` `FRM_1.1` (as cinco de `equipe`); no `/config`, só `CFG_10.1`, `CFG_11.1` e `CFG_12.1` (25/09: *"Owner e admin criam"* os Padrões e Formulários) |
 | `atendimento` | `atendimento` | `INI_1.1` `ATD_1.*` `ATD_5.1` `ATD_6.1` `LIG_1.1` `EML_1.1` `CFG_0.1` › `CFG_10.1` `CFG_11.1` `CFG_12.1` |
 | `cadastro` | `cadastro` | `CAD_1.1` `CAD_1.2` |
 

@@ -124,7 +124,14 @@ class TestIntegridadeDoRegistro:
             # LIG entrou em 15/10: ligação do MicroSIP não é conversa de
             # WhatsApp nem cadastro, e a aba é de auditoria -- pendurá-la em
             # ATD faria o log misturar "falou com cliente" e "ligou".
-            assert modulo in {"INI", "EML", "ATD", "CAD", "CFG", "LIG", "REL"}, t["codigo"]
+            #
+            # FRM entrou em 22/10 com os formulários próprios: formulário não
+            # é conversa de WhatsApp nem cadastro -- tem definição, campo
+            # obrigatório e anexo, e nenhuma das três existe numa mensagem.
+            # Pendurá-lo em ATD misturaria "cliente escreveu" e "cliente
+            # preencheu".
+            assert modulo in {"INI", "EML", "ATD", "CAD", "CFG", "LIG", "REL",
+                              "FRM"}, t["codigo"]
             assert numero, t["codigo"]
             for parte in numero.split("."):
                 assert parte.isdigit(), f"{t['codigo']}: parte não numérica"
@@ -300,7 +307,12 @@ class TestPortaDoConfig:
         # elas deixaram de entrar por `de_atendimento`, e por isso vêm
         # nomeadas aqui. O conjunto segue FECHADO: é esta linha que tem de
         # mudar quando a decisão dele mudar, não o assert.
-        esperado = de_atendimento | {"ATD_1.3", "ATD_5.1",
+        # 🔵 22/10: a FRM_1.1 (Solicitações) nasceu `equipe`, pela mesma
+        # régua da Fila e do Histórico -- a solicitação traz dado de cadastro
+        # (CNPJ, endereço, valor) de quem ainda não é cliente. O admin a vê
+        # porque tem `equipe`, e por isso vem nomeada aqui: o conjunto segue
+        # FECHADO, e é esta linha que muda quando a decisão dele muda.
+        esperado = de_atendimento | {"ATD_1.3", "ATD_5.1", "FRM_1.1",
                                      "CAD_2.1", "CAD_2.2", "CFG_10.1", "CFG_11.1",
                                      "CFG_12.1"}
         assert vistas == esperado

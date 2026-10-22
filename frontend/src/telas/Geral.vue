@@ -134,6 +134,13 @@ async function carregar() {
     } catch {
       harmonitLigado.value = false
     }
+    // 🚨 EM TRY PRÓPRIO, pelo mesmo motivo do de cima: um interruptor a mais
+    // não pode derrubar a leitura da tela inteira.
+    try {
+      desafioSempre.value = (await api.get('/api/config/formulario-desafio')).desafio_sempre
+    } catch {
+      desafioSempre.value = false
+    }
     await carregarPresenca()
     await carregarDistribuicao()
     erro.value = ''
@@ -145,6 +152,26 @@ async function carregar() {
 }
 
 const harmonitLigado = ref(false)
+/* 🔵 22/10: a conta de somar do formulário público. Nasce desligada. */
+const desafioSempre = ref(false)
+
+async function alternarDesafio() {
+  salvando.value = true
+  recado.value = ''
+  try {
+    const r = await api.put('/api/config/formulario-desafio',
+                            { ligado: !desafioSempre.value })
+    // Relê o que o servidor gravou: a confirmação é o estado.
+    desafioSempre.value = r.desafio_sempre
+    recado.value = desafioSempre.value
+      ? 'Ligado: todo envio de formulário passa a pedir a conta.'
+      : 'Desligado: a conta volta a aparecer só depois de 5 envios do mesmo IP na hora.'
+  } catch (e) {
+    erro.value = e instanceof ErroDeApi ? e.message : 'Não consegui mudar.'
+  } finally {
+    salvando.value = false
+  }
+}
 
 async function alternarHarmonit() {
   salvando.value = true
@@ -470,6 +497,33 @@ onMounted(carregar)
           O agendamento daqui <strong>não depende</strong> disto dar certo: se
           o Harmonit recusar, o compromisso continua valendo e o motivo fica
           gravado na linha, visível na tela de Agendamentos.
+        </p>
+      </div>
+    </section>
+      <!-- 🔵 22/10: a conta de somar do formulário público.
+
+         ⚠️ FICA NO FIM DA TELA, pelo mesmo motivo escrito acima: dois testes
+         da Geral escolhem a caixa pelo ÍNDICE (`caixas[2]`), e interruptor
+         inserido no meio desloca os deles.
+
+         🚨 NASCE DESLIGADO, e desligado NÃO quer dizer "sem defesa": a isca,
+         o tempo mínimo de preenchimento e o limite por IP valem sempre. Isto
+         aqui é só a pergunta aparecer em TODO envio, em vez de aparecer
+         depois de 5 envios do mesmo IP na hora. Decisão dele: *"captcha no
+         final pode se legal, mas tbm usam pelo cel então não pode virar
+         entrave de processo"*. -->
+    <section class="cartao tela__bloco">
+      <div class="cartao__corpo pilha">
+        <label class="interruptor">
+          <input type="checkbox" :checked="desafioSempre" :disabled="salvando"
+                 @change="alternarDesafio" />
+          <span><strong>Pedir a conta de somar em todo formulário enviado</strong></span>
+        </label>
+        <p class="apagado pequeno">
+          Desligado (o normal), quem preenche um formulário em
+          <strong>forms.movisat.com.br</strong> só vê a pergunta depois de 5
+          envios do mesmo endereço na mesma hora. Ligado, ela aparece sempre —
+          mais atrito para o cliente, inclusive no celular.
         </p>
       </div>
     </section>

@@ -49,6 +49,11 @@ def _conectar() -> sqlite3.Connection:
     conn.execute("CREATE TABLE IF NOT EXISTS falhas (chave TEXT, quando REAL)")
     conn.execute("CREATE INDEX IF NOT EXISTS ix_falhas ON falhas (chave)")
     conn.execute("CREATE TABLE IF NOT EXISTS travas (chave TEXT PRIMARY KEY, ate REAL)")
+    # 🔵 22/10: os formularios publicos precisam contar ENVIOS, nao falhas --
+    # envio e sucesso, e sucesso nenhum bloqueia aqui. Tabela separada para que
+    # a conta de um nunca mexa na trava do outro.
+    conn.execute("CREATE TABLE IF NOT EXISTS eventos (chave TEXT, quando REAL)")
+    conn.execute("CREATE INDEX IF NOT EXISTS ix_eventos ON eventos (chave)")
     return conn
 
 
@@ -137,3 +142,41 @@ def zerar() -> None:
             conn.execute("DELETE FROM travas")
     except sqlite3.Error:
         pass
+
+# ----------------------------------------------------------------------------
+# Eventos: contar o que ACONTECEU, sem bloquear nada
+# ----------------------------------------------------------------------------
+# 🔵 22/10, para o envio publico de formulario. 🚨 DELIBERADAMENTE SEPARADO DAS
+# FALHAS DE LOGIN: aqui nada trava. Quem passa do teto so ganha um desafio a
+# mais no caminho -- decisao dele: *"captcha no final pode se legal, mas tbm
+# usam pelo cel então não pode virar entrave de processo"*.
+JANELA_EVENTOS_SEG = 3600
+
+
+def registrar_evento(chave: str) -> None:
+    """Mais um envio desta chave, agora."""
+    try:
+        with _conectar() as conn:
+            agora = time.time()
+            conn.execute("INSERT INTO eventos (chave, quando) VALUES (?, ?)",
+                         (chave, agora))
+            # Limpeza no caminho, como nas falhas: sem cron e sem crescer.
+            conn.execute("DELETE FROM eventos WHERE quando < ?",
+                         (agora - JANELA_EVENTOS_SEG * 24,))
+    except sqlite3.Error:
+        pass   # ver o comentario em bloqueado_por: contador fora do ar nao fecha porta
+
+
+def quantos_eventos(chave: str, janela_seg: int = JANELA_EVENTOS_SEG) -> int:
+    """Quantos eventos desta chave na janela. 🚨 Contar nunca registra."""
+    try:
+        with _conectar() as conn:
+            linha = conn.execute(
+                "SELECT count(*) FROM eventos WHERE chave = ? AND quando > ?",
+                (chave, time.time() - janela_seg)).fetchone()
+            return int(linha[0]) if linha else 0
+    except sqlite3.Error:
+        # ⚠️ Na dúvida, NÃO exige desafio: o banco de contagem fora do ar não
+        # pode impedir um cliente de pedir suporte. É a mesma escolha de
+        # `bloqueado_por`, e pelo mesmo motivo.
+        return 0
