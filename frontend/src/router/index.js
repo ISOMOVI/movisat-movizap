@@ -253,6 +253,14 @@ const rotas = [
     meta: { codigo: 'CFG_11.1', titulo: 'Notificações' },
   },
   {
+    // 🟡 Ponta 4 do plano (21/10): a rota de pendências do vínculo tinha
+    // dado e não tinha tela. Só owner, como a aba do orçamento.
+    path: '/config/vinculo-tecnicos',
+    name: 'CFG_14.1',
+    component: Configuracoes,
+    meta: { codigo: 'CFG_14.1', titulo: 'Vínculo dos técnicos' },
+  },
+  {
     // 🔵 Decisão 9 dele (19/10): a numeração do orçamento, só do owner.
     path: '/config/orcamento',
     name: 'CFG_13.1',

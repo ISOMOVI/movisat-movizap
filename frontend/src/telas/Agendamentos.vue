@@ -16,6 +16,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 
 import { api } from '../api/cliente.js'
+import { agrupar, chaveDoGrupo, textosDoGrupo } from '../util/mensagem_agendamento.js'
 
 const router = useRouter()
 
@@ -158,6 +159,142 @@ async function reagendar(a) {
   }
 }
 
+/* ---- MÊS NAVEGÁVEL AO LADO (ponta 3 do plano, §8) ------------------------
+   O carrossel entrega semana anterior / hoje / próxima; faltava o mês ao lado,
+   para pular para um dia distante sem andar de sete em sete.
+
+   ⚠️ O MÊS É UM ATALHO DE NAVEGAÇÃO, NÃO UMA SEGUNDA LISTA. Escolher um dia
+   nele move a âncora do carrossel e recarrega os 7 dias -- quem manda no que
+   a tela mostra continua sendo o carrossel. Duas listas de agendamento na
+   mesma tela seriam duas respostas para a mesma pergunta.
+
+   🚨 O SELO DE "TEM SERVIÇO" NÃO APARECE NO MÊS, de propósito: o que está
+   carregado é a semana da âncora, então o mês saberia de uns dias e não de
+   outros -- e um mês com pontos em três dias afirmaria que nos outros não há
+   nada. Tela que mente é defeito. */
+const mesAberto = ref(false)
+
+function primeiroDoMes(isoDia) {
+  const d = new Date(`${isoDia}T12:00:00`)
+  return new Date(d.getFullYear(), d.getMonth(), 1, 12, 0, 0)
+}
+
+const mesCursor = ref(primeiroDoMes(iso(hoje)))
+
+const rotuloDoMes = computed(() =>
+  mesCursor.value.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' }))
+
+const diasDoMes = computed(() => {
+  const base = mesCursor.value
+  const primeiro = new Date(base.getFullYear(), base.getMonth(), 1, 12, 0, 0)
+  const lista = []
+  // Os vazios antes do dia 1, para o dia cair na coluna do seu dia da semana.
+  for (let i = 0; i < primeiro.getDay(); i += 1) lista.push(null)
+  const d = new Date(primeiro)
+  while (d.getMonth() === base.getMonth()) {
+    lista.push({ iso: iso(d), dia: d.getDate(), hoje: iso(d) === iso(hoje) })
+    d.setDate(d.getDate() + 1)
+  }
+  return lista
+})
+
+function andarMes(passo) {
+  const d = new Date(mesCursor.value)
+  d.setMonth(d.getMonth() + passo)
+  mesCursor.value = new Date(d.getFullYear(), d.getMonth(), 1, 12, 0, 0)
+}
+
+function escolherDoMes(d) {
+  ancora.value = d.iso
+  selecionado.value = d.iso
+  mesAberto.value = false
+  carregar()
+}
+
+/* ---- REENVIAR CONFIRMAÇÃO (ponta 2 do plano, §8) -------------------------
+   A quarta ação da linha. Entregaram-se três em 21/10 (Reagendar, Cancelar,
+   Abrir conversa) e esta ficou faltando.
+
+   🚨 NÃO ENVIA NADA. Decisão 6 dele, ao pé da letra: as duas confirmações
+   saem pré-escritas e **quem envia é o atendente**. Aqui ela mostra os dois
+   textos para copiar e oferece abrir a conversa com o texto no compositor.
+
+   🚨 MONTA COM A MESMA REGRA DE AGRUPAMENTO (mesma data e hora => uma
+   mensagem só, placas e OS somadas), e por isso junta os compromissos IRMÃOS:
+   o mesmo cliente, na mesma hora, menos os cancelados. Reenviar só a linha
+   clicada mandaria ao cliente um texto diferente do que ele recebeu.
+
+   ⚠️ COMPROMISSO AINDA `aguardando` NÃO TEM RESPONSÁVEL: o texto sai com o
+   campo vazio, e a tela diz por quê em vez de deixar o operador descobrir. */
+const reenvio = ref(null)
+const copiado = ref('')
+
+function irmaosDe(a) {
+  const chave = chaveDoGrupo(a)
+  return agendamentos.value.filter(
+    (x) => x.estado !== 'cancelado'
+      && x.cliente_harmonit_id === a.cliente_harmonit_id
+      && chaveDoGrupo(x) === chave)
+}
+
+function reenviarConfirmacao(a) {
+  const grupo = irmaosDe(a)
+  // `irmaosDe` exclui cancelado, e a ação não aparece em linha cancelada --
+  // mas se por algum caminho chegar aqui vazia, usa a própria linha em vez de
+  // montar mensagem de lista vazia.
+  const [primeiro] = agrupar(grupo.length ? grupo : [a])
+  reenvio.value = {
+    agendamento: a,
+    ...textosDoGrupo(primeiro, {}),
+  }
+  copiado.value = ''
+}
+
+
+async function copiar(qual, texto) {
+  try {
+    await navigator.clipboard.writeText(texto)
+    copiado.value = qual
+  } catch {
+    // 🚨 A ÁREA DE TRANSFERÊNCIA FALHA SEM AVISO em contexto não seguro e
+    // quando a aba não tem o foco. O texto está na tela, selecionável: o que
+    // não pode é a tela afirmar que copiou sem ter copiado.
+    copiado.value = ''
+    acaoErro.value = 'Não deu para copiar — selecione o texto e copie à mão.'
+  }
+}
+
+/* Abre a conversa com o texto JÁ no compositor.
+
+   🚨 O CAMINHO É O RASCUNHO POR CONVERSA (Bloco 7, 15/10): a Caixa semeia o
+   compositor com `localStorage['movizap.rascunho.<id>']` ao abrir a conversa.
+   Escrever aqui é usar o mecanismo que já existe, em vez de inventar um
+   segundo caminho de "texto pendente".
+
+   ⚠️ NÃO SOBRESCREVE RASCUNHO SEM AVISAR: se já havia texto guardado naquela
+   conversa, pergunta. Perder meia frase digitada pelo colega é o defeito que
+   o Bloco 7 nasceu para corrigir. */
+function abrirConversaComTexto(a, texto) {
+  if (!a.conversa_id) return
+  const chave = `movizap.rascunho.${a.conversa_id}`
+  try {
+    const havia = localStorage.getItem(chave)
+    if (havia && havia.trim() && havia !== texto
+        && !window.confirm('Esta conversa já tem texto não enviado no '
+                           + 'compositor. Substituir pelo da confirmação?')) {
+      return
+    }
+    localStorage.setItem(chave, texto)
+  } catch {
+    // Sem storage (janela privada, dados bloqueados): abre a conversa de todo
+    // jeito e diz que o texto não foi semeado -- o texto continua na tela.
+    acaoErro.value = 'Abri a conversa, mas não deu para deixar o texto no '
+      + 'compositor neste navegador. Copie o texto acima.'
+  }
+  reenvio.value = null
+  router.push(`/atendimento/${a.conversa_id}`)
+}
+
 function abrirConversa(a) {
   if (!a.conversa_id) return
   router.push(`/atendimento/${a.conversa_id}`)
@@ -177,6 +314,13 @@ onMounted(carregar)
         <button class="botao botao--fantasma" type="button" @click="irParaHoje">Hoje</button>
         <button class="botao botao--fantasma" type="button" @click="andar(7)">
           Próxima semana <i class="bi bi-chevron-right" aria-hidden="true"></i>
+        </button>
+        <!-- Ponta 3: o mês ao lado, para pular para um dia distante sem andar
+             de sete em sete. Atalho de navegação, não uma segunda lista. -->
+        <button class="botao botao--fantasma agd__mes-botao" type="button"
+                :aria-expanded="mesAberto ? 'true' : 'false'"
+                @click="mesAberto = !mesAberto">
+          <i class="bi bi-calendar3" aria-hidden="true"></i> Mês
         </button>
       </div>
     </header>
@@ -202,6 +346,37 @@ onMounted(carregar)
         <span v-if="porDia[d.iso]" class="agd__dia-selo">{{ porDia[d.iso] }}</span>
       </button>
     </nav>
+
+    <div v-if="mesAberto" class="agd__mes">
+      <header class="agd__mes-topo">
+        <button class="botao botao--fantasma" type="button" @click="andarMes(-1)"
+                aria-label="Mês anterior">
+          <i class="bi bi-chevron-left" aria-hidden="true"></i>
+        </button>
+        <strong class="agd__mes-rotulo">{{ rotuloDoMes }}</strong>
+        <button class="botao botao--fantasma" type="button" @click="andarMes(1)"
+                aria-label="Mês seguinte">
+          <i class="bi bi-chevron-right" aria-hidden="true"></i>
+        </button>
+      </header>
+      <div class="agd__mes-grade">
+        <span v-for="s in ['D', 'S', 'T', 'Q', 'Q', 'S', 'S']" :key="s"
+              class="agd__mes-semana">{{ s }}</span>
+        <template v-for="(d, i) in diasDoMes" :key="d ? d.iso : `vazio-${i}`">
+          <span v-if="!d" class="agd__mes-vago"></span>
+          <button v-else type="button" class="agd__mes-dia"
+                  :class="{ 'agd__mes-dia--ativo': d.iso === selecionado,
+                            'agd__mes-dia--hoje': d.hoje }"
+                  @click="escolherDoMes(d)">{{ d.dia }}</button>
+        </template>
+      </div>
+      <!-- 🚨 Dizer isto evita que a ausência de marca pareça ausência de
+           serviço: o que está carregado é a semana da âncora. -->
+      <p class="agd__mes-nota">
+        Escolher um dia move a semana do carrossel. As marcas de serviço ficam
+        no carrossel, que é o que está carregado.
+      </p>
+    </div>
 
     <p v-if="erro" class="aviso aviso--erro">{{ erro }}</p>
     <p v-if="acaoErro" class="aviso aviso--erro">{{ acaoErro }}</p>
@@ -249,12 +424,81 @@ onMounted(carregar)
                       type="button" @click="reagendar(a)">Reagendar</button>
               <button v-if="a.estado !== 'cancelado'" class="botao botao--fantasma"
                       type="button" @click="cancelar(a)">Cancelar</button>
+              <button v-if="a.estado !== 'cancelado'" class="botao botao--fantasma"
+                      type="button" @click="reenviarConfirmacao(a)">Reenviar confirmação</button>
               <button v-if="a.conversa_id" class="botao botao--fantasma"
                       type="button" @click="abrirConversa(a)">Abrir conversa</button>
             </td>
           </tr>
         </tbody>
       </table>
+    </div>
+
+    <!-- 🚨 NÃO ENVIA NADA (decisão 6 dele): mostra para copiar e oferece abrir
+         a conversa com o texto no compositor. -->
+    <div v-if="reenvio" class="agd__reenvio">
+      <header class="agd__reenvio-topo">
+        <strong>Confirmação de {{ reenvio.agendamento.cliente_nome }}</strong>
+        <button class="botao botao--fantasma" type="button" @click="reenvio = null">
+          Fechar
+        </button>
+      </header>
+
+      <p class="aviso aviso--info agd__reenvio-aviso">
+        Isto <b>não envia nada</b>: quem envia é você. Copie o texto, ou abra a
+        conversa com ele já no compositor.
+      </p>
+      <p v-if="reenvio.quantos > 1" class="agd__reenvio-nota">
+        Mesma data e hora: {{ reenvio.quantos }} compromissos entraram numa
+        mensagem só, com as placas e as OS somadas ({{ reenvio.ordens.join(', ') }}).
+      </p>
+      <!-- ⚠️ Compromisso ainda aguardando não tem responsável: o campo sai
+           vazio, e a tela diz por quê. -->
+      <p v-if="reenvio.semResponsavel" class="aviso aviso--atencao agd__reenvio-nota">
+        Este compromisso ainda não foi confirmado pelo cliente, então ninguém
+        disse quem acompanha o técnico — o campo sai vazio. Quem preenche é a
+        aba <b>Confirmar</b>, na conversa do cliente.
+      </p>
+
+      <div class="agd__reenvio-textos">
+        <article>
+          <h3 class="agd__reenvio-rotulo">Para o cliente</h3>
+          <pre class="agd__reenvio-pre">{{ reenvio.doCliente }}</pre>
+          <div class="agd__acoes">
+            <button class="botao botao--fantasma" type="button"
+                    @click="copiar('cliente', reenvio.doCliente)">
+              {{ copiado === 'cliente' ? 'Copiado' : 'Copiar' }}
+            </button>
+            <button v-if="reenvio.agendamento.conversa_id" class="botao botao--contorno"
+                    type="button"
+                    @click="abrirConversaComTexto(reenvio.agendamento, reenvio.doCliente)">
+              Abrir conversa com este texto
+            </button>
+          </div>
+        </article>
+        <article>
+          <h3 class="agd__reenvio-rotulo">Para o técnico</h3>
+          <pre class="agd__reenvio-pre">{{ reenvio.doTecnico }}</pre>
+          <div class="agd__acoes">
+            <button class="botao botao--fantasma" type="button"
+                    @click="copiar('tecnico', reenvio.doTecnico)">
+              {{ copiado === 'tecnico' ? 'Copiado' : 'Copiar' }}
+            </button>
+            <button v-if="reenvio.agendamento.conversa_id" class="botao botao--contorno"
+                    type="button"
+                    @click="abrirConversaComTexto(reenvio.agendamento, reenvio.doTecnico)">
+              Abrir conversa com este texto
+            </button>
+          </div>
+        </article>
+      </div>
+      <!-- A conversa de ORIGEM é a do técnico (decisão dele de 07/10: em
+           conversa de técnico o `cliente_id` do contato é nulo). Dizer isso
+           evita o operador achar que "abrir conversa" leva ao cliente. -->
+      <p class="agd__reenvio-nota">
+        “Abrir conversa” leva à conversa de onde este agendamento saiu — a do
+        técnico. A do cliente abre-se pela Caixa.
+      </p>
     </div>
   </section>
 </template>
@@ -302,6 +546,61 @@ onMounted(carregar)
 .agd__dia--ativo .agd__dia-selo { background: rgba(255, 255, 255, .35); }
 
 .agd__grid { overflow-x: auto; }
+
+/* O mês ao lado (ponta 3) */
+.agd__mes {
+  display: flex;
+  flex-direction: column;
+  gap: var(--e-2);
+  align-self: flex-start;
+  padding: var(--e-3);
+  border: var(--borda-fina) solid var(--borda);
+  border-radius: var(--r-md);
+  background: var(--superficie-2);
+}
+.agd__mes-topo { display: flex; align-items: center; justify-content: space-between; gap: var(--e-2); }
+.agd__mes-rotulo { text-transform: capitalize; }
+.agd__mes-grade { display: grid; grid-template-columns: repeat(7, 36px); gap: 4px; }
+.agd__mes-semana { text-align: center; font-size: var(--txt-xs); color: var(--texto-fraco); }
+.agd__mes-vago { display: block; }
+.agd__mes-dia {
+  height: 32px;
+  border: var(--borda-fina) solid transparent;
+  border-radius: var(--r-sm);
+  background: var(--superficie);
+  color: inherit;
+  cursor: pointer;
+}
+.agd__mes-dia--hoje { border-color: var(--acento); }
+.agd__mes-dia--ativo { background: var(--acento); color: #fff; }
+.agd__mes-nota { margin: 0; max-width: 34ch; color: var(--texto-fraco); font-size: var(--txt-xs); }
+
+/* Reenviar confirmação (ponta 2) */
+.agd__reenvio {
+  display: flex;
+  flex-direction: column;
+  gap: var(--e-2);
+  padding: var(--e-3);
+  border: var(--borda-fina) solid var(--borda);
+  border-radius: var(--r-md);
+  background: var(--superficie-2);
+}
+.agd__reenvio-topo { display: flex; align-items: center; justify-content: space-between; gap: var(--e-2); }
+.agd__reenvio-aviso, .agd__reenvio-nota { margin: 0; }
+.agd__reenvio-nota { color: var(--texto-fraco); font-size: var(--txt-sm); }
+.agd__reenvio-textos { display: flex; gap: var(--e-3); flex-wrap: wrap; }
+.agd__reenvio-textos > article { flex: 1 1 320px; display: flex; flex-direction: column; gap: var(--e-2); }
+.agd__reenvio-rotulo { margin: 0; font-size: var(--txt-sm); }
+.agd__reenvio-pre {
+  margin: 0;
+  padding: var(--e-2);
+  border: var(--borda-fina) solid var(--borda);
+  border-radius: var(--r-sm);
+  background: var(--superficie);
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: var(--txt-sm);
+}
 .agd__vazio { color: var(--texto-fraco); font-size: var(--txt-sm); }
 .agd__acoes { display: flex; gap: var(--e-1); flex-wrap: wrap; }
 .agd__linha--cancelada { opacity: .65; }

@@ -65,13 +65,70 @@ class OsJaAgendada(ValueError):
     """Alguma das OS escolhidas já está num compromisso ativo."""
 
 
+# Os campos de endereço como ELES vivem nesta tabela. ⚠️ `logradouro` é o que
+# o Harmonit chama de `endereco`: aqui esse nome já era da linha montada
+# (migração 069), e a tradução mora no `_endereco_para_a_os`.
+CAMPOS_DE_ENDERECO = ("cep", "logradouro", "numero", "bairro", "cidade", "uf",
+                      "complemento")
+
+
+def linha_do_endereco(e: dict) -> str | None:
+    """Os campos viram a LINHA que sai na mensagem do cliente.
+
+    🚨 A MENSAGEM NÃO PASSOU A LER OS SETE CAMPOS, e isto é deliberado: os
+    compromissos criados antes da migração 073 só têm a linha, e trocar a
+    fonte os faria sair sem endereço -- eles são o único histórico que existe.
+    Então a linha continua sendo o texto, e passa a ser MONTADA quando há
+    campos.
+
+    ⚠️ Monta com o que existe, e nada de "—" no meio: endereço com buraco
+    marcado parece defeito para quem recebe a mensagem.
+    """
+    rua = (e.get("logradouro") or "").strip()
+    numero = (e.get("numero") or "").strip()
+    primeiro = ", ".join(p for p in (rua, numero) if p)
+    partes = [primeiro,
+              (e.get("bairro") or "").strip(),
+              (e.get("complemento") or "").strip()]
+    cidade = (e.get("cidade") or "").strip()
+    uf = (e.get("uf") or "").strip()
+    local = " - ".join(p for p in (cidade, uf) if p)
+    if local:
+        partes.append(local)
+    cep = (e.get("cep") or "").strip()
+    if cep:
+        partes.append(f"CEP {cep}")
+    texto = " · ".join(p for p in partes if p)
+    return texto or None
+
+
+def _endereco_para_a_os(linha: dict) -> dict:
+    """Do vocabulário desta tabela para o do Harmonit."""
+    return {
+        "cep": linha.get("cep"),
+        # 🚨 A única tradução de nome que existe no caminho.
+        "endereco": linha.get("logradouro"),
+        "numero": linha.get("numero"),
+        "bairro": linha.get("bairro"),
+        "cidade": linha.get("cidade"),
+        "uf": linha.get("uf"),
+        "complemento": linha.get("complemento"),
+    }
+
+
 def criar(*, conversa_id: int, tecnico_contato_id: int, cliente_harmonit_id: str,
           cliente_nome: str, inicio, fim=None, endereco: str | None,
           ordens: list[dict], criado_por: int, orcamento_id: int | None = None,
-          estado: str = "aguardando") -> int:
+          estado: str = "aguardando", campos_endereco: dict | None = None) -> int:
     """Grava o compromisso e as OS dele. Devolve o id.
 
-    `ordens` são dicts `{"numero_os": int, "placa": str | None}`.
+    `ordens` são dicts `{"numero_os": int, "placa": str | None,
+    "tipo_nome": str | None}`.
+
+    ⚠️ `tipo_nome` é RETRATO, como a placa (migração 072): o nome do tipo da
+    OS no momento do agendamento. Nulo é o caso comum -- 173 das 547 OS têm
+    `tipo` fora da lista do Harmonit --, e quem monta a mensagem omite o
+    segmento do cabeçalho em vez de inventar rótulo.
 
     🚨 A CHECAGEM DE OS REPETIDA ACONTECE NA MESMA TRANSAÇÃO DA INSERÇÃO. Fora
     dela, dois operadores no mesmo segundo passariam os dois -- e o segundo só
@@ -103,20 +160,32 @@ def criar(*, conversa_id: int, tecnico_contato_id: int, cliente_harmonit_id: str
                 + ", ".join(str(n) for n in presas)
             )
 
+        campos = {c: (campos_endereco or {}).get(c) or None
+                  for c in CAMPOS_DE_ENDERECO}
+        # 🚨 A LINHA É MONTADA DOS CAMPOS quando eles existem, e só então o
+        # texto digitado deixa de valer: é o mesmo endereço dito de duas
+        # formas, e duas fontes para o mesmo fato divergem na primeira edição.
+        linha = linha_do_endereco(campos) or endereco
         cur.execute(
             "INSERT INTO agendamento (conversa_id, tecnico_contato_id, "
             "    cliente_harmonit_id, cliente_nome, inicio, fim, endereco, "
-            "    estado, orcamento_id, criado_por) "
-            "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id",
+            "    estado, orcamento_id, criado_por, cep, logradouro, numero, "
+            "    bairro, cidade, uf, complemento) "
+            "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) "
+            "RETURNING id",
             (conversa_id, tecnico_contato_id, str(cliente_harmonit_id),
-             cliente_nome, inicio, fim, endereco, estado, orcamento_id, criado_por),
+             cliente_nome, inicio, fim, linha, estado, orcamento_id, criado_por,
+             campos["cep"], campos["logradouro"], campos["numero"],
+             campos["bairro"], campos["cidade"], campos["uf"],
+             campos["complemento"]),
         )
         novo = cur.fetchone()["id"]
         for o in ordens:
             cur.execute(
-                "INSERT INTO agendamento_os (agendamento_id, numero_os, placa) "
-                "VALUES (%s,%s,%s)",
-                (novo, int(o["numero_os"]), (o.get("placa") or None)),
+                "INSERT INTO agendamento_os (agendamento_id, numero_os, placa, "
+                "    tipo_nome) VALUES (%s,%s,%s,%s)",
+                (novo, int(o["numero_os"]), (o.get("placa") or None),
+                 (o.get("tipo_nome") or None)),
             )
     log.info("agendamento %s criado com %s OS", novo, len(ordens))
     return novo
@@ -199,6 +268,46 @@ def levar_ao_harmonit(agendamento_id: int, *, cfg: dict | None = None) -> dict:
             "quantas_foram": len(bons), "erro": erros or None}
 
 
+def levar_endereco_ao_harmonit(agendamento_id: int, *,
+                               cfg: dict | None = None) -> dict:
+    """Grava o endereço do compromisso nas OS dele, no Harmonit.
+
+    🔵 Pedido dele, 21/10: *"dai vai enviar para o endereço da OS e salvar ela
+    lá no harmonit corretamente"*.
+
+    🚨 USA O MESMO INTERRUPTOR DA ESCRITA DO COMPROMISSO. Endereço e
+    compromisso vão para a mesma OS, pela mesma ponte: dois interruptores para
+    a mesma decisão seriam dois lugares para esquecer de ligar.
+
+    🚨 NUNCA DERRUBA O COMPROMISSO, e grava o motivo na própria linha -- igual
+    ao `levar_ao_harmonit`. ⚠️ Sem rua, não tenta: mandar CEP sozinho
+    sobrescreveria o endereço que a OS já tem por um que não leva ninguém a
+    lugar nenhum.
+    """
+    if not escreve_no_harmonit(cfg):
+        return {"ligado": False, "resultados": []}
+    linha = por_id(agendamento_id)
+    if not linha:
+        raise ValueError("agendamento não encontrado")
+    endereco = _endereco_para_a_os(linha)
+    if not endereco.get("endereco"):
+        return {"ligado": True, "resultados": [],
+                "erro": "o compromisso não tem rua, então não mexi na OS"}
+
+    resultados = [fpsl_ponte.gravar_endereco_da_os(o["numero_os"], endereco)
+                  for o in linha["ordens"]]
+    bons = [r for r in resultados if r.get("ok")]
+    erros = "; ".join(
+        f"OS {r.get('numero_os')}: {r.get('motivo') or r.get('fora_do_endereco')}"
+        for r in resultados if not r.get("ok"))
+    banco.executar(
+        "UPDATE agendamento SET endereco_os_em = CASE WHEN %s THEN now() END, "
+        "       endereco_os_erro = %s WHERE id = %s",
+        (bool(bons), erros or None, agendamento_id))
+    return {"ligado": True, "resultados": resultados,
+            "quantas_foram": len(bons), "erro": erros or None}
+
+
 def confirmar(agendamento_id: int, responsavel_cliente: str) -> bool:
     """O cliente confirmou, e disse quem acompanha o técnico.
 
@@ -253,14 +362,17 @@ def _montar(linhas: list[dict]) -> list[dict]:
         return []
     ids = [l["id"] for l in linhas]
     ordens = banco.varios(
-        "SELECT agendamento_id, numero_os, placa FROM agendamento_os "
+        "SELECT agendamento_id, numero_os, placa, tipo_nome FROM agendamento_os "
         " WHERE agendamento_id = ANY(%s) ORDER BY numero_os",
         (ids,),
     )
     por_agendamento: dict[int, list[dict]] = {i: [] for i in ids}
     for o in ordens:
         por_agendamento[o["agendamento_id"]].append(
-            {"numero_os": o["numero_os"], "placa": o["placa"]}
+            # `tipo_nome` sai daqui para o cabeçalho da mensagem (ponta 1). Vem
+            # nulo com frequência, e a tela OMITE o segmento nesse caso.
+            {"numero_os": o["numero_os"], "placa": o["placa"],
+             "tipo_nome": o["tipo_nome"]}
         )
     for l in linhas:
         l["ordens"] = por_agendamento.get(l["id"], [])
@@ -272,7 +384,9 @@ _CAMPOS = (
     "a.cliente_nome, a.inicio, a.fim, a.endereco, a.responsavel_cliente, "
     "a.estado, a.orcamento_id, a.criado_em, a.confirmado_em, a.cancelado_em, "
     "a.motivo_cancelamento, a.harmonit_agendamento_id, a.harmonit_em, "
-    "a.harmonit_erro, c.nome AS tecnico_nome, at.nome AS criado_por_nome, "
+    "a.harmonit_erro, a.cep, a.logradouro, a.numero, a.bairro, a.cidade, "
+    "a.uf, a.complemento, a.endereco_os_em, a.endereco_os_erro, "
+    "c.nome AS tecnico_nome, at.nome AS criado_por_nome, "
     "o.numero AS orcamento_numero"
 )
 _DE = (

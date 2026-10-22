@@ -180,6 +180,45 @@ def agendar_tecnico(*, numero_os: int, inicio, fim=None,
         return {"ok": False, "numero_os": int(numero_os), "motivo": str(e)}
 
 
+# Os sete campos de endereço, com os nomes do Harmonit. 🚨 `endereco` aqui é a
+# RUA, como lá -- e não a linha montada que a mensagem usa. A tradução para
+# `logradouro` acontece uma única vez, no `agendamento`.
+CAMPOS_DE_ENDERECO = ("cep", "endereco", "numero", "bairro", "cidade", "uf",
+                      "complemento")
+
+
+def endereco_da_os(numero_os: int) -> dict:
+    """O endereço estruturado da OS, para pré-preencher o modal.
+
+    🚨 Estoura `FpslIndisponivel` quando a ponte cai: endereço vazio por falha
+    de rede faria o operador digitar por cima de um cadastro que existe.
+    """
+    return _pedir("/api/os/endereco", {"numero_os": int(numero_os)})
+
+
+def gravar_endereco_da_os(numero_os: int, endereco: dict,
+                          conferir: bool = False) -> dict:
+    """Grava o endereço na OS do Harmonit, pela ponte.
+
+    🔵 Pedido dele, 21/10: *"vai enviar para o endereço da OS e salvar ela lá
+    no harmonit corretamente"*.
+
+    🚨 DEVOLVE `{"ok": False, "motivo": ...}` EM VEZ DE ESTOURAR, como o
+    `agendar_tecnico`: o dono do compromisso é este lado, e a OS não gravada
+    não derruba o agendamento -- fica dita.
+
+    ⚠️ Do outro lado isto é uma escrita de OS INTEIRA (o Harmonit não tem
+    "atualizar só o endereço"), e lá a rota relê e compara os 39 campos. O
+    `fora_do_endereco` da resposta é o que importa quando vem preenchido.
+    """
+    corpo = {"numero_os": int(numero_os), "conferir": bool(conferir)}
+    corpo.update({c: endereco.get(c) for c in CAMPOS_DE_ENDERECO})
+    try:
+        return _postar("/api/os/endereco", corpo)
+    except FpslIndisponivel as e:
+        return {"ok": False, "numero_os": int(numero_os), "motivo": str(e)}
+
+
 def clientes_com_os(meses: int = 6, abertas: bool = True) -> dict[str, int]:
     """`harmonit_id` -> quantas OS, para a etapa 2 da aba Agendar.
 

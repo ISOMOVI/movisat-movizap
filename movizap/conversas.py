@@ -3091,11 +3091,146 @@ def anotar_com_arquivo(conversa_id: int, dados: bytes, mime: str,
             "mensagem_id": nova["id"], "midia_id": midia_id}
 
 
-def anotar(conversa_id: int, texto: str, atendente_id: int | None) -> dict:
+def quem_esta_na_conversa(conversa_id: int) -> list[dict]:
+    """Quem, DO NOSSO LADO, está nesta conversa: o dono e os convidados ativos.
+
+    🚨 É A MESMA RÉGUA DE `esta_na_conversa`, de propósito. Quem pode ser
+    chamado por `@` numa nota é exatamente quem pode AGIR aqui -- duas listas
+    com réguas diferentes acabariam oferecendo na tela gente que a rota recusa,
+    e a pessoa descobriria isso depois de escrever a nota.
+
+    ⚠️ SÓ ATENDENTE ATIVO. Quem saiu da empresa continua dono de conversa
+    antiga; chamá-lo seria avisar quem nunca vai ler.
+    """
+    return banco.varios(
+        """SELECT a.id, a.nome, (c.atendente_id = a.id) AS dono
+             FROM conversa c
+             JOIN atendente a
+               ON a.id = c.atendente_id
+                  OR a.id IN (SELECT p.atendente_id
+                                FROM conversa_participante p
+                               WHERE p.conversa_id = c.id
+                                 AND p.saiu_em IS NULL)
+            WHERE c.id = %s AND a.ativo
+            ORDER BY dono DESC, a.nome""", (conversa_id,))
+
+
+def _conferir_chamados(conversa_id: int, eu: int | None,
+                       chamar: list[int] | None):
+    """A lista limpa de quem a nota chama, ou a recusa com o motivo.
+
+    🚨 CHAMAR QUEM NÃO ESTÁ NA CONVERSA É RECUSA, NUNCA REMENDO -- a mesma
+    regra do chat interno. Aceitar e ignorar faria a pessoa achar que avisou
+    alguem que nunca vai ver: é o "parâmetro aceito e ignorado", o defeito que
+    este projeto mais cataloga.
+
+    ⚠️ CHAMAR A SI MESMO SAI DA LISTA, sem recusar: não é erro de quem
+    escreve, e o aviso para si mesmo não avisa nada (a sala direta consigo
+    mesmo nem existe).
+    """
+    from . import chat
+
+    if not chamar:
+        return []
+    pedidos = sorted({int(c) for c in chamar})
+    if eu in pedidos:
+        pedidos.remove(eu)
+    if not pedidos:
+        return []
+    if len(pedidos) > chat.TETO_MENCOES:
+        return {"ok": False,
+                "motivo": f"Dá para chamar no máximo {chat.TETO_MENCOES} "
+                          f"pessoas numa nota."}
+    presentes = {p["id"]: p["nome"] for p in quem_esta_na_conversa(conversa_id)}
+    fora = [p for p in pedidos if p not in presentes]
+    if fora:
+        nomes = banco.varios(
+            "SELECT nome FROM atendente WHERE id = ANY(%s) ORDER BY nome",
+            (fora,))
+        quem = ", ".join(n["nome"] for n in nomes) or "alguem"
+        return {"ok": False,
+                "motivo": f"{quem} não está nesta conversa — convide primeiro, "
+                          f"senão a pessoa recebe o aviso e não consegue agir."}
+    return [{"id": p, "nome": presentes[p]} for p in pedidos]
+
+
+def _titulo_da_conversa(conversa_id: int) -> str:
+    """Como a conversa se chama no aviso: cadastro, grupo, nome do WhatsApp ou
+    o telefone. O telefone é o fundo do poço, nunca o primeiro."""
+    l = banco.um(
+        """SELECT ct.nome AS contato, c.grupo_nome, c.nome_whatsapp,
+                  c.telefone_e164
+             FROM conversa c LEFT JOIN contato ct ON ct.id = c.contato_id
+            WHERE c.id = %s""", (conversa_id,))
+    if not l:
+        return f"conversa {conversa_id}"
+    return (l["contato"] or l["grupo_nome"] or l["nome_whatsapp"]
+            or l["telefone_e164"] or f"conversa {conversa_id}")
+
+
+TRECHO_NO_AVISO = 160
+
+
+def _avisar_chamados(conversa_id: int, eu: int, texto: str,
+                     chamados: list[dict]) -> tuple[list[dict], list[dict]]:
+    """Manda o aviso de cada chamado pelo CHAT INTERNO, e devolve (feitos, falhos).
+
+    🚨 NÃO HÁ TABELA NOVA, DE PROPÓSITO (21/10, pedido dele: *"tem um
+    caminho mais pratico para os @ em chats?"*). A máquina de menção do chat
+    interno já existe e já está validada: `chat_mencao`, a recusa de quem não
+    é da sala, o contador SEPARADO de menção não lida e o selo no menu e na
+    barra do celular. O aviso vai para onde a pessoa já olha.
+
+    ⚠️ O PREÇO, DITO AQUI E NA DOC: a nota não guarda quem foi chamado -- o
+    registro é a mensagem do chat. Apagada ela, o aviso se perde (a nota, não).
+
+    ⚠️ FALHA NO AVISO NÃO DESFAZ A NOTA. A nota já está gravada quando isto
+    roda, e perder o texto escrito para punir uma falha de aviso seria pior do
+    que dizer que o aviso não saiu.
+    """
+    from . import chat
+
+    titulo = _titulo_da_conversa(conversa_id)
+    corte = texto[:TRECHO_NO_AVISO]
+    trecho = corte + ("…" if len(texto) > TRECHO_NO_AVISO else "")
+    feitos: list[dict] = []
+    falhos: list[dict] = []
+    for c in chamados:
+        aviso = (f"@{c['nome']} chamei você numa nota da conversa com "
+                 f"{titulo}:\n\n“{trecho}”\n\n/atendimento/{conversa_id}")
+        try:
+            sala = chat.abrir_direta(eu, c["id"])
+            if not sala.get("ok"):
+                falhos.append({**c, "motivo": sala.get("motivo") or "sala"})
+                continue
+            escrito = chat.escrever(sala["sala_id"], eu, aviso,
+                                    mencionados=[c["id"]])
+            if not escrito.get("ok"):
+                falhos.append({**c, "motivo": escrito.get("motivo") or "chat"})
+                continue
+            feitos.append(c)
+        except Exception as e:   # noqa: BLE001 -- aviso não derruba a nota
+            log.warning("nota da conversa %s: aviso para %s falhou: %s",
+                        conversa_id, c["id"], e)
+            falhos.append({**c, "motivo": "não consegui avisar pelo chat agora"})
+    return feitos, falhos
+
+
+def anotar(conversa_id: int, texto: str, atendente_id: int | None,
+           chamar: list[int] | None = None) -> dict:
     """Nota interna: fica na conversa e NUNCA vai para o cliente.
 
     ⚠️ O CHECK do banco amarra os dois campos: `tipo = 'nota'` só existe com
     `direcao = 'interna'`. É o banco impedindo que uma nota vaze como mensagem.
+
+    🔵 21/10 -- `chamar` são IDS DE ATENDENTE escolhidos na lista do `@` da
+    nota. Isto não tem nada a ver com o `mencionados` da resposta ao cliente,
+    que é JID de WhatsApp e só vale em grupo: aqui a menção é de gente NOSSA, e
+    o aviso sai pelo chat interno (`_avisar_chamados`).
+
+    🚨 A CONFERÊNCIA VEM ANTES DO INSERT. Gravar a nota e só então descobrir
+    que um dos chamados não está na conversa deixaria a nota escrita com a
+    recusa na tela -- a pessoa reescreveria e a conversa ficaria com duas.
     """
     texto = (texto or "").strip()
     if not texto:
@@ -3103,12 +3238,23 @@ def anotar(conversa_id: int, texto: str, atendente_id: int | None) -> dict:
     if not banco.um("SELECT id FROM conversa WHERE id = %s", (conversa_id,)):
         return {"ok": False, "motivo": "Conversa não encontrada."}
 
+    chamados = _conferir_chamados(conversa_id, atendente_id, chamar)
+    if isinstance(chamados, dict):
+        return chamados
+
     linha = banco.um(
         """INSERT INTO mensagem
                (conversa_id, direcao, autor, tipo, conteudo, atendente_id, criada_em)
            VALUES (%s, 'interna', 'atendente', 'nota', %s, %s, now())
            RETURNING id""", (conversa_id, texto, atendente_id))
-    return {"ok": True, "conversa_id": conversa_id, "mensagem_id": linha["id"]}
+
+    feitos: list[dict] = []
+    falhos: list[dict] = []
+    if chamados and atendente_id:
+        feitos, falhos = _avisar_chamados(conversa_id, atendente_id, texto,
+                                          chamados)
+    return {"ok": True, "conversa_id": conversa_id, "mensagem_id": linha["id"],
+            "chamados": feitos, "avisos_falhos": falhos}
 
 
 # ── Editar/apagar a própria nota interna (28/09) ─────────────────────────────

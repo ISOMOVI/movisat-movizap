@@ -3750,3 +3750,284 @@ As OS vivem no FPSL (SQLite, `os_historico`); o MoviZap é Postgres. A ponte é
 de **leitura**, autenticada por segredo compartilhado, e cruza pelo
 `harmonit_id`. ⚠️ **Lista vazia e FPSL fora do ar são coisas diferentes**: a
 falha sobe como erro legível, nunca como "este cliente não tem OS".
+
+## 21/10, terceira volta — as quatro pontas do plano de Agendamentos
+
+### Ponta 1 — o cabeçalho diz o TIPO DA OS (`ATD_1.2`, modal Agendar)
+
+🚨 **A ÚNICA DAS QUATRO QUE SAI PARA O CLIENTE.** O cabeçalho das duas
+confirmações era `(SERVIÇO) | placas | cliente`, com a palavra literal; agora é
+o **nome do tipo da OS**, em maiúsculas. Sem nome, o segmento **sai fora**:
+`FZU5D16 | VELASCO`. Os números e o porquê estão no `docs/02`, na migração 072.
+
+A lista de OS do passo 2 passou a mostrar o tipo ao lado da situação — o
+operador vê, **antes de marcar**, o que o cliente vai ler — e diz
+"tipo não nomeado no Harmonit" quando é o caso, em vez de calar.
+
+🚨 **A MONTAGEM DAS DUAS MENSAGENS SAIU DO MODAL** para
+`frontend/src/util/mensagem_agendamento.js`, porque a `ATD_7.1` também as monta
+agora (ponta 2): a mesma mensagem escrita em dois lugares viraria duas
+mensagens diferentes no primeiro ajuste de campo.
+
+### Ponta 2 — "Reenviar confirmação" (`ATD_7.1`)
+
+A quarta ação da linha; entregaram-se três em 21/10 (Reagendar, Cancelar, Abrir
+conversa).
+
+🚨 **NÃO ENVIA NADA**, e diz isso na tela — 🔵 decisão 6 dele ao pé da letra:
+as duas confirmações saem pré-escritas e **quem envia é o atendente**. Ela
+mostra os dois textos para copiar e oferece **abrir a conversa com o texto já
+no compositor**, pelo rascunho por conversa do Bloco 7 (15/10).
+
+🚨 **MONTA COM A MESMA REGRA DE AGRUPAMENTO** (mesma data e hora ⇒ uma
+mensagem só, placas e OS somadas), e por isso junta os compromissos **irmãos**
+daquele cliente naquela hora, menos os cancelados: reenviar só a linha clicada
+mandaria ao cliente um texto diferente do que ele recebeu.
+
+⚠️ **Compromisso ainda `aguardando` não tem responsável:** o campo sai vazio e
+a tela **diz por quê** — quem o preenche é a aba Confirmar, na conversa do
+cliente. ⚠️ E não sobrescreve rascunho do colega sem perguntar: perder meia
+frase digitada é o defeito que o Bloco 7 nasceu para corrigir.
+
+### Ponta 3 — o mês navegável ao lado do carrossel (`ATD_7.1`)
+
+O carrossel entregava semana anterior / hoje / próxima. O mês é **atalho de
+navegação, não uma segunda lista**: escolher um dia move a âncora do carrossel
+e recarrega os sete dias. 🚨 **O selo de "tem serviço" não aparece no mês**, de
+propósito: o que está carregado é a semana da âncora, então o mês saberia de uns
+dias e não de outros — e um mês com pontos em três dias afirmaria que nos
+outros não há nada. A tela diz onde as marcas estão.
+
+### Ponta 4 — `CFG_14.1`, Vínculo dos técnicos
+
+🟡 Sugestão minha, não pedido dele. A rota de pendências do vínculo existia
+**sem tela**. A aba é **só owner** e mostra os **três buracos separados** —
+juntá-los num número só esconderia o que fazer com cada um: técnico daqui sem
+cadastro lá, cadastro lá sem contato aqui, e quem casa pelo telefone e ainda
+não é do tipo técnico.
+
+🚨 **SÓ LEITURA: ela mostra o trabalho, não o faz.** 🔵 *"nenhuma regra
+resolve, é trabalho de cadastro"*. ⚠️ E **lista vazia é diferente de ponte fora
+do ar**: se o FPSL não responder, a tela diz que não deu para consultar, em vez
+de deixar o cadastro parecer em dia.
+
+## 21/10, quarta volta — as cinco frentes depois do teste dele no navegador
+
+🚨 **O QUE ABRIU ESTA VOLTA FOI USO, NÃO LEITURA.** Ele exercitou o fluxo às
+15:11: orçamento nº 2, agendamento 211 criado e confirmado, tipo da OS gravado.
+Sete apontamentos saíram dali, e nenhum deles qualquer teste tinha visto — a
+família do `M9`.
+
+### F1 — a barreira do técnico saiu (`ATD_1.2` → ponte → Harmonit)
+
+🔵 *"a barreira de agendamento do tecnico não deve existir, no harmonit ja foi
+liberada tbm"*. 🚨 **A barreira era NOSSA**: o `os_ponte._escolher_vinculo`
+recusava antes de chamar, e foi o que derrubou o teste dele (*"Iago Santos do Ó
+Souza ja tem compromisso nesta OS"*).
+
+🚨 **E o Harmonit ainda recusa** — medido ao vivo: com a nossa barreira fora,
+`AgendarTecnico` responde `Erro ao cadastrar Evento: TecnicoJaAgendado`. A
+recusa dele é **do vínculo**, não do técnico, e a medição mostrou o caminho: nas
+547 OS da base, o mesmo técnico tem vários compromissos, inclusive **dois na
+mesma OS** (`usuarioId 14316` aparece duas vezes na OS 16921). Cada linha
+`ordemServicoxTecnico` guarda **um** `agendamentoId`.
+
+Então a ponte passou a fazer o que o próprio Harmonit faz: quando o vínculo
+escolhido já tem compromisso, **cria outro vínculo** para o mesmo técnico
+(`SalvarTecnicoOrdemServico`) e agenda nele. Provado na OS 16991: vínculo 1143048
+→ compromisso 945220, com o 930447 dele intacto ao lado.
+
+⚠️ **O QUE SOBROU DA GUARDA, e tinha de sobrar:** ambiguidade. Vários técnicos
+na OS e nenhuma pista de qual continua sendo recusa — e a conta passou a ser
+sobre **todos** os técnicos, não só os livres, senão a OS de três técnicos com
+dois agendados escolheria o terceiro sozinha e em silêncio.
+
+🚨 **A PROVA MUDOU JUNTO COM A BARREIRA.** Antes, "a OS tem `agendamentoId`" só
+podia ser verdade depois da escrita. Agora é verdade **antes**, e relatar
+sucesso por ela seria dizer "agendei" sobre o compromisso de outra pessoa.
+Guarda-se o id anterior, e só vale se ele **mudou**.
+
+### F2 — o tipo da OS em selo (`ATD_1.2`, passo 2)
+
+🔵 *"o tipo da OS pode ter mais destaque"*. Era linha miúda cinza junto da
+situação; virou **selo com cor por tipo**, ao lado do número da OS — o mesmo
+peso, porque é o que o cliente lê no cabeçalho da mensagem. ⚠️ Mapa de cores
+**fechado** nos 5 nomes que o Harmonit devolve: tipo fora dele cai no selo
+neutro, que **diz** que não tem nome em vez de desaparecer.
+
+### F3 — o calendário sempre aberto, e a trava do modal (`ATD_1.2`, passo 1)
+
+🔵 *"o botão do calendário pode ficar um pouco mais perto ou ja aparecer em
+aberto mesmo, ficar sempre aberto"*. 🚨 **Não foi o `showPicker()` do
+navegador**: ele depende de cada navegador e fecha sozinho ao clicar fora —
+"sempre aberto" não se sustentaria. O calendário é desenhado na tela, com os
+horários ao lado, **de 30 em 30 minutos das 7h às 19h** (escolha minha,
+declarada). ⚠️ O campo digitado **fica**, e é por ele que entra horário fora do
+expediente — e é ele que o teclado e o teste usam. ⚠️ Dia passado não é
+proibido: a tela avisa, não barra.
+
+🔵 *"coloque trava nesse modal, se clicar fora dele no movizap ele aparece aviso
+de 'cancelar' ou 'continuar'"*. Clicar no fundo **e o X** passam a perguntar.
+🚨 O motivo é trabalho perdido: o modal guarda orçamento em digitação, OS
+marcadas, data e endereço, e um clique no fundo apagava tudo sem avisar.
+⚠️ O aviso diz que fechar perde o que não foi gravado — botão que promete o que
+não cumpre é o defeito do "Não perturbe".
+
+### F4 — o endereço em campos separados, com CEP (`ATD_1.2`, passo 3)
+
+Os sete campos do Harmonit, **pré-preenchidos com o endereço da própria OS**
+(nova rota `GET /api/agendamento/os/{numero}/endereco`, ao vivo). Endereço
+vindo da fonte é melhor que endereço digitado — e das 30 OS amostradas, 23 têm
+rua.
+
+🔵 *"não poderíamos ter a consulta do CEP dentro do modal nesse momento? daí
+preenche os campos e ela ainda edita se precisar?"* — sim: `GET /api/cep/{cep}`.
+🚨 **O Harmonit não tem rota de CEP** (conferido nas 17 rotas de OS e nas de
+dados de suporte), então a fonte é o **ViaCEP**, consultado **pelo nosso
+backend** e não pelo navegador (escolha declarada: o CEP não sai do computador
+do atendente, dá para guardar em memória e não há CORS no caminho).
+
+🚨 **TRÊS RESPOSTAS DIFERENTES, e a tela mostra as três:** achou; o serviço
+disse que **não existe**; e **não deu para consultar**. ⚠️ A última **não** é
+CEP errado, e confundi-las faria o operador apagar um CEP certo. O ViaCEP
+responde **200 com `{"erro": true}`** para CEP inexistente — quem olhasse só o
+código HTTP preencheria a tela com campos vazios.
+
+⚠️ O CEP preenche rua, bairro, cidade e UF, e **nunca o número** — ele não
+sabe. ⚠️ Tudo continua editável (*"ela ainda edita se precisar"*). ⚠️ Sem rua,
+o endereço **não** vai para a OS, e a tela diz isso: mandar CEP sozinho
+sobrescreveria o endereço da OS por um que não leva ninguém a lugar nenhum.
+
+A tela mostra, antes de gravar, **a linha que o cliente vai ler**.
+
+**Validado com o que ele mandou:** CEP `19013180`, número `26`. O ViaCEP e a OS
+16991 concordam campo a campo, e a escrita mudou `numero` de `S/N` para `26` sem
+tocar em mais nada.
+
+### F5 — "Enviar ao cliente" e "Abrir na conversa do técnico" (`ATD_1.2`, aba Confirmar)
+
+🔵 *"os botões de cada texto podem ser: 'Enviar ao cliente' e do outro 'Abrir na
+conversa do tecnico', então envia o primeiro e o modal persiste, como orçamento
+faz, dai operador decide clicar no outro ou não, não sendo obrigatório"*.
+
+As duas mensagens passam a ser **editáveis no próprio modal** (*"ao invés de
+editar na caixa de mensagem, pode editar ali no modal mesmo"*), e o texto
+editado é o que vai enviado.
+
+🚨 **O MODAL PERSISTE DEPOIS DE ENVIAR**, como o orçamento: fechar sozinho
+levaria embora o texto do técnico, que é o segundo passo — e **opcional**, por
+decisão dele.
+
+⚠️ **A DECISÃO 6 DELE CONTINUA VALENDO** (*"quem envia é o atendente"*): o
+botão é um clique dele; o que desapareceu foi o desvio pelo compositor.
+
+🚨 **O segundo botão ABRE, não envia**, e isto é limite da rota, não escolha de
+desenho: `/responder` exige **estar na conversa**, e a do técnico é outra.
+Prometer envio ali seria botão que não cumpre. O texto vai no compositor pelo
+rascunho por conversa (Bloco 7), e **não sobrescreve texto não enviado sem
+perguntar**.
+
+## 21/10, quinta volta — o `@` na nota interna chama gente NOSSA
+
+Pergunta dele: *"E o @ nas notas internas tbm funcionaria, certo?"* — e a
+resposta medida foi **não**, em três lugares: a lista do `@` não abria fora de
+grupo, a tela **apagava** as menções ao salvar nota (`const vivos = interna ?
+[]`) e o `anotar()` não tinha onde recebê-las. Era recusa deliberada, da época
+em que menção só existia como `mentioned` do WhatsApp — que de fato o WhatsApp
+ignora em conversa direta.
+
+Depois: *"foco nos nomes internos no caso dos chats, que ja temos por convite
+de usuarios"* e *"tem um caminho mais pratico para os @ em chats?"*. Tem, e é
+o que entrou.
+
+### 🚨 Não há tabela nova — a máquina do chat interno é a mesma
+
+O aviso de quem foi chamado **sai pelo chat interno**: a nota é gravada e, para
+cada chamado, `chat.abrir_direta` acha ou cria a sala direta e `chat.escrever`
+grava a mensagem com `mencionados`. Isso reaproveita, sem código novo,
+`chat_mencao`, a recusa de quem não é da sala, o **contador separado** de
+menção não lida e o selo no menu e na barra do celular.
+
+| Antes seria | Ficou |
+|---|---|
+| migração `nota_mencao` | nenhuma migração |
+| contador novo na `/api/eu/notificacoes` | o contador do chat, que já existe |
+| selo novo na Caixa | o selo do chat |
+| destaque do nome dentro da nota | o `@Nome` fica como texto na nota |
+
+⚠️ **O preço, dito aqui porque é real:** a nota **não guarda** quem foi
+chamado — o registro é a mensagem do chat. Apagada ela, o aviso se perde (a
+nota, não). Se algum dia o registro na própria nota for necessário, a tabela
+entra em cima disto sem desfazer nada.
+
+### 🚨 A mesma tecla, dois universos
+
+| Onde | O `@` chama | Como o aviso chega |
+|---|---|---|
+| **Grupo** do WhatsApp | participante do grupo, por **JID**, lista do Evolution ao vivo | o próprio WhatsApp notifica (`mentioned`) |
+| **Conversa direta** | **atendente** nosso, por **id** — dono + convidados ativos | mensagem no **chat interno**, com o link da conversa |
+
+Nunca os dois juntos: cliente não se chama em nota, e colega não se chama em
+grupo do WhatsApp. Quem resolve é `ehGrupo`, e as duas rotas são irmãs e
+separadas de propósito — `/quem-chamar` (grupo, JID) e
+`/quem-chamar-interno` (atendente, id).
+
+🚨 **Quem pode ser chamado é quem pode AGIR**, pela mesma régua de
+`esta_na_conversa`: dono e convidado ativo, e só atendente **ativo**. Oferecer
+na tela quem a rota recusaria seria o defeito; chamar quem não está é **recusa
+que diz o nome**, nunca aceitar e ignorar.
+
+### O destino vem do botão, e por isso a tela pergunta
+
+O compositor não sabe, enquanto se digita, se aquilo vai ser nota ou mensagem:
+**o destino vem do botão clicado** (decisão dele, de quando o `modoNota` caiu).
+Então em conversa direta o `@` é sempre interno, e se o texto for enviado **ao
+cliente** a tela avisa antes: o `@Fulano` segue como **texto comum** e ninguém
+é chamado. Avisar é o que separa isto de prometer o que não acontece.
+
+### O que a tela diz depois é o que o backend respondeu
+
+A rota devolve `chamados` e `avisos_falhos`. Aviso que saiu: *"Avisei Thiago
+pelo chat interno"*. Aviso que falhou: *"A nota ficou gravada, mas não consegui
+avisar Thiago pelo chat interno"* — porque **falha no aviso não desfaz a
+nota**, e perder o texto escrito para punir uma falha de aviso seria pior.
+
+⚠️ **O recado vem DEPOIS do recarregar da conversa**: `abrir()` limpa o recado,
+e um recado posto antes dele morria sem aparecer. Achado pelo teste, não pela
+leitura.
+
+### O aviso leva um clique, não um caminho para copiar
+
+`partesDoTexto` (em `util/mencao.js`, a função que a tela e o teste
+compartilham) passou a quebrar também o caminho `/atendimento/<id>`, que o
+balão do chat rende como link. 🚨 **Só caminho nosso** — acender URL qualquer
+seria outra decisão, com outro risco: texto de cliente passa por ali.
+
+### Base da medição, e o que falta
+
+Medido na conversa **80355**, a do número **+5511932726146** (*"a conversa de
+base é a do numero +5511932726146"*): contato **Murilo Augusto | YUV**, dona
+**Claudia**, 29 mensagens e **11 notas**, com **Erika, Iago, Rodrigo e Thiago**
+como convidados ativos. Cinco pessoas nossas dentro de uma conversa direta.
+
+No ar: **508 notas** (492 nos últimos 30 dias) em 249 conversas; **23 convites
+ativos** em 17 conversas. Fora dessas 17, a lista do `@` traz só o dono.
+
+### ✅ Decisão dele, 21/10: *"convite é convite, mencioanr é mencionar"*
+
+Eu propus que **mencionar convidasse junto** quem está fora da conversa, e ele
+**recusou**. 🚨 **NÃO REABRIR.** São duas ações distintas, e cada uma é uma
+decisão de quem atende: a menção continua **recusando com o nome** de quem está
+fora e dizendo *"convide primeiro, senão a pessoa recebe o aviso e não consegue
+agir"*.
+
+⚠️ A consequência é conhecida e aceita: nas 232 conversas com nota e sem
+convidado, a lista do `@` traz só o dono. Quem quiser chamar alguém convida
+antes — um clique que a tela já tem.
+
+🔴 **Falta dele:** exercitar na 80355 (chamar alguém numa nota e ver o selo
+chegar do outro lado). **Grupos ficam para depois** (*"proponha o ajuste para conversas primeiro e somente depois o de
+grupos"*): a ficha de grupo com participantes e as quatro ações, os
+participantes oferecidos com o número como rótulo quando não houver nome, o
+"diga por que a lista está vazia" quando o Evolution recusa, e o registro da
+menção enviada.

@@ -19,11 +19,15 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 
-const estado = vi.hoisted(() => ({ respostas: {}, posts: [] }))
+const estado = vi.hoisted(() => ({ respostas: {}, posts: [], navegou: [],
+                                   pedidos: [], erroNoPost: '' }))
 
 vi.mock('./api/cliente.js', () => ({
   api: {
     get: (rota) => {
+      // 🚨 Os GET ficam registrados: ha teste que prova que uma consulta NAO
+      // sai (CEP curto nem deve chegar ao servidor).
+      estado.pedidos.push(rota)
       const chave = Object.keys(estado.respostas)
         .filter((k) => rota.startsWith(k))
         .sort((a, b) => b.length - a.length)[0]
@@ -31,6 +35,11 @@ vi.mock('./api/cliente.js', () => ({
     },
     post: (rota, corpo) => {
       estado.posts.push({ rota, corpo })
+      // Para provar o caminho da recusa: sem isto, "envio falhou" nao tem como
+      // ser exercitado, e e o estado que o atendente mais precisa entender.
+      if (estado.erroNoPost && rota === estado.erroNoPost) {
+        return Promise.reject(new Error('o WhatsApp recusou'))
+      }
       return Promise.resolve(estado.respostas[rota] || { ok: true })
     },
     put: () => Promise.resolve({}),
@@ -44,7 +53,13 @@ vi.mock('./api/cliente.js', () => ({
 
 vi.mock('vue-router', () => ({
   useRoute: () => ({ query: {}, params: {}, meta: {} }),
-  useRouter: () => ({ push: () => {}, replace: () => {} }),
+  // 🆕 21/10: a navegação é REGISTRADA. "Reenviar confirmação" oferece abrir a
+  // conversa com o texto no compositor (ponta 2), e sem isto o teste não teria
+  // como provar que ela foi aberta -- só que o clique não estourou.
+  useRouter: () => ({
+    push: (destino) => { estado.navegou.push(destino) },
+    replace: (destino) => { estado.navegou.push(destino) },
+  }),
   RouterLink: { props: ['to'], template: '<a><slot /></a>' },
 }))
 
@@ -79,6 +94,14 @@ const OS_DO_CLIENTE = {
   ja_agendadas: [16546],
 }
 
+/* 🚨 O TEXTO DAS MENSAGENS VIVE NO VALOR DO `textarea`, e nao no texto do
+   DOM -- desde 21/10 elas sao editaveis no proprio modal (🔵 *"ao inves de
+   editar na caixa de mensagem, pode editar ali no modal mesmo"*). `.text()`
+   nao ve valor de campo, e por isso quatro testes passaram a ler daqui. */
+function textoDaMensagem(tela, i = 0) {
+  return tela.findAll('.agm__texto')[i].element.value
+}
+
 function montarModal(props = {}) {
   return mount(ModalAgendar, {
     props: {
@@ -90,6 +113,12 @@ function montarModal(props = {}) {
 
 beforeEach(() => {
   estado.posts = []
+  estado.navegou = []
+  estado.pedidos = []
+  estado.erroNoPost = ''
+  // O rascunho por conversa vive no `localStorage` (Bloco 7, 15/10), e a ponta
+  // 2 escreve nele: teste que deixa lixo lá contamina o seguinte.
+  try { localStorage.clear() } catch { /* sem storage */ }
   estado.respostas = {
     '/api/orcamento/catalogo': CATALOGO,
     '/api/agendamento/clientes/998063/os': OS_DO_CLIENTE,
@@ -276,9 +305,9 @@ describe('as duas confirmações', () => {
   it('🚨 mesma data e hora => UMA mensagem só, com placas e OS somadas', async () => {
     const tela = await confirmar([UM, OUTRO_MESMA_HORA])
     expect(tela.findAll('.agm__mensagem')).toHaveLength(1)
-    const texto = tela.find('.agm__mensagem').text()
-    expect(texto).toContain('FZU5D16, ABC1D23')
-    expect(texto).toContain('16548, 16547')
+    // O do cliente tem as placas; o do tecnico, as OS.
+    expect(textoDaMensagem(tela, 0)).toContain('FZU5D16, ABC1D23')
+    expect(textoDaMensagem(tela, 1)).toContain('16548, 16547')
   })
 
   it('horas diferentes => mensagens separadas', async () => {
@@ -288,7 +317,7 @@ describe('as duas confirmações', () => {
 
   it('a do técnico leva OS e orçamento; a do cliente, não', async () => {
     const tela = await confirmar([UM])
-    const blocos = tela.findAll('.agm__mensagem pre').map((n) => n.text())
+    const blocos = tela.findAll('.agm__texto').map((n) => n.element.value)
     expect(blocos[0]).not.toContain('ORÇAMENTO')
     expect(blocos[1]).toContain('OS: 16548')
     expect(blocos[1]).toContain('ORÇAMENTO 1668')
@@ -351,5 +380,533 @@ describe('tela ATD_7.1 Agendamentos', () => {
     expect(linha).toContain('16548')
     expect(linha).toContain('sem placa registrada')
     expect(linha).toContain('Confirmado')
+  })
+})
+
+/* ==========================================================================
+   AS TRÊS PONTAS DO PLANO QUE FALTAVAM — 21/10, tarde.
+   --------------------------------------------------------------------------
+   Ponta 1: o cabeçalho imprime o TIPO DA OS (era `(SERVIÇO)` literal), e
+            OMITE o segmento quando o tipo não tem nome no Harmonit. 🚨 É a
+            única das quatro que sai para o cliente.
+   Ponta 2: "Reenviar confirmação", a quarta ação da linha da `ATD_7.1`.
+            🚨 Não envia nada -- decisão 6 dele.
+   Ponta 3: o mês navegável ao lado do carrossel.
+   ========================================================================== */
+
+describe('ponta 1 — o cabeçalho diz o TIPO DA OS', () => {
+  const COM_TIPO = {
+    id: 1, cliente_nome: 'VELASCO', inicio: '2026-10-23T09:00:00-03:00',
+    endereco: 'Rua Um, 100', tecnico_nome: 'Franck', orcamento_numero: 1668,
+    responsavel_cliente: 'Dona Maria',
+    ordens: [{ numero_os: 16548, placa: 'FZU5D16', tipo_nome: 'Contrato' }],
+  }
+
+  async function confirmar(lista) {
+    estado.respostas['/api/agendamento/aguardando'] = { agendamentos: lista }
+    for (const a of lista) estado.respostas[`/api/agendamentos/${a.id}/confirmar`] = a
+    const tela = montarModal({ relacao: 'cliente', clienteHarmonitId: '998063' })
+    await flushPromises()
+    for (const item of tela.findAll('.agm__item')) await item.trigger('click')
+    await tela.find('.agm__campo input').setValue('Dona Maria')
+    await tela.findAll('button').find((b) => b.text().includes('Confirmar e escrever'))
+      .trigger('click')
+    await flushPromises()
+    return tela
+  }
+
+  it('imprime o nome do tipo, e NÃO a palavra SERVIÇO', async () => {
+    const tela = await confirmar([COM_TIPO])
+    const texto = textoDaMensagem(tela)
+    expect(texto).toContain('(CONTRATO) | FZU5D16 | VELASCO')
+    expect(texto).not.toContain('SERVIÇO')
+  })
+
+  it('🚨 sem nome de tipo, o segmento SAI FORA — não vira número nem rótulo inventado',
+     async () => {
+    // 173 das 547 OS estão assim: `tipo` fora da lista do Harmonit.
+    const tela = await confirmar([{
+      ...COM_TIPO,
+      ordens: [{ numero_os: 16548, placa: 'FZU5D16', tipo_nome: null }],
+    }])
+    const texto = textoDaMensagem(tela)
+    expect(texto.split('\n')[0]).toBe('FZU5D16 | VELASCO')
+    // ⚠️ O parêntese só pode faltar NO CABEÇALHO: o corpo tem sempre
+    // `VEÍCULO(S) / PLACA(S)`, e medir o texto inteiro mediria a linha errada.
+    expect(texto.split('\n')[0]).not.toContain('(')
+    expect(texto).not.toContain('tipo 73')
+  })
+
+  it('grupo com tipos diferentes lista os dois, sem repetir', async () => {
+    const tela = await confirmar([
+      COM_TIPO,
+      { ...COM_TIPO, id: 2,
+        ordens: [{ numero_os: 16547, placa: 'ABC1D23', tipo_nome: 'Ordem de Serviço' },
+                 { numero_os: 16545, placa: 'DEF2G34', tipo_nome: 'Contrato' }] },
+    ])
+    expect(tela.findAll('.agm__mensagem')).toHaveLength(1)
+    expect(textoDaMensagem(tela)).toContain('(CONTRATO, ORDEM DE SERVIÇO)')
+  })
+
+  it('a OS escolhida leva o tipo GRAVADO para o compromisso (retrato)', async () => {
+    estado.respostas['/api/agendamento/clientes/998063/os'] = {
+      os: [{ numero_os: 16548, tipo: 2, tipo_nome: 'Contrato', status_str: 'Nova',
+             sem_situacao: false, veiculos: [{ placa: 'FZU5D16' }] }],
+      ja_agendadas: [],
+    }
+    const tela = montarModal()
+    await flushPromises()
+    await tela.findAll('.agm__aba')[1].trigger('click')
+    await tela.find('input[type="datetime-local"]').setValue('2026-10-23T09:00')
+    await tela.findAll('button').find((b) => b.text() === 'Continuar').trigger('click')
+    await tela.findAll('.agm__item')[0].trigger('click')
+    await flushPromises()
+    // O tipo aparece na lista, para o operador ver antes de marcar o que o
+    // cliente vai ler.
+    expect(tela.text()).toContain('Contrato')
+    // ⚠️ O PRIMEIRO clique escolheu o CLIENTE; a lista de OS substitui a de
+    // clientes no mesmo `.agm__item`, então é o segundo que marca a OS.
+    await tela.findAll('.agm__item')[0].trigger('click')
+    await tela.findAll('button').find((b) => b.text() === 'Continuar').trigger('click')
+    await flushPromises()
+    // ⚠️ `Agendar` é também o rótulo da aba: a ação é a do passo 3, não a
+    // primeira ocorrência no DOM.
+    await tela.findAll('.botao--primario').find((b) => b.text() === 'Agendar')
+      .trigger('click')
+    await flushPromises()
+    const post = estado.posts.find((p) => p.rota === '/api/agendamentos')
+    expect(post.corpo.ordens[0]).toMatchObject({
+      numero_os: 16548, placa: 'FZU5D16', tipo_nome: 'Contrato' })
+  })
+
+  it('OS sem nome de tipo diz isso na lista, em vez de calar', async () => {
+    estado.respostas['/api/agendamento/clientes/998063/os'] = {
+      os: [{ numero_os: 16451, tipo: 73, tipo_nome: null, status_str: 'Nova',
+             sem_situacao: false, veiculos: [] }],
+      ja_agendadas: [],
+    }
+    const tela = montarModal()
+    await flushPromises()
+    await tela.findAll('.agm__aba')[1].trigger('click')
+    await tela.find('input[type="datetime-local"]').setValue('2026-10-23T09:00')
+    await tela.findAll('button').find((b) => b.text() === 'Continuar').trigger('click')
+    await tela.findAll('.agm__item')[0].trigger('click')
+    await flushPromises()
+    // 🔵 21/10: o tipo virou SELO (*"pode ter mais destaque"*), e o rotulo
+    // do que nao tem nome acompanhou. Troca deliberada, nao regressao.
+    expect(tela.text()).toContain('tipo sem nome no Harmonit')
+  })
+})
+
+describe('ponta 2 — reenviar confirmação NÃO envia', () => {
+  const hoje = new Date()
+  const ISO_HOJE = `${hoje.getFullYear()}-${String(hoje.getMonth() + 1).padStart(2, '0')}-${String(hoje.getDate()).padStart(2, '0')}`
+
+  function linha(extra = {}) {
+    return {
+      id: 1, inicio: `${ISO_HOJE}T09:00:00`, cliente_nome: 'VELASCO',
+      cliente_harmonit_id: '998063', conversa_id: 77, tecnico_nome: 'Franck',
+      endereco: 'Rua Um', responsavel_cliente: 'Dona Maria',
+      orcamento_numero: 1668, estado: 'confirmado',
+      ordens: [{ numero_os: 16548, placa: 'FZU5D16', tipo_nome: 'Contrato' }],
+      ...extra,
+    }
+  }
+
+  async function abrirReenvio(lista) {
+    estado.respostas['/api/agendamentos'] = { agendamentos: lista }
+    const tela = mount(Agendamentos)
+    await flushPromises()
+    await tela.findAll('button').find((b) => b.text() === 'Reenviar confirmação')
+      .trigger('click')
+    await flushPromises()
+    return tela
+  }
+
+  it('mostra as duas mensagens e diz, por extenso, que não envia', async () => {
+    const tela = await abrirReenvio([linha()])
+    expect(tela.text()).toContain('não envia nada')
+    const blocos = tela.findAll('.agd__reenvio-pre').map((n) => n.text())
+    expect(blocos).toHaveLength(2)
+    expect(blocos[0]).toContain('(CONTRATO) | FZU5D16 | VELASCO')
+    expect(blocos[0]).not.toContain('ORÇAMENTO')
+    expect(blocos[1]).toContain('OS: 16548')
+    expect(blocos[1]).toContain('ORÇAMENTO 1668')
+    // 🚨 Nenhum POST: a ação é de leitura.
+    expect(estado.posts).toHaveLength(0)
+  })
+
+  it('🚨 junta os IRMÃOS da mesma hora — o cliente recebeu uma mensagem só',
+     async () => {
+    const tela = await abrirReenvio([
+      linha(),
+      linha({ id: 2, ordens: [{ numero_os: 16547, placa: 'ABC1D23', tipo_nome: 'Contrato' }] }),
+      // Outra hora: fica de fora.
+      linha({ id: 3, inicio: `${ISO_HOJE}T14:00:00`,
+              ordens: [{ numero_os: 16540, placa: 'XYZ9W87', tipo_nome: 'Contrato' }] }),
+      // Cancelado: fica de fora.
+      linha({ id: 4, estado: 'cancelado',
+              ordens: [{ numero_os: 16539, placa: 'QQQ1Q11', tipo_nome: 'Contrato' }] }),
+    ])
+    const doCliente = tela.findAll('.agd__reenvio-pre')[0].text()
+    expect(doCliente).toContain('FZU5D16, ABC1D23')
+    expect(doCliente).not.toContain('XYZ9W87')
+    expect(doCliente).not.toContain('QQQ1Q11')
+    expect(tela.text()).toContain('2 compromissos entraram numa mensagem só')
+  })
+
+  it('⚠️ compromisso aguardando sai com o campo vazio, e a tela diz por quê',
+     async () => {
+    const tela = await abrirReenvio([
+      linha({ estado: 'aguardando', responsavel_cliente: null })])
+    expect(tela.text()).toContain('ninguém disse quem acompanha o técnico')
+    expect(tela.findAll('.agd__reenvio-pre')[0].text())
+      .toContain('RESPONSÁVEL DO CLIENTE POR ACOMPANHAR O TÉCNICO:')
+  })
+
+  it('a ação não aparece em linha cancelada', async () => {
+    estado.respostas['/api/agendamentos'] = {
+      agendamentos: [linha({ estado: 'cancelado', motivo_cancelamento: 'cliente pediu' })] }
+    const tela = mount(Agendamentos)
+    await flushPromises()
+    expect(tela.findAll('button').some((b) => b.text() === 'Reenviar confirmação'))
+      .toBe(false)
+  })
+
+  it('abrir a conversa deixa o texto no rascunho DELA, e navega', async () => {
+    const tela = await abrirReenvio([linha()])
+    await tela.findAll('button')
+      .find((b) => b.text() === 'Abrir conversa com este texto').trigger('click')
+    await flushPromises()
+    expect(localStorage.getItem('movizap.rascunho.77'))
+      .toContain('(CONTRATO) | FZU5D16 | VELASCO')
+    expect(estado.navegou).toContain('/atendimento/77')
+  })
+
+  it('⚠️ não sobrescreve rascunho do colega sem perguntar', async () => {
+    localStorage.setItem('movizap.rascunho.77', 'meia frase do colega')
+    const confirmou = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    const tela = await abrirReenvio([linha()])
+    await tela.findAll('button')
+      .find((b) => b.text() === 'Abrir conversa com este texto').trigger('click')
+    await flushPromises()
+    expect(confirmou).toHaveBeenCalled()
+    expect(localStorage.getItem('movizap.rascunho.77')).toBe('meia frase do colega')
+    confirmou.mockRestore()
+  })
+})
+
+describe('ponta 3 — o mês navegável ao lado', () => {
+  it('nasce fechado e abre pelo botão Mês', async () => {
+    const tela = mount(Agendamentos)
+    await flushPromises()
+    expect(tela.find('.agd__mes').exists()).toBe(false)
+    await tela.findAll('button').find((b) => b.text().includes('Mês')).trigger('click')
+    expect(tela.find('.agd__mes').exists()).toBe(true)
+  })
+
+  it('o mês tem os dias do mês e nenhum a mais', async () => {
+    const tela = mount(Agendamentos)
+    await flushPromises()
+    await tela.findAll('button').find((b) => b.text().includes('Mês')).trigger('click')
+    const agora = new Date()
+    const quantos = new Date(agora.getFullYear(), agora.getMonth() + 1, 0).getDate()
+    expect(tela.findAll('.agd__mes-dia')).toHaveLength(quantos)
+  })
+
+  it('🚨 o carrossel continua sendo o que manda: escolher um dia move a âncora',
+     async () => {
+    const tela = mount(Agendamentos)
+    await flushPromises()
+    await tela.findAll('button').find((b) => b.text().includes('Mês')).trigger('click')
+    const dia = tela.findAll('.agd__mes-dia')[0]
+    await dia.trigger('click')
+    await flushPromises()
+    // Fecha ao escolher, e o carrossel segue com os seus 7 dias.
+    expect(tela.find('.agd__mes').exists()).toBe(false)
+    expect(tela.findAll('.agd__dia')).toHaveLength(7)
+    expect(tela.find('.agd__dia--ativo').exists()).toBe(true)
+  })
+
+  it('e diz onde estão as marcas de serviço, para o mês vazio não mentir',
+     async () => {
+    const tela = mount(Agendamentos)
+    await flushPromises()
+    await tela.findAll('button').find((b) => b.text().includes('Mês')).trigger('click')
+    expect(tela.text()).toContain('As marcas de serviço ficam')
+  })
+})
+
+
+/* ==========================================================================
+   AS CINCO FRENTES DE 21/10, TARDE — depois do teste dele no navegador.
+   --------------------------------------------------------------------------
+   F1 (barreira do tecnico) vive na suite do FPSL: e regra de backend.
+   Aqui ficam as quatro de tela.
+   ========================================================================== */
+
+describe('F3 — a trava do modal', () => {
+  it('🚨 clicar fora NÃO fecha: pergunta primeiro', async () => {
+    const perguntou = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    const tela = montarModal()
+    await flushPromises()
+    await tela.find('.agm__fundo').trigger('click')
+    expect(perguntou).toHaveBeenCalled()
+    // Disse "não": o modal fica, e o trabalho não se perde.
+    expect(tela.emitted('fechar')).toBeFalsy()
+    perguntou.mockRestore()
+  })
+
+  it('confirmando, fecha', async () => {
+    const perguntou = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const tela = montarModal()
+    await flushPromises()
+    await tela.find('.agm__fundo').trigger('click')
+    expect(tela.emitted('fechar')).toBeTruthy()
+    perguntou.mockRestore()
+  })
+
+  it('o X também pergunta — é o mesmo caminho de saída', async () => {
+    const perguntou = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    const tela = montarModal()
+    await flushPromises()
+    await tela.find('[aria-label="Fechar"]').trigger('click')
+    expect(perguntou).toHaveBeenCalled()
+    expect(tela.emitted('fechar')).toBeFalsy()
+    perguntou.mockRestore()
+  })
+})
+
+describe('F3 — o calendário sempre aberto', () => {
+  async function naAbaAgendar() {
+    const tela = montarModal()
+    await flushPromises()
+    await tela.findAll('.agm__aba')[1].trigger('click')
+    return tela
+  }
+
+  it('🚨 nasce aberto, sem clique nenhum', async () => {
+    const tela = await naAbaAgendar()
+    expect(tela.find('.agm__cal').exists()).toBe(true)
+    expect(tela.findAll('.agm__cal-dia').length).toBeGreaterThan(27)
+    expect(tela.findAll('.agm__hora').length).toBeGreaterThan(10)
+  })
+
+  it('o passo é de 30 min, das 7h às 19h', async () => {
+    const tela = await naAbaAgendar()
+    const horas = tela.findAll('.agm__hora').map((n) => n.text())
+    expect(horas[0]).toBe('07:00')
+    expect(horas[1]).toBe('07:30')
+    expect(horas[horas.length - 1]).toBe('19:00')
+    expect(horas).toHaveLength(25)
+  })
+
+  it('escolher dia e hora monta o `quando`, e um não apaga o outro', async () => {
+    const tela = await naAbaAgendar()
+    await tela.findAll('.agm__cal-dia')[9].trigger('click')   // dia 10
+    await tela.findAll('.agm__hora')[4].trigger('click')      // 09:00
+    const campo = tela.find('input[type="datetime-local"]')
+    expect(campo.element.value).toMatch(/-10T09:00$/)
+    // Troca o dia: a hora tem de ficar.
+    await tela.findAll('.agm__cal-dia')[14].trigger('click')  // dia 15
+    expect(tela.find('input[type="datetime-local"]').element.value)
+      .toMatch(/-15T09:00$/)
+  })
+
+  it('o campo digitado continua existindo, para fora do expediente', async () => {
+    const tela = await naAbaAgendar()
+    await tela.find('input[type="datetime-local"]').setValue('2026-10-23T05:15')
+    const continuar = tela.findAll('button').find((b) => b.text() === 'Continuar')
+    expect(continuar.attributes('disabled')).toBeUndefined()
+  })
+})
+
+describe('F4 — o endereço em campos, e o CEP', () => {
+  const OS_COM_ENDERECO = {
+    numero_os: 16991,
+    endereco: { cep: '19013180', endereco: 'Rua Domingos de Moraes',
+                numero: 'S/N', bairro: 'Jardim Bela Daria',
+                cidade: 'Presidente Prudente', uf: 'SP', complemento: null },
+    tem_endereco: true,
+  }
+
+  async function noPasso3(resposta = OS_COM_ENDERECO) {
+    estado.respostas['/api/agendamento/os/16548/endereco'] = resposta
+    const tela = montarModal()
+    await flushPromises()
+    await tela.findAll('.agm__aba')[1].trigger('click')
+    await tela.find('input[type="datetime-local"]').setValue('2026-10-23T09:00')
+    await tela.findAll('button').find((b) => b.text() === 'Continuar').trigger('click')
+    await tela.findAll('.agm__item')[0].trigger('click')   // cliente
+    await flushPromises()
+    await tela.findAll('.agm__item')[0].trigger('click')   // OS 16548
+    await tela.findAll('button').find((b) => b.text() === 'Continuar').trigger('click')
+    await flushPromises()
+    return tela
+  }
+
+  it('são sete campos, com os nomes do Harmonit', async () => {
+    const tela = await noPasso3()
+    // O seletor precisa ser o PRIMEIRO span de cada label: o do CEP tem um
+    // segundo span, que embrulha o campo e o botao Buscar.
+    const rotulos = tela.findAll('.agm__endereco .agm__campo > span:first-child')
+      .map((n) => n.text().split(' ')[0])
+    expect(rotulos).toEqual(['CEP', 'Rua', 'Número', 'Bairro', 'Cidade', 'UF',
+                             'Complemento'])
+  })
+
+  it('🚨 pré-preenche com o endereço da PRÓPRIA OS', async () => {
+    const tela = await noPasso3()
+    const valores = tela.findAll('.agm__endereco input').map((n) => n.element.value)
+    expect(valores).toContain('19013180')
+    expect(valores).toContain('Rua Domingos de Moraes')
+    expect(valores).toContain('Presidente Prudente')
+  })
+
+  it('OS sem endereço avisa que o que for digitado vai gravado nela', async () => {
+    const tela = await noPasso3({ numero_os: 16991, endereco: {}, tem_endereco: false })
+    expect(tela.text()).toContain('não tem endereço')
+  })
+
+  it('o CEP preenche rua, bairro, cidade e UF — e nunca o número', async () => {
+    estado.respostas['/api/cep/19013180'] = {
+      achado: true, cep: '19013180', logradouro: 'Rua Domingos de Moraes',
+      bairro: 'Jardim Bela Daria', cidade: 'Presidente Prudente', uf: 'SP' }
+    const tela = await noPasso3({ numero_os: 1, endereco: {}, tem_endereco: false })
+    const campos = tela.findAll('.agm__endereco input')
+    await campos[0].setValue('19013180')
+    await tela.findAll('button').find((b) => b.text() === 'Buscar').trigger('click')
+    await flushPromises()
+    const valores = tela.findAll('.agm__endereco input').map((n) => n.element.value)
+    expect(valores[1]).toBe('Rua Domingos de Moraes')
+    expect(valores[3]).toBe('Jardim Bela Daria')
+    expect(valores[5]).toBe('SP')
+    // 🚨 O número é do operador: o CEP não sabe.
+    expect(valores[2]).toBe('')
+  })
+
+  it('🚨 CEP que não existe e CEP que não deu para consultar são DIFERENTES',
+     async () => {
+    estado.respostas['/api/cep/19013180'] = { achado: false, cep: '19013180' }
+    const tela = await noPasso3({ numero_os: 1, endereco: {}, tem_endereco: false })
+    await tela.findAll('.agm__endereco input')[0].setValue('19013180')
+    await tela.findAll('button').find((b) => b.text() === 'Buscar').trigger('click')
+    await flushPromises()
+    expect(tela.text()).toContain('não existe na base dos Correios')
+    expect(tela.text()).not.toContain('não quer dizer que')
+  })
+
+  it('CEP curto nem sai da tela', async () => {
+    const tela = await noPasso3({ numero_os: 1, endereco: {}, tem_endereco: false })
+    await tela.findAll('.agm__endereco input')[0].setValue('190')
+    await tela.findAll('button').find((b) => b.text() === 'Buscar').trigger('click')
+    await flushPromises()
+    expect(tela.text()).toContain('8 dígitos')
+    expect(estado.pedidos.filter((p) => p.includes('/api/cep/'))).toHaveLength(0)
+  })
+
+  it('sem rua, avisa que a OS do Harmonit não muda', async () => {
+    const tela = await noPasso3({ numero_os: 1, endereco: {}, tem_endereco: false })
+    expect(tela.text()).toContain('não vai para a OS do Harmonit')
+  })
+
+  it('manda os campos no POST, e a linha montada como endereço', async () => {
+    const tela = await noPasso3()
+    await tela.findAll('.agm__endereco input')[2].setValue('26')
+    await tela.findAll('.botao--primario').find((b) => b.text() === 'Agendar')
+      .trigger('click')
+    await flushPromises()
+    const post = estado.posts.find((p) => p.rota === '/api/agendamentos')
+    expect(post.corpo.endereco_campos).toMatchObject({
+      cep: '19013180', logradouro: 'Rua Domingos de Moraes', numero: '26',
+      cidade: 'Presidente Prudente', uf: 'SP' })
+    // A linha é o que o cliente lê, e sai montada dos campos.
+    expect(post.corpo.endereco)
+      .toBe('Rua Domingos de Moraes, 26 · Jardim Bela Daria · '
+            + 'Presidente Prudente - SP · CEP 19013180')
+  })
+})
+
+describe('F5 — enviar ao cliente, e abrir na conversa do técnico', () => {
+  const UM = {
+    id: 1, cliente_nome: 'VELASCO', inicio: '2026-10-23T09:00:00-03:00',
+    endereco: 'Rua Um, 100', tecnico_nome: 'Franck', orcamento_numero: 1668,
+    responsavel_cliente: 'Dona Maria', conversa_id: 777,
+    ordens: [{ numero_os: 16548, placa: 'FZU5D16', tipo_nome: 'Contrato' }],
+  }
+
+  async function confirmar(lista = [UM]) {
+    estado.respostas['/api/agendamento/aguardando'] = { agendamentos: lista }
+    for (const a of lista) estado.respostas[`/api/agendamentos/${a.id}/confirmar`] = a
+    const tela = montarModal({ relacao: 'cliente', clienteHarmonitId: '998063' })
+    await flushPromises()
+    for (const item of tela.findAll('.agm__item')) await item.trigger('click')
+    await tela.find('.agm__campo input').setValue('Dona Maria')
+    await tela.findAll('button').find((b) => b.text().includes('Confirmar e escrever'))
+      .trigger('click')
+    await flushPromises()
+    return tela
+  }
+
+  it('os dois botões são os que ele pediu', async () => {
+    const tela = await confirmar()
+    const textos = tela.findAll('button').map((b) => b.text())
+    expect(textos).toContain('Enviar ao cliente')
+    expect(textos).toContain('Abrir na conversa do técnico')
+  })
+
+  it('🚨 envia o do cliente e o MODAL PERSISTE', async () => {
+    const tela = await confirmar()
+    await tela.findAll('button').find((b) => b.text() === 'Enviar ao cliente')
+      .trigger('click')
+    await flushPromises()
+    expect(estado.posts.map((p) => p.rota)).toContain('/api/conversas/1/responder')
+    // Como o orçamento faz: não fecha, porque o segundo passo é opcional.
+    expect(tela.emitted('fechar')).toBeFalsy()
+    expect(tela.text()).toContain('Enviado')
+    expect(tela.text()).toContain('O do técnico é opcional')
+  })
+
+  it('o texto editado no modal é o que vai enviado', async () => {
+    const tela = await confirmar()
+    await tela.findAll('.agm__texto')[0].setValue('texto que eu reescrevi')
+    await tela.findAll('button').find((b) => b.text() === 'Enviar ao cliente')
+      .trigger('click')
+    await flushPromises()
+    const post = estado.posts.find((p) => p.rota === '/api/conversas/1/responder')
+    expect(post.corpo.texto).toBe('texto que eu reescrevi')
+  })
+
+  it('envio falho diz o motivo e deixa tentar de novo', async () => {
+    const tela = await confirmar()
+    estado.erroNoPost = '/api/conversas/1/responder'
+    await tela.findAll('button').find((b) => b.text() === 'Enviar ao cliente')
+      .trigger('click')
+    await flushPromises()
+    expect(tela.text()).toContain('o WhatsApp recusou')
+    expect(tela.findAll('button').some((b) => b.text() === 'Enviar ao cliente'))
+      .toBe(true)
+    estado.erroNoPost = ''
+  })
+
+  it('🚨 o do técnico ABRE a conversa dele e semeia o compositor — não envia',
+     async () => {
+    const tela = await confirmar()
+    await tela.findAll('button')
+      .find((b) => b.text() === 'Abrir na conversa do técnico').trigger('click')
+    await flushPromises()
+    expect(localStorage.getItem('movizap.rascunho.777')).toContain('OS: 16548')
+    expect(estado.navegou).toContain('/atendimento/777')
+    // Nenhum envio na conversa do técnico: a rota exige estar nela.
+    expect(estado.posts.map((p) => p.rota))
+      .not.toContain('/api/conversas/777/responder')
+  })
+
+  it('compromisso sem conversa de origem não oferece o botão ativo', async () => {
+    const tela = await confirmar([{ ...UM, conversa_id: null }])
+    const botao = tela.findAll('button')
+      .find((b) => b.text() === 'Abrir na conversa do técnico')
+    expect(botao.attributes('disabled')).toBeDefined()
+    expect(tela.text()).toContain('não guarda a conversa de origem')
   })
 })

@@ -461,6 +461,32 @@ TELAS = [
         "fase": 1,
         "aba_de": "CFG_0.1",
     },
+    # ---- CFG_14.1: o vinculo dos tecnicos (21/10) ----
+    {
+        # 🟡 Ponta 4 do plano: a rota `/api/tecnicos-harmonit/pendencias`
+        # entrou no ar em 21/10 **sem tela nenhuma** -- porta trancada, o
+        # defeito que a casa já catalogou. A alternativa honesta era tirar
+        # a rota.
+        #
+        # 🚨 SÓ LEITURA. Ela mostra os três buracos de cadastro; não
+        # conserta nada. 🔵 A conclusão é dele, de 21/10: *"nenhuma regra
+        # resolve -- é trabalho de cadastro"*. Quem vincula à mão é a ficha
+        # do contato, na conversa.
+        #
+        # ⚠️ `aba_de` -> não vira item de menu: a casca é o `/config`, como
+        # em todas as CFG_*.
+        #
+        # ⚠️ Código conferido contra `CODIGOS_APOSENTADOS` (só `ATD_4.1`).
+        "codigo": "CFG_14.1",
+        "titulo": "Vínculo dos técnicos",
+        "rota": "/config/vinculo-tecnicos",
+        "icone": "bi-person-vcard",
+        "descricao": "O que falta para o agendamento achar o técnico na OS do Harmonit.",
+        "permissao": "owner",
+        "grupo": "Configuração",
+        "fase": 1,
+        "aba_de": "CFG_0.1",
+    },
     {
         "codigo": "REL_1.1",
         "titulo": "Relatórios",

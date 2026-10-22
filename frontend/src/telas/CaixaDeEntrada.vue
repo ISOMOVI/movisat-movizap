@@ -1419,9 +1419,12 @@ async function abrir(id) {
     // no grupo A seguiria para o grupo B — e lá o JID nem existe. A lista de
     // quem dá para chamar também é da conversa, e é remontada sob demanda.
     mencionados.value = []
+    chamados.value = []
     listaArroba.value = []
     chamaveis.value = []
     chamaveisDaConversa = null
+    chamaveisInternos.value = []
+    internosDaConversa = null
     // A busca é DESTA conversa: carregá-la em outra mostraria contador e
     // marcações de um termo que ninguém procurou aqui.
     // ⚠️ E o CAMPO fecha junto (27/08): deixá-lo aberto na conversa nova
@@ -1616,21 +1619,58 @@ async function enviar(interna = false) {
        ⚠️ Nota interna não chama ninguém: ela nunca vai ao WhatsApp. */
     const vivos = interna ? []
       : mencionados.value.filter((p) => texto.includes('@' + p.nome))
-    await api.post(`/api/conversas/${aberta.value.id}/${caminho}`, {
-      texto,
-      /* ⚠️ Nota interna não cita: ela nunca foi ao WhatsApp, e o backend
-         recusaria a chave. */
-      citando_id: interna ? null : (citando.value?.id ?? null),
-      mencionados: vivos.map((p) => p.jid),
-    })
+    /* ⚠️ Mesma regra para os chamados da nota: só vai quem AINDA está
+       escrito. Apagar o "@Fulano" à mão desfaz o chamado. */
+    const chamadosVivos = chamados.value.filter(
+      (p) => texto.includes('@' + p.nome))
+    /* 🚨 O DESTINO VEM DO BOTÃO, e o `@` da conversa direta é interno: se
+       este texto vai AO CLIENTE, o "@Fulano" segue como texto comum e ninguém
+       é chamado. A tela avisa antes em vez de deixar a pessoa achar que
+       avisou o colega. */
+    if (!interna && chamadosVivos.length) {
+      const nomes = chamadosVivos.map((p) => p.nome).join(', ')
+      if (!window.confirm(
+        `Esta mensagem vai PARA O CLIENTE, e ${nomes} não será chamado: `
+        + 'o nome segue como texto comum.\n\nOK envia ao cliente. Cancelar '
+        + 'volta — use "Nota interna" para chamar alguem nosso.')) {
+        enviando.value = false
+        return
+      }
+    }
+    const resultado = await api.post(
+      `/api/conversas/${aberta.value.id}/${caminho}`, {
+        texto,
+        /* ⚠️ Nota interna não cita: ela nunca foi ao WhatsApp, e o backend
+           recusaria a chave. */
+        ...(interna
+          ? { chamar: chamadosVivos.map((p) => p.id) }
+          : { citando_id: citando.value?.id ?? null,
+              mencionados: vivos.map((p) => p.jid) }),
+      })
     resposta.value = ''
     apagarRascunho()
     citando.value = null
     mencionados.value = []
+    chamados.value = []
     listaArroba.value = []
     // 🚨 Recarrega a conversa em vez de empurrar o balão na mão: o que vale é
     // o que o banco gravou, não o que a tela supõe ter acontecido.
     await Promise.all([abrir(aberta.value.id), carregar({ silencioso: true })])
+    /* 🚨 QUEM FOI AVISADO É O QUE O BACKEND DIZ, não o que a tela pediu: o
+       aviso pelo chat pode falhar sem derrubar a nota, e a tela tem de contar
+       isso em vez de deixar quem escreveu achando que chamou alguem.
+
+       ⚠️ DEPOIS DO RECARREGAR, nunca antes: `abrir()` limpa o recado, e um
+       recado posto antes dele morria sem aparecer -- achado pelo teste. */
+    if (interna && resultado?.avisos_falhos?.length) {
+      recado.value = 'A nota ficou gravada, mas não consegui avisar '
+        + resultado.avisos_falhos.map((f) => f.nome).join(', ')
+        + ' pelo chat interno.'
+    } else if (interna && resultado?.chamados?.length) {
+      recado.value = 'Avisei '
+        + resultado.chamados.map((c) => c.nome).join(', ')
+        + ' pelo chat interno.'
+    }
   } catch (e) {
     erro.value = e instanceof ErroDeApi ? e.message : 'Não consegui enviar.'
     relatarErroDeBotao('enviar_mensagem', e, aberta.value?.id)
@@ -1744,6 +1784,13 @@ const clienteNomeDaConversa = computed(
   () => aberta.value?.empresa?.cliente?.nome || '')
 
 const mencionados = ref([])
+/* 🚨 OS CHAMADOS DA NOTA SÃO OUTRA LISTA, e não a mesma com um campo a
+   mais: `mencionados` guarda participante de WhatsApp (JID, só vale em grupo)
+   e `chamados` guarda ATENDENTE (id), que é quem uma nota interna chama. Uma
+   lista só acabaria mandando id onde o backend espera JID. */
+const chamados = ref([])
+const chamaveisInternos = ref([])
+let internosDaConversa = null
 const listaArroba = ref([])
 const arrobaEscolhido = ref(0)
 const chamaveis = ref([])
@@ -1764,8 +1811,24 @@ async function carregarChamaveis() {
   }
 }
 
+/* 🔵 21/10 — quem a NOTA pode chamar: o dono e os convidados ativos desta
+   conversa, pela mesma régua de quem pode agir nela. Cacheada por conversa,
+   como a do grupo. */
+async function carregarInternos() {
+  const id = aberta.value?.id
+  if (!id) { chamaveisInternos.value = []; return }
+  if (internosDaConversa === id) return
+  try {
+    const r = await api.get(`/api/conversas/${id}/quem-chamar-interno`)
+    chamaveisInternos.value = r.pessoas || []
+    internosDaConversa = id
+  } catch {
+    // Igual à do grupo: sem a lista, escreve-se normalmente.
+    chamaveisInternos.value = []
+  }
+}
+
 async function olharArroba(evento) {
-  if (!ehGrupo.value) { listaArroba.value = []; return }
   const campo = evento.target
   const ate = campo.value.slice(0, campo.selectionStart)
   const at = ate.lastIndexOf('@')
@@ -1775,11 +1838,21 @@ async function olharArroba(evento) {
   const termo = ate.slice(at + 1)
   if (/\s{2,}|\n/.test(termo)) { listaArroba.value = []; return }
 
-  await carregarChamaveis()
+  /* 🚨 DOIS UNIVERSOS, A MESMA TECLA (21/10, decisão dele). Em GRUPO o `@`
+     chama participante do WhatsApp, que é o que o `mentioned` notifica. Em
+     conversa DIRETA o WhatsApp ignora menção -- então ali o `@` chama GENTE
+     NOSSA, e o aviso sai pelo chat interno. Nunca os dois juntos: cliente não
+     se chama em nota, e colega não se chama em grupo do WhatsApp. */
+  if (ehGrupo.value) await carregarChamaveis()
+  else await carregarInternos()
   inicioDaArroba = at
   const busca = termo.trim().toLowerCase()
-  listaArroba.value = chamaveis.value
-    .filter((p) => !mencionados.value.some((m) => m.jid === p.jid))
+  const fonte = ehGrupo.value ? chamaveis.value : chamaveisInternos.value
+  const jaEscolhido = (p) => (ehGrupo.value
+    ? mencionados.value.some((m) => m.jid === p.jid)
+    : chamados.value.some((m) => m.id === p.id))
+  listaArroba.value = fonte
+    .filter((p) => !jaEscolhido(p))
     .filter((p) => !busca || (p.nome || '').toLowerCase().includes(busca))
     .slice(0, 8)
   arrobaEscolhido.value = 0
@@ -1821,8 +1894,14 @@ function escolherArroba(pessoa) {
     resposta.value = resposta.value.slice(0, inicioDaArroba)
       + '@' + pessoa.nome + ' ' + resposta.value.slice(fim)
   }
-  if (!mencionados.value.some((m) => m.jid === pessoa.jid)) {
-    mencionados.value.push(pessoa)
+  /* O destino do escolhido é o universo da conversa, nunca o campo que a
+     pessoa tem: participante de grupo tem `jid`, atendente tem `id`. */
+  if (ehGrupo.value) {
+    if (!mencionados.value.some((m) => m.jid === pessoa.jid)) {
+      mencionados.value.push(pessoa)
+    }
+  } else if (!chamados.value.some((m) => m.id === pessoa.id)) {
+    chamados.value.push(pessoa)
   }
   listaArroba.value = []
   inicioDaArroba = -1
@@ -1831,6 +1910,10 @@ function escolherArroba(pessoa) {
 
 function tirarMencionado(jid) {
   mencionados.value = mencionados.value.filter((m) => m.jid !== jid)
+}
+
+function tirarChamado(id) {
+  chamados.value = chamados.value.filter((m) => m.id !== id)
 }
 
 /* ---- envio de arquivo ----------------------------------------------------
@@ -4351,7 +4434,7 @@ function carregarMidiasDaConversa(c) {
                 rows="3"
                 :placeholder="ehGrupo
                   ? 'Escreva — @ chama alguém do grupo'
-                  : 'Escreva e escolha abaixo: enviar ao cliente ou guardar como nota'"
+                  : 'Escreva — @ chama quem está na conversa, na nota interna'"
                 maxlength="4000"
                 @input="olharArroba"
                 @keydown.ctrl.enter.prevent="enviar"
@@ -4364,7 +4447,7 @@ function carregarMidiasDaConversa(c) {
 
               <!-- A lista sobe: o compositor mora no rodapé da conversa. -->
               <ul v-if="listaArroba.length" class="arroba" role="listbox">
-                <li v-for="(p, i) in listaArroba" :key="p.jid">
+                <li v-for="(p, i) in listaArroba" :key="p.jid || p.id">
                   <button type="button"
                           class="arroba__item"
                           :class="{ 'arroba__item--aqui': i === arrobaEscolhido }"
@@ -4379,6 +4462,20 @@ function carregarMidiasDaConversa(c) {
             <!-- 🚨 QUEM VAI SER CHAMADO APARECE ANTES DE ENVIAR, e o aviso diz
                  que isso só vale em grupo — a tela não pode prometer o que o
                  WhatsApp ignora fora dele. -->
+            <!-- 🚨 O CHAMADO DA NOTA DIZ POR ONDE O AVISO VAI. "Chamando" sem
+                 mais nada faria a pessoa esperar notificação no WhatsApp, que
+                 não existe em conversa direta -- o aviso é pelo chat interno. -->
+            <p v-if="chamados.length" class="linha pequeno fraco chamados">
+              <i class="bi bi-at" aria-hidden="true"></i>
+              <span>na nota interna, aviso pelo chat</span>
+              <button v-for="p in chamados" :key="p.id"
+                      class="chamados__chip" type="button"
+                      :title="`não chamar ${p.nome}`"
+                      @click="tirarChamado(p.id)">
+                {{ p.nome }} <i class="bi bi-x" aria-hidden="true"></i>
+              </button>
+            </p>
+
             <p v-if="mencionados.length" class="linha pequeno fraco chamados">
               <i class="bi bi-at" aria-hidden="true"></i>
               <span>chamando no grupo</span>

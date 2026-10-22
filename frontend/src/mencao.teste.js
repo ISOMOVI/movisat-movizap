@@ -105,3 +105,52 @@ describe('o destaque da menção', () => {
     expect(acesas(partes)).toEqual([])
   })
 })
+
+/* 🚨 21/10 -- o aviso de menção em NOTA INTERNA chega aqui pelo chat
+   interno, e carrega `/atendimento/<id>`. Sem o link, a pessoa teria de
+   copiar o caminho à mão: o aviso diria onde está a conversa e não levaria
+   a ela. */
+describe('o caminho da conversa dentro do balão', () => {
+  it('vira um pedaço com link', () => {
+    const partes = partesDoTexto({
+      texto: 'chamei voce na conversa /atendimento/80355',
+      mencionados: [],
+    })
+    const alvo = partes.find((p) => p.link)
+    expect(alvo.link).toBe('/atendimento/80355')
+    expect(partes.map((p) => p.texto).join('')).toBe(
+      'chamei voce na conversa /atendimento/80355')
+  })
+
+  it('o texto ao redor continua inteiro, antes e depois', () => {
+    const partes = partesDoTexto({
+      texto: 'veja /atendimento/7 agora',
+      mencionados: [],
+    })
+    expect(partes.map((p) => p.texto)).toEqual(
+      ['veja ', '/atendimento/7', ' agora'])
+    expect(partes.filter((p) => p.link)).toHaveLength(1)
+  })
+
+  it('⚠️ convive com a menção na mesma mensagem', () => {
+    const partes = partesDoTexto({
+      texto: '@Erika chamei voce: /atendimento/12',
+      mencionados: [{ id: 2, nome: 'Erika' }],
+    })
+    expect(partes.find((p) => p.mencao).texto).toBe('@Erika')
+    expect(partes.find((p) => p.link).link).toBe('/atendimento/12')
+  })
+
+  it('🚨 NÃO acende URL qualquer -- só caminho nosso', () => {
+    const partes = partesDoTexto({
+      texto: 'olha http://exemplo.com/atendimento-do-cliente',
+      mencionados: [],
+    })
+    expect(partes.filter((p) => p.link)).toHaveLength(0)
+  })
+
+  it('texto sem caminho nenhum segue como uma peça só', () => {
+    expect(partesDoTexto({ texto: 'bom dia', mencionados: [] }))
+      .toEqual([{ texto: 'bom dia' }])
+  })
+})

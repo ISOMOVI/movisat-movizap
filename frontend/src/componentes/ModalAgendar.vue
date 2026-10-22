@@ -17,8 +17,10 @@
    manda nada sozinho.
    ============================================================================ */
 import { computed, onMounted, ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
 
 import { api } from '../api/cliente.js'
+import { agrupar, dataBr, horaBr, textosDoGrupo } from '../util/mensagem_agendamento.js'
 
 const props = defineProps({
   conversaId: { type: Number, required: true },
@@ -30,6 +32,28 @@ const props = defineProps({
   clienteNome: { type: String, default: '' },
 })
 const emit = defineEmits(['fechar', 'inserir'])
+
+const router = useRouter()
+
+/* ---- A TRAVA DO MODAL (🔵 pedido dele, 21/10) ------------------------------
+   *"coloque trava nesse modal, se clicar fora dele no movizap ele aparece
+   aviso de 'cancelar' ou 'continuar'"*.
+
+   🚨 O MOTIVO E O TRABALHO PERDIDO. Este modal guarda orcamento em
+   digitacao, OS marcadas, data, endereco -- e um clique no fundo apagava tudo
+   sem perguntar. Era o unico caminho de saida acidental: o X e o Enter sao
+   deliberados.
+
+   ⚠️ "Continuar" NAO E "salvar": e voltar ao modal. Quem fecha perde o que
+   nao gravou, e o aviso diz isso -- botao que promete o que nao cumpre e o
+   defeito do "Nao perturbe". */
+function tentarFechar() {
+  if (!window.confirm('Fechar o agendamento?\n\nO que não foi gravado se '
+                      + 'perde: orçamento em digitação, OS marcadas, data e '
+                      + 'endereço.\n\nOK cancela o agendamento. Cancelar '
+                      + 'continua aqui.')) return
+  emit('fechar')
+}
 
 const ehTecnico = computed(() => props.relacao === 'tecnico')
 const ehCliente = computed(() => props.relacao === 'cliente')
@@ -121,6 +145,80 @@ async function reenviarOrcamento() {
 /* ------------------------------------------------------------------ Agendar */
 const passo = ref(1)
 const quando = ref('')
+
+/* ---- O CALENDARIO SEMPRE ABERTO (🔵 pedido dele, 21/10) -------------------
+   *"o botao do calendario pode ficar um pouco mais perto ou ja aparecer em
+   aberto mesmo, ficar sempre aberto"*.
+
+   🚨 POR QUE NAO FOI O `showPicker()` DO NAVEGADOR: ele depende de cada
+   navegador e **fecha sozinho** ao clicar fora -- "sempre aberto" nao se
+   sustentaria. Este calendario e desenhado aqui, entao esta sempre visivel
+   porque e parte da tela, e nao um popup emprestado.
+
+   O `input datetime-local` fica, escondido do olho mas presente: e ele que
+   carrega o `quando`, e e por ele que teste e teclado continuam funcionando.
+
+   ⚠️ PASSO DE 30 MINUTOS, das 7h as 19h -- escolha minha, declarada: ele
+   nao vetou quando propus. Horario fora disso ainda entra, pelo campo. */
+const HORA_DE = 7
+const HORA_ATE = 19
+const PASSO_MIN = 30
+
+function _iso(d) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+const hojeIso = _iso(new Date())
+const mesCursor = ref(new Date(new Date().getFullYear(), new Date().getMonth(), 1, 12))
+
+const diaEscolhido = computed(() => (quando.value || '').slice(0, 10))
+const horaEscolhida = computed(() => (quando.value || '').slice(11, 16))
+
+const rotuloDoMes = computed(() =>
+  mesCursor.value.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' }))
+
+const diasDoMes = computed(() => {
+  const base = mesCursor.value
+  const primeiro = new Date(base.getFullYear(), base.getMonth(), 1, 12)
+  const lista = []
+  for (let i = 0; i < primeiro.getDay(); i += 1) lista.push(null)
+  const d = new Date(primeiro)
+  while (d.getMonth() === base.getMonth()) {
+    const iso = _iso(d)
+    lista.push({ iso, dia: d.getDate(), hoje: iso === hojeIso, passado: iso < hojeIso })
+    d.setDate(d.getDate() + 1)
+  }
+  return lista
+})
+
+const horarios = computed(() => {
+  const lista = []
+  for (let h = HORA_DE; h <= HORA_ATE; h += 1) {
+    for (let m = 0; m < 60; m += PASSO_MIN) {
+      if (h === HORA_ATE && m > 0) break
+      lista.push(`${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`)
+    }
+  }
+  return lista
+})
+
+function andarMes(passoMes) {
+  const d = new Date(mesCursor.value)
+  d.setMonth(d.getMonth() + passoMes)
+  mesCursor.value = new Date(d.getFullYear(), d.getMonth(), 1, 12)
+}
+
+/* ⚠️ Dia e hora se escolhem SEPARADO, e por isso cada um preserva o outro:
+   trocar o dia depois de escolher a hora nao pode apagar a hora. Sem hora
+   ainda, o dia nasce com a primeira do expediente -- e `quando` nunca fica
+   meio preenchido, que e o que o `Continuar` mede. */
+function escolherDia(d) {
+  quando.value = `${d.iso}T${horaEscolhida.value || String(HORA_DE).padStart(2, '0') + ':00'}`
+}
+
+function escolherHora(h) {
+  quando.value = `${diaEscolhido.value || hojeIso}T${h}`
+}
 const clientes = ref([])
 const buscaCliente = ref('')
 const clienteEscolhido = ref(null)
@@ -129,6 +227,96 @@ const jaAgendadas = ref([])
 const osEscolhidas = ref([])
 const endereco = ref('')
 const agendado = ref(null)
+
+/* ---- O ENDERECO EM CAMPOS SEPARADOS (🔵 pedido dele, 21/10) --------------
+   *"a tela 3 precisa ter o campo com os dados de endereço separados, para
+   enviar sem erros no harmonit... sem os campos, podem inserir de qqer jeito"*.
+
+   🚨 OS SETE CAMPOS SAO OS DO HARMONIT, um a um -- a OS guarda `cep`,
+   `endereco`(rua), `numero`, `bairro`, `cidade`, `uf` e `complemento`. O unico
+   nome diferente e `logradouro`, que la e `endereco`: aqui esse nome ja era da
+   linha montada que sai na mensagem.
+
+   🚨 PRE-PREENCHE COM O ENDERECO DA PROPRIA OS. Endereco vindo da fonte e
+   melhor que endereco digitado -- e foi medido que ele existe: das 30 OS
+   amostradas em 21/10, 23 tem rua. ⚠️ As outras 7 nao tem nada, e e para
+   essas que existe o caminho do CEP.
+
+   ⚠️ TUDO CONTINUA EDITAVEL depois do preenchimento (*"ela ainda edita se
+   precisar"*): endereco de servico tem excecao -- condominio, zona rural, rua
+   renomeada -- e quem decide e quem atende. */
+const LIMITES = { cep: 8, logradouro: 80, numero: 10, bairro: 60, cidade: 50,
+                  uf: 2, complemento: 40 }
+
+function enderecoVazio() {
+  return { cep: '', logradouro: '', numero: '', bairro: '', cidade: '', uf: '',
+           complemento: '' }
+}
+
+const campos = ref(enderecoVazio())
+const enderecoDaOs = ref(null)
+const cepEstado = ref('')   // '', 'buscando', 'achado', 'nao-existe', 'caiu'
+
+const temRua = computed(() => !!campos.value.logradouro.trim())
+
+/* A linha como ela vai sair na mensagem -- a mesma regra do backend.
+   🚨 Mostrada na tela de proposito: o operador ve o que o CLIENTE vai ler,
+   antes de gravar. */
+const linhaDoEndereco = computed(() => {
+  const e = campos.value
+  const primeiro = [e.logradouro.trim(), e.numero.trim()].filter(Boolean).join(', ')
+  const local = [e.cidade.trim(), e.uf.trim()].filter(Boolean).join(' - ')
+  return [primeiro, e.bairro.trim(), e.complemento.trim(), local,
+          e.cep.trim() ? `CEP ${e.cep.trim()}` : ''].filter(Boolean).join(' · ')
+})
+
+async function carregarEnderecoDaOs() {
+  const primeira = osEscolhidas.value[0]
+  if (!primeira) return
+  try {
+    const r = await api.get(
+      `/api/agendamento/os/${primeira.numero_os}/endereco`)
+    enderecoDaOs.value = r
+    if (!r.tem_endereco) return
+    // ⚠️ So preenche o que esta VAZIO: se o operador ja digitou, o cadastro
+    // da OS nao passa por cima -- ele veio depois na tela, nao antes.
+    const vindo = r.endereco || {}
+    const mapa = { cep: vindo.cep, logradouro: vindo.endereco,
+                   numero: vindo.numero, bairro: vindo.bairro,
+                   cidade: vindo.cidade, uf: vindo.uf,
+                   complemento: vindo.complemento }
+    for (const [k, v] of Object.entries(mapa)) {
+      if (v && !campos.value[k]) campos.value[k] = String(v)
+    }
+  } catch (e) {
+    // 🚨 Nao e erro de tela: o compromisso pode ser agendado com endereco
+    // digitado. A tela diz que nao conseguiu ler o da OS.
+    enderecoDaOs.value = { erro: e?.message || 'não deu para ler o endereço da OS' }
+  }
+}
+
+async function buscarCep() {
+  const limpo = campos.value.cep.replace(/\D/g, '')
+  if (limpo.length !== 8) { cepEstado.value = 'curto'; return }
+  cepEstado.value = 'buscando'
+  try {
+    const r = await api.get(`/api/cep/${limpo}`)
+    if (!r.achado) { cepEstado.value = 'nao-existe'; return }
+    campos.value.cep = r.cep
+    // ⚠️ O CEP preenche rua, bairro, cidade e UF -- e NUNCA o numero, que
+    // ele nao sabe. Numero vem do operador, sempre.
+    campos.value.logradouro = r.logradouro || campos.value.logradouro
+    campos.value.bairro = r.bairro || campos.value.bairro
+    campos.value.cidade = r.cidade || campos.value.cidade
+    campos.value.uf = r.uf || campos.value.uf
+    cepEstado.value = 'achado'
+  } catch (e) {
+    // 🚨 "Nao deu para consultar" NAO e "CEP errado", e a tela diz qual dos
+    // dois foi: o contrario faria o operador apagar um CEP certo.
+    cepEstado.value = 'caiu'
+    erro.value = e?.message || 'Não deu para consultar o CEP agora.'
+  }
+}
 
 const clientesFiltrados = computed(() => {
   const termo = buscaCliente.value.trim().toUpperCase()
@@ -176,6 +364,21 @@ async function escolherCliente(c) {
   }
 }
 
+/* A cor do selo do tipo. ⚠️ Mapa FECHADO, com os 5 nomes que o Harmonit
+   devolve (medidos em 21/10): tipo que nao estiver aqui cai no neutro, em vez
+   de a tela inventar cor para um nome que ela nao conhece. */
+const CLASSE_DO_TIPO = {
+  'Contrato': 'agm__tipo--contrato',
+  'Solicitação de Cliente': 'agm__tipo--solicitacao',
+  'Ordem de Serviço': 'agm__tipo--ordem',
+  'Demanda Interna': 'agm__tipo--interna',
+  'Teste ou Treinamento': 'agm__tipo--teste',
+}
+
+function seloDoTipo(nome) {
+  return CLASSE_DO_TIPO[nome] || 'agm__tipo--sem-nome'
+}
+
 function placasDaOs(os) {
   if (!os.veiculos || !os.veiculos.length) return 'sem placa registrada'
   return os.veiculos.map((v) => v.placa).join(', ')
@@ -188,6 +391,11 @@ function alternarOs(os) {
   else osEscolhidas.value.push({
     numero_os: os.numero_os,
     placa: (os.veiculos && os.veiculos[0] && os.veiculos[0].placa) || null,
+    // Ponta 1: o nome do tipo vai GRAVADO no compromisso (retrato, como a
+    // placa), para o cabeçalho da mensagem. ⚠️ Nulo é o caso comum -- 173 das
+    // 547 OS têm tipo fora da lista do Harmonit -- e o cabeçalho omite o
+    // segmento nesse caso, em vez de imprimir número ou rótulo inventado.
+    tipo_nome: os.tipo_nome || null,
   })
 }
 
@@ -205,7 +413,8 @@ async function gravarAgendamento() {
       cliente_harmonit_id: clienteEscolhido.value.harmonit_id,
       cliente_nome: clienteEscolhido.value.nome,
       inicio: new Date(quando.value).toISOString(),
-      endereco: endereco.value.trim() || null,
+      endereco: linhaDoEndereco.value || endereco.value.trim() || null,
+      endereco_campos: { ...campos.value },
       ordens: osEscolhidas.value,
       orcamento_id: orcamentoEmitido.value ? orcamentoEmitido.value.id : null,
     })
@@ -242,54 +451,62 @@ function alternarMarcado(a) {
   else marcados.value.push(a.id)
 }
 
-function dataBr(valor) {
-  const d = new Date(valor)
-  return d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })
-}
-function horaBr(valor) {
-  return new Date(valor).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
-}
-
-/* 🚨 REGRA DE AGRUPAMENTO DECLARADA: mesma DATA e HORA => UMA mensagem só,
-   com as placas e as OS somadas. Sem isso o cliente receberia três mensagens
-   iguais variando a placa. */
-function agrupar(lista) {
-  const grupos = new Map()
-  for (const a of lista) {
-    const chave = `${dataBr(a.inicio)} ${horaBr(a.inicio)}`
-    if (!grupos.has(chave)) grupos.set(chave, [])
-    grupos.get(chave).push(a)
-  }
-  return [...grupos.values()]
-}
-
+/* 🚨 A MONTAGEM DAS DUAS MENSAGENS MORA EM `util/mensagem_agendamento.js`, e
+   não aqui: desde 21/10 a `ATD_7.1` também as monta ("Reenviar confirmação",
+   ponta 2 do plano), e a mesma mensagem escrita em dois lugares viraria duas
+   mensagens diferentes no primeiro ajuste de campo. A do cliente é a única que
+   sai para fora da casa. */
 function textos(grupo) {
-  const primeiro = grupo[0]
-  const placas = [...new Set(grupo.flatMap(
-    (a) => (a.ordens || []).map((o) => o.placa).filter(Boolean)))]
-  const ordens = [...new Set(grupo.flatMap((a) => (a.ordens || []).map((o) => o.numero_os)))]
-  const orcamentos = [...new Set(grupo.map((a) => a.orcamento_numero).filter(Boolean))]
-  const placasTexto = placas.length ? placas.join(', ') : 'sem placa registrada'
-
-  const cabecalho = `(SERVIÇO) | ${placasTexto} | ${primeiro.cliente_nome}`
-  const corpo = [
-    `DATA: ${dataBr(primeiro.inicio)}`,
-    `HORÁRIO: ${horaBr(primeiro.inicio)}`,
-    `ENDEREÇO: ${primeiro.endereco || '—'}`,
-    `TÉCNICO RESPONSÁVEL: ${primeiro.tecnico_nome || '—'}`,
-    `VEÍCULO(S) / PLACA(S): ${placasTexto}`,
-    `RESPONSÁVEL DO CLIENTE POR ACOMPANHAR O TÉCNICO: ${primeiro.responsavel_cliente || responsavel.value || '—'}`,
-  ]
-  const doCliente = [cabecalho, '', ...corpo].join('\n')
-  const doTecnico = [
-    cabecalho, '', ...corpo,
-    `OS: ${ordens.join(', ') || '—'}`,
-    orcamentos.length ? `ORÇAMENTO ${orcamentos.join(', ')}` : 'ORÇAMENTO —',
-  ].join('\n')
-  return { doCliente, doTecnico }
+  return textosDoGrupo(grupo, { responsavelPadrao: responsavel.value })
 }
 
 const mensagens = ref([])
+
+/* ---- F5: ENVIAR AO CLIENTE, E ABRIR NO TECNICO (🔵 21/10) ----------------
+   *"os botões de cada texto podem ser: 'Enviar ao cliente' e do outro 'Abrir
+   na conversa do tecnico', então envia o primeiro e o modal persiste, como
+   orçamento faz, dai operador decide clicar no outro ou não, não sendo
+   obrigatório"*.
+
+   🚨 O MODAL PERSISTE DEPOIS DE ENVIAR, como o orcamento: fechar sozinho
+   levaria embora o texto do tecnico, que e o segundo passo opcional.
+
+   ⚠️ A DECISAO 6 DELE CONTINUA VALENDO -- *"quem envia e o atendente"*: o
+   botao e um clique dele, e o que desapareceu foi o desvio pelo compositor.
+
+   🚨 ENVIAR E A CONVERSA ABERTA, e so ela: a rota `/responder` exige estar
+   na conversa, e a do tecnico e outra. Por isso o segundo botao ABRE em vez de
+   enviar -- prometer envio ali seria botao que nao cumpre. */
+async function enviarAoCliente(m) {
+  m.enviando = true
+  m.erroEnvio = ''
+  try {
+    await api.post(`/api/conversas/${props.conversaId}/responder`,
+                   { texto: m.doCliente })
+    m.enviado = true
+  } catch (e) {
+    m.erroEnvio = e?.message || 'Não deu para enviar.'
+  } finally {
+    m.enviando = false
+  }
+}
+
+function abrirNoTecnico(m) {
+  if (!m.conversaDoTecnico) return
+  /* 🚨 O caminho e o RASCUNHO POR CONVERSA (Bloco 7, 15/10): a Caixa semeia
+     o compositor com `movizap.rascunho.<id>` ao abrir a conversa. ⚠️ Nao
+     sobrescreve texto nao enviado de ninguem sem perguntar. */
+  const chave = `movizap.rascunho.${m.conversaDoTecnico}`
+  try {
+    const havia = localStorage.getItem(chave)
+    if (havia && havia.trim() && havia !== m.doTecnico
+        && !window.confirm('A conversa do técnico já tem texto não enviado no '
+                           + 'compositor. Substituir?')) return
+    localStorage.setItem(chave, m.doTecnico)
+  } catch { /* sem storage: abre de todo jeito, o texto esta na tela */ }
+  emit('fechar')
+  router.push(`/atendimento/${m.conversaDoTecnico}`)
+}
 
 async function confirmar() {
   if (!responsavel.value.trim()) {
@@ -304,7 +521,17 @@ async function confirmar() {
       confirmados.push(await api.post(`/api/agendamentos/${id}/confirmar`,
                                       { responsavel_cliente: responsavel.value.trim() }))
     }
-    mensagens.value = agrupar(confirmados).map(textos)
+    /* ⚠️ Cada mensagem ganha estado PROPRIO de envio: sao varias quando ha
+       horarios diferentes, e um estado compartilhado marcaria todas como
+       enviadas no primeiro clique. E `conversaDoTecnico` sai do compromisso --
+       a conversa de ORIGEM e a do tecnico (decisao dele de 07/10). */
+    mensagens.value = agrupar(confirmados).map((grupo) => ({
+      ...textos(grupo),
+      conversaDoTecnico: grupo[0]?.conversa_id || null,
+      enviando: false,
+      enviado: false,
+      erroEnvio: '',
+    }))
   } catch (e) {
     erro.value = e?.message || 'Não deu para confirmar.'
   } finally {
@@ -331,12 +558,12 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="agm__fundo" @click.self="emit('fechar')">
+  <div class="agm__fundo" @click.self="tentarFechar">
     <section class="agm" role="dialog" aria-label="Agendar serviço">
       <header class="agm__topo">
         <h2 class="agm__titulo">Agendar serviço</h2>
         <button class="botao botao--fantasma botao--icone" type="button"
-                aria-label="Fechar" @click="emit('fechar')">
+                aria-label="Fechar" @click="tentarFechar">
           <i class="bi bi-x-lg" aria-hidden="true"></i>
         </button>
       </header>
@@ -500,8 +727,51 @@ onMounted(() => {
             </ol>
 
             <div v-if="passo === 1">
+              <!-- 🔵 Sempre aberto: e parte da tela, nao um popup. -->
+              <div class="agm__quando">
+                <div class="agm__cal">
+                  <header class="agm__cal-topo">
+                    <button class="botao botao--fantasma" type="button"
+                            aria-label="Mês anterior" @click="andarMes(-1)">
+                      <i class="bi bi-chevron-left" aria-hidden="true"></i>
+                    </button>
+                    <strong class="agm__cal-mes">{{ rotuloDoMes }}</strong>
+                    <button class="botao botao--fantasma" type="button"
+                            aria-label="Mês seguinte" @click="andarMes(1)">
+                      <i class="bi bi-chevron-right" aria-hidden="true"></i>
+                    </button>
+                  </header>
+                  <div class="agm__cal-grade">
+                    <span v-for="(s, i) in ['D', 'S', 'T', 'Q', 'Q', 'S', 'S']"
+                          :key="`s${i}`" class="agm__cal-semana">{{ s }}</span>
+                    <template v-for="(d, i) in diasDoMes" :key="d ? d.iso : `v${i}`">
+                      <span v-if="!d" class="agm__cal-vago"></span>
+                      <button v-else type="button" class="agm__cal-dia"
+                              :class="{ 'agm__cal-dia--ativo': d.iso === diaEscolhido,
+                                        'agm__cal-dia--hoje': d.hoje,
+                                        'agm__cal-dia--passado': d.passado }"
+                              @click="escolherDia(d)">{{ d.dia }}</button>
+                    </template>
+                  </div>
+                  <!-- ⚠️ Dia passado NAO e proibido: remarcar servico que ja
+                       aconteceu e caso real. A tela avisa, nao barra. -->
+                  <p v-if="diaEscolhido && diaEscolhido < hojeIso"
+                     class="aviso aviso--atencao agm__cal-nota">
+                    Este dia já passou. Dá para agendar, mas confira.
+                  </p>
+                </div>
+                <div class="agm__horas">
+                  <span class="agm__horas-rotulo">Horário</span>
+                  <div class="agm__horas-grade">
+                    <button v-for="h in horarios" :key="h" type="button"
+                            class="agm__hora"
+                            :class="{ 'agm__hora--ativo': h === horaEscolhida }"
+                            @click="escolherHora(h)">{{ h }}</button>
+                  </div>
+                </div>
+              </div>
               <label class="agm__campo">
-                <span>Quando</span>
+                <span>Ou digite dia e hora (aceita fora do expediente)</span>
                 <input v-model="quando" type="datetime-local" class="campo__entrada" />
               </label>
               <div class="agm__acoes">
@@ -545,7 +815,19 @@ onMounted(() => {
                                       'agm__item--preso': jaAgendadas.includes(os.numero_os) }"
                             :disabled="jaAgendadas.includes(os.numero_os)"
                             @click="alternarOs(os)">
-                      <span>OS {{ os.numero_os }} — {{ placasDaOs(os) }}</span>
+                      <span class="agm__item-linha">
+                        <!-- 🔵 21/10: *"o tipo da OS pode ter mais destaque"*. O
+                             tipo e o que o CLIENTE le no cabecalho da mensagem,
+                             entao ganha o mesmo peso do numero da OS -- selo
+                             com cor por tipo, e nao linha miuda cinza.
+                             ⚠️ Sem nome, o selo fica neutro e DIZ que nao ha
+                             nome, em vez de desaparecer. -->
+                        <span class="agm__tipo" :class="seloDoTipo(os.tipo_nome)">
+                          {{ os.tipo_nome || 'tipo sem nome no Harmonit' }}
+                        </span>
+                        <b>OS {{ os.numero_os }}</b>
+                        <span class="agm__fraco">{{ placasDaOs(os) }}</span>
+                      </span>
                       <small>
                         {{ os.sem_situacao ? 'sem situação' : os.status_str }}
                         <template v-if="jaAgendadas.includes(os.numero_os)">
@@ -563,7 +845,8 @@ onMounted(() => {
               <div class="agm__acoes">
                 <button class="botao botao--contorno" type="button" @click="passo = 1">Voltar</button>
                 <button class="botao botao--primario" type="button"
-                        :disabled="!osEscolhidas.length" @click="passo = 3">Continuar</button>
+                        :disabled="!osEscolhidas.length"
+                        @click="passo = 3; carregarEnderecoDaOs()">Continuar</button>
               </div>
             </div>
 
@@ -574,11 +857,83 @@ onMounted(() => {
                 {{ quando ? `${dataBr(quando)} às ${horaBr(quando)}` : '' }} ·
                 técnico {{ contatoNome || '—' }}
               </p>
-              <label class="agm__campo">
-                <span>Endereço (sugerido com o último usado para este cliente)</span>
-                <input v-model="endereco" class="campo__entrada"
-                       placeholder="Rua, número, bairro, cidade" />
-              </label>
+              <!-- 🔵 Campos separados, com os nomes do Harmonit. -->
+              <div class="agm__endereco">
+                <label class="agm__campo agm__campo--cep">
+                  <span>CEP</span>
+                  <span class="agm__cep-linha">
+                    <input v-model="campos.cep" class="campo__entrada"
+                           :maxlength="LIMITES.cep" inputmode="numeric"
+                           placeholder="19013180" @keyup.enter="buscarCep" />
+                    <button class="botao botao--contorno" type="button"
+                            :disabled="cepEstado === 'buscando'" @click="buscarCep">
+                      {{ cepEstado === 'buscando' ? 'Buscando…' : 'Buscar' }}
+                    </button>
+                  </span>
+                </label>
+                <label class="agm__campo agm__campo--rua">
+                  <span>Rua <small>{{ campos.logradouro.length }}/{{ LIMITES.logradouro }}</small></span>
+                  <input v-model="campos.logradouro" class="campo__entrada"
+                         :maxlength="LIMITES.logradouro" />
+                </label>
+                <label class="agm__campo agm__campo--num">
+                  <span>Número</span>
+                  <input v-model="campos.numero" class="campo__entrada"
+                         :maxlength="LIMITES.numero" />
+                </label>
+                <label class="agm__campo">
+                  <span>Bairro <small>{{ campos.bairro.length }}/{{ LIMITES.bairro }}</small></span>
+                  <input v-model="campos.bairro" class="campo__entrada"
+                         :maxlength="LIMITES.bairro" />
+                </label>
+                <label class="agm__campo">
+                  <span>Cidade <small>{{ campos.cidade.length }}/{{ LIMITES.cidade }}</small></span>
+                  <input v-model="campos.cidade" class="campo__entrada"
+                         :maxlength="LIMITES.cidade" />
+                </label>
+                <label class="agm__campo agm__campo--uf">
+                  <span>UF</span>
+                  <input v-model="campos.uf" class="campo__entrada"
+                         :maxlength="LIMITES.uf" />
+                </label>
+                <label class="agm__campo">
+                  <span>Complemento <small>{{ campos.complemento.length }}/{{ LIMITES.complemento }}</small></span>
+                  <input v-model="campos.complemento" class="campo__entrada"
+                         :maxlength="LIMITES.complemento" />
+                </label>
+              </div>
+
+              <!-- 🚨 Os tres estados da consulta de CEP, separados: "nao
+                   existe" e "nao deu para perguntar" nao sao a mesma coisa. -->
+              <p v-if="cepEstado === 'curto'" class="aviso aviso--atencao">
+                O CEP tem 8 dígitos.
+              </p>
+              <p v-else-if="cepEstado === 'nao-existe'" class="aviso aviso--atencao">
+                Este CEP não existe na base dos Correios. Confira, ou preencha os
+                campos à mão.
+              </p>
+              <p v-else-if="cepEstado === 'caiu'" class="aviso aviso--erro">
+                Não deu para consultar o CEP agora — isto <b>não</b> quer dizer que
+                ele está errado. Preencha à mão, ou tente de novo.
+              </p>
+
+              <p v-if="enderecoDaOs && enderecoDaOs.tem_endereco === false"
+                 class="aviso aviso--info">
+                Esta OS <b>não tem endereço</b> no Harmonit. O que você preencher
+                aqui vai gravado nela.
+              </p>
+              <p v-else-if="enderecoDaOs && enderecoDaOs.erro" class="aviso aviso--atencao">
+                Não deu para ler o endereço desta OS ({{ enderecoDaOs.erro }}). Dá
+                para agendar: o endereço daqui é que vale.
+              </p>
+
+              <p v-if="!temRua" class="aviso aviso--atencao">
+                Sem a rua, o endereço <b>não</b> vai para a OS do Harmonit — o
+                compromisso vale aqui, mas lá fica como está.
+              </p>
+              <p v-if="linhaDoEndereco" class="agm__dica">
+                O cliente vai ler: <b>{{ linhaDoEndereco }}</b>
+              </p>
               <p v-if="orcamentoEmitido" class="agm__dica">
                 Orçamento nº {{ orcamentoEmitido.numero }} vai junto.
               </p>
@@ -640,13 +995,38 @@ onMounted(() => {
             </p>
             <div v-for="(m, i) in mensagens" :key="i" class="agm__mensagem">
               <h3>Para o cliente</h3>
-              <pre>{{ m.doCliente }}</pre>
-              <button class="botao botao--contorno" type="button"
-                      @click="usar(m.doCliente)">Escrever no compositor</button>
+              <!-- 🔵 21/10: *"ao invés de editar na caixa de mensagem, pode
+                   editar ali no modal mesmo"*. -->
+              <textarea v-model="m.doCliente" class="campo__entrada agm__texto"
+                        rows="8"></textarea>
+              <div class="agm__acoes">
+                <button class="botao botao--primario" type="button"
+                        :disabled="m.enviando || m.enviado"
+                        @click="enviarAoCliente(m)">
+                  {{ m.enviado ? 'Enviado' : (m.enviando ? 'Enviando…' : 'Enviar ao cliente') }}
+                </button>
+                <button class="botao botao--contorno" type="button"
+                        @click="usar(m.doCliente)">Escrever no compositor</button>
+              </div>
+              <p v-if="m.enviado" class="agm__dica">
+                Foi para esta conversa. 🔵 O do técnico é opcional: clique ao
+                lado só se quiser.
+              </p>
+              <p v-if="m.erroEnvio" class="aviso aviso--erro">{{ m.erroEnvio }}</p>
+
               <h3>Para o técnico</h3>
-              <pre>{{ m.doTecnico }}</pre>
-              <button class="botao botao--contorno" type="button"
-                      @click="usar(m.doTecnico)">Escrever no compositor</button>
+              <textarea v-model="m.doTecnico" class="campo__entrada agm__texto"
+                        rows="9"></textarea>
+              <div class="agm__acoes">
+                <!-- 🚨 ABRE, NAO ENVIA: a conversa do tecnico e outra, e a rota
+                     de envio exige estar nela. O texto vai no compositor. -->
+                <button class="botao botao--contorno" type="button"
+                        :disabled="!m.conversaDoTecnico"
+                        @click="abrirNoTecnico(m)">Abrir na conversa do técnico</button>
+                <span v-if="!m.conversaDoTecnico" class="agm__fraco">
+                  este compromisso não guarda a conversa de origem
+                </span>
+              </div>
             </div>
           </template>
         </div>
@@ -679,6 +1059,72 @@ onMounted(() => {
   color: var(--texto);
 }
 .agm__topo { display: flex; align-items: center; justify-content: space-between; }
+
+/* O calendario sempre aberto (F3) */
+.agm__quando { display: flex; gap: var(--e-3); flex-wrap: wrap; align-items: flex-start; }
+.agm__cal { display: flex; flex-direction: column; gap: var(--e-2); }
+.agm__cal-topo { display: flex; align-items: center; justify-content: space-between; gap: var(--e-2); }
+.agm__cal-mes { text-transform: capitalize; }
+.agm__cal-grade { display: grid; grid-template-columns: repeat(7, 34px); gap: 3px; }
+.agm__cal-semana { text-align: center; font-size: var(--txt-xs); color: var(--texto-fraco); }
+.agm__cal-vago { display: block; }
+.agm__cal-dia {
+  height: 30px;
+  border: var(--borda-fina) solid transparent;
+  border-radius: var(--r-sm);
+  background: var(--superficie-2);
+  color: inherit;
+  cursor: pointer;
+}
+.agm__cal-dia--hoje { border-color: var(--acento); }
+.agm__cal-dia--ativo { background: var(--acento); color: #fff; }
+.agm__cal-dia--passado { color: var(--texto-fraco); }
+.agm__cal-nota { margin: 0; max-width: 30ch; }
+.agm__horas { display: flex; flex-direction: column; gap: var(--e-1); }
+.agm__horas-rotulo { font-size: var(--txt-xs); text-transform: uppercase; color: var(--texto-fraco); }
+.agm__horas-grade {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 3px;
+  max-height: 232px;
+  overflow-y: auto;
+}
+.agm__hora {
+  padding: 4px 8px;
+  border: var(--borda-fina) solid var(--borda);
+  border-radius: var(--r-sm);
+  background: var(--superficie-2);
+  color: inherit;
+  font-size: var(--txt-sm);
+  cursor: pointer;
+}
+.agm__hora--ativo { background: var(--acento); color: #fff; border-color: var(--acento); }
+
+/* O selo do tipo da OS (F2) */
+.agm__item-linha { display: flex; align-items: center; gap: var(--e-2); flex-wrap: wrap; }
+.agm__fraco { color: var(--texto-fraco); }
+.agm__tipo {
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: var(--txt-xs);
+  font-weight: var(--peso-forte);
+  text-transform: uppercase;
+  letter-spacing: .02em;
+  color: #fff;
+  white-space: nowrap;
+}
+.agm__tipo--contrato { background: #2563eb; }
+.agm__tipo--solicitacao { background: #7c3aed; }
+.agm__tipo--ordem { background: #0f766e; }
+.agm__tipo--interna { background: #b45309; }
+.agm__tipo--teste { background: #be123c; }
+/* ⚠️ Sem nome: cinza e com borda, para nao parecer um tipo a mais. */
+.agm__tipo--sem-nome {
+  background: transparent;
+  border: var(--borda-fina) solid var(--borda);
+  color: var(--texto-fraco);
+  text-transform: none;
+}
 .agm__titulo { margin: 0; font-size: var(--txt-lg); }
 .agm__abas { display: flex; gap: var(--e-2); border-bottom: var(--borda-fina) solid var(--borda); }
 .agm__aba {
@@ -722,6 +1168,11 @@ onMounted(() => {
 .agm__item--preso { opacity: .55; cursor: not-allowed; }
 .agm__item small { color: var(--texto-fraco); }
 .agm__vazio { padding: var(--e-3); color: var(--texto-fraco); font-size: var(--txt-sm); }
+.agm__endereco { display: grid; grid-template-columns: repeat(2, minmax(160px, 1fr)); gap: var(--e-2); }
+.agm__endereco .agm__campo span small { color: var(--texto-fraco); font-weight: 400; }
+.agm__campo--rua { grid-column: span 2; }
+.agm__cep-linha { display: flex; gap: var(--e-1); }
+.agm__texto { width: 100%; font-family: inherit; font-size: var(--txt-sm); }
 .agm__mensagem { display: flex; flex-direction: column; gap: var(--e-2); }
 .agm__mensagem h3 { margin: 0; font-size: var(--txt-sm); }
 .agm__mensagem pre {

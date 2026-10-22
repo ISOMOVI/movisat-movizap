@@ -1490,6 +1490,13 @@ function quando(iso) {
                         v-for="(q, j) in p.trechos" :key="j"><span v-if="q.casa"
                         class="achado">{{ q.texto }}</span><template
                         v-else>{{ q.texto }}</template></template></mark>
+                      <!-- 21/10: o caminho da conversa vira um clique. É o que
+                           faz o aviso de menção em nota servir para algo. -->
+                      <router-link v-else-if="p.link" :to="p.link"
+                                   class="balao__ir">
+                        <i class="bi bi-box-arrow-up-right" aria-hidden="true"></i>
+                        abrir a conversa
+                      </router-link>
                       <template v-else>
                         <template v-for="(q, j) in p.trechos" :key="j">
                           <span v-if="q.casa" class="achado">{{ q.texto }}</span>

@@ -2011,3 +2011,109 @@ lados).
 **O interruptor** é `tecnico_vinculo_ligado` no `config` e **nasceu ligado por
 decisão dele** — exceção consciente à régua da casa, porque a varredura só
 grava o que a trava do agendamento já calcula ao vivo.
+
+## Migração 072 — `agendamento_os.tipo_nome`, o tipo da OS no compromisso
+
+🔵 Ponta 1 do plano de Agendamentos (§7.4): o cabeçalho da mensagem imprimia
+a palavra `(SERVIÇO)` literal, onde o plano pede o **tipo da OS**. 🚨 É a
+única das quatro pontas que **sai para o cliente**.
+
+| Coluna | Tipo | Nulo? |
+|---|---|---|
+| `agendamento_os.tipo_nome` | `text` | **sim**, e é o caso comum |
+
+🚨 **RETRATO, COMO A PLACA DO LADO.** O nome do tipo é gravado no momento do
+agendamento, não consultado quando a mensagem é montada. Três razões, todas
+medidas: a mensagem sai de uma tela que o operador está olhando; a
+`agendamento_os` já guarda a placa pelo mesmo motivo desde a 069; e a OS pode
+ser reclassificada depois — a mensagem que saiu falava do tipo de então.
+
+🚨 **NULO É RESPOSTA, NÃO FALHA.** A lista de tipos do Harmonit
+(`/TipoOrdemServico/ObterListaTipoOrdemServico`) tem **5 tipos**, que cobrem
+**374 das 547** OS não excluídas. As outras **173** estão em **nove** ids fora
+da lista (57, 76, 73, 72, 55, 77, 75, 576, 814) — tipos que o Harmonit removeu
+ou renomeou; o FPSL já registrava o caso do 55 desde 14/08
+(`os_router._resolver_cabecalho_por_nome`: *"id fixo em código apodrece em
+silêncio"*). Medido em 21/10, antes de escrever.
+
+⚠️ Para essas, o cabeçalho **omite o segmento inteiro** — parênteses e barra
+incluídos — em vez de imprimir número ou rótulo inventado. `(tipo 57)` não diz
+nada ao cliente.
+
+**A fonte do nome é do lado do FPSL**, na tabela `tipos_os` (`tipo_id`, `nome`,
+`codigo`, `atualizado_em`), preenchida pela rotina **`sync_tipos_os`**, 1×/dia,
+e devolvida pela ponte em `tipo_nome`. ⚠️ Ela é **dicionário, não autoridade**
+sobre que tipos existem: quem pergunta por um tipo fora dela recebe ausência,
+e nunca apaga o que já sabia quando a rota do Harmonit responde vazio.
+
+## Migração 073 — o endereço do compromisso em campos separados
+
+🔵 Pedido dele, 21/10, depois de exercitar o fluxo no navegador: *"a tela 3
+precisa ter o campo com os dados de endereço separados, para enviar sem erros
+no harmonit... sem os campos, podem inserir de qqer jeito"*.
+
+| Coluna | Tipo | Observação |
+|---|---|---|
+| `agendamento.cep` | `varchar(8)` | 8 dígitos, **sem máscara** |
+| `agendamento.logradouro` | `varchar(80)` | a rua — no Harmonit chama-se `endereco` |
+| `agendamento.numero` | `varchar(10)` | |
+| `agendamento.bairro` | `varchar(60)` | |
+| `agendamento.cidade` | `varchar(50)` | no Harmonit vem de `cidade`; no ViaCEP, de `localidade` |
+| `agendamento.uf` | `varchar(2)` | |
+| `agendamento.complemento` | `varchar(40)` | |
+| `agendamento.endereco_os_em` | `timestamptz` | quando o endereço foi gravado na OS |
+| `agendamento.endereco_os_erro` | `text` | por que não foi |
+
+🚨 **OS CAMPOS SÃO OS DO HARMONIT, UM A UM.** A OS guarda o endereço nesses
+sete campos (medido na OS 16991 em 21/10), e a rota de escrita espera esses
+mesmos nomes. Inventar um formato aqui obrigaria uma tradução no caminho, e
+tradução é onde o endereço se perde. ⚠️ A **única** diferença de nome é
+`logradouro`: `agendamento.endereco` já existia desde a 069 e é a **linha
+montada** que sai na mensagem do cliente.
+
+🚨 **`endereco` CONTINUA SENDO A FONTE DA MENSAGEM**, e passou a ser *montada*
+dos campos quando eles existem. Trocar a mensagem para ler os sete campos faria
+os compromissos criados antes desta migração saírem sem endereço — e eles são o
+único histórico que existe.
+
+⚠️ **Nada é obrigatório:** em 30 OS amostradas no Harmonit em 21/10, **7 têm os
+oito campos em branco**. Exigir endereço estruturado impediria de agendar
+justamente onde o cadastro está pior.
+
+🚨 **Os tamanhos são escolha nossa, e o teto do Harmonit não é documentado.** O
+que se mediu nas 30 OS é o **piso** — logradouro 41, bairro 54, cidade 21,
+número 4, complemento 9 —, e piso prova que cabe, não prova o limite.
+
+### A escrita do endereço na OS, e por que ela relê 39 campos
+
+🚨 **NÃO EXISTE "ATUALIZAR SÓ O ENDEREÇO" NO HARMONIT.** A única rota é
+`POST /OrdemServico/SalvarOrdemServico`, que a doc deles chama de *"criar/
+atualizar OS completa"*: manda-se a OS inteira, e o que não for mandado se
+perde. Por isso a rota `POST /api/os/endereco` do FPSL **lê a OS, remonta campo
+a campo, grava, relê e compara** — e devolve `fora_do_endereco` quando tocou
+algo que não devia.
+
+🚨 **OS NOMES DE LEITURA E DE ESCRITA NÃO BATEM**, e é a armadilha central:
+
+| leitura | escrita |
+|---|---|
+| `tipo` | `tipoId` |
+| `localServico` | `localServicoId` |
+| `prioridade` | `prioridadeId` |
+| `problema` | `problemaId` |
+| `produtoId` | `produtoServicoId` |
+| `descricao` | `descricaoDetalhada` |
+| `dataPrevisao` (`dd/mm/aaaa HH:MM:SS`) | `dataPrevisaoEntrega` (ISO) |
+| `parceiro` | `clienteId` |
+
+⚠️ **`parceiro` É O `clienteId`** (998063 na 16991, igual ao `cliente_id` da
+`os_historico`) — a nossa própria nota dizia que a OS não traz o cliente.
+Medido em **uma** OS, então a `os_historico` segue como fonte e o `parceiro` é
+o reforço.
+
+🚨 **O ENSAIO A SECO E A ESCRITA NO-OP SALVARAM O REMAPEAMENTO.** Com
+`conferir: true` a rota monta tudo e não grava; depois, gravar o **mesmo**
+endereço de volta provou o mapa. E pegou um erro meu: `solucaoTecnica` saía
+como `""` onde a OS tinha `null`, por causa de um `or ""`. A comparação acusou,
+`ok` voltou `False`, e a causa foi corrigida. Sem o no-op, isso teria ido para
+produção invisível.

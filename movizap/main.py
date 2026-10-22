@@ -45,6 +45,7 @@ from . import ligacoes_consulta
 from . import relatorio_csv
 from . import mensagens_rapidas
 from . import agendamento
+from . import cep as cep_mod
 from . import fpsl_ponte
 from . import orcamento as orcamento_mod
 from . import tecnico_vinculo
@@ -1003,6 +1004,27 @@ def gravar_numeracao(entrada: NumeracaoEntrada,
 class OrdemDoAgendamento(BaseModel):
     numero_os: int
     placa: str | None = Field(default=None, max_length=20)
+    # 🆕 Ponta 1 do plano (migração 072): o nome do tipo da OS, RETRATO do
+    # momento do agendamento, para o cabeçalho da mensagem que sai para o
+    # cliente. ⚠️ Nulo é o caso comum (173 das 547 OS têm tipo fora da lista do
+    # Harmonit) e a tela omite o segmento -- não é campo obrigatório.
+    tipo_nome: str | None = Field(default=None, max_length=120)
+
+
+class EnderecoDoAgendamento(BaseModel):
+    """Os sete campos, com os tamanhos da migração 073.
+
+    ⚠️ NENHUM OBRIGATÓRIO: 7 de 30 OS amostradas no Harmonit não têm
+    endereço nenhum, e exigir campo cheio impediria de agendar exatamente onde
+    o cadastro está pior.
+    """
+    cep: str | None = Field(default=None, max_length=8)
+    logradouro: str | None = Field(default=None, max_length=80)
+    numero: str | None = Field(default=None, max_length=10)
+    bairro: str | None = Field(default=None, max_length=60)
+    cidade: str | None = Field(default=None, max_length=50)
+    uf: str | None = Field(default=None, max_length=2)
+    complemento: str | None = Field(default=None, max_length=40)
 
 
 class AgendamentoEntrada(BaseModel):
@@ -1011,7 +1033,11 @@ class AgendamentoEntrada(BaseModel):
     cliente_nome: str = Field(min_length=1, max_length=200)
     inicio: datetime
     fim: datetime | None = None
+    # ⚠️ O texto livre FICA, e não é redundância: os compromissos criados
+    # antes da 073 só têm ele, e a mensagem continua lendo esta linha. Quando
+    # os campos vêm preenchidos, a linha é montada deles e este texto perde.
     endereco: str | None = Field(default=None, max_length=400)
+    endereco_campos: EnderecoDoAgendamento | None = None
     ordens: list[OrdemDoAgendamento] = Field(min_length=1, max_length=30)
     orcamento_id: int | None = None
 
@@ -1062,6 +1088,8 @@ def criar_agendamento(entrada: AgendamentoEntrada,
             inicio=entrada.inicio, fim=entrada.fim, endereco=entrada.endereco,
             ordens=[o.model_dump() for o in entrada.ordens],
             criado_por=usuario.get("id"), orcamento_id=entrada.orcamento_id,
+            campos_endereco=(entrada.endereco_campos.model_dump()
+                             if entrada.endereco_campos else None),
         )
     except agendamento.OsJaAgendada as e:
         # 409 e não 400: não é pedido malformado, é conflito com o que existe.
@@ -1079,7 +1107,57 @@ def criar_agendamento(entrada: AgendamentoEntrada,
         log.exception("agendamento %s criado e a escrita no Harmonit falhou", novo)
         resposta["harmonit"] = {"ligado": True, "quantas_foram": 0,
                                 "erro": f"{type(e).__name__}: {e}"}
+
+    # 🔵 21/10: o endereço também vai para a OS -- *"dai vai enviar para o
+    # endereço da OS e salvar ela lá no harmonit corretamente"*. 🚨 Depois do
+    # compromisso, e nunca derrubando o agendamento: do outro lado isto é uma
+    # escrita de OS inteira, que relê e compara os 39 campos antes de dizer ok.
+    try:
+        resposta["endereco_harmonit"] = agendamento.levar_endereco_ao_harmonit(novo)
+    except Exception as e:  # noqa: BLE001
+        log.exception("agendamento %s criado e o endereco nao foi para a OS", novo)
+        resposta["endereco_harmonit"] = {"ligado": True, "quantas_foram": 0,
+                                         "erro": f"{type(e).__name__}: {e}"}
     return resposta
+
+
+@app.get("/api/agendamento/os/{numero_os}/endereco")
+def endereco_da_os(numero_os: int,
+                   usuario: dict = Depends(auth.requer_tela("ATD_1.2"))):
+    """O endereço estruturado da OS, para pré-preencher o modal.
+
+    🔵 21/10: endereço vindo da fonte é melhor que endereço digitado.
+    ⚠️ `tem_endereco: false` é resposta, não falha: 7 de 30 OS amostradas não
+    têm nenhum, e é aí que a tela oferece o caminho do CEP.
+    """
+    try:
+        return fpsl_ponte.endereco_da_os(numero_os)
+    except fpsl_ponte.FpslIndisponivel as e:
+        raise HTTPException(status_code=503, detail=str(e))
+
+
+@app.get("/api/cep/{cep}")
+def consultar_cep(cep: str, usuario: dict = Depends(auth.requer_tela("ATD_1.2"))):
+    """O endereço de um CEP, para preencher os campos do agendamento.
+
+    🔵 Pedido dele, 21/10: *"não poderíamos ter a consulta do CEP dentro do
+    modal nesse momento? daí preenche os campos e ela ainda edita se precisar?"*
+
+    🚨 TRÊS RESPOSTAS DIFERENTES, e a tela precisa das três:
+      · `{"achado": true, ...}` -- preenche;
+      · `{"achado": false}` -- o serviço disse que este CEP **não existe**;
+      · **503** -- não deu para perguntar. ⚠️ Isto NÃO é CEP errado, e
+        confundir os dois faria o operador apagar um CEP certo.
+    """
+    try:
+        achado = cep_mod.consultar(cep)
+    except cep_mod.CepInvalido as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except cep_mod.CepIndisponivel as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    if not achado:
+        return {"achado": False, "cep": cep_mod.so_digitos(cep)}
+    return {"achado": True, **achado}
 
 
 class ConfirmacaoEntrada(BaseModel):
@@ -2391,6 +2469,22 @@ class RespostaEntrada(BaseModel):
     mencionados: list[str] = Field(default_factory=list)
 
 
+class NotaEntrada(BaseModel):
+    """🚨 MODELO PRÓPRIO, e não o `RespostaEntrada` com mais um campo.
+
+    A nota chama GENTE NOSSA por id de atendente; a resposta ao cliente chama
+    participante de grupo por JID de WhatsApp. São universos diferentes, e um
+    modelo só faria a rota aceitar campo que ignora -- o "parâmetro aceito e
+    ignorado" que este projeto cataloga como o pior defeito.
+    """
+
+    texto: str = Field(min_length=1, max_length=4000)
+    # Os IDS DE ATENDENTE escolhidos na lista do `@` da nota. O aviso sai pelo
+    # CHAT INTERNO (`conversas._avisar_chamados`), onde a máquina de menção
+    # já existe: contador separado e selo. Ver `quem_esta_na_conversa`.
+    chamar: list[int] = Field(default_factory=list)
+
+
 @app.get("/api/conversas/{conversa_id}/quem-chamar")
 def participantes_para_chamar(conversa_id: int,
                               usuario: dict = Depends(auth.requer_tela("ATD_1.2"))):
@@ -2489,12 +2583,36 @@ async def enviar_arquivo(conversa_id: int,
     return resultado
 
 
-@app.post("/api/conversas/{conversa_id}/nota")
-def anotar_conversa(conversa_id: int, dados: RespostaEntrada,
-                    usuario: dict = Depends(auth.requer_tela("ATD_1.2"))):
-    """Nota interna — fica na conversa e nunca sai para o cliente."""
+@app.get("/api/conversas/{conversa_id}/quem-chamar-interno")
+def quem_chamar_interno(conversa_id: int,
+                        usuario: dict = Depends(auth.requer_tela("ATD_1.2"))):
+    """Quem, do nosso lado, está nesta conversa — a lista do `@` da NOTA.
+
+    🚨 IRMÃ DA `/quem-chamar`, E DE PROPÓSITO SEPARADA: aquela devolve
+    participante de GRUPO do WhatsApp (JID, vindo do Evolution ao vivo); esta
+    devolve ATENDENTE (id), que é quem uma nota interna pode chamar. Misturar
+    as duas ofereceria cliente para chamar em nota e colega para chamar em
+    grupo, e nenhum dos dois funciona.
+
+    ⚠️ SEM MIM NA LISTA: chamar a si mesmo não avisa nada.
+    """
     eu = _exige_estar_na_conversa(conversa_id, usuario)
-    resultado = conversas.anotar(conversa_id, dados.texto, eu)
+    return {"pessoas": [p for p in conversas.quem_esta_na_conversa(conversa_id)
+                        if p["id"] != eu]}
+
+
+@app.post("/api/conversas/{conversa_id}/nota")
+def anotar_conversa(conversa_id: int, dados: NotaEntrada,
+                    usuario: dict = Depends(auth.requer_tela("ATD_1.2"))):
+    """Nota interna — fica na conversa e nunca sai para o cliente.
+
+    🔵 21/10: a nota pode chamar gente nossa por `@`. A resposta leva
+    `chamados` e `avisos_falhos` — a tela diz quem foi avisado e quem não, em
+    vez de supor que o aviso saiu.
+    """
+    eu = _exige_estar_na_conversa(conversa_id, usuario)
+    resultado = conversas.anotar(conversa_id, dados.texto, eu,
+                                 chamar=dados.chamar)
     if not resultado["ok"]:
         raise HTTPException(status_code=409, detail=resultado["motivo"])
     return resultado
@@ -3826,9 +3944,14 @@ def listar_tecnicos_harmonit(busca: str = "",
 
 
 @app.get("/api/tecnicos-harmonit/pendencias")
-def pendencias_do_vinculo(usuario: dict = Depends(auth.requer_tela("CFG_7.1"))):
+def pendencias_do_vinculo(usuario: dict = Depends(auth.requer_tela("CFG_14.1"))):
     """Os três buracos de cadastro, separados — juntá-los num número só
-    esconderia o que fazer com cada um."""
+    esconderia o que fazer com cada um.
+
+    ⚠️ A PERMISSÃO MUDOU DE `CFG_7.1` PARA `CFG_14.1` em 21/10, quando a
+    ponta 4 deu tela a esta rota: a permissão de uma rota é a da tela que a
+    consome, e `CFG_7.1` é a Geral, que pode estar concedida a quem não tem
+    esta aba. O owner enxerga as duas, então ninguém perde acesso."""
     try:
         return tecnico_vinculo.pendencias()
     except fpsl_ponte.FpslIndisponivel as e:

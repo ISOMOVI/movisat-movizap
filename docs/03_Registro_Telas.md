@@ -112,6 +112,7 @@ aparecem todos.
 | `LIG_1.1` | Ligações | `/ligacoes` | `atendimento` | 1 |
 | `ATD_7.1` | Agendamentos | `/agendamentos` | `atendimento` | 1 |
 | `CFG_13.1` | Orçamento (numeração) | `/config/orcamento` | `owner` | 1 |
+| `CFG_14.1` | Vínculo dos técnicos | `/config/vinculo-tecnicos` | `owner` | 1 |
 | `REL_1.1` | Relatórios | `/relatorios` | `owner` | 3 |
 
 🚨 **AS SEIS TELAS `CFG_*` SÃO ABAS DA `CFG_0.1` DESDE 27/08** (decisão do
@@ -173,6 +174,7 @@ O campo **`icone`** deste registro é o que o menu desenha, e ele é **a fonte
 | `LIG_1.1` Ligações | `bi-telephone` | menu |
 | `ATD_7.1` Agendamentos | `bi-calendar-check` | menu |
 | `CFG_13.1` Orçamento | `bi-receipt` | aba |
+| `CFG_14.1` Vínculo dos técnicos | `bi-person-vcard` | aba |
 | `ATD_3.1` Informativos | `bi-megaphone` | menu |
 | `CAD_1.1` Clientes | `bi-building` | menu |
 | `CAD_1.2` Contatos | `bi-person-lines-fill` | menu |
@@ -419,3 +421,26 @@ consciente.
 🚨 **Nunca reaproveitados** — reusar faria o log antigo mentir.
 
 - `ATD_4.1` — era o e-mail dentro do módulo de atendimento. Aposentado em 10/08: o usuário decidiu que e-mail **jamais** se mistura com WhatsApp, e ele virou `EML_1.1`, módulo próprio. A tela nunca existiu, então nada foi logado com ele.
+
+## 21/10, terceira volta — `CFG_14.1`, a aba que fecha uma porta trancada
+
+🟡 **Ponta 4 do plano de Agendamentos, e sugestão minha, não pedido dele.**
+A rota `/api/tecnicos-harmonit/pendencias` entrou no ar em 21/10 **sem tela
+nenhuma**: o dado existia e ninguém o via. A alternativa honesta era tirar a
+rota.
+
+| O que | Onde |
+|---|---|
+| a tela | `frontend/src/telas/VinculoTecnicos.vue` |
+| a aba | `CFG_14.1`, `aba_de: CFG_0.1`, **só owner**, entre Sincronização e Orçamento |
+| a rota de dados | `GET /api/tecnicos-harmonit/pendencias` |
+
+⚠️ **A permissão dessa rota mudou de `CFG_7.1` para `CFG_14.1`**: a permissão
+de uma rota é a da tela que a consome, e `CFG_7.1` é a Geral, que pode estar
+concedida a quem não tem esta aba. O owner enxerga as duas, então ninguém
+perdeu acesso.
+
+🚨 **SÓ LEITURA.** Ela mostra os três buracos de cadastro e **não conserta
+nada** — 🔵 a conclusão é dele, de 21/10: *"nenhuma regra resolve, é trabalho
+de cadastro"*. Quem vincula à mão continua sendo a ficha do contato, na
+conversa.
