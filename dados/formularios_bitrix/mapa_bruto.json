@@ -1,0 +1,7239 @@
+{
+ "30": {
+  "id": "30",
+  "sec": "bwrh2o",
+  "lang": "br",
+  "address": "https://movisat.bitrix24.com.br",
+  "views": {
+   "click": {
+    "type": "panel",
+    "position": "right",
+    "vertical": "bottom"
+   },
+   "auto": {
+    "type": "popup",
+    "position": "center",
+    "vertical": "bottom",
+    "delay": 5
+   }
+  },
+  "data": {
+   "schemaVersion": 1,
+   "acceptBySubmitEnabled": false,
+   "agreementNoticeSupported": true,
+   "agreementNoticeTextMaxLength": 1000,
+   "language": "br",
+   "editMode": false,
+   "design": {
+    "border": {
+     "bottom": false,
+     "top": false,
+     "left": false,
+     "right": false
+    },
+    "color": {
+     "primary": "#f26b36ff",
+     "primaryText": "#ffffffff",
+     "text": "#000000ff",
+     "background": "#ffffffff",
+     "fieldBorder": "#0000000c",
+     "fieldBackground": "#0000000c",
+     "fieldFocusBackground": "#ffffffff"
+    }
+   },
+   "title": "",
+   "desc": "",
+   "buttonCaption": "Enviar",
+   "useSign": false,
+   "date": {
+    "dateFormat": "DD/MM/YYYY",
+    "dateTimeFormat": "DD/MM/YYYY HH:MI:SS",
+    "sundayFirstly": false
+   },
+   "currency": {
+    "code": "BRL",
+    "title": "Reais",
+    "format": "R$#"
+   },
+   "fields": [
+    {
+     "id": "CONTACT_NAME",
+     "name": "CONTACT_NAME",
+     "label": "Primeiro Nome",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "name",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": true,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "CONTACT_LAST_NAME",
+     "name": "CONTACT_LAST_NAME",
+     "label": "Sobrenome",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "last-name",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": true,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "CONTACT_EMAIL",
+     "name": "CONTACT_EMAIL",
+     "label": "E-mail",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "WORK",
+     "type": "email",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": true,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "CONTACT_PHONE",
+     "name": "CONTACT_PHONE",
+     "label": "Telefone",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "OTHER",
+     "type": "phone",
+     "placeholder": null,
+     "value": "+55",
+     "items": [],
+     "hint": "Não esqueça do DDD",
+     "hintOnFocus": false,
+     "autocomplete": true,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "COMPANY_TITLE",
+     "name": "COMPANY_TITLE",
+     "label": "Nome da Empresa",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "company-name",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": true,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "COMPANY_UF_CRM_1646332310941",
+     "name": "COMPANY_UF_CRM_1646332310941",
+     "label": "CNPJ",
+     "visible": true,
+     "required": false,
+     "multiple": false,
+     "valueType": "",
+     "type": "double",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": true,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "LEAD_TITLE",
+     "name": "LEAD_TITLE",
+     "label": "Assunto",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "string",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "LEAD_COMMENTS",
+     "name": "LEAD_COMMENTS",
+     "label": "Mensagem",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "text",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    }
+   ],
+   "agreements": [],
+   "dependencies": [],
+   "captcha": {
+    "service": "google",
+    "recaptcha": {
+     "use": false
+    },
+    "yandexCaptcha": {
+     "use": false
+    }
+   }
+  }
+ },
+ "220": {
+  "id": "220",
+  "sec": "pg99oz",
+  "lang": "br",
+  "address": "https://movisat.bitrix24.com.br",
+  "views": {
+   "click": {
+    "type": "panel",
+    "position": "right",
+    "vertical": "bottom"
+   },
+   "auto": {
+    "type": "popup",
+    "position": "center",
+    "vertical": "bottom",
+    "delay": 5
+   }
+  },
+  "data": {
+   "schemaVersion": 1,
+   "acceptBySubmitEnabled": false,
+   "agreementNoticeSupported": true,
+   "agreementNoticeTextMaxLength": 1000,
+   "language": "br",
+   "editMode": false,
+   "design": {
+    "border": {
+     "bottom": true,
+     "top": false,
+     "left": false,
+     "right": false
+    },
+    "color": {
+     "primary": "#075c7dff",
+     "primaryText": "#ffffffff",
+     "text": "#000000ff",
+     "background": "#ffffffff",
+     "fieldBorder": "#0000000c",
+     "fieldBackground": "#0000000c",
+     "fieldFocusBackground": "#ffffffff"
+    }
+   },
+   "title": "Solicitação de Demonstração",
+   "desc": "",
+   "buttonCaption": "Solicitar demonstração",
+   "useSign": false,
+   "date": {
+    "dateFormat": "DD/MM/YYYY",
+    "dateTimeFormat": "DD/MM/YYYY HH:MI:SS",
+    "sundayFirstly": false
+   },
+   "currency": {
+    "code": "BRL",
+    "title": "Reais",
+    "format": "R$#"
+   },
+   "fields": [
+    {
+     "id": "page_7921068",
+     "name": "page_7921068",
+     "label": "Seus dados",
+     "visible": true,
+     "required": false,
+     "multiple": false,
+     "valueType": "",
+     "type": "page",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "LEAD_UF_CRM_LEAD_1749154323359",
+     "name": "LEAD_UF_CRM_LEAD_1749154323359",
+     "label": "Data desejada",
+     "visible": true,
+     "required": true,
+     "multiple": true,
+     "valueType": "",
+     "type": "date",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "CONTACT_NAME",
+     "name": "CONTACT_NAME",
+     "label": "Primeiro Nome",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "name",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "CONTACT_LAST_NAME",
+     "name": "CONTACT_LAST_NAME",
+     "label": "Sobrenome",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "last-name",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "CONTACT_POST",
+     "name": "CONTACT_POST",
+     "label": "Cargo",
+     "visible": true,
+     "required": false,
+     "multiple": false,
+     "valueType": "",
+     "type": "string",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "CONTACT_EMAIL",
+     "name": "CONTACT_EMAIL",
+     "label": "E-mail",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "WORK",
+     "type": "email",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "CONTACT_PHONE",
+     "name": "CONTACT_PHONE",
+     "label": "Telefone",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "WORK",
+     "type": "phone",
+     "placeholder": null,
+     "value": "+55",
+     "items": [],
+     "hint": "Somente números",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "hr_8094336",
+     "name": "hr_8094336",
+     "label": null,
+     "visible": true,
+     "required": false,
+     "multiple": false,
+     "valueType": "",
+     "type": "layout",
+     "content": {
+      "type": "hr"
+     }
+    },
+    {
+     "id": "COMPANY_TITLE",
+     "name": "COMPANY_TITLE",
+     "label": "Nome da Empresa",
+     "visible": true,
+     "required": false,
+     "multiple": false,
+     "valueType": "",
+     "type": "company-name",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "LEAD_UF_CRM_LEAD_1749148838751",
+     "name": "LEAD_UF_CRM_LEAD_1749148838751",
+     "label": "CNPJ",
+     "visible": true,
+     "required": false,
+     "multiple": false,
+     "valueType": "",
+     "type": "string",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "LEAD_UF_CRM_1689790448506",
+     "name": "LEAD_UF_CRM_1689790448506",
+     "label": "Estado",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "string",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "LEAD_UF_CRM_1689790434955",
+     "name": "LEAD_UF_CRM_1689790434955",
+     "label": "Cidade",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "string",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "hr_5441820",
+     "name": "hr_5441820",
+     "label": null,
+     "visible": true,
+     "required": false,
+     "multiple": false,
+     "valueType": "",
+     "type": "layout",
+     "content": {
+      "type": "hr"
+     }
+    },
+    {
+     "id": "LEAD_UF_CRM_1645812061373",
+     "name": "LEAD_UF_CRM_1645812061373",
+     "label": "Quais são seus objetivos com nossa solução?",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "string",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "LEAD_COMMENTS",
+     "name": "LEAD_COMMENTS",
+     "label": "Detalhe sua operação, dificuldade ou problemas enfrentados atualmente ",
+     "visible": true,
+     "required": false,
+     "multiple": false,
+     "valueType": "",
+     "type": "text",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "\n",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    }
+   ],
+   "agreements": [],
+   "dependencies": [],
+   "captcha": {
+    "service": "google",
+    "recaptcha": {
+     "use": false
+    },
+    "yandexCaptcha": {
+     "use": false
+    }
+   }
+  }
+ },
+ "96": {
+  "id": "96",
+  "sec": "go9ub8",
+  "lang": "br",
+  "address": "https://movisat.bitrix24.com.br",
+  "views": {
+   "click": {
+    "type": "panel",
+    "position": "right",
+    "vertical": "bottom"
+   },
+   "auto": {
+    "type": "popup",
+    "position": "center",
+    "vertical": "bottom",
+    "delay": 5
+   }
+  },
+  "data": {
+   "schemaVersion": 1,
+   "acceptBySubmitEnabled": false,
+   "agreementNoticeSupported": true,
+   "agreementNoticeTextMaxLength": 1000,
+   "language": "br",
+   "editMode": false,
+   "design": {
+    "style": "modern",
+    "border": {
+     "bottom": true,
+     "top": false,
+     "left": false,
+     "right": false
+    },
+    "color": {
+     "primary": "#67cdccff",
+     "primaryText": "#fff0d6ff",
+     "text": "#000000ff",
+     "background": "#ffffffff",
+     "fieldBorder": "#0000000c",
+     "fieldBackground": "#0000000c",
+     "fieldFocusBackground": "#ffffffff"
+    }
+   },
+   "title": "Cadastro para Teste Gratuito - Movisat",
+   "desc": "",
+   "buttonCaption": "Enviar",
+   "useSign": false,
+   "date": {
+    "dateFormat": "DD/MM/YYYY",
+    "dateTimeFormat": "DD/MM/YYYY HH:MI:SS",
+    "sundayFirstly": false
+   },
+   "currency": {
+    "code": "BRL",
+    "title": "Reais",
+    "format": "R$#"
+   },
+   "fields": [
+    {
+     "id": "COMPANY_TITLE",
+     "name": "COMPANY_TITLE",
+     "label": "Razão Social",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "company-name",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": true,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "COMPANY_UF_CRM_1646332310941",
+     "name": "COMPANY_UF_CRM_1646332310941",
+     "label": "CNPJ",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "double",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": true,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "COMPANY_ADDRESS",
+     "name": "COMPANY_ADDRESS",
+     "label": "Endereço",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "string",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": true,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "COMPANY_UF_CRM_1647888964",
+     "name": "COMPANY_UF_CRM_1647888964",
+     "label": "Cidade/Estado",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "string",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": true,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "COMPANY_UF_CRM_622E1FE54BC3F",
+     "name": "COMPANY_UF_CRM_622E1FE54BC3F",
+     "label": "Cargo",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "string",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": true,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "CONTACT_UF_CRM_1646331193774",
+     "name": "CONTACT_UF_CRM_1646331193774",
+     "label": "RG",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "double",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "CONTACT_NAME",
+     "name": "CONTACT_NAME",
+     "label": "Primeiro Nome",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "name",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": true,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "CONTACT_SECOND_NAME",
+     "name": "CONTACT_SECOND_NAME",
+     "label": "Sobrenome",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "second-name",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": true,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "CONTACT_UF_CRM_1646331183902",
+     "name": "CONTACT_UF_CRM_1646331183902",
+     "label": "CPF",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "double",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "COMPANY_EMAIL",
+     "name": "COMPANY_EMAIL",
+     "label": "E-mail",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "OTHER",
+     "type": "email",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": true,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "COMPANY_PHONE",
+     "name": "COMPANY_PHONE",
+     "label": "Telefone",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "OTHER",
+     "type": "phone",
+     "placeholder": null,
+     "value": "+55",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "DEAL_UF_CRM_1648236806",
+     "name": "DEAL_UF_CRM_1648236806",
+     "label": "Documento(s) do(s) Veículo(s)",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "maxSizeMb": 1000,
+     "type": "file",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": []
+    },
+    {
+     "id": "DEAL_UF_CRM_1648237002",
+     "name": "DEAL_UF_CRM_1648237002",
+     "label": "Documentos Cadastrais da Empresa",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "maxSizeMb": 1000,
+     "type": "file",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": []
+    },
+    {
+     "id": "DEAL_UF_CRM_1648237031",
+     "name": "DEAL_UF_CRM_1648237031",
+     "label": "Documentos Cadastrais Pessoais",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "maxSizeMb": 1000,
+     "type": "file",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": []
+    }
+   ],
+   "agreements": [
+    {
+     "id": "AGREEMENT_2",
+     "name": "AGREEMENT_2",
+     "label": "Eu aceito os Termos de Uso",
+     "revision": "6da949a905d3140371556298312850580d82cae896cf19ad6f38305b3fe8bbf2",
+     "value": "Y",
+     "required": true,
+     "checked": true,
+     "acceptBySubmit": false,
+     "acceptBySubmitAllowed": false,
+     "isPersonalDataAgreement": false,
+     "agreementNoticeAllowed": false,
+     "agreementNoticeEnabled": false,
+     "agreementNoticeText": "",
+     "content": {
+      "title": "Our rules are straightforward",
+      "url": null,
+      "html": "\n\n\t<p>Our rules are straightforward. You must own the content you publish, or have written permission to use the content owned and held in copyright by a third party. The content you publish must not include any information or images prohibited by law, in any form.</p>\n\n\n\t<p>These Rules govern your relationship with Bitrix24 (further - Us) while using the functionality of Bitrix24 services, that allows our users (further - You) to create websites and landing pages for Your business, Your customers or for personal use (hereinafter referred to as Bitrix24 Sites).</p>\n\n\n\t<p>By publishing a website created using Bitrix24 You acknowledge Your full consent with the Rules. If You do not accept these Rules, do not use Bitrix24 Sites.</p>\n\t<p>By using Bitrix24 Sites:</p>\n\t<ol>\n\t\t<li>\n\t\t\t<p><b>You accept and agree</b> that Bitrix24 Sites are not intended for publishing, demonstrating, transmitting or otherwise making available any texts, images and other items (hereinafter referred to as Content), which may be deemed as: </p> \n\t\t\t<ul>\n\t\t\t\t<li>violating or attempting to violate any national and international law, including those specific laws applicable to You or Your End Users in any of Your geographical locations;</li>\n\t\t\t\t<li>infringing Our or third parties&#039; intellectual property rights and trademarks, privacy rights, rights to information comprising commercial secrets, disclosing business confidential information, prejudicing honor, business reputation and dignity of third parties;</li>\n\t\t\t\t<li>unlawful, harmful, threatening, defamatory, libelous, inciting to violence, calls for a commission of illegal activities, clarifies the procedure for the use of explosives and other weapons, breaks the standard moral standards and ethical norms, obscene, promoting hatred and/or discrimination;</li>\n\t\t\t\t<li>incendiary, racist, harassing, abusive, offensive, deceptive or fraudulent, encouraging criminal or harmful conduct, containing negative and critical remarks regarding religion, politics, race, ethnicity, gender, personal characteristics, abilities, sexual orientation and appearance of third parties, insults addressed to specific individuals or organizations;</li>\n\t\t\t\t<li>advertising of gambling and betting, escort services, as well as similar sexual services;</li>\n\t\t\t\t<li>propagandizing extremist religious or political views;</li>\n\t\t\t\t<li>propagandizing use of illegal substances;</li>\n\t\t\t\t<li>damaging to Our reputation and goodwill or one which may bring Us into disrepute or harm.</li>\n\t\t\t</ul>\n\t\t</li>\n\t\t<li>\n\t\t\t<p><b>You undertake to:</b></p>\n\t\t\t<ul>\n\t\t\t\t<li>follow relevant laws of Your country, including intellectual property, advertising, marketing, and other laws (hereinafter referred to as Applicable Law) during the period of use of Bitrix24 Sites;</li>\n\t\t\t\t<li>not to create sites, which may be used only for automatic redirection to third-party sites, phishing, illegal collection, storage, and processing of personal data or other data of third parties, including financial data;</li>\n\t\t\t\t<li>not to upload any malicious software (viruses, worms, Trojans, spyware or any other computer code, files or programs) and not to use Bitrix24 Sites in connection with any form of spam or similar conduct, or otherwise engage in unethical marketing or advertising;</li>\n\t\t\t\t<li>replace texts, images, icons and other items which are by default in templates and blocks of Bitrix24 Sites (hereinafter referred to as Demo Content), with Your own Content. The Demo Content is not intended for use by You and its use may be regarded as a violation of the Applicable law.</li>\n\t\t\t</ul>\n\t\t</li>\n\t\t<li><p><b>You guarantee</b> that any Content You publish or intend to publish using the Bitrix24 Sites was obtained in compliance with the Applicable Law.</p></li>\n\t\t<li><p><b>You acknowledge</b> that Bitrix24 does not create websites or web pages itself, does not modify Your Content in any way, does not encourage users to publish their Content, does not and should not have any knowledge of possible infringement of the Applicable Law. You use Bitrix24 Sites at Your own risk and under Your own responsibility.</p>\n\t\t\t<p>If You have any doubt as to the use of any Content on Bitrix24 Sites, we recommend You receive professional advice from the relevant specialists (lawyers) prior to publishing.</p></li>\n\t\t<li><p><b>We reserve the right to block Your websites and/or access to the Bitrix24 Sites without notice at Our sole discretion</b>, including if there are reasons to believe that You are violating the aforementioned obligations and guarantees.</p></li>\n\t</ol>\n\t<p>We have the right to conclude at Our sole discretion about Your violation of any of the aforementioned obligations and guarantees, based on the information we have, including from a user complaint, or claim from any third party, or as a result of an internal investigation. You are obligated to provide us with refutations of such violations at our demand.</p>\n\t<p>For complete Bitrix24 terms of service, please refer to <a target=\"_blank\" href=\"https://www.bitrix24.com/terms/\">Terms of Service</a>.</p>\n\n"
+     }
+    }
+   ],
+   "dependencies": [],
+   "captcha": {
+    "service": "google",
+    "recaptcha": {
+     "use": false
+    },
+    "yandexCaptcha": {
+     "use": false
+    }
+   }
+  }
+ },
+ "32": {
+  "id": "32",
+  "sec": "mtpccu",
+  "lang": "br",
+  "address": "https://movisat.bitrix24.com.br",
+  "views": {
+   "click": {
+    "type": "panel",
+    "position": "right",
+    "vertical": "bottom"
+   },
+   "auto": {
+    "type": "popup",
+    "position": "center",
+    "vertical": "bottom",
+    "delay": 5
+   }
+  },
+  "data": {
+   "schemaVersion": 1,
+   "acceptBySubmitEnabled": false,
+   "agreementNoticeSupported": true,
+   "agreementNoticeTextMaxLength": 1000,
+   "language": "br",
+   "editMode": false,
+   "design": {
+    "border": {
+     "bottom": false,
+     "top": false,
+     "left": false,
+     "right": false
+    },
+    "color": {
+     "primary": "#f26b36ff",
+     "primaryText": "#ffffffff",
+     "text": "#000000ff",
+     "background": "#ffffffff",
+     "fieldBorder": "#0000000c",
+     "fieldBackground": "#0000000c",
+     "fieldFocusBackground": "#ffffffff"
+    }
+   },
+   "title": "Abrir chamado de suporte",
+   "desc": "",
+   "buttonCaption": "Enviar",
+   "useSign": false,
+   "date": {
+    "dateFormat": "DD/MM/YYYY",
+    "dateTimeFormat": "DD/MM/YYYY HH:MI:SS",
+    "sundayFirstly": false
+   },
+   "currency": {
+    "code": "BRL",
+    "title": "Reais",
+    "format": "R$#"
+   },
+   "fields": [
+    {
+     "id": "CONTACT_UF_CRM_6227C13CCA255",
+     "name": "CONTACT_UF_CRM_6227C13CCA255",
+     "label": "Contrato Pessoa Física ou Jurídica?",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "list",
+     "placeholder": null,
+     "value": "",
+     "items": [
+      {
+       "label": "Pessoa Física (CPF)",
+       "value": "1754",
+       "selected": false
+      },
+      {
+       "label": "Pessoa Jurídica (CNPJ)",
+       "value": "1756",
+       "selected": false
+      }
+     ],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "COMPANY_TITLE",
+     "name": "COMPANY_TITLE",
+     "label": "Empresa",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "company-name",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "COMPANY_UF_CRM_1646332310941",
+     "name": "COMPANY_UF_CRM_1646332310941",
+     "label": "CNPJ",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "double",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "Somente números",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "CONTACT_UF_CRM_1646331183902",
+     "name": "CONTACT_UF_CRM_1646331183902",
+     "label": "CPF",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "double",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "CONTACT_NAME",
+     "name": "CONTACT_NAME",
+     "label": "Primeiro Nome",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "name",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "CONTACT_LAST_NAME",
+     "name": "CONTACT_LAST_NAME",
+     "label": "Sobrenome",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "last-name",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "CONTACT_EMAIL",
+     "name": "CONTACT_EMAIL",
+     "label": "E-mail",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "WORK",
+     "type": "email",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "CONTACT_PHONE",
+     "name": "CONTACT_PHONE",
+     "label": "Telefone",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "WORK",
+     "type": "phone",
+     "placeholder": null,
+     "value": "+55",
+     "items": [],
+     "hint": "Não esqueça de incluir o DDD",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "DEAL_UF_CRM_1646660778389",
+     "name": "DEAL_UF_CRM_1646660778389",
+     "label": "Tipo de Solicitação",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "list",
+     "placeholder": null,
+     "value": "",
+     "items": [
+      {
+       "label": "Agendamento de serviços",
+       "value": "1340",
+       "selected": false
+      },
+      {
+       "label": "Dúvida de usabilidade",
+       "value": "1342",
+       "selected": false
+      },
+      {
+       "label": "Informação técnica",
+       "value": "1344",
+       "selected": false
+      },
+      {
+       "label": "Informação sistêmica",
+       "value": "1346",
+       "selected": false
+      },
+      {
+       "label": "Problema de software",
+       "value": "1348",
+       "selected": false
+      },
+      {
+       "label": "Problema de hardware",
+       "value": "1350",
+       "selected": false
+      },
+      {
+       "label": "Problema no veículo",
+       "value": "6560",
+       "selected": false
+      },
+      {
+       "label": "Sugestões e idéias",
+       "value": "1352",
+       "selected": false
+      },
+      {
+       "label": "Solicitação de desenvolvimento (Projeto)",
+       "value": "1354",
+       "selected": false
+      },
+      {
+       "label": "Tratativa administrativa",
+       "value": "1356",
+       "selected": false
+      },
+      {
+       "label": "Ativação de Backup",
+       "value": "6072",
+       "selected": false
+      },
+      {
+       "label": "Desativação de Backup",
+       "value": "6076",
+       "selected": false
+      }
+     ],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "DEAL_UF_CRM_1647108443",
+     "name": "DEAL_UF_CRM_1647108443",
+     "label": "Assunto",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "string",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "DEAL_UF_CRM_1646660825704",
+     "name": "DEAL_UF_CRM_1646660825704",
+     "label": "Detalhe a ocorrência",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "string",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "DEAL_UF_CRM_1647530180887",
+     "name": "DEAL_UF_CRM_1647530180887",
+     "label": "Veículo e Placa (somente se for referente a veículo(s) - Um por linha)",
+     "visible": true,
+     "required": false,
+     "multiple": true,
+     "valueType": "",
+     "type": "string",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "DEAL_UF_CRM_DEAL_1648554491560",
+     "name": "DEAL_UF_CRM_DEAL_1648554491560",
+     "label": "Arquivo ou print caso desejar",
+     "visible": true,
+     "required": false,
+     "multiple": true,
+     "valueType": "",
+     "maxSizeMb": 1000,
+     "type": "file",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": []
+    }
+   ],
+   "agreements": [],
+   "dependencies": [
+    {
+     "id": "2212",
+     "typeId": 0,
+     "logic": "or",
+     "list": [
+      {
+       "condition": {
+        "target": "CONTACT_UF_CRM_6227C13CCA255",
+        "event": "change",
+        "value": "1756",
+        "operation": "="
+       },
+       "action": {
+        "target": "COMPANY_TITLE",
+        "type": "show",
+        "value": ""
+       }
+      },
+      {
+       "condition": {
+        "target": "CONTACT_UF_CRM_6227C13CCA255",
+        "event": "change",
+        "value": "1756",
+        "operation": "="
+       },
+       "action": {
+        "target": "COMPANY_UF_CRM_1646332310941",
+        "type": "show",
+        "value": ""
+       }
+      },
+      {
+       "condition": {
+        "target": "CONTACT_UF_CRM_6227C13CCA255",
+        "event": "change",
+        "value": "1754",
+        "operation": "="
+       },
+       "action": {
+        "target": "CONTACT_UF_CRM_1646331183902",
+        "type": "show",
+        "value": ""
+       }
+      }
+     ]
+    }
+   ],
+   "captcha": {
+    "service": "google",
+    "recaptcha": {
+     "use": false
+    },
+    "yandexCaptcha": {
+     "use": false
+    }
+   }
+  }
+ },
+ "98": {
+  "id": "98",
+  "sec": "v0t1bg",
+  "lang": "br",
+  "address": "https://movisat.bitrix24.com.br",
+  "views": {
+   "click": {
+    "type": "panel",
+    "position": "right",
+    "vertical": "bottom"
+   },
+   "auto": {
+    "type": "popup",
+    "position": "center",
+    "vertical": "bottom",
+    "delay": 5
+   }
+  },
+  "data": {
+   "schemaVersion": 1,
+   "acceptBySubmitEnabled": false,
+   "agreementNoticeSupported": true,
+   "agreementNoticeTextMaxLength": 1000,
+   "language": "br",
+   "editMode": false,
+   "design": {
+    "style": "modern",
+    "border": {
+     "bottom": true,
+     "top": false,
+     "left": false,
+     "right": false
+    },
+    "color": {
+     "primary": "#66cccaff",
+     "primaryText": "#ffffffff",
+     "text": "#000000ff",
+     "background": "#ffffffff",
+     "fieldBorder": "#0000000c",
+     "fieldBackground": "#0000000c",
+     "fieldFocusBackground": "#ffffffff"
+    }
+   },
+   "title": "Ficha cadastral",
+   "desc": "",
+   "buttonCaption": "Enviar",
+   "useSign": false,
+   "date": {
+    "dateFormat": "DD/MM/YYYY",
+    "dateTimeFormat": "DD/MM/YYYY HH:MI:SS",
+    "sundayFirstly": false
+   },
+   "currency": {
+    "code": "BRL",
+    "title": "Reais",
+    "format": "R$#"
+   },
+   "fields": [
+    {
+     "id": "page_7745398",
+     "name": "page_7745398",
+     "label": "Dados cadastrais",
+     "visible": true,
+     "required": false,
+     "multiple": false,
+     "valueType": "",
+     "type": "page",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "DEAL_UF_CRM_DEAL_1646767625770",
+     "name": "DEAL_UF_CRM_DEAL_1646767625770",
+     "label": "Contrato Pessoa Física ou Jurídica?",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "list",
+     "placeholder": null,
+     "value": "",
+     "items": [
+      {
+       "label": "Pessoa Física (CPF)",
+       "value": "1702",
+       "selected": false
+      },
+      {
+       "label": "Pessoa Jurídica (CNPJ)",
+       "value": "1704",
+       "selected": false
+      }
+     ],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "COMPANY_UF_CRM_1646332310941",
+     "name": "COMPANY_UF_CRM_1646332310941",
+     "label": "CNPJ",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "double",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "COMPANY_UF_CRM_1646332339664",
+     "name": "COMPANY_UF_CRM_1646332339664",
+     "label": "Razão social",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "string",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "COMPANY_TITLE",
+     "name": "COMPANY_TITLE",
+     "label": "Nome Fantasia",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "company-name",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "COMPANY_UF_CRM_1646332489457",
+     "name": "COMPANY_UF_CRM_1646332489457",
+     "label": "Inscrição Municipal",
+     "visible": true,
+     "required": false,
+     "multiple": false,
+     "valueType": "",
+     "type": "string",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "COMPANY_UF_CRM_1646332469878",
+     "name": "COMPANY_UF_CRM_1646332469878",
+     "label": "Inscrição Estadual",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "string",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "COMPANY_PHONE",
+     "name": "COMPANY_PHONE",
+     "label": "Telefone da empresa com DDD",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "OTHER",
+     "type": "phone",
+     "placeholder": null,
+     "value": "+55",
+     "items": [],
+     "hint": "Exemplo: +55 DDD Número",
+     "hintOnFocus": true,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "COMPANY_ADDRESS",
+     "name": "COMPANY_ADDRESS",
+     "label": "Endereço completo da empresa",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "string",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "Inserir nesta ordem separado por vírgula: (1) Logradouro, (2) Número, (3) Complemento, (4) Bairro, (5) CEP, (6) Cidade e (7) Estado",
+     "hintOnFocus": true,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "DEAL_UF_CRM_1648237002",
+     "name": "DEAL_UF_CRM_1648237002",
+     "label": "Contrato Social da Empresa",
+     "visible": true,
+     "required": false,
+     "multiple": true,
+     "valueType": "",
+     "maxSizeMb": 1000,
+     "type": "file",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": []
+    },
+    {
+     "id": "page_6149425",
+     "name": "page_6149425",
+     "label": "Dados do responsável pelo contrato",
+     "visible": true,
+     "required": false,
+     "multiple": false,
+     "valueType": "",
+     "type": "page",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "CONTACT_NAME",
+     "name": "CONTACT_NAME",
+     "label": "Nome completo do responsável em assinar o contrato",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "name",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "***ATENÇÃO***: Para ser o responsável pela assinatura, é necessário que o nome esteja no contrato social da empresa ou possua uma procuração que permita assinar como responsável.",
+     "hintOnFocus": true,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "CONTACT_BIRTHDATE",
+     "name": "CONTACT_BIRTHDATE",
+     "label": "Data de nascimento",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "date",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "CONTACT_UF_CRM_1646331183902",
+     "name": "CONTACT_UF_CRM_1646331183902",
+     "label": "CPF",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "double",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "CONTACT_UF_CRM_1646331193774",
+     "name": "CONTACT_UF_CRM_1646331193774",
+     "label": "RG",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "double",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "CONTACT_UF_CRM_1647878898",
+     "name": "CONTACT_UF_CRM_1647878898",
+     "label": "Cargo/Departamento",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "string",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "CONTACT_PHONE",
+     "name": "CONTACT_PHONE",
+     "label": "Telefone",
+     "visible": true,
+     "required": true,
+     "multiple": true,
+     "valueType": "OTHER",
+     "type": "phone",
+     "placeholder": null,
+     "value": "+55",
+     "items": [],
+     "hint": "+55 DDD Número (preencha somente somente números)",
+     "hintOnFocus": true,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "CONTACT_EMAIL",
+     "name": "CONTACT_EMAIL",
+     "label": "E-mail",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "OTHER",
+     "type": "email",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "***ATENÇÃO***: Este e-mail deverá ser do titular da assinatura",
+     "hintOnFocus": true,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "CONTACT_ADDRESS",
+     "name": "CONTACT_ADDRESS",
+     "label": "Endereço Completo",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "string",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "Inserir nesta ordem separado por vírgula: (1) Logradouro, (2) Número, (3) Complemento, (4) Bairro, (5) CEP, (6) Cidade e (7) Estado",
+     "hintOnFocus": true,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "DEAL_UF_CRM_1648237031",
+     "name": "DEAL_UF_CRM_1648237031",
+     "label": "Documento do responsável pela assinatura do contrato",
+     "visible": true,
+     "required": false,
+     "multiple": true,
+     "valueType": "",
+     "maxSizeMb": 1000,
+     "type": "file",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "Ex: CNH",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": []
+    },
+    {
+     "id": "page_3664935",
+     "name": "page_3664935",
+     "label": "Pessoa(s) autorizada(s) a solicitarem novos veículos ou realizarem alterações contratuais",
+     "visible": true,
+     "required": false,
+     "multiple": false,
+     "valueType": "",
+     "type": "page",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "COMPANY_UF_CRM_1646414401350",
+     "name": "COMPANY_UF_CRM_1646414401350",
+     "label": "Outra(s) pessoa(s) autorizada(s) a solicitarem novos veículos ou realizarem alterações contratuais",
+     "visible": true,
+     "required": false,
+     "multiple": true,
+     "valueType": "",
+     "type": "string",
+     "placeholder": null,
+     "value": "Nome:   |   Cargo/Profissão:   |   Celular:   |   E-mail:  ",
+     "items": [],
+     "hint": "Caso tenha mais de uma pessoa, insira uma por campo, clicando na opção \"+ Adicionar mais\"",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "page_6799172",
+     "name": "page_6799172",
+     "label": "Definições do plano",
+     "visible": true,
+     "required": false,
+     "multiple": false,
+     "valueType": "",
+     "type": "page",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "DEAL_UF_CRM_DEAL_1653512568658",
+     "name": "DEAL_UF_CRM_DEAL_1653512568658",
+     "label": "Sistema desejado",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "list",
+     "placeholder": null,
+     "value": "",
+     "items": [
+      {
+       "label": "Plano Smart",
+       "value": "4594",
+       "selected": false
+      },
+      {
+       "label": "Plano Pró",
+       "value": "4596",
+       "selected": false
+      },
+      {
+       "label": "Plano Full Manager",
+       "value": "4598",
+       "selected": false
+      }
+     ],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "COMPANY_UF_CRM_1664547698",
+     "name": "COMPANY_UF_CRM_1664547698",
+     "label": "Plano desejado",
+     "visible": true,
+     "required": true,
+     "multiple": true,
+     "valueType": "",
+     "type": "list",
+     "placeholder": null,
+     "value": "",
+     "items": [
+      {
+       "label": "Plano Smart",
+       "value": "5634",
+       "selected": false
+      },
+      {
+       "label": "Plano Pró",
+       "value": "5636",
+       "selected": false
+      },
+      {
+       "label": "Plano Full Manager",
+       "value": "5638",
+       "selected": false
+      }
+     ],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "DEAL_UF_CRM_DEAL_1647116469026",
+     "name": "DEAL_UF_CRM_DEAL_1647116469026",
+     "label": "Deseja implantar o bloqueio veícular?",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "list",
+     "placeholder": null,
+     "value": "",
+     "items": [
+      {
+       "label": "Sim",
+       "value": "2428",
+       "selected": false
+      },
+      {
+       "label": "Não",
+       "value": "2430",
+       "selected": false
+      }
+     ],
+     "hint": "*** ATENÇÃO ***: O Bloqueio requer corte de fiação que pode ocasionar na perda de garantia da concessionária.",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "DEAL_UF_CRM_DEAL_1650479899427",
+     "name": "DEAL_UF_CRM_DEAL_1650479899427",
+     "label": "Responsáveis para contato da Central 24hr",
+     "visible": true,
+     "required": true,
+     "multiple": true,
+     "valueType": "",
+     "type": "string",
+     "placeholder": null,
+     "value": "Nome:   |   E-mail:   |   Celular:  ",
+     "items": [],
+     "hint": "***ATENÇÃO***: Insira na ordem de prioridade para contatos ||||| Caso tenha mais de 1, insira 1 por campo e acrescente a nova pessoa clicando na opção \"+ Adicionar mais\". ",
+     "hintOnFocus": true,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "DEAL_UF_CRM_1648236806",
+     "name": "DEAL_UF_CRM_1648236806",
+     "label": "Documento(s) do(s) Veículo(s)",
+     "visible": true,
+     "required": false,
+     "multiple": true,
+     "valueType": "",
+     "maxSizeMb": 1000,
+     "type": "file",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": []
+    },
+    {
+     "id": "page_3697560",
+     "name": "page_3697560",
+     "label": "Observação Especial",
+     "visible": true,
+     "required": false,
+     "multiple": false,
+     "valueType": "",
+     "type": "page",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "DEAL_COMMENTS",
+     "name": "DEAL_COMMENTS",
+     "label": "Caso sua operação seja sigilosa ou requer alguma atenção especial informe neste campo.",
+     "visible": true,
+     "required": false,
+     "multiple": false,
+     "valueType": "",
+     "type": "text",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "Caso sua operação seja sigilosa ou requer alguma atenção especial informe neste campo.",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "page_3646942",
+     "name": "page_3646942",
+     "label": "Usuários do sistema",
+     "visible": true,
+     "required": false,
+     "multiple": false,
+     "valueType": "",
+     "type": "page",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "COMPANY_UF_CRM_1646414429805",
+     "name": "COMPANY_UF_CRM_1646414429805",
+     "label": "Usuários administradores do sistema",
+     "visible": true,
+     "required": true,
+     "multiple": true,
+     "valueType": "",
+     "type": "string",
+     "placeholder": null,
+     "value": "Nome:   |   E-mail:  ",
+     "items": [],
+     "hint": "***ATENÇÃO***: Insira nome completo e e-mail. (Caso tenha mais de uma pessoa, insira uma por campo, clicando na opção \"+ Adicionar mais\").",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "page_1478261",
+     "name": "page_1478261",
+     "label": "Dados do Financeiro",
+     "visible": true,
+     "required": false,
+     "multiple": false,
+     "valueType": "",
+     "type": "page",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "COMPANY_UF_CRM_1646414455146",
+     "name": "COMPANY_UF_CRM_1646414455146",
+     "label": "Responsável pelo financeiro",
+     "visible": true,
+     "required": true,
+     "multiple": true,
+     "valueType": "",
+     "type": "string",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "***ATENÇÃO***: Insira nome completo e e-mail para receber as faturas e notas. (Caso tenha mais de uma pessoa, insira uma por campo, clicando na opção \"+ Adicionar mais\"). ",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "COMPANY_UF_CRM_627D60BAC5766",
+     "name": "COMPANY_UF_CRM_627D60BAC5766",
+     "label": "Dia de vencimento das mensalidades",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "list",
+     "placeholder": null,
+     "value": "",
+     "items": [
+      {
+       "label": "Dia 05",
+       "value": "4500",
+       "selected": false
+      },
+      {
+       "label": "Dia 10",
+       "value": "4502",
+       "selected": false
+      }
+     ],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "DEAL_UF_CRM_1732217003630",
+     "name": "DEAL_UF_CRM_1732217003630",
+     "label": "Endereço para envio do(s) equipamento(s)",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "string",
+     "placeholder": null,
+     "value": "Logradouro:     , Nº:     , Bairro:     , CEP:     , Cidade/Estado:     , Complemento:     ",
+     "items": [],
+     "hint": "Caso seja o mesmo da empresa já cadastrado, pode deixar em branco.",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    }
+   ],
+   "agreements": [
+    {
+     "id": "AGREEMENT_2",
+     "name": "AGREEMENT_2",
+     "label": "Eu aceito os Termos de Uso",
+     "revision": "6da949a905d3140371556298312850580d82cae896cf19ad6f38305b3fe8bbf2",
+     "value": "Y",
+     "required": true,
+     "checked": true,
+     "acceptBySubmit": false,
+     "acceptBySubmitAllowed": false,
+     "isPersonalDataAgreement": false,
+     "agreementNoticeAllowed": false,
+     "agreementNoticeEnabled": false,
+     "agreementNoticeText": "",
+     "content": {
+      "title": "Our rules are straightforward",
+      "url": null,
+      "html": "\n\n\t<p>Our rules are straightforward. You must own the content you publish, or have written permission to use the content owned and held in copyright by a third party. The content you publish must not include any information or images prohibited by law, in any form.</p>\n\n\n\t<p>These Rules govern your relationship with Bitrix24 (further - Us) while using the functionality of Bitrix24 services, that allows our users (further - You) to create websites and landing pages for Your business, Your customers or for personal use (hereinafter referred to as Bitrix24 Sites).</p>\n\n\n\t<p>By publishing a website created using Bitrix24 You acknowledge Your full consent with the Rules. If You do not accept these Rules, do not use Bitrix24 Sites.</p>\n\t<p>By using Bitrix24 Sites:</p>\n\t<ol>\n\t\t<li>\n\t\t\t<p><b>You accept and agree</b> that Bitrix24 Sites are not intended for publishing, demonstrating, transmitting or otherwise making available any texts, images and other items (hereinafter referred to as Content), which may be deemed as: </p> \n\t\t\t<ul>\n\t\t\t\t<li>violating or attempting to violate any national and international law, including those specific laws applicable to You or Your End Users in any of Your geographical locations;</li>\n\t\t\t\t<li>infringing Our or third parties&#039; intellectual property rights and trademarks, privacy rights, rights to information comprising commercial secrets, disclosing business confidential information, prejudicing honor, business reputation and dignity of third parties;</li>\n\t\t\t\t<li>unlawful, harmful, threatening, defamatory, libelous, inciting to violence, calls for a commission of illegal activities, clarifies the procedure for the use of explosives and other weapons, breaks the standard moral standards and ethical norms, obscene, promoting hatred and/or discrimination;</li>\n\t\t\t\t<li>incendiary, racist, harassing, abusive, offensive, deceptive or fraudulent, encouraging criminal or harmful conduct, containing negative and critical remarks regarding religion, politics, race, ethnicity, gender, personal characteristics, abilities, sexual orientation and appearance of third parties, insults addressed to specific individuals or organizations;</li>\n\t\t\t\t<li>advertising of gambling and betting, escort services, as well as similar sexual services;</li>\n\t\t\t\t<li>propagandizing extremist religious or political views;</li>\n\t\t\t\t<li>propagandizing use of illegal substances;</li>\n\t\t\t\t<li>damaging to Our reputation and goodwill or one which may bring Us into disrepute or harm.</li>\n\t\t\t</ul>\n\t\t</li>\n\t\t<li>\n\t\t\t<p><b>You undertake to:</b></p>\n\t\t\t<ul>\n\t\t\t\t<li>follow relevant laws of Your country, including intellectual property, advertising, marketing, and other laws (hereinafter referred to as Applicable Law) during the period of use of Bitrix24 Sites;</li>\n\t\t\t\t<li>not to create sites, which may be used only for automatic redirection to third-party sites, phishing, illegal collection, storage, and processing of personal data or other data of third parties, including financial data;</li>\n\t\t\t\t<li>not to upload any malicious software (viruses, worms, Trojans, spyware or any other computer code, files or programs) and not to use Bitrix24 Sites in connection with any form of spam or similar conduct, or otherwise engage in unethical marketing or advertising;</li>\n\t\t\t\t<li>replace texts, images, icons and other items which are by default in templates and blocks of Bitrix24 Sites (hereinafter referred to as Demo Content), with Your own Content. The Demo Content is not intended for use by You and its use may be regarded as a violation of the Applicable law.</li>\n\t\t\t</ul>\n\t\t</li>\n\t\t<li><p><b>You guarantee</b> that any Content You publish or intend to publish using the Bitrix24 Sites was obtained in compliance with the Applicable Law.</p></li>\n\t\t<li><p><b>You acknowledge</b> that Bitrix24 does not create websites or web pages itself, does not modify Your Content in any way, does not encourage users to publish their Content, does not and should not have any knowledge of possible infringement of the Applicable Law. You use Bitrix24 Sites at Your own risk and under Your own responsibility.</p>\n\t\t\t<p>If You have any doubt as to the use of any Content on Bitrix24 Sites, we recommend You receive professional advice from the relevant specialists (lawyers) prior to publishing.</p></li>\n\t\t<li><p><b>We reserve the right to block Your websites and/or access to the Bitrix24 Sites without notice at Our sole discretion</b>, including if there are reasons to believe that You are violating the aforementioned obligations and guarantees.</p></li>\n\t</ol>\n\t<p>We have the right to conclude at Our sole discretion about Your violation of any of the aforementioned obligations and guarantees, based on the information we have, including from a user complaint, or claim from any third party, or as a result of an internal investigation. You are obligated to provide us with refutations of such violations at our demand.</p>\n\t<p>For complete Bitrix24 terms of service, please refer to <a target=\"_blank\" href=\"https://www.bitrix24.com/terms/\">Terms of Service</a>.</p>\n\n"
+     }
+    }
+   ],
+   "dependencies": [
+    {
+     "id": "2446",
+     "typeId": 2,
+     "logic": "and",
+     "list": [
+      {
+       "condition": {
+        "target": "DEAL_UF_CRM_DEAL_1646767625770",
+        "event": "change",
+        "value": "1704",
+        "operation": "="
+       },
+       "action": {
+        "target": "COMPANY_UF_CRM_1646332310941",
+        "type": "show",
+        "value": ""
+       }
+      },
+      {
+       "condition": {
+        "target": "DEAL_UF_CRM_DEAL_1646767625770",
+        "event": "change",
+        "value": "1704",
+        "operation": "="
+       },
+       "action": {
+        "target": "COMPANY_UF_CRM_1646332339664",
+        "type": "show",
+        "value": ""
+       }
+      },
+      {
+       "condition": {
+        "target": "DEAL_UF_CRM_DEAL_1646767625770",
+        "event": "change",
+        "value": "1704",
+        "operation": "="
+       },
+       "action": {
+        "target": "COMPANY_TITLE",
+        "type": "show",
+        "value": ""
+       }
+      },
+      {
+       "condition": {
+        "target": "DEAL_UF_CRM_DEAL_1646767625770",
+        "event": "change",
+        "value": "1704",
+        "operation": "="
+       },
+       "action": {
+        "target": "COMPANY_UF_CRM_1646332489457",
+        "type": "show",
+        "value": ""
+       }
+      },
+      {
+       "condition": {
+        "target": "DEAL_UF_CRM_DEAL_1646767625770",
+        "event": "change",
+        "value": "1704",
+        "operation": "="
+       },
+       "action": {
+        "target": "COMPANY_UF_CRM_1646332469878",
+        "type": "show",
+        "value": ""
+       }
+      },
+      {
+       "condition": {
+        "target": "DEAL_UF_CRM_DEAL_1646767625770",
+        "event": "change",
+        "value": "1704",
+        "operation": "="
+       },
+       "action": {
+        "target": "COMPANY_PHONE",
+        "type": "show",
+        "value": ""
+       }
+      },
+      {
+       "condition": {
+        "target": "DEAL_UF_CRM_DEAL_1646767625770",
+        "event": "change",
+        "value": "1704",
+        "operation": "="
+       },
+       "action": {
+        "target": "COMPANY_ADDRESS",
+        "type": "show",
+        "value": ""
+       }
+      },
+      {
+       "condition": {
+        "target": "DEAL_UF_CRM_DEAL_1646767625770",
+        "event": "change",
+        "value": "1704",
+        "operation": "="
+       },
+       "action": {
+        "target": "DEAL_UF_CRM_1648237002",
+        "type": "show",
+        "value": ""
+       }
+      }
+     ]
+    },
+    {
+     "id": "2448",
+     "typeId": 1,
+     "logic": "or",
+     "list": [
+      {
+       "condition": {
+        "target": "DEAL_UF_CRM_DEAL_1653512568658",
+        "event": "change",
+        "value": "4596",
+        "operation": "="
+       },
+       "action": {
+        "target": "DEAL_UF_CRM_DEAL_1647116469026",
+        "type": "show",
+        "value": ""
+       }
+      },
+      {
+       "condition": {
+        "target": "DEAL_UF_CRM_DEAL_1653512568658",
+        "event": "change",
+        "value": "4596",
+        "operation": "="
+       },
+       "action": {
+        "target": "DEAL_UF_CRM_DEAL_1650479899427",
+        "type": "show",
+        "value": ""
+       }
+      },
+      {
+       "condition": {
+        "target": "DEAL_UF_CRM_DEAL_1653512568658",
+        "event": "change",
+        "value": "4598",
+        "operation": "="
+       },
+       "action": {
+        "target": "DEAL_UF_CRM_DEAL_1647116469026",
+        "type": "show",
+        "value": ""
+       }
+      },
+      {
+       "condition": {
+        "target": "DEAL_UF_CRM_DEAL_1653512568658",
+        "event": "change",
+        "value": "4598",
+        "operation": "="
+       },
+       "action": {
+        "target": "DEAL_UF_CRM_DEAL_1650479899427",
+        "type": "show",
+        "value": ""
+       }
+      }
+     ]
+    }
+   ],
+   "captcha": {
+    "service": "google",
+    "recaptcha": {
+     "use": true
+    },
+    "yandexCaptcha": {
+     "use": true
+    }
+   }
+  }
+ },
+ "14": {
+  "id": "14",
+  "sec": "r9rjrk",
+  "lang": "br",
+  "address": "https://movisat.bitrix24.com.br",
+  "views": {
+   "click": {
+    "type": "panel",
+    "position": "right",
+    "vertical": "bottom"
+   },
+   "auto": {
+    "type": "popup",
+    "position": "center",
+    "vertical": "bottom",
+    "delay": 5
+   }
+  },
+  "data": {
+   "schemaVersion": 1,
+   "acceptBySubmitEnabled": false,
+   "agreementNoticeSupported": true,
+   "agreementNoticeTextMaxLength": 1000,
+   "language": "br",
+   "editMode": false,
+   "design": {
+    "border": {
+     "bottom": false,
+     "top": false,
+     "left": false,
+     "right": false
+    },
+    "color": {
+     "primary": "#f26b36ff",
+     "primaryText": "#ffffffff",
+     "text": "#000000ff",
+     "background": "#ffffffff",
+     "fieldBorder": "#0000000c",
+     "fieldBackground": "#0000000c",
+     "fieldFocusBackground": "#ffffffff"
+    }
+   },
+   "title": "Solicitação de Aditivo Contratual",
+   "desc": "",
+   "buttonCaption": "Enviar",
+   "useSign": false,
+   "date": {
+    "dateFormat": "DD/MM/YYYY",
+    "dateTimeFormat": "DD/MM/YYYY HH:MI:SS",
+    "sundayFirstly": false
+   },
+   "currency": {
+    "code": "BRL",
+    "title": "Reais",
+    "format": "R$#"
+   },
+   "fields": [
+    {
+     "id": "DEAL_UF_CRM_DEAL_1646767625770",
+     "name": "DEAL_UF_CRM_DEAL_1646767625770",
+     "label": "Contrato Pessoa Física ou Jurídica?",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "list",
+     "placeholder": null,
+     "value": null,
+     "items": [
+      {
+       "label": "Pessoa Física (CPF)",
+       "value": "1702",
+       "selected": false
+      },
+      {
+       "label": "Pessoa Jurídica (CNPJ)",
+       "value": "1704",
+       "selected": false
+      }
+     ],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "COMPANY_TITLE",
+     "name": "COMPANY_TITLE",
+     "label": "Empresa",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "company-name",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "COMPANY_UF_CRM_1646332310941",
+     "name": "COMPANY_UF_CRM_1646332310941",
+     "label": "CNPJ",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "double",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "CONTACT_UF_CRM_1646331183902",
+     "name": "CONTACT_UF_CRM_1646331183902",
+     "label": "CPF",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "double",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "CONTACT_NAME",
+     "name": "CONTACT_NAME",
+     "label": "Primeiro Nome",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "name",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "CONTACT_LAST_NAME",
+     "name": "CONTACT_LAST_NAME",
+     "label": "Sobrenome",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "last-name",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "CONTACT_EMAIL",
+     "name": "CONTACT_EMAIL",
+     "label": "E-mail",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "WORK",
+     "type": "email",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "CONTACT_PHONE",
+     "name": "CONTACT_PHONE",
+     "label": "Telefone",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "WORK",
+     "type": "phone",
+     "placeholder": null,
+     "value": "+55",
+     "items": [],
+     "hint": "Não esqueça de incluir o DDD",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "DEAL_UF_CRM_1646255488602",
+     "name": "DEAL_UF_CRM_1646255488602",
+     "label": "Quantidade de veículos",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "double",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "DEAL_UF_CRM_1647530180887",
+     "name": "DEAL_UF_CRM_1647530180887",
+     "label": "Veículo e Placa",
+     "visible": true,
+     "required": true,
+     "multiple": true,
+     "valueType": "",
+     "type": "string",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "1 por linha, caso tenha mais de um veículo adicione em outra linha clicando na opção adicionar.",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "DEAL_UF_CRM_1648236806",
+     "name": "DEAL_UF_CRM_1648236806",
+     "label": "Documento(s) do(s) Veículo(s)",
+     "visible": true,
+     "required": false,
+     "multiple": true,
+     "valueType": "",
+     "maxSizeMb": 1000,
+     "type": "file",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": []
+    },
+    {
+     "id": "DEAL_UF_CRM_DEAL_1647116384861",
+     "name": "DEAL_UF_CRM_DEAL_1647116384861",
+     "label": "Contratar Central 24hr?",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "list",
+     "placeholder": null,
+     "value": null,
+     "items": [
+      {
+       "label": "Sim",
+       "value": "2424",
+       "selected": false
+      },
+      {
+       "label": "Não",
+       "value": "2426",
+       "selected": false
+      }
+     ],
+     "hint": "Caso o serviço esteja contemplado no seu plano atual não será gerado cobrança adicional",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "DEAL_UF_CRM_DEAL_1647116469026",
+     "name": "DEAL_UF_CRM_DEAL_1647116469026",
+     "label": "Contratar bloqueio veícular?",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "list",
+     "placeholder": null,
+     "value": null,
+     "items": [
+      {
+       "label": "Sim",
+       "value": "2428",
+       "selected": false
+      },
+      {
+       "label": "Não",
+       "value": "2430",
+       "selected": false
+      }
+     ],
+     "hint": "OBS 1: Consulte previamente com sua concessionária caso o veículo esteja na garantia | OBS 2: Caso seja um caminhão até o ano de 1993, consulte previamente a possibilidade | OBS 3: Caso o serviço esteja contemplado no seu plano atual não será gerado cobrança adicional",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "DEAL_UF_CRM_DEAL_1647116620790",
+     "name": "DEAL_UF_CRM_DEAL_1647116620790",
+     "label": "Contratar acessórios?",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "list",
+     "placeholder": null,
+     "value": null,
+     "items": [
+      {
+       "label": "Sim",
+       "value": "2432",
+       "selected": false
+      },
+      {
+       "label": "Não",
+       "value": "2434",
+       "selected": false
+      }
+     ],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "product_8086406",
+     "name": "product_8086406",
+     "label": "Produtos",
+     "visible": true,
+     "required": false,
+     "multiple": true,
+     "valueType": "",
+     "type": "product",
+     "placeholder": null,
+     "value": null,
+     "items": [
+      {
+       "label": "ADESIVO RFID",
+       "value": 0,
+       "selected": false,
+       "price": 30,
+       "discount": 0,
+       "pics": [],
+       "quantity": [],
+       "changeablePrice": false
+      }
+     ],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "DEAL_UF_CRM_1732217003630",
+     "name": "DEAL_UF_CRM_1732217003630",
+     "label": "Endereço para envio do(s) equipamento(s)",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "string",
+     "placeholder": null,
+     "value": "\n",
+     "items": [],
+     "hint": "Logradouro: , Nº:  Complemento: , Bairro: , Cidade: , Estado - CEP",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "DEAL_UF_CRM_621FBC6B26ED7",
+     "name": "DEAL_UF_CRM_621FBC6B26ED7",
+     "label": "Tipo contratual",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "list",
+     "placeholder": null,
+     "value": null,
+     "items": [
+      {
+       "label": "Aditivo contratual - Nova aquisição",
+       "value": "566",
+       "selected": false
+      },
+      {
+       "label": "[NOVO TITULAR] Transferência de titularidade",
+       "value": "578",
+       "selected": false
+      }
+     ],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "DEAL_UF_CRM_626956D9D2B66",
+     "name": "DEAL_UF_CRM_626956D9D2B66",
+     "label": "observação",
+     "visible": true,
+     "required": false,
+     "multiple": false,
+     "valueType": "",
+     "type": "string",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    }
+   ],
+   "agreements": [],
+   "dependencies": [
+    {
+     "id": "2432",
+     "typeId": 0,
+     "logic": "or",
+     "list": [
+      {
+       "condition": {
+        "target": "DEAL_UF_CRM_DEAL_1646767625770",
+        "event": "change",
+        "value": "1704",
+        "operation": "="
+       },
+       "action": {
+        "target": "COMPANY_TITLE",
+        "type": "show",
+        "value": ""
+       }
+      },
+      {
+       "condition": {
+        "target": "DEAL_UF_CRM_DEAL_1646767625770",
+        "event": "change",
+        "value": "1704",
+        "operation": "="
+       },
+       "action": {
+        "target": "COMPANY_UF_CRM_1646332310941",
+        "type": "show",
+        "value": ""
+       }
+      },
+      {
+       "condition": {
+        "target": "DEAL_UF_CRM_DEAL_1646767625770",
+        "event": "change",
+        "value": "1702",
+        "operation": "="
+       },
+       "action": {
+        "target": "CONTACT_UF_CRM_1646331183902",
+        "type": "show",
+        "value": ""
+       }
+      },
+      {
+       "condition": {
+        "target": "DEAL_UF_CRM_DEAL_1647116620790",
+        "event": "change",
+        "value": "2432",
+        "operation": "="
+       },
+       "action": {
+        "target": "product_8086406",
+        "type": "show",
+        "value": ""
+       }
+      }
+     ]
+    }
+   ],
+   "captcha": {
+    "service": "google",
+    "recaptcha": {
+     "use": false
+    },
+    "yandexCaptcha": {
+     "use": false
+    }
+   }
+  }
+ },
+ "16": {
+  "id": "16",
+  "sec": "bz56zs",
+  "lang": "br",
+  "address": "https://movisat.bitrix24.com.br",
+  "views": {
+   "click": {
+    "type": "panel",
+    "position": "right",
+    "vertical": "bottom"
+   },
+   "auto": {
+    "type": "popup",
+    "position": "center",
+    "vertical": "bottom",
+    "delay": 5
+   }
+  },
+  "data": {
+   "schemaVersion": 1,
+   "acceptBySubmitEnabled": false,
+   "agreementNoticeSupported": true,
+   "agreementNoticeTextMaxLength": 1000,
+   "language": "br",
+   "editMode": false,
+   "design": {
+    "border": {
+     "bottom": false,
+     "top": false,
+     "left": false,
+     "right": false
+    },
+    "color": {
+     "primary": "#f26b36ff",
+     "primaryText": "#ffffffff",
+     "text": "#000000ff",
+     "background": "#ffffffff",
+     "fieldBorder": "#0000000c",
+     "fieldBackground": "#0000000c",
+     "fieldFocusBackground": "#ffffffff"
+    }
+   },
+   "title": "Solicitação de substituição de veículos",
+   "desc": "",
+   "buttonCaption": "Enviar",
+   "useSign": false,
+   "date": {
+    "dateFormat": "DD/MM/YYYY",
+    "dateTimeFormat": "DD/MM/YYYY HH:MI:SS",
+    "sundayFirstly": false
+   },
+   "currency": {
+    "code": "BRL",
+    "title": "Reais",
+    "format": "R$#"
+   },
+   "fields": [
+    {
+     "id": "DEAL_UF_CRM_DEAL_1646767625770",
+     "name": "DEAL_UF_CRM_DEAL_1646767625770",
+     "label": "Contrato Pessoa Física ou Jurídica?",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "list",
+     "placeholder": null,
+     "value": null,
+     "items": [
+      {
+       "label": "Pessoa Física (CPF)",
+       "value": "1702",
+       "selected": false
+      },
+      {
+       "label": "Pessoa Jurídica (CNPJ)",
+       "value": "1704",
+       "selected": false
+      }
+     ],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "COMPANY_TITLE",
+     "name": "COMPANY_TITLE",
+     "label": "Empresa",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "company-name",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "COMPANY_UF_CRM_1646332310941",
+     "name": "COMPANY_UF_CRM_1646332310941",
+     "label": "CNPJ",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "double",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "CONTACT_UF_CRM_1646331183902",
+     "name": "CONTACT_UF_CRM_1646331183902",
+     "label": "CPF",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "double",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "CONTACT_NAME",
+     "name": "CONTACT_NAME",
+     "label": "Primeiro Nome",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "name",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "CONTACT_LAST_NAME",
+     "name": "CONTACT_LAST_NAME",
+     "label": "Sobrenome",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "last-name",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "CONTACT_POST",
+     "name": "CONTACT_POST",
+     "label": "Cargo",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "string",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "CONTACT_EMAIL",
+     "name": "CONTACT_EMAIL",
+     "label": "E-mail",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "WORK",
+     "type": "email",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "CONTACT_PHONE",
+     "name": "CONTACT_PHONE",
+     "label": "Telefone",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "WORK",
+     "type": "phone",
+     "placeholder": null,
+     "value": "+55",
+     "items": [],
+     "hint": "Não esqueça de incluir o DDD",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "DEAL_UF_CRM_1646255488602",
+     "name": "DEAL_UF_CRM_1646255488602",
+     "label": "Quantidade de veículos que serão substituídos",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "double",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "DEAL_UF_CRM_1658953756",
+     "name": "DEAL_UF_CRM_1658953756",
+     "label": "Substituição de veículos",
+     "visible": true,
+     "required": true,
+     "multiple": true,
+     "valueType": "",
+     "type": "string",
+     "placeholder": null,
+     "value": "SAI: Insira Veículo - Insira Placa | ENTRA: Insira Veículo - Insira Placa",
+     "items": [],
+     "hint": "1 por linha, caso tenha mais de 1 clique em adicionar mais",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "DEAL_UF_CRM_1648236806",
+     "name": "DEAL_UF_CRM_1648236806",
+     "label": "Documento(s) do(s) Veículo(s)",
+     "visible": true,
+     "required": false,
+     "multiple": true,
+     "valueType": "",
+     "maxSizeMb": 1000,
+     "type": "file",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": []
+    },
+    {
+     "id": "DEAL_UF_CRM_DEAL_1647116384861",
+     "name": "DEAL_UF_CRM_DEAL_1647116384861",
+     "label": "Contratar Central 24hr?",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "list",
+     "placeholder": null,
+     "value": null,
+     "items": [
+      {
+       "label": "Sim",
+       "value": "2424",
+       "selected": false
+      },
+      {
+       "label": "Não",
+       "value": "2426",
+       "selected": false
+      }
+     ],
+     "hint": "Caso o serviço esteja contemplado no seu plano atual não será gerado cobrança adicional",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "DEAL_UF_CRM_DEAL_1647116469026",
+     "name": "DEAL_UF_CRM_DEAL_1647116469026",
+     "label": "Contratar bloqueio veícular?",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "list",
+     "placeholder": null,
+     "value": null,
+     "items": [
+      {
+       "label": "Sim",
+       "value": "2428",
+       "selected": false
+      },
+      {
+       "label": "Não",
+       "value": "2430",
+       "selected": false
+      }
+     ],
+     "hint": "OBS 1: Consulte previamente com sua concessionária caso o veículo esteja na garantia | OBS 2: Caso seja um caminhão até o ano de 1993, consulte previamente a possibilidade | OBS 3: Caso o serviço esteja contemplado no seu plano atual não será gerado cobrança adicional",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "DEAL_UF_CRM_DEAL_1647116620790",
+     "name": "DEAL_UF_CRM_DEAL_1647116620790",
+     "label": "Contratar acessórios?",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "list",
+     "placeholder": null,
+     "value": null,
+     "items": [
+      {
+       "label": "Sim",
+       "value": "2432",
+       "selected": false
+      },
+      {
+       "label": "Não",
+       "value": "2434",
+       "selected": false
+      }
+     ],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "product_6764664",
+     "name": "product_6764664",
+     "label": "Produtos",
+     "visible": true,
+     "required": false,
+     "multiple": true,
+     "valueType": "",
+     "type": "product",
+     "placeholder": null,
+     "value": null,
+     "items": [
+      {
+       "label": "BOTÃO DE PÂNICO",
+       "value": 0,
+       "selected": false,
+       "price": 10,
+       "discount": 0,
+       "pics": [],
+       "quantity": [],
+       "changeablePrice": false
+      }
+     ],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": true,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "DEAL_UF_CRM_626956D9D2B66",
+     "name": "DEAL_UF_CRM_626956D9D2B66",
+     "label": "Considerações adicionais",
+     "visible": true,
+     "required": false,
+     "multiple": false,
+     "valueType": "",
+     "type": "string",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    }
+   ],
+   "agreements": [],
+   "dependencies": [
+    {
+     "id": "2382",
+     "typeId": 0,
+     "logic": "or",
+     "list": [
+      {
+       "condition": {
+        "target": "DEAL_UF_CRM_DEAL_1646767625770",
+        "event": "change",
+        "value": "1704",
+        "operation": "="
+       },
+       "action": {
+        "target": "COMPANY_TITLE",
+        "type": "show",
+        "value": ""
+       }
+      },
+      {
+       "condition": {
+        "target": "DEAL_UF_CRM_DEAL_1646767625770",
+        "event": "change",
+        "value": "1704",
+        "operation": "="
+       },
+       "action": {
+        "target": "COMPANY_UF_CRM_1646332310941",
+        "type": "show",
+        "value": ""
+       }
+      },
+      {
+       "condition": {
+        "target": "DEAL_UF_CRM_DEAL_1646767625770",
+        "event": "change",
+        "value": "1702",
+        "operation": "="
+       },
+       "action": {
+        "target": "CONTACT_UF_CRM_1646331183902",
+        "type": "show",
+        "value": ""
+       }
+      },
+      {
+       "condition": {
+        "target": "DEAL_UF_CRM_DEAL_1647116620790",
+        "event": "change",
+        "value": "2432",
+        "operation": "="
+       },
+       "action": {
+        "target": "product_6764664",
+        "type": "show",
+        "value": ""
+       }
+      }
+     ]
+    }
+   ],
+   "captcha": {
+    "service": "google",
+    "recaptcha": {
+     "use": false
+    },
+    "yandexCaptcha": {
+     "use": false
+    }
+   }
+  }
+ },
+ "10": {
+  "id": "10",
+  "sec": "ynipyz",
+  "lang": "br",
+  "address": "https://movisat.bitrix24.com.br",
+  "views": {
+   "click": {
+    "type": "panel",
+    "position": "right",
+    "vertical": "bottom"
+   },
+   "auto": {
+    "type": "popup",
+    "position": "center",
+    "vertical": "bottom",
+    "delay": 5
+   }
+  },
+  "data": {
+   "schemaVersion": 1,
+   "acceptBySubmitEnabled": false,
+   "agreementNoticeSupported": true,
+   "agreementNoticeTextMaxLength": 1000,
+   "language": "br",
+   "editMode": false,
+   "design": {
+    "border": {
+     "bottom": false,
+     "top": false,
+     "left": false,
+     "right": false
+    },
+    "color": {
+     "primary": "#f58319ff",
+     "primaryText": "#ffffffff",
+     "text": "#000000ff",
+     "background": "#ffffffff",
+     "fieldBorder": "#0000000c",
+     "fieldBackground": "#0000000c",
+     "fieldFocusBackground": "#ffffffff"
+    }
+   },
+   "title": "Solicitação de Rescisão Contratual",
+   "desc": "",
+   "buttonCaption": "Enviar",
+   "useSign": false,
+   "date": {
+    "dateFormat": "DD/MM/YYYY",
+    "dateTimeFormat": "DD/MM/YYYY HH:MI:SS",
+    "sundayFirstly": false
+   },
+   "currency": {
+    "code": "BRL",
+    "title": "Reais",
+    "format": "R$#"
+   },
+   "fields": [
+    {
+     "id": "CONTACT_UF_CRM_6227C13CCA255",
+     "name": "CONTACT_UF_CRM_6227C13CCA255",
+     "label": "Contrato Pessoa Física ou Jurídica?",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "list",
+     "placeholder": null,
+     "value": "",
+     "items": [
+      {
+       "label": "Pessoa Física (CPF)",
+       "value": "1754",
+       "selected": false
+      },
+      {
+       "label": "Pessoa Jurídica (CNPJ)",
+       "value": "1756",
+       "selected": false
+      }
+     ],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "COMPANY_TITLE",
+     "name": "COMPANY_TITLE",
+     "label": "Empresa",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "company-name",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "COMPANY_UF_CRM_1646332310941",
+     "name": "COMPANY_UF_CRM_1646332310941",
+     "label": "CNPJ",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "double",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "CONTACT_UF_CRM_1646331183902",
+     "name": "CONTACT_UF_CRM_1646331183902",
+     "label": "CPF",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "double",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "CONTACT_NAME",
+     "name": "CONTACT_NAME",
+     "label": "Primeiro Nome",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "name",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "CONTACT_LAST_NAME",
+     "name": "CONTACT_LAST_NAME",
+     "label": "Sobrenome",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "last-name",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "CONTACT_EMAIL",
+     "name": "CONTACT_EMAIL",
+     "label": "E-mail",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "WORK",
+     "type": "email",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "CONTACT_PHONE",
+     "name": "CONTACT_PHONE",
+     "label": "Telefone",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "WORK",
+     "type": "phone",
+     "placeholder": null,
+     "value": "+55",
+     "items": [],
+     "hint": "Não esqueça de incluir o DDD",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "DEAL_UF_CRM_1646765823",
+     "name": "DEAL_UF_CRM_1646765823",
+     "label": "Tipo de Rescisão",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "list",
+     "placeholder": null,
+     "value": "",
+     "items": [
+      {
+       "label": "Parcial (um ou mais veículos apenas) com aviso prévio",
+       "value": "1662",
+       "selected": false
+      },
+      {
+       "label": "Parcial (um ou mais veículos apenas) com retirada imediata",
+       "value": "1664",
+       "selected": false
+      },
+      {
+       "label": "Contrato inteiro com aviso prévio",
+       "value": "1666",
+       "selected": false
+      },
+      {
+       "label": "Contrato inteiro com retirada imediata",
+       "value": "1668",
+       "selected": false
+      },
+      {
+       "label": "Transferência de titularidade",
+       "value": "5836",
+       "selected": false
+      }
+     ],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "DEAL_UF_CRM_1646255488602",
+     "name": "DEAL_UF_CRM_1646255488602",
+     "label": "Quantidade de veículos",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "double",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "DEAL_UF_CRM_1647530180887",
+     "name": "DEAL_UF_CRM_1647530180887",
+     "label": "Veículo e Placa",
+     "visible": true,
+     "required": true,
+     "multiple": true,
+     "valueType": "",
+     "type": "string",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "Insira um veículo por campo, para inserir mais de um veículo clique em \"+ Adicionar mais\" no seguinte modelo: Celta - ABC 1234",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "DEAL_UF_CRM_DEAL_1646766037330",
+     "name": "DEAL_UF_CRM_DEAL_1646766037330",
+     "label": "Motivo de cancelamento",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "list",
+     "placeholder": null,
+     "value": "",
+     "items": [
+      {
+       "label": "Substituição da frota",
+       "value": "1678",
+       "selected": false
+      },
+      {
+       "label": "Venda do veículo",
+       "value": "1680",
+       "selected": false
+      },
+      {
+       "label": "Veículo roubado",
+       "value": "1682",
+       "selected": false
+      },
+      {
+       "label": "Veículo deu perca total",
+       "value": "1684",
+       "selected": false
+      },
+      {
+       "label": "Dificuldade financeira",
+       "value": "1686",
+       "selected": false
+      },
+      {
+       "label": "Outro motivo",
+       "value": "1688",
+       "selected": false
+      }
+     ],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "DEAL_UF_CRM_DEAL_1646767217258",
+     "name": "DEAL_UF_CRM_DEAL_1646767217258",
+     "label": "Detalhe o motivo",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "string",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "DEAL_UF_CRM_DEAL_1675866590047",
+     "name": "DEAL_UF_CRM_DEAL_1675866590047",
+     "label": "CNPJ e Nome da Empresa que será transferido o(s) veículo(s)",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "string",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "DEAL_UF_CRM_DEAL_1675866649286",
+     "name": "DEAL_UF_CRM_DEAL_1675866649286",
+     "label": "Nome do contato responsável que será o novo titular",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "string",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "DEAL_UF_CRM_DEAL_1675866778782",
+     "name": "DEAL_UF_CRM_DEAL_1675866778782",
+     "label": "Telefone com DDD do novo titular",
+     "visible": true,
+     "required": true,
+     "multiple": true,
+     "valueType": "",
+     "type": "string",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "DEAL_UF_CRM_DEAL_1675866815549",
+     "name": "DEAL_UF_CRM_DEAL_1675866815549",
+     "label": "E-mail do novo titular",
+     "visible": true,
+     "required": true,
+     "multiple": true,
+     "valueType": "",
+     "type": "string",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    }
+   ],
+   "agreements": [],
+   "dependencies": [
+    {
+     "id": "2456",
+     "typeId": 0,
+     "logic": "or",
+     "list": [
+      {
+       "condition": {
+        "target": "CONTACT_UF_CRM_6227C13CCA255",
+        "event": "change",
+        "value": "1756",
+        "operation": "="
+       },
+       "action": {
+        "target": "COMPANY_TITLE",
+        "type": "show",
+        "value": ""
+       }
+      },
+      {
+       "condition": {
+        "target": "CONTACT_UF_CRM_6227C13CCA255",
+        "event": "change",
+        "value": "1756",
+        "operation": "="
+       },
+       "action": {
+        "target": "COMPANY_UF_CRM_1646332310941",
+        "type": "show",
+        "value": ""
+       }
+      },
+      {
+       "condition": {
+        "target": "CONTACT_UF_CRM_6227C13CCA255",
+        "event": "change",
+        "value": "1754",
+        "operation": "="
+       },
+       "action": {
+        "target": "CONTACT_UF_CRM_1646331183902",
+        "type": "show",
+        "value": ""
+       }
+      },
+      {
+       "condition": {
+        "target": "DEAL_UF_CRM_DEAL_1646766037330",
+        "event": "change",
+        "value": "1688",
+        "operation": "="
+       },
+       "action": {
+        "target": "DEAL_UF_CRM_DEAL_1646767217258",
+        "type": "show",
+        "value": ""
+       }
+      },
+      {
+       "condition": {
+        "target": "DEAL_UF_CRM_1646765823",
+        "event": "change",
+        "value": "5836",
+        "operation": "="
+       },
+       "action": {
+        "target": "DEAL_UF_CRM_DEAL_1675866590047",
+        "type": "show",
+        "value": ""
+       }
+      },
+      {
+       "condition": {
+        "target": "DEAL_UF_CRM_1646765823",
+        "event": "change",
+        "value": "5836",
+        "operation": "="
+       },
+       "action": {
+        "target": "DEAL_UF_CRM_DEAL_1675866649286",
+        "type": "show",
+        "value": ""
+       }
+      },
+      {
+       "condition": {
+        "target": "DEAL_UF_CRM_1646765823",
+        "event": "change",
+        "value": "5836",
+        "operation": "="
+       },
+       "action": {
+        "target": "DEAL_UF_CRM_DEAL_1675866778782",
+        "type": "show",
+        "value": ""
+       }
+      },
+      {
+       "condition": {
+        "target": "DEAL_UF_CRM_1646765823",
+        "event": "change",
+        "value": "5836",
+        "operation": "="
+       },
+       "action": {
+        "target": "DEAL_UF_CRM_DEAL_1675866815549",
+        "type": "show",
+        "value": ""
+       }
+      }
+     ]
+    },
+    {
+     "id": "2458",
+     "typeId": 1,
+     "logic": "or",
+     "list": [
+      {
+       "condition": {
+        "target": "DEAL_UF_CRM_1646765823",
+        "event": "change",
+        "value": "1666",
+        "operation": "="
+       },
+       "action": {
+        "target": "DEAL_UF_CRM_1647530180887",
+        "type": "hide",
+        "value": ""
+       }
+      },
+      {
+       "condition": {
+        "target": "DEAL_UF_CRM_1646765823",
+        "event": "change",
+        "value": "1668",
+        "operation": "="
+       },
+       "action": {
+        "target": "DEAL_UF_CRM_1647530180887",
+        "type": "hide",
+        "value": ""
+       }
+      }
+     ]
+    }
+   ],
+   "captcha": {
+    "service": "google",
+    "recaptcha": {
+     "use": false
+    },
+    "yandexCaptcha": {
+     "use": false
+    }
+   }
+  }
+ },
+ "36": {
+  "id": "36",
+  "sec": "1ij4kk",
+  "lang": "br",
+  "address": "https://movisat.bitrix24.com.br",
+  "views": {
+   "click": {
+    "type": "panel",
+    "position": "right",
+    "vertical": "bottom"
+   },
+   "auto": {
+    "type": "popup",
+    "position": "center",
+    "vertical": "bottom",
+    "delay": 5
+   }
+  },
+  "data": {
+   "schemaVersion": 1,
+   "acceptBySubmitEnabled": false,
+   "agreementNoticeSupported": true,
+   "agreementNoticeTextMaxLength": 1000,
+   "language": "br",
+   "editMode": false,
+   "design": {
+    "border": {
+     "bottom": false,
+     "top": false,
+     "left": false,
+     "right": false
+    },
+    "color": {
+     "primary": "#f26b36ff",
+     "primaryText": "#ffffffff",
+     "text": "#000000ff",
+     "background": "#ffffffff",
+     "fieldBorder": "#0000000c",
+     "fieldBackground": "#0000000c",
+     "fieldFocusBackground": "#ffffffff"
+    }
+   },
+   "title": "Solicitações administrativas",
+   "desc": "",
+   "buttonCaption": "Enviar",
+   "useSign": false,
+   "date": {
+    "dateFormat": "DD/MM/YYYY",
+    "dateTimeFormat": "DD/MM/YYYY HH:MI:SS",
+    "sundayFirstly": false
+   },
+   "currency": {
+    "code": "BRL",
+    "title": "Reais",
+    "format": "R$#"
+   },
+   "fields": [
+    {
+     "id": "CONTACT_UF_CRM_6227C13CCA255",
+     "name": "CONTACT_UF_CRM_6227C13CCA255",
+     "label": "Contrato Pessoa Física ou Jurídica?",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "list",
+     "placeholder": null,
+     "value": null,
+     "items": [
+      {
+       "label": "Pessoa Física (CPF)",
+       "value": "1754",
+       "selected": false
+      },
+      {
+       "label": "Pessoa Jurídica (CNPJ)",
+       "value": "1756",
+       "selected": false
+      }
+     ],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "COMPANY_TITLE",
+     "name": "COMPANY_TITLE",
+     "label": "Empresa",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "company-name",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "COMPANY_UF_CRM_1646332310941",
+     "name": "COMPANY_UF_CRM_1646332310941",
+     "label": "CNPJ",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "double",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "CONTACT_UF_CRM_1646331183902",
+     "name": "CONTACT_UF_CRM_1646331183902",
+     "label": "CPF",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "double",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "CONTACT_NAME",
+     "name": "CONTACT_NAME",
+     "label": "Primeiro Nome",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "name",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "CONTACT_LAST_NAME",
+     "name": "CONTACT_LAST_NAME",
+     "label": "Sobrenome",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "last-name",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "CONTACT_EMAIL",
+     "name": "CONTACT_EMAIL",
+     "label": "E-mail",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "WORK",
+     "type": "email",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "CONTACT_PHONE",
+     "name": "CONTACT_PHONE",
+     "label": "Telefone",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "WORK",
+     "type": "phone",
+     "placeholder": null,
+     "value": "+55",
+     "items": [],
+     "hint": "Não esqueça de incluir o DDD",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "DEAL_UF_CRM_1646660778389",
+     "name": "DEAL_UF_CRM_1646660778389",
+     "label": "Tipo de Solicitação",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "list",
+     "placeholder": null,
+     "value": null,
+     "items": [
+      {
+       "label": "Alteração cadastral",
+       "value": "1334",
+       "selected": false
+      },
+      {
+       "label": "Boletos e/ou Notas Fiscais",
+       "value": "1336",
+       "selected": false
+      },
+      {
+       "label": "Outros assuntos financeiros",
+       "value": "1338",
+       "selected": false
+      },
+      {
+       "label": "Sugestões e idéias",
+       "value": "1352",
+       "selected": false
+      },
+      {
+       "label": "Solicitação de desenvolvimento (Projeto)",
+       "value": "1354",
+       "selected": false
+      },
+      {
+       "label": "Tratativa administrativa",
+       "value": "1356",
+       "selected": false
+      },
+      {
+       "label": "Troca de tecnologia",
+       "value": "6298",
+       "selected": false
+      },
+      {
+       "label": "Reclamação de serviço prestado",
+       "value": "1360",
+       "selected": false
+      },
+      {
+       "label": "Reclamação de atendimento",
+       "value": "1362",
+       "selected": false
+      },
+      {
+       "label": "Reclamação de qualidade",
+       "value": "1364",
+       "selected": false
+      },
+      {
+       "label": "Compra de Equipamento",
+       "value": "5462",
+       "selected": false
+      },
+      {
+       "label": "Ressarcimento de Equipamento",
+       "value": "5464",
+       "selected": false
+      },
+      {
+       "label": "Ativação de Backup",
+       "value": "6072",
+       "selected": false
+      },
+      {
+       "label": "Desativação de Backup",
+       "value": "6076",
+       "selected": false
+      }
+     ],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "DEAL_UF_CRM_1771949617",
+     "name": "DEAL_UF_CRM_1771949617",
+     "label": "Solicitação de Produto/Serviço",
+     "visible": true,
+     "required": true,
+     "multiple": true,
+     "valueType": "",
+     "type": "list",
+     "placeholder": null,
+     "value": null,
+     "items": [
+      {
+       "label": "Cartão RFID motorista",
+       "value": "7260",
+       "selected": false
+      },
+      {
+       "label": "Leitor RFID veicular",
+       "value": "7262",
+       "selected": false
+      },
+      {
+       "label": "iButton motorista",
+       "value": "7264",
+       "selected": false
+      },
+      {
+       "label": "Leitor iButton veicular",
+       "value": "7266",
+       "selected": false
+      },
+      {
+       "label": "Botão pânico",
+       "value": "7268",
+       "selected": false
+      },
+      {
+       "label": "Módulo de voz",
+       "value": "7270",
+       "selected": false
+      },
+      {
+       "label": "Sirene",
+       "value": "7272",
+       "selected": false
+      }
+     ],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "DEAL_UF_CRM_1646660825704",
+     "name": "DEAL_UF_CRM_1646660825704",
+     "label": "Detalhe o máximo a ocorrência/solicitação",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "string",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    }
+   ],
+   "agreements": [],
+   "dependencies": [
+    {
+     "id": "2372",
+     "typeId": 0,
+     "logic": "or",
+     "list": [
+      {
+       "condition": {
+        "target": "CONTACT_UF_CRM_6227C13CCA255",
+        "event": "change",
+        "value": "1756",
+        "operation": "="
+       },
+       "action": {
+        "target": "COMPANY_TITLE",
+        "type": "show",
+        "value": null
+       }
+      },
+      {
+       "condition": {
+        "target": "CONTACT_UF_CRM_6227C13CCA255",
+        "event": "change",
+        "value": "1756",
+        "operation": "="
+       },
+       "action": {
+        "target": "COMPANY_UF_CRM_1646332310941",
+        "type": "show",
+        "value": null
+       }
+      },
+      {
+       "condition": {
+        "target": "CONTACT_UF_CRM_6227C13CCA255",
+        "event": "change",
+        "value": "1754",
+        "operation": "="
+       },
+       "action": {
+        "target": "CONTACT_UF_CRM_1646331183902",
+        "type": "show",
+        "value": null
+       }
+      },
+      {
+       "condition": {
+        "target": "DEAL_UF_CRM_1646660778389",
+        "event": "change",
+        "value": "5462",
+        "operation": "="
+       },
+       "action": {
+        "target": "DEAL_UF_CRM_1771949617",
+        "type": "show",
+        "value": null
+       }
+      }
+     ]
+    }
+   ],
+   "captcha": {
+    "service": "google",
+    "recaptcha": {
+     "use": false
+    },
+    "yandexCaptcha": {
+     "use": false
+    }
+   }
+  }
+ },
+ "34": {
+  "id": "34",
+  "sec": "kw2hsm",
+  "lang": "br",
+  "address": "https://movisat.bitrix24.com.br",
+  "views": {
+   "click": {
+    "type": "panel",
+    "position": "right",
+    "vertical": "bottom"
+   },
+   "auto": {
+    "type": "popup",
+    "position": "center",
+    "vertical": "bottom",
+    "delay": 5
+   }
+  },
+  "data": {
+   "schemaVersion": 1,
+   "acceptBySubmitEnabled": false,
+   "agreementNoticeSupported": true,
+   "agreementNoticeTextMaxLength": 1000,
+   "language": "br",
+   "editMode": false,
+   "design": {
+    "border": {
+     "bottom": false,
+     "top": false,
+     "left": false,
+     "right": false
+    },
+    "color": {
+     "primary": "#f26b36ff",
+     "primaryText": "#ffffffff",
+     "text": "#000000ff",
+     "background": "#ffffffff",
+     "fieldBorder": "#0000000c",
+     "fieldBackground": "#0000000c",
+     "fieldFocusBackground": "#ffffffff"
+    }
+   },
+   "title": "Solicitações financeiras",
+   "desc": "",
+   "buttonCaption": "Enviar",
+   "useSign": false,
+   "date": {
+    "dateFormat": "DD/MM/YYYY",
+    "dateTimeFormat": "DD/MM/YYYY HH:MI:SS",
+    "sundayFirstly": false
+   },
+   "currency": {
+    "code": "BRL",
+    "title": "Reais",
+    "format": "R$#"
+   },
+   "fields": [
+    {
+     "id": "CONTACT_UF_CRM_6227C13CCA255",
+     "name": "CONTACT_UF_CRM_6227C13CCA255",
+     "label": "Contrato Pessoa Física ou Jurídica?",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "list",
+     "placeholder": null,
+     "value": null,
+     "items": [
+      {
+       "label": "Pessoa Física (CPF)",
+       "value": "1754",
+       "selected": false
+      },
+      {
+       "label": "Pessoa Jurídica (CNPJ)",
+       "value": "1756",
+       "selected": false
+      }
+     ],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "COMPANY_TITLE",
+     "name": "COMPANY_TITLE",
+     "label": "Empresa",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "company-name",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "COMPANY_UF_CRM_1646332310941",
+     "name": "COMPANY_UF_CRM_1646332310941",
+     "label": "CNPJ",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "double",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "CONTACT_UF_CRM_1646331183902",
+     "name": "CONTACT_UF_CRM_1646331183902",
+     "label": "CPF",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "double",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "CONTACT_NAME",
+     "name": "CONTACT_NAME",
+     "label": "Primeiro Nome",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "name",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "CONTACT_LAST_NAME",
+     "name": "CONTACT_LAST_NAME",
+     "label": "Sobrenome",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "last-name",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "CONTACT_EMAIL",
+     "name": "CONTACT_EMAIL",
+     "label": "E-mail",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "WORK",
+     "type": "email",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "CONTACT_PHONE",
+     "name": "CONTACT_PHONE",
+     "label": "Telefone",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "WORK",
+     "type": "phone",
+     "placeholder": null,
+     "value": "+55",
+     "items": [],
+     "hint": "Não esqueça de incluir o DDD",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "DEAL_UF_CRM_1646660778389",
+     "name": "DEAL_UF_CRM_1646660778389",
+     "label": "Tipo de Solicitação",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "list",
+     "placeholder": null,
+     "value": null,
+     "items": [
+      {
+       "label": "Alteração cadastral",
+       "value": "1334",
+       "selected": false
+      },
+      {
+       "label": "Boletos e/ou Notas Fiscais",
+       "value": "1336",
+       "selected": false
+      },
+      {
+       "label": "Outros assuntos financeiros",
+       "value": "1338",
+       "selected": false
+      },
+      {
+       "label": "Tratativa administrativa",
+       "value": "1356",
+       "selected": false
+      },
+      {
+       "label": "Cobrança",
+       "value": "4156",
+       "selected": false
+      }
+     ],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "DEAL_UF_CRM_1646660825704",
+     "name": "DEAL_UF_CRM_1646660825704",
+     "label": "Detalhe sua solicitação",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "string",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "Se necessário indique datas, códigos, números para facilitar a tratativa",
+     "hintOnFocus": true,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    }
+   ],
+   "agreements": [],
+   "dependencies": [
+    {
+     "id": "2296",
+     "typeId": 0,
+     "logic": "or",
+     "list": [
+      {
+       "condition": {
+        "target": "CONTACT_UF_CRM_6227C13CCA255",
+        "event": "change",
+        "value": "1756",
+        "operation": "="
+       },
+       "action": {
+        "target": "COMPANY_TITLE",
+        "type": "show",
+        "value": ""
+       }
+      },
+      {
+       "condition": {
+        "target": "CONTACT_UF_CRM_6227C13CCA255",
+        "event": "change",
+        "value": "1756",
+        "operation": "="
+       },
+       "action": {
+        "target": "COMPANY_UF_CRM_1646332310941",
+        "type": "show",
+        "value": ""
+       }
+      },
+      {
+       "condition": {
+        "target": "CONTACT_UF_CRM_6227C13CCA255",
+        "event": "change",
+        "value": "1754",
+        "operation": "="
+       },
+       "action": {
+        "target": "CONTACT_UF_CRM_1646331183902",
+        "type": "show",
+        "value": ""
+       }
+      }
+     ]
+    }
+   ],
+   "captcha": {
+    "service": "google",
+    "recaptcha": {
+     "use": true
+    },
+    "yandexCaptcha": {
+     "use": true
+    }
+   }
+  }
+ },
+ "164": {
+  "id": "164",
+  "sec": "6qimez",
+  "lang": "br",
+  "address": "https://movisat.bitrix24.com.br",
+  "views": {
+   "click": {
+    "type": "panel",
+    "position": "right",
+    "vertical": "bottom"
+   },
+   "auto": {
+    "type": "popup",
+    "position": "center",
+    "vertical": "bottom",
+    "delay": 5
+   }
+  },
+  "data": {
+   "schemaVersion": 1,
+   "acceptBySubmitEnabled": false,
+   "agreementNoticeSupported": true,
+   "agreementNoticeTextMaxLength": 1000,
+   "language": "br",
+   "editMode": false,
+   "design": {
+    "style": "classic",
+    "border": {
+     "bottom": true,
+     "top": false,
+     "left": false,
+     "right": false
+    },
+    "color": {
+     "primary": "#00aeef",
+     "primaryText": "#fff",
+     "text": "#000",
+     "background": "#ffffff",
+     "fieldBorder": "#00000012",
+     "fieldBackground": "#0000000d",
+     "fieldFocusBackground": "#fff"
+    }
+   },
+   "title": "Credenciamento de serviços técnicos",
+   "desc": "",
+   "buttonCaption": "Enviar",
+   "useSign": false,
+   "date": {
+    "dateFormat": "DD/MM/YYYY",
+    "dateTimeFormat": "DD/MM/YYYY HH:MI:SS",
+    "sundayFirstly": false
+   },
+   "currency": {
+    "code": "BRL",
+    "title": "Reais",
+    "format": "R$#"
+   },
+   "fields": [
+    {
+     "id": "page_8563129",
+     "name": "page_8563129",
+     "label": "EMPRESA",
+     "visible": true,
+     "required": false,
+     "multiple": false,
+     "valueType": "",
+     "type": "page",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "COMPANY_TITLE",
+     "name": "COMPANY_TITLE",
+     "label": "Nome da Empresa (fantasia)",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "company-name",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "COMPANY_UF_CRM_1646332339664",
+     "name": "COMPANY_UF_CRM_1646332339664",
+     "label": "Razão social",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "string",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "COMPANY_UF_CRM_1646332310941",
+     "name": "COMPANY_UF_CRM_1646332310941",
+     "label": "CNPJ",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "double",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "COMPANY_ADDRESS",
+     "name": "COMPANY_ADDRESS",
+     "label": "Endereço",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "string",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "Padrão Google: Logradouro, número, cidade e estado",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "COMPANY_UF_CRM_1647888964",
+     "name": "COMPANY_UF_CRM_1647888964",
+     "label": "Cidade",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "string",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "COMPANY_UF_CRM_COMPANY_1676472122756",
+     "name": "COMPANY_UF_CRM_COMPANY_1676472122756",
+     "label": "Estado",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "string",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "Use Sigla: AM, SP, RJ, MG, RS, PR...",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "COMPANY_UF_CRM_COMPANY_1676472157251",
+     "name": "COMPANY_UF_CRM_COMPANY_1676472157251",
+     "label": "CEP",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "string",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "COMPANY_PHONE",
+     "name": "COMPANY_PHONE",
+     "label": "Telefone Fixo",
+     "visible": true,
+     "required": false,
+     "multiple": true,
+     "valueType": "OTHER",
+     "type": "phone",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "COMPANY_EMAIL",
+     "name": "COMPANY_EMAIL",
+     "label": "E-mail geral da empresa",
+     "visible": true,
+     "required": false,
+     "multiple": true,
+     "valueType": "OTHER",
+     "type": "email",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "page_9795360",
+     "name": "page_9795360",
+     "label": "RESPONSÁVEL PELA EMPRESA",
+     "visible": true,
+     "required": false,
+     "multiple": false,
+     "valueType": "",
+     "type": "page",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "CONTACT_NAME",
+     "name": "CONTACT_NAME",
+     "label": "Nome do responsável pela empresa",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "name",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "CONTACT_LAST_NAME",
+     "name": "CONTACT_LAST_NAME",
+     "label": "Sobrenome do responsável pela empresa",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "last-name",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "CONTACT_UF_CRM_1646331183902",
+     "name": "CONTACT_UF_CRM_1646331183902",
+     "label": "CPF",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "double",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "CONTACT_PHONE",
+     "name": "CONTACT_PHONE",
+     "label": "Telefone Celular / Whatsapp",
+     "visible": true,
+     "required": true,
+     "multiple": true,
+     "valueType": "OTHER",
+     "type": "phone",
+     "placeholder": null,
+     "value": "+55",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "CONTACT_EMAIL",
+     "name": "CONTACT_EMAIL",
+     "label": "E-mail",
+     "visible": true,
+     "required": true,
+     "multiple": true,
+     "valueType": "WORK",
+     "type": "email",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "page_8369621",
+     "name": "page_8369621",
+     "label": "BANCO",
+     "visible": true,
+     "required": false,
+     "multiple": false,
+     "valueType": "",
+     "type": "page",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "COMPANY_UF_CRM_COMPANY_1676472984923",
+     "name": "COMPANY_UF_CRM_COMPANY_1676472984923",
+     "label": "Banco",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "string",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "COMPANY_UF_CRM_COMPANY_1676473014155",
+     "name": "COMPANY_UF_CRM_COMPANY_1676473014155",
+     "label": "Agência",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "string",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "COMPANY_UF_CRM_COMPANY_1676473127324",
+     "name": "COMPANY_UF_CRM_COMPANY_1676473127324",
+     "label": "Conta",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "string",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "COMPANY_UF_CRM_COMPANY_1676473188477",
+     "name": "COMPANY_UF_CRM_COMPANY_1676473188477",
+     "label": "Titular da conta é pessoa Física ou Jurídica?",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "list",
+     "placeholder": null,
+     "value": null,
+     "items": [
+      {
+       "label": "Física",
+       "value": "5846",
+       "selected": false
+      },
+      {
+       "label": "Jurídica",
+       "value": "5848",
+       "selected": false
+      }
+     ],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "page_6511443",
+     "name": "page_6511443",
+     "label": "TABELA DE SERVIÇOS",
+     "visible": true,
+     "required": false,
+     "multiple": false,
+     "valueType": "",
+     "type": "page",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "COMPANY_UF_CRM_COMPANY_1676473349877",
+     "name": "COMPANY_UF_CRM_COMPANY_1676473349877",
+     "label": "Instalação simples (positivo, negativo e pós-chave)",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "double",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "Valor unitário",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "COMPANY_UF_CRM_COMPANY_1676473402701",
+     "name": "COMPANY_UF_CRM_COMPANY_1676473402701",
+     "label": "Instalação com bloqueio",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "string",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "Valor unitário",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "COMPANY_UF_CRM_COMPANY_1676473439165",
+     "name": "COMPANY_UF_CRM_COMPANY_1676473439165",
+     "label": "Manutenção/Correção do equipamento ou da instalação",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "double",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "Valor unitário",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "COMPANY_UF_CRM_COMPANY_1676473595782",
+     "name": "COMPANY_UF_CRM_COMPANY_1676473595782",
+     "label": "Substituição de equipamento, troca de equipamento no mesmo veículo",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "double",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "Valor unitário",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "COMPANY_UF_CRM_COMPANY_1676473645934",
+     "name": "COMPANY_UF_CRM_COMPANY_1676473645934",
+     "label": "Substituição de um equipamento de um veículo para outro",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "double",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "COMPANY_UF_CRM_COMPANY_1676473667870",
+     "name": "COMPANY_UF_CRM_COMPANY_1676473667870",
+     "label": "Remoção de um equipamento",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "string",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "COMPANY_UF_CRM_COMPANY_1676473742510",
+     "name": "COMPANY_UF_CRM_COMPANY_1676473742510",
+     "label": "Possui ponto fixo para receber serviços?",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "list",
+     "placeholder": null,
+     "value": null,
+     "items": [
+      {
+       "label": "Sim",
+       "value": "5850",
+       "selected": false
+      },
+      {
+       "label": "Não",
+       "value": "5852",
+       "selected": false
+      }
+     ],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "COMPANY_UF_CRM_COMPANY_1676473773718",
+     "name": "COMPANY_UF_CRM_COMPANY_1676473773718",
+     "label": "Possível deslocamento até o cliente?",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "list",
+     "placeholder": null,
+     "value": null,
+     "items": [
+      {
+       "label": "Sim",
+       "value": "5854",
+       "selected": false
+      },
+      {
+       "label": "Não",
+       "value": "5856",
+       "selected": false
+      }
+     ],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "COMPANY_UF_CRM_COMPANY_1676473838038",
+     "name": "COMPANY_UF_CRM_COMPANY_1676473838038",
+     "label": "Área de cobertura (ex: até 50km)",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "string",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "COMPANY_UF_CRM_COMPANY_1676473931719",
+     "name": "COMPANY_UF_CRM_COMPANY_1676473931719",
+     "label": "É cobrado a parte o deslocamento?",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "list",
+     "placeholder": null,
+     "value": null,
+     "items": [
+      {
+       "label": "Sim",
+       "value": "5858",
+       "selected": false
+      },
+      {
+       "label": "Não",
+       "value": "5860",
+       "selected": false
+      }
+     ],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "COMPANY_UF_CRM_COMPANY_1676474106921",
+     "name": "COMPANY_UF_CRM_COMPANY_1676474106921",
+     "label": "Qual o valor cobrado pelo deslocamento?",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "string",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "COMPANY_COMMENTS",
+     "name": "COMPANY_COMMENTS",
+     "label": "Caso tenha alguma consideração ou observação específica",
+     "visible": true,
+     "required": false,
+     "multiple": false,
+     "valueType": "",
+     "type": "text",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    }
+   ],
+   "agreements": [],
+   "dependencies": [
+    {
+     "id": "2426",
+     "typeId": 0,
+     "logic": "or",
+     "list": [
+      {
+       "condition": {
+        "target": "COMPANY_UF_CRM_COMPANY_1676473773718",
+        "event": "change",
+        "value": "5854",
+        "operation": "="
+       },
+       "action": {
+        "target": "COMPANY_UF_CRM_COMPANY_1676473838038",
+        "type": "show",
+        "value": ""
+       }
+      }
+     ]
+    },
+    {
+     "id": "2428",
+     "typeId": 0,
+     "logic": "or",
+     "list": [
+      {
+       "condition": {
+        "target": "COMPANY_UF_CRM_COMPANY_1676473838038",
+        "event": "change",
+        "value": "",
+        "operation": "any"
+       },
+       "action": {
+        "target": "COMPANY_UF_CRM_COMPANY_1676473931719",
+        "type": "show",
+        "value": ""
+       }
+      }
+     ]
+    },
+    {
+     "id": "2430",
+     "typeId": 0,
+     "logic": "or",
+     "list": [
+      {
+       "condition": {
+        "target": "COMPANY_UF_CRM_COMPANY_1676473931719",
+        "event": "change",
+        "value": "5858",
+        "operation": "="
+       },
+       "action": {
+        "target": "COMPANY_UF_CRM_COMPANY_1676474106921",
+        "type": "show",
+        "value": ""
+       }
+      }
+     ]
+    }
+   ],
+   "captcha": {
+    "service": "google",
+    "recaptcha": {
+     "use": false
+    },
+    "yandexCaptcha": {
+     "use": false
+    }
+   }
+  }
+ },
+ "184": {
+  "id": "184",
+  "sec": "682i5g",
+  "lang": "br",
+  "address": "https://movisat.bitrix24.com.br",
+  "views": {
+   "click": {
+    "type": "panel",
+    "position": "right",
+    "vertical": "bottom"
+   },
+   "auto": {
+    "type": "popup",
+    "position": "center",
+    "vertical": "bottom",
+    "delay": 5
+   }
+  },
+  "data": {
+   "schemaVersion": 1,
+   "acceptBySubmitEnabled": false,
+   "agreementNoticeSupported": true,
+   "agreementNoticeTextMaxLength": 1000,
+   "language": "br",
+   "editMode": false,
+   "design": {
+    "style": "classic",
+    "border": {
+     "bottom": true,
+     "top": false,
+     "left": false,
+     "right": false
+    },
+    "color": {
+     "primary": "#00aeef",
+     "primaryText": "#fff",
+     "text": "#000",
+     "background": "#ffffff",
+     "fieldBorder": "#00000012",
+     "fieldBackground": "#0000000d",
+     "fieldFocusBackground": "#fff"
+    }
+   },
+   "title": "Solicitação de pagamento de serviço técnico",
+   "desc": "",
+   "buttonCaption": "Solicitar",
+   "useSign": false,
+   "date": {
+    "dateFormat": "DD/MM/YYYY",
+    "dateTimeFormat": "DD/MM/YYYY HH:MI:SS",
+    "sundayFirstly": false
+   },
+   "currency": {
+    "code": "BRL",
+    "title": "Reais",
+    "format": "R$#"
+   },
+   "fields": [
+    {
+     "id": "CONTACT_NAME",
+     "name": "CONTACT_NAME",
+     "label": "Primeiro Nome",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "name",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": true,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "CONTACT_LAST_NAME",
+     "name": "CONTACT_LAST_NAME",
+     "label": "Sobrenome",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "last-name",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": true,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "CONTACT_UF_CRM_1646331183902",
+     "name": "CONTACT_UF_CRM_1646331183902",
+     "label": "CPF",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "double",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": true,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "CONTACT_UF_CRM_1647878128",
+     "name": "CONTACT_UF_CRM_1647878128",
+     "label": "CNPJ",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "string",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": true,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "DEAL_UF_CRM_DEAL_1729011424110",
+     "name": "DEAL_UF_CRM_DEAL_1729011424110",
+     "label": "Nº Orçamento",
+     "visible": true,
+     "required": true,
+     "multiple": true,
+     "valueType": "",
+     "type": "string",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "Insira um número apenas. Para incluir mais de um orçamento, clique em Adicionar mais (uma por campo)",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "DEAL_UF_CRM_DEAL_1707489721530",
+     "name": "DEAL_UF_CRM_DEAL_1707489721530",
+     "label": "Ordem de serviço executada",
+     "visible": true,
+     "required": true,
+     "multiple": true,
+     "valueType": "",
+     "type": "string",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "Insira um número apenas. Para incluir mais de uma ordem de serviço, clique em Adicionar mais (uma por campo)",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "CONTACT_UF_CRM_1647878733",
+     "name": "CONTACT_UF_CRM_1647878733",
+     "label": "Banco",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "string",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": true,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "CONTACT_UF_CRM_CONTACT_1704480883236",
+     "name": "CONTACT_UF_CRM_CONTACT_1704480883236",
+     "label": "Conta do banco",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "list",
+     "placeholder": null,
+     "value": "",
+     "items": [
+      {
+       "label": "Conta Corrente",
+       "value": "6064",
+       "selected": false
+      },
+      {
+       "label": "Conta Poupança",
+       "value": "6066",
+       "selected": false
+      }
+     ],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": true,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "CONTACT_UF_CRM_1647877659",
+     "name": "CONTACT_UF_CRM_1647877659",
+     "label": "Tipo de Conta",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "list",
+     "placeholder": null,
+     "value": "",
+     "items": [
+      {
+       "label": "Pessoa Física",
+       "value": "3352",
+       "selected": false
+      },
+      {
+       "label": "Pessoa Jurídica",
+       "value": "3354",
+       "selected": false
+      }
+     ],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "CONTACT_UF_CRM_1647878701",
+     "name": "CONTACT_UF_CRM_1647878701",
+     "label": "Agência",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "string",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": true,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "CONTACT_UF_CRM_1647878726",
+     "name": "CONTACT_UF_CRM_1647878726",
+     "label": "Conta",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "string",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": true,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "CONTACT_UF_CRM_CONTACT_1704481096596",
+     "name": "CONTACT_UF_CRM_CONTACT_1704481096596",
+     "label": "PIX",
+     "visible": true,
+     "required": false,
+     "multiple": false,
+     "valueType": "",
+     "type": "string",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": true,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "DEAL_UF_CRM_DEAL_1770987593548",
+     "name": "DEAL_UF_CRM_DEAL_1770987593548",
+     "label": "Nome do titular da conta pagamento",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "string",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "DEAL_COMMENTS",
+     "name": "DEAL_COMMENTS",
+     "label": "Detalhe o valor unitário da cobrança",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "text",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "DEAL_UF_CRM_DEAL_1704743556137",
+     "name": "DEAL_UF_CRM_DEAL_1704743556137",
+     "label": "Valor total do serviço",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "string",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "DEAL_UF_CRM_DEAL_1773412180318",
+     "name": "DEAL_UF_CRM_DEAL_1773412180318",
+     "label": "Nota Fiscal",
+     "visible": true,
+     "required": false,
+     "multiple": false,
+     "valueType": "",
+     "maxSizeMb": 1000,
+     "type": "file",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": []
+    }
+   ],
+   "agreements": [],
+   "dependencies": [],
+   "captcha": {
+    "service": "google",
+    "recaptcha": {
+     "use": false
+    },
+    "yandexCaptcha": {
+     "use": false
+    }
+   }
+  }
+ },
+ "238": {
+  "id": "238",
+  "sec": "cdq2ay",
+  "lang": "br",
+  "address": "https://movisat.bitrix24.com.br",
+  "views": {
+   "click": {
+    "type": "panel",
+    "position": "right",
+    "vertical": "bottom"
+   },
+   "auto": {
+    "type": "popup",
+    "position": "center",
+    "vertical": "bottom",
+    "delay": 5
+   }
+  },
+  "data": {
+   "schemaVersion": 1,
+   "acceptBySubmitEnabled": false,
+   "agreementNoticeSupported": true,
+   "agreementNoticeTextMaxLength": 1000,
+   "language": "br",
+   "editMode": false,
+   "design": {
+    "style": "classic",
+    "border": {
+     "bottom": true,
+     "top": false,
+     "left": false,
+     "right": false
+    },
+    "color": {
+     "primary": "#00aeef",
+     "primaryText": "#fff",
+     "text": "#000",
+     "background": "#ffffff",
+     "fieldBorder": "#00000012",
+     "fieldBackground": "#0000000d",
+     "fieldFocusBackground": "#fff"
+    }
+   },
+   "title": "Fornecedores",
+   "desc": "Ofereça seus serviços ou produtos para a Movisat",
+   "buttonCaption": "Enviar",
+   "useSign": false,
+   "date": {
+    "dateFormat": "DD/MM/YYYY",
+    "dateTimeFormat": "DD/MM/YYYY HH:MI:SS",
+    "sundayFirstly": false
+   },
+   "currency": {
+    "code": "BRL",
+    "title": "Reais",
+    "format": "R$#"
+   },
+   "fields": [
+    {
+     "id": "page_8521302",
+     "name": "page_8521302",
+     "label": "Página 1",
+     "visible": true,
+     "required": false,
+     "multiple": false,
+     "valueType": "",
+     "type": "page",
+     "placeholder": null,
+     "value": null,
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "CONTACT_NAME",
+     "name": "CONTACT_NAME",
+     "label": "Primeiro Nome",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "name",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": true,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "CONTACT_LAST_NAME",
+     "name": "CONTACT_LAST_NAME",
+     "label": "Sobrenome",
+     "visible": true,
+     "required": false,
+     "multiple": false,
+     "valueType": "",
+     "type": "last-name",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": true,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "CONTACT_UF_CRM_1647878898",
+     "name": "CONTACT_UF_CRM_1647878898",
+     "label": "Cargo",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "string",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "CONTACT_EMAIL",
+     "name": "CONTACT_EMAIL",
+     "label": "E-mail",
+     "visible": true,
+     "required": false,
+     "multiple": false,
+     "valueType": "OTHER",
+     "type": "email",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": true,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "CONTACT_PHONE",
+     "name": "CONTACT_PHONE",
+     "label": "Telefone",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "WORK",
+     "type": "phone",
+     "placeholder": null,
+     "value": "+55",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": true,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "page_7507634",
+     "name": "page_7507634",
+     "label": "Página 2",
+     "visible": true,
+     "required": false,
+     "multiple": false,
+     "valueType": "",
+     "type": "page",
+     "placeholder": null,
+     "value": null,
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "COMPANY_UF_CRM_1646332310941",
+     "name": "COMPANY_UF_CRM_1646332310941",
+     "label": "CNPJ",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "double",
+     "placeholder": null,
+     "value": null,
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "COMPANY_UF_CRM_1646332339664",
+     "name": "COMPANY_UF_CRM_1646332339664",
+     "label": "Razão social",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "string",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "COMPANY_TITLE",
+     "name": "COMPANY_TITLE",
+     "label": "Nome Fantasia",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "company-name",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "COMPANY_WEB",
+     "name": "COMPANY_WEB",
+     "label": "Website",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "WORK",
+     "type": "string",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "COMPANY_PHONE",
+     "name": "COMPANY_PHONE",
+     "label": "Telefone",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "WORK",
+     "type": "phone",
+     "placeholder": null,
+     "value": "+55",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "COMPANY_EMAIL",
+     "name": "COMPANY_EMAIL",
+     "label": "E-mail",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "OTHER",
+     "type": "email",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": true,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "page_4685201",
+     "name": "page_4685201",
+     "label": "Página 3",
+     "visible": true,
+     "required": false,
+     "multiple": false,
+     "valueType": "",
+     "type": "page",
+     "placeholder": null,
+     "value": null,
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "COMPANY_UF_CRM_622E1FE52E7F4",
+     "name": "COMPANY_UF_CRM_622E1FE52E7F4",
+     "label": "Apresentação, Tabela, Catálogo ou materiais",
+     "visible": true,
+     "required": false,
+     "multiple": true,
+     "valueType": "",
+     "maxSizeMb": 15,
+     "type": "file",
+     "placeholder": null,
+     "value": null,
+     "items": [],
+     "hint": "Cada arquivo deverá ter até 15MB",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": []
+    },
+    {
+     "id": "COMPANY_UF_CRM_COMPANY_1765544872958",
+     "name": "COMPANY_UF_CRM_COMPANY_1765544872958",
+     "label": "Produto/Serviço oferecido",
+     "visible": true,
+     "required": true,
+     "multiple": true,
+     "valueType": "",
+     "type": "string",
+     "placeholder": null,
+     "value": "Inserir um por campo",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    }
+   ],
+   "agreements": [
+    {
+     "id": "AGREEMENT_2",
+     "name": "AGREEMENT_2",
+     "label": "Eu aceito os Termos de Uso",
+     "revision": "6da949a905d3140371556298312850580d82cae896cf19ad6f38305b3fe8bbf2",
+     "value": "Y",
+     "required": true,
+     "checked": true,
+     "acceptBySubmit": false,
+     "acceptBySubmitAllowed": false,
+     "isPersonalDataAgreement": false,
+     "agreementNoticeAllowed": false,
+     "agreementNoticeEnabled": false,
+     "agreementNoticeText": "",
+     "content": {
+      "title": "Our rules are straightforward",
+      "url": null,
+      "html": "\n\n\t<p>Our rules are straightforward. You must own the content you publish, or have written permission to use the content owned and held in copyright by a third party. The content you publish must not include any information or images prohibited by law, in any form.</p>\n\n\n\t<p>These Rules govern your relationship with Bitrix24 (further - Us) while using the functionality of Bitrix24 services, that allows our users (further - You) to create websites and landing pages for Your business, Your customers or for personal use (hereinafter referred to as Bitrix24 Sites).</p>\n\n\n\t<p>By publishing a website created using Bitrix24 You acknowledge Your full consent with the Rules. If You do not accept these Rules, do not use Bitrix24 Sites.</p>\n\t<p>By using Bitrix24 Sites:</p>\n\t<ol>\n\t\t<li>\n\t\t\t<p><b>You accept and agree</b> that Bitrix24 Sites are not intended for publishing, demonstrating, transmitting or otherwise making available any texts, images and other items (hereinafter referred to as Content), which may be deemed as: </p> \n\t\t\t<ul>\n\t\t\t\t<li>violating or attempting to violate any national and international law, including those specific laws applicable to You or Your End Users in any of Your geographical locations;</li>\n\t\t\t\t<li>infringing Our or third parties&#039; intellectual property rights and trademarks, privacy rights, rights to information comprising commercial secrets, disclosing business confidential information, prejudicing honor, business reputation and dignity of third parties;</li>\n\t\t\t\t<li>unlawful, harmful, threatening, defamatory, libelous, inciting to violence, calls for a commission of illegal activities, clarifies the procedure for the use of explosives and other weapons, breaks the standard moral standards and ethical norms, obscene, promoting hatred and/or discrimination;</li>\n\t\t\t\t<li>incendiary, racist, harassing, abusive, offensive, deceptive or fraudulent, encouraging criminal or harmful conduct, containing negative and critical remarks regarding religion, politics, race, ethnicity, gender, personal characteristics, abilities, sexual orientation and appearance of third parties, insults addressed to specific individuals or organizations;</li>\n\t\t\t\t<li>advertising of gambling and betting, escort services, as well as similar sexual services;</li>\n\t\t\t\t<li>propagandizing extremist religious or political views;</li>\n\t\t\t\t<li>propagandizing use of illegal substances;</li>\n\t\t\t\t<li>damaging to Our reputation and goodwill or one which may bring Us into disrepute or harm.</li>\n\t\t\t</ul>\n\t\t</li>\n\t\t<li>\n\t\t\t<p><b>You undertake to:</b></p>\n\t\t\t<ul>\n\t\t\t\t<li>follow relevant laws of Your country, including intellectual property, advertising, marketing, and other laws (hereinafter referred to as Applicable Law) during the period of use of Bitrix24 Sites;</li>\n\t\t\t\t<li>not to create sites, which may be used only for automatic redirection to third-party sites, phishing, illegal collection, storage, and processing of personal data or other data of third parties, including financial data;</li>\n\t\t\t\t<li>not to upload any malicious software (viruses, worms, Trojans, spyware or any other computer code, files or programs) and not to use Bitrix24 Sites in connection with any form of spam or similar conduct, or otherwise engage in unethical marketing or advertising;</li>\n\t\t\t\t<li>replace texts, images, icons and other items which are by default in templates and blocks of Bitrix24 Sites (hereinafter referred to as Demo Content), with Your own Content. The Demo Content is not intended for use by You and its use may be regarded as a violation of the Applicable law.</li>\n\t\t\t</ul>\n\t\t</li>\n\t\t<li><p><b>You guarantee</b> that any Content You publish or intend to publish using the Bitrix24 Sites was obtained in compliance with the Applicable Law.</p></li>\n\t\t<li><p><b>You acknowledge</b> that Bitrix24 does not create websites or web pages itself, does not modify Your Content in any way, does not encourage users to publish their Content, does not and should not have any knowledge of possible infringement of the Applicable Law. You use Bitrix24 Sites at Your own risk and under Your own responsibility.</p>\n\t\t\t<p>If You have any doubt as to the use of any Content on Bitrix24 Sites, we recommend You receive professional advice from the relevant specialists (lawyers) prior to publishing.</p></li>\n\t\t<li><p><b>We reserve the right to block Your websites and/or access to the Bitrix24 Sites without notice at Our sole discretion</b>, including if there are reasons to believe that You are violating the aforementioned obligations and guarantees.</p></li>\n\t</ol>\n\t<p>We have the right to conclude at Our sole discretion about Your violation of any of the aforementioned obligations and guarantees, based on the information we have, including from a user complaint, or claim from any third party, or as a result of an internal investigation. You are obligated to provide us with refutations of such violations at our demand.</p>\n\t<p>For complete Bitrix24 terms of service, please refer to <a target=\"_blank\" href=\"https://www.bitrix24.com/terms/\">Terms of Service</a>.</p>\n\n"
+     }
+    }
+   ],
+   "dependencies": [],
+   "captcha": {
+    "service": "google",
+    "recaptcha": {
+     "use": false
+    },
+    "yandexCaptcha": {
+     "use": false
+    }
+   }
+  }
+ },
+ "64": {
+  "id": "64",
+  "sec": "dxg6zg",
+  "lang": "br",
+  "address": "https://movisat.bitrix24.com.br",
+  "views": {
+   "click": {
+    "type": "panel",
+    "position": "right",
+    "vertical": "bottom"
+   },
+   "auto": {
+    "type": "popup",
+    "position": "center",
+    "vertical": "bottom",
+    "delay": 5
+   }
+  },
+  "data": {
+   "schemaVersion": 1,
+   "acceptBySubmitEnabled": false,
+   "agreementNoticeSupported": true,
+   "agreementNoticeTextMaxLength": 1000,
+   "language": "br",
+   "editMode": false,
+   "design": {
+    "style": "classic",
+    "border": {
+     "bottom": true,
+     "top": false,
+     "left": false,
+     "right": false
+    },
+    "color": {
+     "primary": "#00aeef",
+     "primaryText": "#fff",
+     "text": "#000",
+     "background": "#ffffff",
+     "fieldBorder": "#00000012",
+     "fieldBackground": "#0000000d",
+     "fieldFocusBackground": "#fff"
+    }
+   },
+   "title": "Pesquisa NPS de satisfação",
+   "desc": "",
+   "buttonCaption": "Enviar",
+   "useSign": false,
+   "date": {
+    "dateFormat": "DD/MM/YYYY",
+    "dateTimeFormat": "DD/MM/YYYY HH:MI:SS",
+    "sundayFirstly": false
+   },
+   "currency": {
+    "code": "BRL",
+    "title": "Reais",
+    "format": "R$#"
+   },
+   "fields": [
+    {
+     "id": "CONTACT_NAME",
+     "name": "CONTACT_NAME",
+     "label": "Primeiro Nome",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "name",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": true,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "CONTACT_LAST_NAME",
+     "name": "CONTACT_LAST_NAME",
+     "label": "Sobrenome",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "last-name",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": true,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "COMPANY_TITLE",
+     "name": "COMPANY_TITLE",
+     "label": "Nome da Empresa",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "company-name",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "CONTACT_UF_CRM_1647878898",
+     "name": "CONTACT_UF_CRM_1647878898",
+     "label": "Cargo",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "string",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "DEAL_UF_CRM_62508C8FD9476",
+     "name": "DEAL_UF_CRM_62508C8FD9476",
+     "label": "Pesquisa NPS",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "list",
+     "placeholder": null,
+     "value": "",
+     "items": [
+      {
+       "label": "10",
+       "value": "4214",
+       "selected": false
+      },
+      {
+       "label": "9",
+       "value": "4216",
+       "selected": false
+      },
+      {
+       "label": "8",
+       "value": "4218",
+       "selected": false
+      },
+      {
+       "label": "7",
+       "value": "4220",
+       "selected": false
+      },
+      {
+       "label": "6",
+       "value": "4222",
+       "selected": false
+      },
+      {
+       "label": "5",
+       "value": "4224",
+       "selected": false
+      },
+      {
+       "label": "4",
+       "value": "4226",
+       "selected": false
+      },
+      {
+       "label": "3",
+       "value": "4228",
+       "selected": false
+      },
+      {
+       "label": "2",
+       "value": "4230",
+       "selected": false
+      },
+      {
+       "label": "1",
+       "value": "4232",
+       "selected": false
+      }
+     ],
+     "hint": "Escala: 1 (Insatisfeito e não indicaria) à 10 (Satisfeito e indicaria)",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "DEAL_TITLE",
+     "name": "DEAL_TITLE",
+     "label": "Nome do indicado",
+     "visible": true,
+     "required": false,
+     "multiple": false,
+     "valueType": "",
+     "type": "string",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "INDIQUE E GANHE: cada veículo indicado que contratar Movisat vale 1% de desconto em sua mensalidade (desconto válido para o mês seguinte ao contrato assinado pelo indicado)",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "CONTACT_PHONE",
+     "name": "CONTACT_PHONE",
+     "label": "Telefone",
+     "visible": true,
+     "required": false,
+     "multiple": false,
+     "valueType": "OTHER",
+     "type": "phone",
+     "placeholder": null,
+     "value": "+55",
+     "items": [],
+     "hint": "Não esqueça do DDD",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "CONTACT_EMAIL",
+     "name": "CONTACT_EMAIL",
+     "label": "E-mail",
+     "visible": true,
+     "required": false,
+     "multiple": false,
+     "valueType": "OTHER",
+     "type": "email",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "DEAL_UF_CRM_1670424547",
+     "name": "DEAL_UF_CRM_1670424547",
+     "label": "O que ocorreu ou o que devemos fazer para melhorar seu índice de satisfação conosco? \n",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "string",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    }
+   ],
+   "agreements": [],
+   "dependencies": [
+    {
+     "id": "2232",
+     "typeId": 1,
+     "logic": "or",
+     "list": [
+      {
+       "condition": {
+        "target": "DEAL_UF_CRM_62508C8FD9476",
+        "event": "change",
+        "value": "4214",
+        "operation": "="
+       },
+       "action": {
+        "target": "DEAL_TITLE",
+        "type": "show",
+        "value": ""
+       }
+      },
+      {
+       "condition": {
+        "target": "DEAL_UF_CRM_62508C8FD9476",
+        "event": "change",
+        "value": "4214",
+        "operation": "="
+       },
+       "action": {
+        "target": "CONTACT_PHONE",
+        "type": "show",
+        "value": ""
+       }
+      },
+      {
+       "condition": {
+        "target": "DEAL_UF_CRM_62508C8FD9476",
+        "event": "change",
+        "value": "4214",
+        "operation": "="
+       },
+       "action": {
+        "target": "CONTACT_EMAIL",
+        "type": "show",
+        "value": ""
+       }
+      },
+      {
+       "condition": {
+        "target": "DEAL_UF_CRM_62508C8FD9476",
+        "event": "change",
+        "value": "4214",
+        "operation": "="
+       },
+       "action": {
+        "target": "COMPANY_TITLE",
+        "type": "show",
+        "value": ""
+       }
+      },
+      {
+       "condition": {
+        "target": "DEAL_UF_CRM_62508C8FD9476",
+        "event": "change",
+        "value": "4216",
+        "operation": "="
+       },
+       "action": {
+        "target": "DEAL_TITLE",
+        "type": "show",
+        "value": ""
+       }
+      },
+      {
+       "condition": {
+        "target": "DEAL_UF_CRM_62508C8FD9476",
+        "event": "change",
+        "value": "4216",
+        "operation": "="
+       },
+       "action": {
+        "target": "CONTACT_PHONE",
+        "type": "show",
+        "value": ""
+       }
+      },
+      {
+       "condition": {
+        "target": "DEAL_UF_CRM_62508C8FD9476",
+        "event": "change",
+        "value": "4216",
+        "operation": "="
+       },
+       "action": {
+        "target": "CONTACT_EMAIL",
+        "type": "show",
+        "value": ""
+       }
+      },
+      {
+       "condition": {
+        "target": "DEAL_UF_CRM_62508C8FD9476",
+        "event": "change",
+        "value": "4216",
+        "operation": "="
+       },
+       "action": {
+        "target": "COMPANY_TITLE",
+        "type": "show",
+        "value": ""
+       }
+      },
+      {
+       "condition": {
+        "target": "DEAL_UF_CRM_62508C8FD9476",
+        "event": "change",
+        "value": "4218",
+        "operation": "="
+       },
+       "action": {
+        "target": "DEAL_TITLE",
+        "type": "show",
+        "value": ""
+       }
+      },
+      {
+       "condition": {
+        "target": "DEAL_UF_CRM_62508C8FD9476",
+        "event": "change",
+        "value": "4218",
+        "operation": "="
+       },
+       "action": {
+        "target": "CONTACT_PHONE",
+        "type": "show",
+        "value": ""
+       }
+      },
+      {
+       "condition": {
+        "target": "DEAL_UF_CRM_62508C8FD9476",
+        "event": "change",
+        "value": "4218",
+        "operation": "="
+       },
+       "action": {
+        "target": "CONTACT_EMAIL",
+        "type": "show",
+        "value": ""
+       }
+      },
+      {
+       "condition": {
+        "target": "DEAL_UF_CRM_62508C8FD9476",
+        "event": "change",
+        "value": "4218",
+        "operation": "="
+       },
+       "action": {
+        "target": "COMPANY_TITLE",
+        "type": "show",
+        "value": ""
+       }
+      }
+     ]
+    },
+    {
+     "id": "2234",
+     "typeId": 1,
+     "logic": "or",
+     "list": [
+      {
+       "condition": {
+        "target": "DEAL_UF_CRM_62508C8FD9476",
+        "event": "change",
+        "value": "4220",
+        "operation": "="
+       },
+       "action": {
+        "target": "DEAL_UF_CRM_1670424547",
+        "type": "show",
+        "value": ""
+       }
+      },
+      {
+       "condition": {
+        "target": "DEAL_UF_CRM_62508C8FD9476",
+        "event": "change",
+        "value": "4222",
+        "operation": "="
+       },
+       "action": {
+        "target": "DEAL_UF_CRM_1670424547",
+        "type": "show",
+        "value": ""
+       }
+      },
+      {
+       "condition": {
+        "target": "DEAL_UF_CRM_62508C8FD9476",
+        "event": "change",
+        "value": "4224",
+        "operation": "="
+       },
+       "action": {
+        "target": "DEAL_UF_CRM_1670424547",
+        "type": "show",
+        "value": ""
+       }
+      },
+      {
+       "condition": {
+        "target": "DEAL_UF_CRM_62508C8FD9476",
+        "event": "change",
+        "value": "4226",
+        "operation": "="
+       },
+       "action": {
+        "target": "DEAL_UF_CRM_1670424547",
+        "type": "show",
+        "value": ""
+       }
+      },
+      {
+       "condition": {
+        "target": "DEAL_UF_CRM_62508C8FD9476",
+        "event": "change",
+        "value": "4228",
+        "operation": "="
+       },
+       "action": {
+        "target": "DEAL_UF_CRM_1670424547",
+        "type": "show",
+        "value": ""
+       }
+      },
+      {
+       "condition": {
+        "target": "DEAL_UF_CRM_62508C8FD9476",
+        "event": "change",
+        "value": "4230",
+        "operation": "="
+       },
+       "action": {
+        "target": "DEAL_UF_CRM_1670424547",
+        "type": "show",
+        "value": ""
+       }
+      },
+      {
+       "condition": {
+        "target": "DEAL_UF_CRM_62508C8FD9476",
+        "event": "change",
+        "value": "4232",
+        "operation": "="
+       },
+       "action": {
+        "target": "DEAL_UF_CRM_1670424547",
+        "type": "show",
+        "value": ""
+       }
+      }
+     ]
+    }
+   ],
+   "captcha": {
+    "service": "google",
+    "recaptcha": {
+     "use": false
+    },
+    "yandexCaptcha": {
+     "use": false
+    }
+   }
+  }
+ },
+ "70": {
+  "id": "70",
+  "sec": "r7x4jx",
+  "lang": "br",
+  "address": "https://movisat.bitrix24.com.br",
+  "views": {
+   "click": {
+    "type": "panel",
+    "position": "right",
+    "vertical": "bottom"
+   },
+   "auto": {
+    "type": "popup",
+    "position": "center",
+    "vertical": "bottom",
+    "delay": 5
+   }
+  },
+  "data": {
+   "schemaVersion": 1,
+   "acceptBySubmitEnabled": false,
+   "agreementNoticeSupported": true,
+   "agreementNoticeTextMaxLength": 1000,
+   "language": "br",
+   "editMode": false,
+   "design": {
+    "style": "classic",
+    "border": {
+     "bottom": true,
+     "top": false,
+     "left": false,
+     "right": false
+    },
+    "color": {
+     "primary": "#00aeef",
+     "primaryText": "#fff",
+     "text": "#000",
+     "background": "#ffffff",
+     "fieldBorder": "#00000012",
+     "fieldBackground": "#0000000d",
+     "fieldFocusBackground": "#fff"
+    }
+   },
+   "title": "[PESQUISA CES] Satisfação com atendimento",
+   "desc": "",
+   "buttonCaption": "Enviar",
+   "useSign": false,
+   "date": {
+    "dateFormat": "DD/MM/YYYY",
+    "dateTimeFormat": "DD/MM/YYYY HH:MI:SS",
+    "sundayFirstly": false
+   },
+   "currency": {
+    "code": "BRL",
+    "title": "Reais",
+    "format": "R$#"
+   },
+   "fields": [
+    {
+     "id": "CONTACT_NAME",
+     "name": "CONTACT_NAME",
+     "label": "Primeiro Nome",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "name",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": true,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "CONTACT_LAST_NAME",
+     "name": "CONTACT_LAST_NAME",
+     "label": "Sobrenome",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "last-name",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": true,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "COMPANY_TITLE",
+     "name": "COMPANY_TITLE",
+     "label": "Nome da Empresa",
+     "visible": true,
+     "required": false,
+     "multiple": false,
+     "valueType": "",
+     "type": "company-name",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "DEAL_UF_CRM_DEAL_1649449139431",
+     "name": "DEAL_UF_CRM_DEAL_1649449139431",
+     "label": "Satisfação com atendimento recebido",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "list",
+     "placeholder": null,
+     "value": "",
+     "items": [
+      {
+       "label": "10",
+       "value": "4254",
+       "selected": false
+      },
+      {
+       "label": "9",
+       "value": "4256",
+       "selected": false
+      },
+      {
+       "label": "8",
+       "value": "4258",
+       "selected": false
+      },
+      {
+       "label": "7",
+       "value": "4260",
+       "selected": false
+      },
+      {
+       "label": "6",
+       "value": "4262",
+       "selected": false
+      },
+      {
+       "label": "5",
+       "value": "4264",
+       "selected": false
+      },
+      {
+       "label": "4",
+       "value": "4266",
+       "selected": false
+      },
+      {
+       "label": "3",
+       "value": "4268",
+       "selected": false
+      },
+      {
+       "label": "2",
+       "value": "4270",
+       "selected": false
+      },
+      {
+       "label": "1",
+       "value": "4272",
+       "selected": false
+      }
+     ],
+     "hint": "Escala: 1 (Insatisfeito) à 10 (Satisfeito)",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "DEAL_UF_CRM_DEAL_1649449335871",
+     "name": "DEAL_UF_CRM_DEAL_1649449335871",
+     "label": "Justifique a nota escolhida",
+     "visible": true,
+     "required": false,
+     "multiple": false,
+     "valueType": "",
+     "type": "string",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    }
+   ],
+   "agreements": [],
+   "dependencies": [],
+   "captcha": {
+    "service": "google",
+    "recaptcha": {
+     "use": false
+    },
+    "yandexCaptcha": {
+     "use": false
+    }
+   }
+  }
+ }
+}
