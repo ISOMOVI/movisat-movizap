@@ -4908,3 +4908,278 @@ normal. **Corrigido:** a chave passou a ser gerada no `.env` novo.
 que faltava era tudo o que vive **fora do repositório** — nginx, cron, backup,
 `.env`. "Documentado" não é "o código tem comentário": é *alguém que não estava
 aqui consegue achar isto depois*.
+
+---
+
+# 23/10 — Formulários: a ponte com o Harmonit e o desenho das telas
+
+**Nada foi implementado nesta volta.** Decisão dele, dita no meio do trabalho:
+*"primeiro proposta, depois ação"*. O que está aqui é **medição + decisão**, e
+é o que sustenta o plano.
+
+📘 **O desenho, a responsividade e a validação têm arquivo próprio**, por
+pedido dele (*"monte um arquivo .md sobre esse assunto todo na area de
+trabalho"*): `C:\Users\Lenovo\Desktop\Formularios_Movisat_Design.md`.
+Mockup dos 4: `https://claude.ai/artifact/TaLTfBB9XBT35J8ykd8YBj`.
+
+---
+
+## 1. A pergunta que abriu o dia: formulário enviado gera OS?
+
+**Não, e não havia amarração nenhuma.** Medido, não suposto:
+
+- `grep SalvarOrdemServico` no repositório inteiro → **zero chamadas**;
+- `formulario_solicitacao.os_id` aparece em 5 lugares, **todos de leitura**
+  (`formularios.py:536`, `paineis.py:132/157/174`). Nada escreve;
+- na base: **1 solicitação, `com_os = 0`, `com_situacao = 0`**;
+- as 4 colunas da ponte (`gera_os`, `problema_id`, `tipo_os_id`,
+  `prioridade_id`) nascem vazias **de propósito** — a migração 074 diz por quê:
+  *"número de catálogo chutado é pior que nulo"*.
+
+🚨 **O `SalvarOrdemServico` exige SETE campos, não três:** `clienteId`,
+`tipoId`, `problemaId`, `situacaoId`, `produtoServicoId`, `prioridadeId` e
+`descricaoDetalhada`. Metade das dúvidas do dia saiu daí.
+
+---
+
+## 2. O catálogo real do Harmonit (lido ao vivo em 23/10, empresaId 98)
+
+| Lista | Rota | Quantidade |
+|---|---|---|
+| Problemas | `/Problema/ObterProblemas` | **24** |
+| Tipos de OS | `/TipoOrdemServico/ObterListaTipoOrdemServico` | **5** |
+| Prioridades | — | 4 (381 Baixa · 382 Normal · 383 Alta · 384 Urgente) |
+
+⚠️ **`/Prioridade/ObterPrioridades` responde "não estruturada"** (HTTP 502 pelo
+nosso cliente). Os 4 ids vêm de `templates_config.py`, validados por escrita
+real em 24/07 (383 gravou "Alta"). **Não existe rota de leitura confiável para
+prioridade** — tratar a lista como constante.
+
+Os 5 tipos: `2` Contrato · `1782` Demanda Interna · `1783` Solicitação de
+Cliente · `1784` Ordem de Serviço · `1785` Teste ou Treinamento.
+
+---
+
+## 3. As decisões dele, 23/10
+
+### 3.1 O `tipoId` vem da ORIGEM, não do formulário
+
+| Origem | `tipoId` |
+|---|---|
+| Botão na conversa do MoviZap (Etapa 2) | `1783` Solicitação de Cliente |
+| Link livre (`forms.movisat.com.br`) | `1782` Demanda Interna |
+| Painel de contratos / termo assinado (FPSL) | `2` Contrato |
+
+⚠️ **Apontado por mim e aceito por ele:** pelo link livre quem preenche é o
+cliente, e a OS nasce marcada "Demanda Interna". Quem filtrar o Harmonit por
+origem para saber o que o cliente pediu **não verá essas**.
+
+### 3.2 Situação, prioridade e produto
+
+- **`situacaoId = 38`** ("Nova sollicitação") em todas. Confirmado por ele:
+  *"todas elas abre como Nova Solicitação por padrão do harmonit"*. A diferença
+  é **em qual painel ela aparece primeiro**, não na situação inicial.
+- **`prioridadeId = 382`** (Normal) em todas — *"sempre padrão atual, normal"*.
+- **`produtoServicoId = 670990`** — item **`ABERTURA DE OS`**, R$ 0,01, que ele
+  criou para este fim. 🚨 **Está cadastrado como SERVIÇO**, não produto:
+  aparece em `/Produto/ObterServicos`, não em `/Produto/ObterProdutos`.
+
+🚨 **UM `ABERTURA DE OS` POR ENVIO, não por placa.** Decorre da decisão 3.5: um
+envio vira **uma OS de análise**, mesmo com 20 placas. Nada de R$ 0,20.
+
+### 3.3 O `clienteId`, e a busca por CNPJ
+
+- **Pelo MoviZap:** já existe a trava de empresa vinculada. Resolvido.
+- **Pelo link livre:** busca na base do Harmonit ao sair do campo CNPJ, com ou
+  sem traços; se o CNPJ não achar, busca por nome (palavra no meio conta); mais
+  de um resultado, mostra qual é. Antes de enviar, a caixa de diálogo com o
+  texto dele:
+
+  > *"Os dados para chamado da empresa XXX estão corretos? Deseja prosseguir?"*
+  > — **"Sim, desejo"** · **"Espere, vou conferir os dados"**
+
+🚨 **A armadilha que essa busca atravessa:** `/ObterClientePorCpfCnpj` devolve
+`list` quando existe e **`dict` quando NÃO existe — e esse dict é truthy**.
+Tratar a resposta como verdade diria que todo documento já é cliente.
+E `take` tem teto de 100.
+
+🔴 **Ressalva minha, aceita como ajuste:** o campo de nome vem **depois** do
+CNPJ e em 4 formulários é o nome da própria pessoa. Buscar por nome enquanto
+ela digita o nome dela casaria com clientes errados — por isso **nome só
+quando o CNPJ não achar nada**.
+
+### 3.4 Sem técnico
+
+*"o tecnico é outro fluxo e talvez não chegue a ter tecnico, pois nem todo
+chamado vira demanda"*. A OS nasce **sem técnico**.
+
+### 3.5 🚨 UMA OS POR ENVIO, E ELA É DE ANÁLISE
+
+> *"somente 1 OS para analise do problema mesmo, se for necessário manutenção,
+> daí será gerada pelo painel de 'Operações' do FPSL. Não necessariamente todo
+> chamado do cliente virá OS de serviço. Daí a importancia da 'Situação da OS'"*
+
+É a decisão mais estruturante do dia: **o formulário não abre serviço, abre
+análise.** O serviço, se houver, nasce no FPSL. Mata a dúvida de "uma OS por
+placa ou uma só" em todos os formulários multi-placa.
+
+### 3.6 Criação por BOTÃO, não automática
+
+Confirmado por ele. A OS nasce conferida, e a coluna "Sem OS" do `PNL_1.1`
+passa a ter função. 🚨 Automático num formulário público criaria OS de spam — e
+os dois que tinham reCAPTCHA perderam essa camada ao irem para o ar.
+
+### 3.7 Duplicata: aviso, não trava
+
+Duas camadas:
+1. **Mesma solicitação, dois cliques:** `UPDATE ... WHERE os_id IS NULL
+   RETURNING`. Sem linha de volta, já tinha OS. Atômico.
+2. **Mesmo cliente, dois envios:** procura outra solicitação do mesmo
+   formulário + mesmo `cliente_id` com OS nos últimos **7 dias** e **avisa no
+   card** — *"este cliente já tem a OS nº X deste formulário"*. 🟡 Aviso e não
+   trava, porque o cliente pode legitimamente pedir duas vezes.
+
+### 3.8 Anexo: link para o card, nunca link público
+
+O anexo **só sai pela rota autenticada do painel** — o código diz por quê:
+*"o host público nunca serve anexo; quem envia o arquivo é a internet, quem o
+lê é a casa"*. Na `descricaoDetalhada` vai o link do card no MoviZap, que já
+tem login.
+
+🚨 **Link público assinado foi recusado por mim e aceito por ele:** seriam
+contrato social, CPF, RG e documento de veículo atrás de uma URL que, colada
+num grupo de WhatsApp, abre para qualquer um.
+
+---
+
+## 4. O vínculo de cada um dos 15
+
+### 4.1 Não geram OS (6)
+
+| Formulário | Motivo |
+|---|---|
+| **NPS** · **CES** | Medição, não fila. Confirmado por ele. |
+| **CONTATO** | O campo `assunto` está **com lista vazia** na origem — não há como derivar problema. 🔵 Adiado por ele: *"cada formulario meio que ja tem o assunto... é um campo útil ao bitrix, talvez não seja para nós — deixe para o final como pendencia"*. |
+| **PAGAMENTO_TECNICOS** | 🔵 **Vira frente própria.** Ver 4.4. |
+
+### 4.2 Geram OS, vínculo direto
+
+| Formulário | `problemaId` |
+|---|---|
+| **FICHA_CADASTRAL** | `7457` CONTRATO NOVO |
+| **TESTE_GRATUITO** | `7485` TESTE GRATUITO DE TECNOLOGIA |
+| **SUBSTITUICAO** | `7471` SUBSTITUIÇÃO/RETIRADA + `7472` SUBSTITUIÇÃO/INSTALAÇÃO |
+| **DEMONSTRACAO** | 🆕 *"Abre OS normal para o painel do pós venda"* |
+| **FORNECEDORES** · **CREDENCIAMENTO** | 🆕 *"abre OS mesmo assim, mas não gerará demanda tecnica, só administrativa. Mas a OS é o registro interno de controle de informações tbm"* |
+
+### 4.3 Sub-mapa por opção de lista
+
+**ADITIVO** (`tipo-contratual`) — confirmado:
+| Opção | `problemaId` |
+|---|---|
+| Aditivo contratual - Nova aquisição | `7372` ADITIVO |
+| [NOVO TITULAR] Transferência de titularidade | `7474` TRANSFERÊNCIA DE TITULARIDADE |
+
+**RESCISAO** (`tipo-de-rescisao`) — confirmado, **com o prazo**:
+| Opção | `problemaId` |
+|---|---|
+| as 4 variantes de rescisão | `7502` RESCISÃO |
+| Transferência de titularidade | `7474` TRANSFERÊNCIA DE TITULARIDADE |
+
+🔴 **SUPORTE** e **ADMINISTRATIVO** — sub-mapas **propostos, não confirmados**.
+Ele pediu para deixar o Administrativo para depois: *"vamos deixar ele para
+depois para os demais itens ainda não relacionados"*.
+
+🚨 **Os dois "Backup" não têm candidato.** `Ativação de Backup` e `Desativação
+de Backup` aparecem em SUPORTE e ADMINISTRATIVO, e **nenhum dos 24 problemas
+nomeia backup**. Sem resposta dele, não há o que mapear.
+
+---
+
+
+### 4.4 🚨 DUAS PROPOSTAS DE MAPA, E ELAS DIVERGEM — erro meu, achado em 23/10
+
+O `Desktop\MoviZap_Formularios_PLANO.md` (22/10, 37 KB, seção **7.4**) **já
+trazia** uma proposta de mapa formulário → `problemaId`. Eu **não li esse
+arquivo** ao montar a proposta de 23/10, e as duas não batem:
+
+| Formulário | Proposta de **22/10** | Proposta de **23/10** | Bate? |
+|---|---|---|---|
+| Teste gratuito | `7485` TESTE GRATUITO | `7485` TESTE GRATUITO | ✅ |
+| **Suporte** | `8616` **SOCORRO TECNICO** | sub-mapa: `7384` / `7518` / `7482` | ❌ |
+| **Demonstração** | `7485` TESTE GRATUITO | `10281` VENDA *(ou nenhuma)* | ❌ |
+| **Credenciamento** | `7482` TRATATIVA ADMIN. | "não gera OS" → depois "OS administrativa" | ❌ |
+| **Pagamento de técnicos** | `11701` FINANCEIRO | "não cria OS, lança na OS citada" | ❌ |
+
+🚨 **`8616 SOCORRO TECNICO` eu nem ofereci em 23/10.** Está nos 24 do
+catálogo e é, pelo nome, o candidato mais direto para Suporte — a proposta de
+23/10 o ignorou por completo.
+
+🔴 **Nenhuma das duas foi aprovada.** A escolha é dele, e esta tabela existe
+para que ele não decida olhando só um dos arquivos.
+
+⚠️ **A lição:** antes de propor mapa, catalogar o que já foi proposto. O
+arquivo de 22/10 se declara *"autossuficiente"*, e eu refiz o levantamento dele
+do zero — gastando trabalho e criando conflito.
+
+## 5. 🔴 A frente nova: rescisão → prazo → Painel Contratual
+
+Decisão dele em 23/10, ao confirmar o mapa da rescisão:
+
+> *"o prazo deverá ser informado como informação importante no card do painel e
+> ajustado na OS [...] aviso prévio a partir da assinatura do Clicksign que
+> precisaremos propor no Movizap um Painel 'Contratual' para isso tbm, com os
+> contratos por etapas de assinatura"*
+
+**Fluxo que ele descreveu:** cliente pede rescisão → gera OS + ticket → termo
+vai para assinatura → card no painel contratual com **nº do termo + nº da OS**
+→ rotina confere assinatura → ao bater **"Assinado 100%"**, o prazo da OS é
+ajustado pelo aviso prévio.
+
+✅ **Dá para escrever o prazo, e o número já existe:**
+- `dataPrevisaoEntrega` é campo de escrita do `SalvarOrdemServico`;
+- ⚠️ **lê como `dataPrevisao` em `dd/mm/aaaa` e escreve em ISO** — nomes
+  diferentes nos dois lados, a armadilha central da ponte de OS;
+- **`AVISO_PREVIO_DIAS = 90`** no FPSL (`painel/contratos_eventos.py:91`),
+  contado **da data de assinatura**;
+- `painel/operacoes_os.py:159` registra que *"quando o comercial concede prazo
+  menor, o campo vira `(90) 30 DIAS DE AVISO PRÉVIO`"*.
+
+🚨 **Não existe "atualizar só a data".** `SalvarOrdemServico` é save completo: o
+que não for mandado se perde. O caminho é o que a ponte do FPSL já faz — ler a
+OS, remontar os 39 campos, gravar e **reler para comparar**.
+
+---
+
+## 6. 🔵 Frente própria: pagamento de técnicos
+
+Decisão dele, 23/10 — este formulário **não vira OS nem fica como está**:
+
+> *"esse formulario é para os tecnicos solicitarem seu pagamento [...] quero
+> que os tecnicos tbm possam ver o que tem em aberto, conforme aquela rotina do
+> FPSL de fechamento dos tecnicos [...] um resumo por periodo de até 30 dias.
+> Então só pede pagamento tecnico que fez o serviço"*
+
+Peças que já existem e que a frente reaproveita:
+- a `FIN_2.1 Fechamento Tecnicos` do FPSL (kanban de 5 colunas, 170 técnicos);
+- os itens apurados: `653939` PAGAMENTO DE TECNICO e `6971` KM DESLOCAMENTO;
+- **o login do técnico já tem regra:** e-mail **é o telefone dele**, com a
+  senha padrão do app.
+- o próprio formulário já tem `ordem-de-servico-executada` — **a OS já
+  existe**, então aqui se lança na OS citada, não se cria uma nova.
+
+🔵 **Fica para depois, com observações** — palavras dele.
+
+---
+
+## 7. O que ainda falta dele
+
+| # | Pendência |
+|---|---|
+| 1 | Os sub-mapas de **SUPORTE** e **ADMINISTRATIVO** |
+| 2 | 🚨 Os **dois "Backup"** — sem candidato nos 24 problemas |
+| 3 | O **texto dos termos** de aceite (3 formulários), aberto desde 22/10 |
+| 4 | `sistema-desejado` × `plano-desejado`: **a mesma pergunta duas vezes** |
+| 5 | O catálogo de `product` (ADITIVO/SUBSTITUICAO) |
+
+---
