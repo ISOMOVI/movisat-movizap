@@ -1,0 +1,61 @@
+MoviZap - Backup de Ligacoes
+============================
+
+O QUE E ISTO
+------------
+Um programa da Movisat que guarda, no servidor do MoviZap, o historico de
+ligacoes do MicroSIP deste PC (quem ligou, para quem, quando, quanto durou e,
+quando o MicroSIP gravou, o audio). Serve para que uma ligacao atendida aqui
+apareca na ficha do cliente dentro do MoviZap, e para nao se perder gravacao
+quando um PC e formatado ou trocado.
+
+QUANDO ELE RODA
+---------------
+Tres vezes: as 12:00, as 17:30 e cinco minutos depois de alguem entrar no
+Windows. Se o PC estava desligado na hora, ele roda assim que ligar. Cada
+passada leva segundos e nao atrapalha nada.
+
+O QUE ELE NAO FAZ
+-----------------
+- Nao grava, nao escuta e nao mexe no historico do MicroSIP: a lista de
+  ligacoes dele fica inteira, sempre.
+- A UNICA coisa que ele apaga (desde a 0.6): gravacao com mais de 7 dias
+  que o servidor JA confirmou ter recebido igual, arquivo por arquivo,
+  conferido por codigo. A copia na VPS fica, com backup todas as noites.
+  Gravacao que nao subiu, ou que subiu diferente, NAO e apagada.
+- Nao grava ligacao nova e nao escuta nada ao vivo. Quem grava e o MicroSIP,
+  como ja fazia antes.
+- Nao manda nada fora dos tres horarios acima.
+- Nao pede administrador e nao mexe em outro usuario do Windows.
+- Nao abre porta neste PC: quem fala e sempre ele com o servidor, nunca o
+  contrario.
+
+POR FAVOR, NAO ENCERRE
+----------------------
+Se aparecer no Gerenciador de Tarefas como "MoviZap - Backup de Ligacoes",
+e isto. Encerrar nao quebra nada (ele tenta de novo no horario seguinte), mas
+o historico do dia pode demorar a subir.
+
+Para conferir que esta tudo bem, use o atalho do Menu Iniciar:
+   MoviZap - Backup de Ligacoes (ver situacao)
+Ele mostra o ramal, a pasta das gravacoes e quando foi o ultimo envio. Esse
+atalho NAO envia nada: so mostra.
+
+COMO REMOVER
+------------
+Configuracoes do Windows > Aplicativos > Aplicativos instalados >
+"MoviZap - Backup de Ligacoes" > Desinstalar. As gravacoes do MicroSIP
+continuam onde estavam.
+
+ONDE FICAM OS ARQUIVOS DELE
+---------------------------
+%LOCALAPPDATA%\MoviZapLigacoes
+   movizap-ligacoes.ps1   o programa
+   config.json            o ramal e a chave deste PC (a chave fica cifrada)
+   enviados.json          o controle do que ja subiu
+   agente.log             o diario das passadas
+
+PROBLEMA?
+---------
+Fale com o Iago (Movisat). Se der erro, o que ajuda e a ultima linha do
+arquivo agente.log, na pasta acima.

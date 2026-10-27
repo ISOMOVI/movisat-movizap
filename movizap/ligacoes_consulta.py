@@ -219,13 +219,68 @@ AVISO_REC_DESLIGADO = "gravacao automatica desligada"
 def rec_do_agente(linha: dict) -> str | None:
     """O estado da gravação automática daquele PC: `ligado`, `desligado`,
     `desconhecido` -- ou `None` para quem não tem agente, onde a pergunta nem
-    existe."""
+    existe.
+
+    🚨 26/10: PASSOU A PREFERIR O DADO EXPLÍCITO (`auto_gravacao`, migração
+    078). A dedução por ausência de aviso continua existindo e vale só para
+    agente velho -- e ela quebra de dois jeitos: se a frase do agente mudar, a
+    dedução inverte; se chegar aviso novo sobre outra coisa, o REC "desliga"
+    sozinho. O agente `0.7` manda o booleano, e aí não há o que deduzir.
+
+    ⚠️ `auto_gravacao` nulo em quem JÁ FALOU é **agente velho**, não
+    "desligado": dizer desligado ali seria afirmar sobre um PC que nunca foi
+    perguntado. Cai na dedução de antes, que é o melhor que existe para ele.
+    """
     if not linha.get("agente_id"):
         return None
     if not linha.get("ultimo_contato_em"):
         return "desconhecido"
+    explicito = linha.get("auto_gravacao")
+    if explicito is not None:
+        return "ligado" if explicito else "desligado"
     aviso = (linha.get("ultimo_aviso") or "").lower()
     return "desligado" if AVISO_REC_DESLIGADO in aviso else "ligado"
+
+
+# Como a pasta foi decidida, em português e com o que cada caso QUER DIZER.
+# 🚨 A tela não escreve a sua versão: o rótulo e a explicação saem daqui, um
+# lugar só -- e `palpite` é o único que pede ação.
+ORIGEM_DA_PASTA = {
+    "vps": ("mandada daqui", "Alguém definiu este caminho no painel."),
+    "escolhida": ("confirmada na instalação",
+                  "A pessoa conferiu a pasta quando instalou o agente."),
+    "ini": ("lida do MicroSIP", "Veio do `recordingPath` do MicroSIP.ini."),
+    "relativa": ("lida do MicroSIP (relativa)",
+                 "O MicroSIP guardou um caminho relativo; foi resolvido contra "
+                 "a pasta do .ini."),
+    "busca": ("achada procurando pelo nome",
+              "O .ini não disse onde era, e o agente encontrou a pasta pelo "
+              "nome dentro do perfil do usuário."),
+    "palpite": ("PALPITE do agente antigo",
+                "O agente chutou a Área de Trabalho. Com OneDrive ela muda de "
+                "lugar -- é o caso que motivou esta frente. Reinstale com o "
+                "agente novo, ou defina o caminho aqui."),
+}
+
+
+def pasta_do_agente(linha: dict) -> dict | None:
+    """O que a tela mostra sobre a pasta daquele PC.
+
+    ⚠️ `None` quando o agente não informou -- e a tela diz **"agente antigo"**,
+    não "sem pasta": o PC pode estar coletando perfeitamente e só não saber
+    contar onde. Os 7 PCs estão neste estado em 26/10 (rodam o `0.4`).
+    """
+    if not linha.get("agente_id"):
+        return None
+    caminho = linha.get("pasta")
+    if not caminho:
+        return None
+    rotulo, explicacao = ORIGEM_DA_PASTA.get(
+        linha.get("pasta_origem") or "",
+        ("origem não informada", "O agente não disse como decidiu este caminho."))
+    return {"caminho": caminho, "origem": linha.get("pasta_origem"),
+            "rotulo": rotulo, "explicacao": explicacao,
+            "atencao": linha.get("pasta_origem") == "palpite"}
 
 
 def agentes() -> list[dict]:
@@ -244,6 +299,11 @@ def agentes() -> list[dict]:
                   g.id AS agente_id, g.criado_em, g.ultimo_contato_em, g.ultimo_pc,
                   g.ultima_versao, g.cert_validade, g.pendentes,
                   g.ultimo_erro, g.ultimo_aviso,
+                  -- 🆕 26/10 (migração 078): ONDE o agente procura, e como
+                  -- decidiu. É o que transforma "sem comunicação" em
+                  -- diagnóstico -- antes disto, o aviso dizia que a pasta não
+                  -- existe sem dizer qual pasta.
+                  g.pasta, g.pasta_origem, g.auto_gravacao, g.pastas_extra,
                   (SELECT count(*) FROM ligacao l WHERE l.atendente_id = a.id) AS ligacoes
              FROM atendente a
              LEFT JOIN agente_ligacao g
@@ -252,6 +312,8 @@ def agentes() -> list[dict]:
             ORDER BY (g.id IS NULL), a.nome""")
     for linha in linhas:
         linha["rec"] = rec_do_agente(linha)
+        linha["pasta_info"] = pasta_do_agente(linha)
+        linha["pastas_extra"] = list(linha.get("pastas_extra") or [])
     return linhas
 
 

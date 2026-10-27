@@ -118,6 +118,7 @@ aparecem todos.
 | `CFG_2.2` | IA — analytics | `/config/ia/analytics` | `owner` | 2 |
 | `LIG_1.1` | Ligações | `/ligacoes` | `atendimento` | 1 |
 | `ATD_7.1` | Agendamentos | `/agendamentos` | `atendimento` | 1 |
+| `ORC_1.1` | Orçamentos | `/orcamentos` | `atendimento` | 1 |
 | `CFG_13.1` | Orçamento (numeração) | `/config/orcamento` | `owner` | 1 |
 | `CFG_14.1` | Vínculo dos técnicos | `/config/vinculo-tecnicos` | `owner` | 1 |
 | `REL_1.1` | Relatórios | `/relatorios` | `owner` | 3 |
@@ -180,6 +181,7 @@ O campo **`icone`** deste registro é o que o menu desenha, e ele é **a fonte
 | `ATD_6.1` Chat interno | `bi-chat-left-dots` | menu |
 | `LIG_1.1` Ligações | `bi-telephone` | menu |
 | `ATD_7.1` Agendamentos | `bi-calendar-check` | menu |
+| `ORC_1.1` Orçamentos | `bi-receipt-cutoff` | menu |
 | `CFG_13.1` Orçamento | `bi-receipt` | aba |
 | `CFG_14.1` Vínculo dos técnicos | `bi-person-vcard` | aba |
 | `ATD_3.1` Informativos | `bi-megaphone` | menu |
@@ -384,7 +386,7 @@ Fixa no rodapé de **toda** tela principal. Modelo mental: barra do Excel / bloc
 |---|---|---|
 | `owner` | todas | tudo, inclusive o que é exclusivo do owner |
 | `admin` | `atendimento` `equipe` | as de `atendimento` + `ATD_1.3` `ATD_5.1` `CAD_2.1` `CAD_2.2` `FRM_1.1` (as cinco de `equipe`); no `/config`, só `CFG_10.1`, `CFG_11.1` e `CFG_12.1` (25/09: *"Owner e admin criam"* os Padrões e Formulários) |
-| `atendimento` | `atendimento` | `INI_1.1` `ATD_1.*` `ATD_5.1` `ATD_6.1` `LIG_1.1` `EML_1.1` `CFG_0.1` › `CFG_10.1` `CFG_11.1` `CFG_12.1` |
+| `atendimento` | `atendimento` | `INI_1.1` `ATD_1.*` `ATD_6.1` `ATD_7.1` `LIG_1.1` `ORC_1.1` `EML_1.1` `CFG_0.1` › `CFG_10.1` `CFG_11.1` `CFG_12.1` |
 | `cadastro` | `cadastro` | `CAD_1.1` `CAD_1.2` |
 
 Perfil é conjunto de **permissões**, e a permissão de cada tela vem do registro.
@@ -453,3 +455,22 @@ perdeu acesso.
 nada** — 🔵 a conclusão é dele, de 21/10: *"nenhuma regra resolve, é trabalho
 de cadastro"*. Quem vincula à mão continua sendo a ficha do contato, na
 conversa.
+
+
+## 🚨 Rotas que exigem OWNER mesmo dentro de uma aba aberta a todos (26/10)
+
+A permissão da tela **não é sempre a permissão de tudo o que se faz nela**. Há
+caso em que a aba é aberta e **uma ação dentro dela não é**, e isto fica
+registrado aqui porque é neste documento que alguém procura *"quem pode o
+quê"*.
+
+| rota | tela | permissão da tela | quem pode | por quê |
+|---|---|---|---|---|
+| `PUT /api/ligacoes/agentes/{agente_id}/pastas` | `LIG_1.1` | `atendimento` | **owner** | O campo manda um programa no computador de outra pessoa **ler uma pasta e subir o conteúdo**. A aba é `atendimento` por decisão dele de 15/10 (*"pode exibir a aba para todos"*) — e *"todo atendente vê a aba"* não pode virar *"todo atendente aponta o agente do colega para onde quiser"*. **Ver** continua aberto; **escrever** o caminho, não. |
+
+⚠️ **A trava mora na rota, não na tela:** ela usa `auth.get_usuario` e confere
+`usuario.get("owner")` por dentro, em vez de `requer_tela("LIG_1.1")` — que é o
+que o resto da aba usa. Um teste prende isso
+(`tests/teste_pasta_agente.py::test_a_rota_NAO_usa_a_permissao_da_aba`), porque
+trocar a guarda por `requer_tela` abriria a ação para todo atendente **sem
+mudar uma linha da tela**.

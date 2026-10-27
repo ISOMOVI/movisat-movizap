@@ -31,6 +31,7 @@ import { useRoute } from 'vue-router'
 
 import { api, pedirBlob, ErroDeApi } from '../api/cliente.js'
 import AjudaDaTela from '../componentes/AjudaDaTela.vue'
+import { sessao } from '../estado/sessao.js'
 
 const route = useRoute()
 
@@ -81,6 +82,50 @@ const REC_AJUDA = {
              + 'desligada: as ligações sobem, o áudio não.',
   desconhecido: 'Este PC ainda não fez nenhuma passada, então não há o que '
                 + 'dizer sobre a gravação dele.',
+}
+
+/* ---- A pasta de coleta de cada PC (26/10) ---------------------------------
+   🚨 O diagnóstico vem ANTES do canal de volta: até hoje o aviso dizia que a
+   pasta não existe sem dizer QUAL pasta, e por isso ninguém via pelo painel
+   que o caminho calculado estava errado. */
+const editandoPastas = ref(null)   // o agente_id em edição
+const pastasDigitadas = ref('')
+const salvandoPastas = ref(false)
+const pastasErro = ref('')
+
+const souOwner = computed(() => !!sessao.owner)
+
+function abrirPastas(a) {
+  editandoPastas.value = a.agente_id
+  /* Uma por linha: caminho tem espaço, então vírgula separaria errado. */
+  pastasDigitadas.value = (a.pastas_extra || []).join('\n')
+  pastasErro.value = ''
+}
+
+async function salvarPastas(a) {
+  salvandoPastas.value = true
+  pastasErro.value = ''
+  try {
+    const pastas = pastasDigitadas.value.split('\n')
+      .map((p) => p.trim()).filter(Boolean)
+    const r = await api.put(`/api/ligacoes/agentes/${a.agente_id}/pastas`,
+                            { pastas })
+    a.pastas_extra = r.pastas
+    /* 🚨 A TELA DIZ SE ISSO VAI SURTIR EFEITO. O agente `0.4` descarta a
+       resposta do batimento: gravar e deixar a pessoa achar que resolveu
+       seria a tela mentindo. */
+    if (!r.obedece) {
+      pastasErro.value = `Gravado — mas o PC roda o agente ${r.versao_no_pc
+        || 'antigo'}, que ainda não lê isto. Só vale depois de reinstalar com `
+        + 'o 0.7.'
+    } else {
+      editandoPastas.value = null
+    }
+  } catch (e) {
+    pastasErro.value = e instanceof ErroDeApi ? e.message : 'Não deu para gravar.'
+  } finally {
+    salvandoPastas.value = false
+  }
 }
 
 const comAgente = computed(() => agentes.value.filter((a) => a.agente_id))
@@ -256,6 +301,64 @@ function quando(iso) {
                  nenhuma, e o operador só descobria ao procurar o áudio. -->
             <span :class="['chip', REC_CLASSE[a.rec] || 'chip--aviso']"
                   :title="REC_AJUDA[a.rec]">{{ REC_ROTULO[a.rec] || 'REC ?' }}</span>
+
+            <!-- 🆕 26/10: ONDE este PC procura as gravações, e como decidiu.
+                 Sem isto, o aviso de "pasta não existe" não dizia qual. -->
+            <template v-if="a.pasta_info">
+              <span :class="['chip', 'chip--pequeno',
+                             a.pasta_info.atencao ? 'chip--erro' : '']"
+                    :title="a.pasta_info.explicacao">
+                {{ a.pasta_info.rotulo }}
+              </span>
+              <code class="lig__pasta" :title="a.pasta_info.caminho">
+                {{ a.pasta_info.caminho }}
+              </code>
+            </template>
+            <!-- 🚨 "agente antigo", NÃO "sem pasta": o PC pode estar coletando
+                 e só não saber contar onde. É o estado dos 7 em 26/10. -->
+            <span v-else class="chip chip--pequeno chip--aviso"
+                  title="Este agente não informa onde procura. Só o 0.7 em diante manda isso.">
+              agente antigo
+            </span>
+
+            <button v-if="souOwner" class="botao botao--pequeno botao--fantasma"
+                    type="button" @click="abrirPastas(a)">
+              <i class="bi bi-folder2-open" aria-hidden="true"></i> pasta
+            </button>
+
+            <!-- O campo que manda os caminhos. Só owner: ver a rota.
+                 ⚠️ DENTRO do `<li>` da pessoa, e não num irmão: o editor fala
+                 daquele PC, e numa lista de 7 linhas separá-lo da linha dele
+                 seria pedir para alguém editar a pasta do colega errado.
+                 (E como irmão, a variável `a` do `v-for` nem existe -- foi o
+                 que derrubou os 9 testes da aba de uma vez.) -->
+            <div v-if="souOwner && editandoPastas === a.agente_id"
+                 class="lig__pastas">
+            <label class="campo">
+              <span class="campo__rotulo">
+                Caminhos para o agente tentar — um por linha, na ordem
+              </span>
+              <textarea v-model="pastasDigitadas" class="campo__entrada" rows="3"
+                        placeholder="C:\Users\Nome\OneDrive\Backups\Área de Trabalho\Recordings"></textarea>
+              <span class="campo__ajuda">
+                Vencem o que está no MicroSIP.ini. Vazio = não interfere.
+                ⚠️ Só vale a partir do agente <b>0.7</b>; o PC precisa ter sido
+                reinstalado. As travas (dentro do perfil do usuário, só
+                <code>.mp3</code>/<code>.wav</code>) ficam no próprio PC.
+              </span>
+            </label>
+            <div class="linha">
+              <button class="botao botao--primario botao--pequeno" type="button"
+                      :disabled="salvandoPastas" @click="salvarPastas(a)">
+                {{ salvandoPastas ? 'gravando…' : 'Gravar' }}
+              </button>
+              <button class="botao botao--contorno botao--pequeno" type="button"
+                      @click="editandoPastas = null">Fechar</button>
+            </div>
+            <p v-if="pastasErro" class="aviso aviso--atencao" role="alert">
+              <span>{{ pastasErro }}</span>
+            </p>
+            </div>
           </li>
         </ul>
         <p v-if="semAgente.length" class="apagado pequeno">
@@ -466,6 +569,26 @@ function quando(iso) {
   gap: var(--e-1);
 }
 .cobertura__lista li { display: flex; gap: var(--e-2); flex-wrap: wrap; align-items: center; }
+
+/* O caminho é longo e não pode empurrar a linha para fora da tela. */
+.lig__pasta {
+  max-width: 34ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--txt-xs);
+  color: var(--texto-fraco);
+}
+.lig__pastas {
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--e-2);
+  width: 100%;
+  padding: var(--e-3);
+  border: var(--borda-fina) solid var(--borda);
+  border-radius: var(--r-sm);
+  background: var(--superficie-2);
+}
 
 .gravacao { display: flex; gap: var(--e-2); align-items: center; flex-wrap: wrap; }
 /* O player nasce em largura de conteúdo: o padrão do navegador estica a

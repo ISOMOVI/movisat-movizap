@@ -102,20 +102,83 @@ def agente_da_chave(chave: str | None, cert_pem: str | None = None,
 
 # ------------------------------------------------------------------ batimento
 
+# As formas de o agente decidir onde procurar, da que MANDA para a que cede.
+# 🚨 É a mesma ordem que o agente aplica, e ela mora nos dois lugares de
+# propósito: aqui para o CHECK da migração 078 e a tela terem vocabulário, lá
+# porque é o PC que decide. Divergir faria a tela nomear uma origem que o
+# agente nunca manda.
+ORIGENS_DA_PASTA = ("vps", "escolhida", "ini", "relativa", "busca", "palpite")
+
+
+def definir_pastas_extra(agente_id: int, pastas: list[str]) -> list[str]:
+    """Os caminhos que a VPS manda este agente tentar, em ordem.
+
+    🚨 O QUE ESTA FUNÇÃO **NÃO** FAZ: validar se o caminho é seguro. Isso mora
+    **no PC** (dentro do perfil do usuário ou de uma raiz de OneDrive, e só
+    `.mp3`/`.wav` sobem), porque é lá que o estrago seria -- e um agente que
+    confia na VPS para isso é um agente que obedece a VPS invadida.
+
+    ⚠️ Aqui só se apara o que é formato: vazio sai, espaço sobrando sai, e há
+    teto de 10 caminhos -- lista longa é lista que ninguém revisa.
+    """
+    limpas, vistas = [], set()
+    for p in (pastas or [])[:10]:
+        texto = str(p or "").strip()[:400]
+        if not texto or texto.lower() in vistas:
+            continue
+        vistas.add(texto.lower())
+        limpas.append(texto)
+    banco.executar(
+        "UPDATE agente_ligacao SET pastas_extra = %s WHERE id = %s",
+        (limpas, int(agente_id)))
+    return limpas
+
+
+def pastas_extra(agente_id: int) -> list[str]:
+    linha = banco.um("SELECT pastas_extra FROM agente_ligacao WHERE id = %s",
+                     (int(agente_id),))
+    return list(linha["pastas_extra"]) if linha else []
+
+
 def batimento(agente: dict, pc: str | None, versao: str | None,
               pendentes: int | None, erro: str | None,
-              ip: str | None = None, aviso: str | None = None) -> dict:
+              ip: str | None = None, aviso: str | None = None,
+              pasta: str | None = None, pasta_origem: str | None = None,
+              auto_gravacao: bool | None = None) -> dict:
+    """O batimento do agente -- e, desde 26/10, o CANAL DE VOLTA.
+
+    🚨 ATÉ HOJE ERA SÓ DE IDA: devolvia `{ok, ramal, servidor_em}` e o agente
+    descartava a resposta. Agora a resposta carrega `config`, e é isso que
+    torna possível *"atualizar do lado de cá o local de coleta"* -- 🔵 pedido
+    dele de 26/10.
+
+    ⚠️ `pasta`, `pasta_origem` e `auto_gravacao` são OPCIONAIS e vão continuar:
+    os 7 PCs rodam o agente `0.4` e não sabem mandá-los. Exigi-los derrubaria a
+    coleta inteira para ganhar um diagnóstico.
+
+    ⚠️ `pasta_origem` fora da lista vira NULO em vez de estourar: o CHECK da
+    migração 078 recusaria, e um agente com versão nova demais não pode fazer o
+    batimento falhar -- perder a gravação é pior que perder o rótulo.
+    """
+    origem = pasta_origem if pasta_origem in ORIGENS_DA_PASTA else None
     banco.executar(
         """UPDATE agente_ligacao
               SET ultimo_contato_em = now(), ultimo_pc = %s, ultima_versao = %s,
                   pendentes = %s, ultimo_erro = %s,
-                  ultimo_ip = COALESCE(%s, ultimo_ip), ultimo_aviso = %s
+                  ultimo_ip = COALESCE(%s, ultimo_ip), ultimo_aviso = %s,
+                  pasta = COALESCE(%s, pasta),
+                  pasta_origem = COALESCE(%s, pasta_origem),
+                  auto_gravacao = COALESCE(%s, auto_gravacao)
             WHERE id = %s""",
         ((pc or "")[:100] or None, (versao or "")[:20] or None, pendentes,
          (erro or "")[:500] or None, (ip or "")[:45] or None,
-         (aviso or "")[:500] or None, agente["id"]))
+         (aviso or "")[:500] or None,
+         (pasta or "")[:400] or None, origem, auto_gravacao, agente["id"]))
     return {"ok": True, "ramal": agente["ramal"],
-            "servidor_em": datetime.now(timezone.utc).isoformat()}
+            "servidor_em": datetime.now(timezone.utc).isoformat(),
+            # 🚨 A RESPOSTA QUE O AGENTE PASSA A OBEDECER. Lista vazia =
+            # "não interfiro", que é o estado de todos hoje.
+            "config": {"pastas": pastas_extra(agente["id"])}}
 
 
 def agentes_com_aviso() -> list[dict]:

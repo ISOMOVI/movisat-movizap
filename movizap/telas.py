@@ -509,6 +509,37 @@ TELAS = [
         "grupo": "Atendimento",
         "fase": 1,
     },
+    # ---- ORC_1.1: a aba Orçamentos (26/10) ----
+    {
+        # 🔵 26/10: *"Painel de orçamento salvo para consulta apenas;
+        # Consultar em grid os orçamentos aba nova 'Orçamentos' (como das
+        # ligações)"*.
+        #
+        # 🔵 Permissão decidida por ele no mesmo dia: **todo atendente**, igual
+        # à LIG_1.1 que é o molde que ele pediu -- e coerente com quem EMITE,
+        # que já precisa só de `ATD_1.2` (a mesma permissão `atendimento`).
+        # Fica de fora só o perfil `cadastro`.
+        #
+        # ⚠️ A CFG_13.1, que configura a NUMERAÇÃO, continua só do owner. Ver e
+        # configurar são coisas diferentes: aqui ninguém mexe no documento.
+        #
+        # 🚨 SÓ CONSULTA, e isto é regra do domínio, não falta de tempo:
+        # orçamento emitido não muda de conteúdo (o `reenviar` remonta o MESMO
+        # papel). A tela diz isso em texto, no molde do card do PNL_1.1 que
+        # explica por que não se arrasta.
+        #
+        # ⚠️ Módulo novo (ORC). Painel não é a mesma coisa que documento
+        # emitido: `ATD` é conversa, `LIG` é ligação, `ORC` é o papel que saiu
+        # com número. Código conferido contra `CODIGOS_APOSENTADOS`.
+        "codigo": "ORC_1.1",
+        "titulo": "Orçamentos",
+        "rota": "/orcamentos",
+        "icone": "bi-receipt-cutoff",
+        "descricao": "Os orçamentos emitidos: número, técnico, valor, OS e o PDF.",
+        "permissao": "atendimento",
+        "grupo": "Atendimento",
+        "fase": 1,
+    },
     # ---- CFG_13.1: a numeração do orçamento (21/10) ----
     {
         # 🔵 Decisão 9 dele: numeração própria do orçamento, com **aba de
@@ -626,6 +657,10 @@ GRUPO_PELO_PREFIXO = {
     "EML": "E-mail",
     "INI": "Início",
     "LIG": "Ligações",
+    # 26/10: a ORC_1.1 leva `grupo` explícito ("Atendimento"), então este
+    # fallback nunca é usado hoje -- ele existe para o dia em que alguém
+    # acrescentar uma tela ORC sem `grupo` e o menu desenharia "ORC" cru.
+    "ORC": "Atendimento",
     "REL": "Relatórios",
 }
 

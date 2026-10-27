@@ -551,3 +551,124 @@ contém mais o cabeçalho 0.5. Cópia do anterior em
 🔴 **O `.exe` que está no grupo "Todos Movisat" (16/10) é o antigo.** Quem
 instalar por ele cai no 0.4: sem `-Exportar` e sem limpeza. Reenviar o novo é
 decisão dele — e, para quem já instalou, o `.ps1` do PC só troca reinstalando.
+
+---
+
+## Agente 0.7 (26/10) — a pasta de coleta: precedência, busca e permissão
+
+🔵 *"veja se da para atualizar do lado de ca para os computadores o local de
+coleta das ligações gravadas, por exemplo, da claudia está em: (…) one drive,
+backups, área de trabalho"*, e o desenho dele: *"primeiro a correção do .exe e
+que permita inserir mais endereços por aqui ou buscar pelo nome da pasta,
+pedindo permissão ao instalar"*.
+
+### 🚨 O que o 0.7 muda de fundo
+
+**1. O batimento deixou de ser só de ida.** Até o 0.6, o agente fazia
+`[void](Batimento …)` — a resposta da VPS era **descartada**. Agora a resposta
+traz `config.pastas`, e o agente **guarda no `config.json`** (`pastas_da_vps`),
+porque ele roda e sai: sem guardar, a passada seguinte começaria sem saber.
+
+**2. O palpite da Área de Trabalho SAIU.** Com `recordingPath` vazio, o 0.6
+caía em `GetFolderPath('Desktop')\Recordings` — e o próprio comentário dizia que
+era *"HIPOTESE a medir no PC da Claudia"*. **Com OneDrive a Área de Trabalho
+muda de lugar**, e era exatamente o caso que motivou esta versão. Chutar é pior
+que procurar: o chute não avisa que chutou.
+
+**3. O aviso passou a dizer ONDE procurou.** Antes era *"pasta de gravacoes
+ainda nao existe"*, sem o caminho — e por isso era impossível ver pelo painel
+que o caminho calculado estava errado.
+
+### A ordem de precedência
+
+| # | fonte | `pasta_origem` |
+|---|---|---|
+| 1 | os caminhos que a **VPS** mandou, em ordem | `vps` |
+| 2 | a escolha confirmada na **instalação** (`config.json`) | `escolhida` |
+| 3 | `recordingPath` do `MicroSIP.ini` | `ini` |
+| 4 | o mesmo, relativo, resolvido contra a pasta do `.ini` | `relativa` |
+| 5 | **busca pelo nome** da pasta | `busca` |
+| — | nada: a pasta fica **nula** e o aviso diz que não achou | — |
+
+⚠️ A última linha é deliberada: **melhor dizer "não achei onde procurar" que
+apontar para um lugar inventado e depois dizer "pasta não existe"**.
+
+### 🚨 As travas moram NO PC, não na VPS
+
+A VPS pode **mandar** um caminho; quem diz se ele é aceitável é o agente, no
+PC. Isto é o oposto do padrão da casa (*"quem barra é o backend"*) e tem de
+ser: o backend do risco, aqui, é o agente — ele lê disco e **sobe arquivo**. Um
+agente que confia na VPS para isso é um agente que obedece a VPS invadida.
+
+**Raízes permitidas:** o perfil do usuário (`%USERPROFILE%`) e as pastas de
+OneDrive (`OneDrive`, `OneDriveCommercial`, `OneDriveConsumer`).
+
+Provado no PC do Iago, seis casos:
+
+| caminho | resultado |
+|---|---|
+| `C:\Users\Lenovo\Desktop\Recordings` | aceita |
+| `%USERPROFILE%\Recordings` | aceita (variável expandida) |
+| `C:\Windows\System32` | **recusa** |
+| `C:\Users\Outra\Desktop` | **recusa** |
+| `\\servidor\compartilhada\audio` | **recusa** — backup de pasta de rede é outra decisão, e não se toma por caminho digitado num painel |
+| `C:\Users\Lenovo\..\Outra\x` | **recusa** — travessia resolvida antes de comparar |
+
+E a **busca** tem profundidade (4 níveis) e **teto de tempo (20 s)**: varredura
+de disco inteiro num PC de trabalho é coisa que a pessoa sente, e não poderia
+ser causada por um programa de backup silencioso.
+
+### O instalador pergunta
+
+Mostra o que achou (do `.ini` ou procurando), **diz que o agente vai ler
+aqueles áudios e enviá-los para a VPS**, e aceita outro caminho. A escolha vai
+para o `config.json` — **no mesmo `Set-Content` da chave do ramal**, porque dois
+momentos de escrita daquele arquivo são dois jeitos de perder o alistamento (e
+alistamento perdido só se recupera com senha nova).
+
+⚠️ **Sem ninguém na frente** (instalação silenciosa, sem console), **não
+inventa escolha**: segue sem ela, e o painel passa a dizer onde o agente achou.
+
+🚨 **É consentimento de verdade, não formalidade.** A partir do 0.7 o agente
+**procura** pastas dentro do perfil do usuário. Quem usa o PC tem de ver isso
+escrito e concordar — não descobrir depois.
+
+### O binário
+
+| | 0.6 (19/10, nunca circulou) | **0.7 (26/10)** |
+|---|---|---|
+| bytes | 81.408 | **93.184** |
+| sha256 | `9a0b5899c3fbfc4c…` | **`775586093355c9ce…`** |
+| versão que o Windows mostra | 0.6.0.0 | **0.7.0.0** |
+
+Cópia do anterior em
+`1-PC-DO-OPERADOR\MoviZap-Instalar-Ligacoes.exe.bak_v06_2026-10-26`.
+
+⚠️ **A primeira compilação saiu `v0.6.0.0` carregando scripts 0.7:** o assembly
+tem a versão cravada à parte, nos dois `.cs`. O Windows (e o "Programas e
+Recursos") afirmaria 0.6. Corrigido antes de qualquer distribuição.
+
+⚠️ **Duas armadilhas de codificação, medidas nesta volta:**
+1. o `.ps1` **não tem BOM**, e o PS 5.1 lê arquivo sem BOM como **ANSI**. Emoji
+   dentro de **string** vira bytes que quebram o terminador; em **comentário** é
+   inofensivo. 🚨 E validar com `ReadAllText` (que detecta UTF-8) é validar com
+   **o decodificador errado** — o certo é `Parser::ParseFile`, o mesmo leitor do
+   `powershell -File`;
+2. gravar o arquivo por Python no Windows converteu **1.097 linhas** para CRLF.
+   Revertido para LF: diff em que toda linha mudou esconde a mudança real, e
+   este arquivo vai para 7 PCs.
+
+### 🔴 A distribuição, nas etapas que ele decidiu (26/10)
+
+1. **PC dele** — controle: o `.ini` é conhecido (`recordingPath=C:\Users\Lenovo\Desktop\Recordings`, `autoRecording=1`).
+2. **Claudia** — é onde a **busca por nome** se prova (ela tem OneDrive), e ela
+   falou com a VPS em 26/10 às 08:38.
+3. **Aline, Karla, Erika e o 3404** — pelo chat interno, com senha de uso único.
+4. 🔴 **Ludmila (3348) e Rodrigo (3399)** — **mudos desde 22/10 17:30**. Primeiro
+   descobrir por quê; mandar instalador para quem não responde é repetir o que
+   matou o 0.5 e o 0.6.
+
+⚠️ **E o 0.7 não conserta a gravação desligada** (6 dos 7 PCs). Escrever
+`autoRecording=1` no `.ini` **não é confiável com o MicroSIP aberto** — medido
+em 16/10: ele regrava o arquivo inteiro a partir da memória. As três saídas
+seguem não decididas por ele desde então.

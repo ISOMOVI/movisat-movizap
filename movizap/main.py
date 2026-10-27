@@ -10,6 +10,7 @@ import secrets
 import time
 from contextlib import asynccontextmanager
 from datetime import date, datetime, timezone
+from decimal import Decimal
 
 import psycopg
 import psycopg_pool
@@ -50,6 +51,8 @@ from . import formularios as formularios_mod
 from . import paineis as paineis_mod
 from . import fpsl_ponte
 from . import orcamento as orcamento_mod
+from . import orcamento_consulta
+from . import rotas
 from . import tecnico_vinculo
 from . import midia
 from . import operacao
@@ -986,6 +989,56 @@ def reenviar_orcamento(conversa_id: int, orcamento_id: int,
         raise HTTPException(status_code=404, detail=str(e))
 
 
+# ── ORC_1.1: a aba Orçamentos (26/10) ──────────────────────────────────────
+#
+# 🔵 *"Painel de orçamento salvo para consulta apenas; Consultar em grid os
+# orçamentos aba nova 'Orçamentos' (como das ligações)"*.
+#
+# 🚨 SÓ LEITURA, e a tela diz isso em texto. Orçamento emitido não muda de
+# conteúdo (o `reenviar` acima remonta o MESMO papel), então não há editar nem
+# cancelar aqui -- e ausência de botão não explica nada a ninguém.
+#
+# 🚨 O PDF NÃO GANHA ROTA NOVA. Ele é uma `midia` de `sala_id` nulo, e
+# `/api/midia/{id}/ver` já serve esse caso a quem tem `ATD_1.2` -- a mesma
+# permissão desta aba. Medido em 26/10 nos três orçamentos emitidos. Rota
+# própria seria um segundo caminho para o mesmo arquivo.
+#
+# ⚠️ Não existe exportar: ele pediu *"para consulta apenas"*. Na LIG_1.1 o
+# exportar obrigou a gravar quem exportou (`ligacao_exportacao`), porque é dado
+# de cliente saindo do sistema -- aqui seria o mesmo, e é frente própria.
+
+
+@app.get("/api/orcamentos")
+def listar_orcamentos(de: str | None = None, ate: str | None = None,
+                      numero: str | None = None,
+                      tecnico_contato_id: int | None = None,
+                      atendente_id: int | None = None,
+                      os_numero: str | None = None,
+                      com_pdf: bool | None = None,
+                      pagina: int = 1,
+                      por_pagina: int = orcamento_consulta.POR_PAGINA,
+                      usuario: dict = Depends(auth.requer_tela("ORC_1.1"))):
+    """O grid da aba. A soma vem do filtro inteiro, não da página."""
+    try:
+        return orcamento_consulta.consultar(
+            pagina=pagina, por_pagina=por_pagina, de=de, ate=ate, numero=numero,
+            tecnico_contato_id=tecnico_contato_id, atendente_id=atendente_id,
+            os_numero=os_numero, com_pdf=com_pdf)
+    except operacao.DadoInvalido as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/api/orcamentos/filtros")
+def filtros_de_orcamento(usuario: dict = Depends(auth.requer_tela("ORC_1.1"))):
+    """Quem aparece nos dois seletores da aba.
+
+    ⚠️ Sai dos ORÇAMENTOS, não do cadastro: seletor que oferece técnico sem
+    orçamento nenhum devolve grid vazio e parece defeito da tela.
+    """
+    return {"tecnicos": orcamento_consulta.tecnicos(),
+            "atendentes": orcamento_consulta.atendentes()}
+
+
 class NumeracaoEntrada(BaseModel):
     proximo_numero: int = Field(ge=1, le=99_999_999)
 
@@ -1042,6 +1095,104 @@ class AgendamentoEntrada(BaseModel):
     endereco_campos: EnderecoDoAgendamento | None = None
     ordens: list[OrdemDoAgendamento] = Field(min_length=1, max_length=30)
     orcamento_id: int | None = None
+    # 🆕 26/10 (migração 077): o retrato do deslocamento. ⚠️ Opcionais, e vão
+    # continuar: compromisso sem calculadora é o caso de todo dia, e exigi-los
+    # quebraria o fluxo que está no ar desde 21/10.
+    origem_endereco: str | None = Field(default=None, max_length=400)
+    km: Decimal | None = Field(default=None, ge=0, le=99_999)
+
+
+class KmEntrada(BaseModel):
+    """O que a calculadora manda: de onde e para onde.
+
+    🚨 **DE QUEM É A ORIGEM NÃO VEM DO NAVEGADOR.** O técnico sai da conversa,
+    aqui no servidor -- o mesmo caminho que a rota de emitir orçamento já
+    percorre para saber em nome de quem o documento sai. Com o id do contato no
+    corpo, qualquer um com a tela sobrescreveria a origem de outro técnico
+    trocando um número.
+    """
+    conversa_id: int | None = None
+    origem: EnderecoDoAgendamento
+    destino: EnderecoDoAgendamento
+    ida_e_volta: bool = True
+
+
+def _tecnico_da_conversa(conversa_id: int | None) -> int | None:
+    """O contato da conversa, se ela for de técnico. `None` em qualquer outro
+    caso -- inclusive conversa sem contato, que é o normal em grupo."""
+    if not conversa_id:
+        return None
+    linha = banco.um(
+        "SELECT ct.id FROM conversa c JOIN contato ct ON ct.id = c.contato_id "
+        " WHERE c.id = %s AND ct.relacao = 'tecnico'", (int(conversa_id),))
+    return linha["id"] if linha else None
+
+
+@app.get("/api/rotas/origem")
+def origem_do_tecnico(conversa_id: int | None = None,
+                      usuario: dict = Depends(auth.requer_tela("ATD_1.2"))):
+    """A memória: o último endereço de origem daquele técnico.
+
+    🚨 `disponivel` VEM JUNTO, e é o que permite a tela não mentir: sem chave
+    da API de rotas o cálculo não existe, e a calculadora tem de dizer isso
+    **antes** de oferecer o botão. Botão que abre e falha é pior que botão que
+    não existe -- e a alternativa honesta aqui é o campo manual, que é como o
+    km é preenchido desde 21/10.
+    """
+    contato_id = _tecnico_da_conversa(conversa_id)
+    memoria = rotas.origem_do_tecnico(contato_id) if contato_id else None
+    return {"origem": memoria, "disponivel": rotas.disponivel()}
+
+
+@app.post("/api/rotas/km")
+def calcular_km(entrada: KmEntrada,
+                usuario: dict = Depends(auth.requer_tela("ATD_1.2"))):
+    """A distância entre os dois endereços, e a memória da origem gravada.
+
+    🚨 **A MEMÓRIA É GRAVADA MESMO QUE O CÁLCULO FALHE**, e isto não é detalhe:
+    a origem é o que o atendente DIGITOU, e guardá-la não depende de a API
+    responder. É o que faz a metade *"fica salvo para proximas"* do pedido dele
+    funcionar **hoje**, sem chave nenhuma -- só o km continua manual até ela
+    existir.
+
+    Quatro respostas, e a tela precisa das quatro:
+      · `{"km": ...}`                -> calculou;
+      · `{"km": null, "motivo": ...}` -> o serviço respondeu e **não localizou**;
+      · **503** com motivo            -> não deu para perguntar (ou sem chave);
+      · **400**                       -> falta rua/cidade; nem saiu da VPS.
+    """
+    origem = entrada.origem.model_dump()
+    destino = entrada.destino.model_dump()
+
+    contato_id = _tecnico_da_conversa(entrada.conversa_id)
+    if contato_id:
+        rotas.lembrar_origem(contato_id, origem)
+
+    try:
+        achado = rotas.distancia(origem, destino)
+    except rotas.EnderecoInsuficiente as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except rotas.RotaIndisponivel as e:
+        # 🚨 503, NÃO 400: "não deu para perguntar" ≠ "endereço errado". Juntar
+        # os dois faria a tela acusar de errado um endereço certo que ela não
+        # conseguiu conferir -- a mesma régua dos três estados do CEP.
+        raise HTTPException(status_code=503, detail=str(e))
+
+    if achado is None:
+        return {"km": None, "ida_e_volta": entrada.ida_e_volta,
+                "motivo": "não achei uma rota entre estes dois endereços"}
+
+    return {
+        "km_ida": achado["km"],
+        "km": float(rotas.arredondar(achado["km"],
+                                     ida_e_volta=entrada.ida_e_volta)),
+        "ida_e_volta": entrada.ida_e_volta,
+        "segundos": achado["segundos"],
+        # ⚠️ A tela mostra de quando é o número: rota muda, e cache sem data é
+        # afirmação sem prazo (a régua da migração 076).
+        "do_cache": achado["do_cache"],
+        "consultado_em": achado["consultado_em"],
+    }
 
 
 @app.get("/api/agendamentos")
@@ -1090,6 +1241,7 @@ def criar_agendamento(entrada: AgendamentoEntrada,
             inicio=entrada.inicio, fim=entrada.fim, endereco=entrada.endereco,
             ordens=[o.model_dump() for o in entrada.ordens],
             criado_por=usuario.get("id"), orcamento_id=entrada.orcamento_id,
+            origem_endereco=entrada.origem_endereco, km=entrada.km,
             campos_endereco=(entrada.endereco_campos.model_dump()
                              if entrada.endereco_campos else None),
         )
@@ -3696,10 +3848,28 @@ def apagar_mensagem_rapida(mensagem_id: int,
 # (256 bits; o banco guarda só o hash). Ver `movizap/ligacoes.py`.
 
 class BatimentoEntrada(BaseModel):
+    """🚨 ESTA É A SEGUNDA `BatimentoEntrada` DO PROJETO. A outra vive em
+    `movizap/app_ligacoes.py`, na porta própria (8010), e é a que o agente usa.
+
+    ⚠️ A DUPLICAÇÃO É DELIBERADA, e a razão é a mesma que criou a porta 8010:
+    `app_ligacoes` tem de servir **com o painel fora do ar**, e importar o
+    modelo de um no outro desfaria isso. O preço é este: dois modelos para o
+    mesmo fato, que divergem.
+
+    🚨 E JÁ DIVERGIRAM. Até 26/10 esta não tinha `aviso`, e a chamada abaixo
+    descartava `aviso` e `ip`: um PC que caísse nesta rota perderia o campo que
+    carrega *"gravacao automatica desligada"* e *"pasta de gravacoes ainda nao
+    existe"* -- os dois avisos que o vigia das 08:10/18:10 lê. O alerta
+    chegaria vazio e ninguém saberia por quê. Igualadas campo a campo.
+    """
     pc: str | None = Field(default=None, max_length=100)
     versao: str | None = Field(default=None, max_length=20)
     pendentes: int | None = None
     erro: str | None = Field(default=None, max_length=500)
+    aviso: str | None = Field(default=None, max_length=500)
+    pasta: str | None = Field(default=None, max_length=400)
+    pasta_origem: str | None = Field(default=None, max_length=20)
+    auto_gravacao: bool | None = None
 
 
 def _agente(request: Request) -> dict:
@@ -3714,7 +3884,9 @@ def batimento_do_agente(dados: BatimentoEntrada, request: Request):
     """Toda passada do agente bate aqui, mesmo sem nada a enviar: é o que
     prova que o PC está vivo (o alerta de mais de 1 dia sem contato)."""
     return ligacoes.batimento(_agente(request), dados.pc, dados.versao,
-                              dados.pendentes, dados.erro)
+                              dados.pendentes, dados.erro, aviso=dados.aviso,
+                              pasta=dados.pasta, pasta_origem=dados.pasta_origem,
+                              auto_gravacao=dados.auto_gravacao)
 
 
 @app.post("/api/ligacoes/agente/enviar")
@@ -3750,9 +3922,14 @@ async def ligacao_do_agente(request: Request, dados: str = Form(...),
 # 🔵 *"um grid simples ... exportar e importar e um botão para baixar a ligação
 # se quiser ou reproduzir por lá"*.
 #
-# 🚨 A aba é `LIG_1.1`, permissão que nenhum perfil tem: nasce só do owner.
-# O modal da ficha é outra rota, sob `ATD_1.2` -- quem atende vê as ligações do
-# número que está atendendo, sem ver a aba.
+# 🚨 A aba `LIG_1.1` NASCEU só do owner e, horas depois, ele disse *"pode
+# exibir a aba para todos"*: hoje a permissão é `atendimento`. O modal da ficha
+# é outra rota, sob `ATD_1.2` -- quem atende vê as ligações do número que está
+# atendendo mesmo sem a aba.
+#
+# ⚠️ Este comentário dizia "permissão que nenhum perfil tem" até 26/10, meses
+# depois de a permissão ter mudado -- `M12` num comentário, que é pior que na
+# tela: ninguém o vê para desconfiar. O `Ligacoes.vue` já trazia a correção.
 
 
 @app.get("/api/ligacoes")
@@ -3768,6 +3945,47 @@ def listar_ligacoes(de: str | None = None, ate: str | None = None,
         pagina=pagina, por_pagina=por_pagina, de=de, ate=ate,
         atendente_id=atendente_id, ramal=ramal, sentido=sentido, numero=numero,
         cliente_id=cliente_id, com_gravacao=com_gravacao)
+
+
+class PastasDoAgente(BaseModel):
+    """Os caminhos que a VPS manda este agente tentar, em ordem."""
+    pastas: list[str] = Field(default_factory=list, max_length=10)
+
+
+@app.put("/api/ligacoes/agentes/{agente_id}/pastas")
+def definir_pastas_do_agente(agente_id: int, dados: PastasDoAgente,
+                             usuario: dict = Depends(auth.get_usuario)):
+    """Onde o agente daquele PC deve procurar as gravações.
+
+    🚨 **SÓ OWNER.** Este campo manda um programa no computador de outra pessoa
+    ler uma pasta e **subir o conteúdo**. A `LIG_1.1` é `atendimento` (aberta a
+    todo atendente, decisão dele de 15/10), e "todo atendente vê a aba" não
+    pode virar "todo atendente aponta o agente do colega para onde quiser".
+    Ver a faixa continua aberto; escrever o caminho, não.
+
+    ⚠️ E a validação do que é um caminho SEGURO **não acontece aqui**: mora no
+    PC (dentro do perfil do usuário ou de uma raiz de OneDrive, e só
+    `.mp3`/`.wav` sobem). Um agente que confiasse na VPS para isso seria um
+    agente que obedece a VPS invadida.
+
+    ⚠️ Vale só a partir do agente **0.7**: os que rodam `0.4` descartam a
+    resposta do batimento. A tela diz isso ao lado do campo -- gravar aqui e
+    nada acontecer no PC seria a tela mentindo.
+    """
+    if not usuario.get("owner"):
+        raise HTTPException(status_code=403,
+                            detail="Só o owner define onde o agente procura.")
+    linha = banco.um("SELECT id, ramal, ultima_versao FROM agente_ligacao "
+                     " WHERE id = %s AND revogado_em IS NULL", (agente_id,))
+    if not linha:
+        raise HTTPException(status_code=404, detail="Agente não encontrado.")
+    gravadas = ligacoes.definir_pastas_extra(agente_id, dados.pastas)
+    return {"agente_id": agente_id, "ramal": linha["ramal"],
+            "pastas": gravadas,
+            # 🚨 A tela precisa disto para não prometer o que não vai acontecer:
+            # o agente velho descarta a resposta do batimento.
+            "versao_no_pc": linha["ultima_versao"],
+            "obedece": (linha["ultima_versao"] or "") >= "0.7"}
 
 
 @app.get("/api/ligacoes/agentes")

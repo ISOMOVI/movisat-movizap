@@ -35,6 +35,7 @@ import Informativos from '../telas/Informativos.vue'
 import Historico from '../telas/Historico.vue'
 import Ligacoes from '../telas/Ligacoes.vue'
 import Agendamentos from '../telas/Agendamentos.vue'
+import Orcamentos from '../telas/Orcamentos.vue'
 import ChatInterno from '../telas/ChatInterno.vue'
 import Solicitacoes from '../telas/Solicitacoes.vue'
 import PainelOperacao from '../telas/PainelOperacao.vue'
@@ -103,6 +104,15 @@ const rotas = [
     name: 'ATD_7.1',
     component: Agendamentos,
     meta: { codigo: 'ATD_7.1', titulo: 'Agendamentos' },
+  },
+  {
+    // 🔵 26/10: a aba de consulta dos orçamentos emitidos. Fora de
+    // /atendimento no caminho pelo mesmo motivo do /agendamentos: não é uma
+    // conversa, é o que saiu das conversas -- com número de documento.
+    path: '/orcamentos',
+    name: 'ORC_1.1',
+    component: Orcamentos,
+    meta: { codigo: 'ORC_1.1', titulo: 'Orçamentos' },
   },
   {
     // Fora de /atendimento: ligação do MicroSIP não é conversa de WhatsApp, e

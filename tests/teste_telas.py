@@ -135,8 +135,15 @@ class TestIntegridadeDoRegistro:
             # atendimento (nao se responde ninguem por ele) nem relatorio (nao
             # se le e fecha) -- e uma fila que se movimenta, e mover o card vai
             # escrever no Harmonit.
+            #
+            # ORC entrou em 26/10 com a aba de consulta dos orçamentos:
+            # orçamento não é conversa (ATD) nem configuração (a CFG_13.1 é só
+            # a numeração dele) -- é DOCUMENTO EMITIDO, com número único que
+            # se gasta, valor e PDF, e que por regra não muda de conteúdo
+            # depois de sair. Pendurá-lo em ATD misturaria "falou com o
+            # técnico" e "emitiu documento para o técnico".
             assert modulo in {"INI", "EML", "ATD", "CAD", "CFG", "LIG", "REL",
-                              "FRM", "PNL"}, t["codigo"]
+                              "FRM", "PNL", "ORC"}, t["codigo"]
             assert numero, t["codigo"]
             for parte in numero.split("."):
                 assert parte.isdigit(), f"{t['codigo']}: parte não numérica"

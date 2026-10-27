@@ -5183,3 +5183,757 @@ Peças que já existem e que a frente reaproveita:
 | 5 | O catálogo de `product` (ADITIVO/SUBSTITUICAO) |
 
 ---
+
+## 26/10 — Orçamentos: a aba de consulta (ORC_1.1)
+
+🔵 *"Painel de orçamento salvo para consulta apenas; Consultar em grid os
+orçamentos aba nova 'Orçamentos' (como das ligações)"*. Bloco A da sprint de
+26/10 (controle em `Desktop\Sprint_2026-10-26_MoviZap.md`).
+
+### O buraco que ela fecha
+
+O orçamento é dado de primeira classe desde 21/10 (migração **069**: `numero`
+UNIQUE, `total_centavos`, `ordens_os`, o PDF em `midia_id`), **mas só era
+visível de dentro da conversa do técnico** — a única porta era a aba
+*Orçamento* do `ModalAgendar`, e a única listagem era
+`GET /api/conversas/{id}/orcamentos`, **por conversa**. Quem quisesse saber
+"que orçamentos saíram esta semana" não tinha onde olhar.
+
+### A aba
+
+Grid com uma linha por orçamento: **nº · quando · técnico (e quem emitiu) ·
+as linhas do documento · total · OS · agendamento · PDF**. Filtros de período,
+nº, OS, técnico, quem emitiu e "só com PDF"; paginação de 50; no cabeçalho, a
+contagem e a **soma do filtro**.
+
+- **Permissão `atendimento`** — 🔵 decisão dele em 26/10, pelo molde que ele
+  pediu (a `LIG_1.1` é `atendimento` desde 15/10) e porque **quem emite já
+  precisa só de `ATD_1.2`**, a mesma permissão. Fica de fora só o perfil
+  `cadastro`. ⚠️ A `CFG_13.1`, que configura a **numeração**, continua só do
+  owner: ver e configurar são coisas diferentes.
+- 🚨 **SÓ CONSULTA, E A TELA DIZ ISSO EM TEXTO.** Orçamento emitido **não muda
+  de conteúdo** — o `reenviar()` remonta o MESMO papel a partir do que está
+  gravado. Então não há editar, cancelar nem emitir, e um aviso na tela
+  escreve isso **e diz onde se emite** (a conversa do técnico, botão
+  *Agendar*). É o precedente do card do `PNL_1.1`, que explica por que não se
+  arrasta: aba de grid sem botão de ação parece tela pela metade. Dois testes
+  prendem as frases, e um terceiro prova que **nenhuma rota de
+  `/api/orcamentos` aceita POST, PUT, PATCH ou DELETE**.
+- 🚨 **O nome do técnico vem do Harmonit, não do contato.** Em conversa de
+  técnico o `contato.nome` é o **telefone cru** — medido em 26/10: os três
+  orçamentos emitidos sairiam todos como `+5518998116168` se o grid lesse a
+  coluna óbvia. A consulta faz
+  `COALESCE(contato.harmonit_tecnico_nome, contato.nome)`, e o telefone é o
+  último recurso (degrada, não some).
+- 🚨 **O dinheiro chega escrito do backend** (`total: "629,00"`), porque
+  `orcamento.reais()` é o único lugar do projeto que escreve centavos em
+  português. A quantidade usa `orcamento._quantidade_texto`, **o mesmo texto
+  que o PDF imprime** ("77 km", não "77.000 km"): se o grid formatasse por
+  conta, grid e papel divergiriam. Um teste de frontend proíbe `/ 100` na tela.
+- 🚨 **A soma é do filtro inteiro, não da página** — senão o rodapé mentiria a
+  cada virada. Mesma regra da `LIG_1.1`.
+- 🚨 **O PDF NÃO GANHOU ROTA NOVA.** Ele é uma `midia` com `sala_id` nulo, e
+  `/api/midia/{id}/ver` **já** serve esse caso a quem tem `ATD_1.2` — a mesma
+  permissão da aba (conferido no banco nos três orçamentos reais). Rota própria
+  seria um segundo caminho para o mesmo arquivo. O visor abre **dentro da
+  tela**, num `iframe`: nova aba com `blob:` é bloqueada por bloqueador de
+  pop-up, e o clique pareceria não fazer nada.
+- **Busca por nº é EXATA.** Número de orçamento é **documento**: busca parcial
+  faria o "1" casar com o 10 e o 21 — útil num telefone, errado aqui. Letra no
+  campo é recusada com frase (**400**, não 500).
+- ⚠️ **"Sem agendamento" é o estado comum, não defeito** — o elo
+  (`agendamento.orcamento_id`) só existe quando o orçamento foi emitido
+  **antes** do compromisso, no mesmo modal: 1 dos 3 em 26/10.
+- ⚠️ **`ordens_os` é array de números, sem chave estrangeira** (migração 070):
+  a OS vive no Harmonit. O grid mostra o número e não promete mais que isso; o
+  filtro procura **dentro** do array.
+- ⚠️ **Não existe exportar**, e é escolha: ele pediu *"para consulta apenas"*.
+  Na `LIG_1.1` o exportar obrigou a gravar quem exportou
+  (`ligacao_exportacao`), porque é dado de cliente saindo do sistema — aqui
+  seria o mesmo, e portanto é frente própria, não um botão.
+
+### O que entrou
+
+| Arquivo | O quê |
+|---|---|
+| `movizap/orcamento_consulta.py` | **novo** — a leitura, separada da escrita, no molde do `ligacoes_consulta.py`. 🚨 O `orcamento.py` não foi tocado |
+| `movizap/main.py` | `GET /api/orcamentos` e `GET /api/orcamentos/filtros`, as duas sob `requer_tela("ORC_1.1")` |
+| `movizap/telas.py` | a `ORC_1.1` (módulo novo `ORC`, grupo **Atendimento**) + o fallback `ORC` em `GRUPO_PELO_PREFIXO` |
+| `frontend/src/router/index.js` | a rota `/orcamentos` |
+| `frontend/src/telas/Orcamentos.vue` | **nova** |
+| `tests/teste_orcamento_consulta.py` | **33 testes**, incluindo as rotas por `TestClient` |
+| `frontend/src/orcamentos_2610.teste.js` | **13 testes** |
+| `docs/03_Registro_Telas.md` | a linha da tela, a do ícone, e a lista do perfil `atendimento` |
+
+### 🚨 Dois textos que já mentiam, corrigidos de passagem (`M12`)
+
+1. **`main.py`** dizia, no cabeçalho das rotas de Ligações: *"a aba é `LIG_1.1`,
+   permissão que nenhum perfil tem: nasce só do owner"*. A `LIG_1.1` é
+   `atendimento` **desde 15/10** (*"pode exibir a aba para todos"*). O
+   `Ligacoes.vue` já trazia a correção; o `main.py` ficou meses atrás. ⚠️
+   `M12` em **comentário** é pior que em tela: ninguém o vê para desconfiar.
+2. **`docs/03`**, na tabela de perfis: a lista de telas do `atendimento` não
+   trazia a **`ATD_7.1`** (Agendamentos, `atendimento` desde 21/10) e ainda
+   trazia a **`ATD_5.1`** (Histórico, que passou a `equipe` em 22/10). As duas
+   corrigidas, com a `ORC_1.1` entrando junto.
+
+### ⚠️ O cuidado que o teste desta aba exigiu
+
+**O teste não chama `orcamento.emitir()`**, e isso é de propósito: emitir
+**gasta** o número do `config.orcamento_proximo_numero`, que é a numeração de
+documento de verdade — um teste rodando dez vezes empurraria a numeração dele
+dez números para frente, e buraco em documento numerado é exatamente o que o
+`orcamento.py` existe para evitar. O teste **insere as linhas direto**, com
+número na faixa **99.90x.xxx**, que nenhum documento real alcança (e o `numero`
+é UNIQUE: se um dia chegar lá, o teste estoura em vez de sobrescrever
+documento). Conferido depois de rodar: numeração ainda em **4**, os **3**
+orçamentos reais e os **2** agendamentos reais intactos, nenhuma sobra.
+
+---
+
+## 26/10 — Agendamento: a base quadrada, a trava com nome e um calendário só
+
+🔵 Pedido dele: *"verifique nos dois tipos, cliente e tecnico, o layout e
+disposição de texto das telas, incluindo de pós agendamento e mensagens
+informativas: Tela de agendar serviço · Layout para base quadrada de
+resposta"*. Bloco B da sprint de 26/10 (controle em
+`Desktop\Sprint_2026-10-26_MoviZap.md`).
+
+### 1. A "base quadrada de resposta" — o corpo da mensagem virou quadro
+
+🔵 Ele escolheu, entre duas leituras, o **bloco de texto alinhado** (a outra
+era botão de resposta no WhatsApp, que **não existe** no projeto: o
+`evolution.py` sabe `sendText`, `sendMedia`, `sendWhatsAppAudio` e
+`sendReaction`, e nada de `sendButtons`/`sendList`).
+
+```
+(INSTALAÇÃO) | ABC1D23, EFG4H56 | Velasco Leite Pastelaria ME
+
+DATA ........ 26/10
+HORÁRIO ..... 14:30
+ENDEREÇO .... Rua X, 123 · Centro
+              Pres. Prudente - SP
+TÉCNICO ..... João
+PLACA(S) .... ABC1D23, EFG4H56
+ACOMPANHA ...
+```
+
+🚨 **O BLOCO VAI CERCADO POR ``` (TRÊS CRASES), E SEM ISSO A ENTREGA NÃO
+ACONTECE.** O WhatsApp usa fonte **proporcional**: em fonte proporcional os
+pontinhos **não alinham**, porque cada letra tem largura diferente, e o quadro
+sairia torto. As crases põem o bloco em monoespaçado — e é isso que também o
+desenha numa caixa, que é o que ele chamou de "base quadrada".
+
+Consequências que entraram no desenho, cada uma por um motivo:
+
+- ⚠️ **Os rótulos encurtaram.** `RESPONSÁVEL DO CLIENTE POR ACOMPANHAR O
+  TÉCNICO` tem **48 caracteres** e, como rótulo de coluna, empurraria o valor
+  para fora de qualquer celular. Ficou **`ACOMPANHA`**; `VEÍCULO(S) /
+  PLACA(S)` → `PLACA(S)`; `TÉCNICO RESPONSÁVEL` → `TÉCNICO`.
+- **A largura da coluna é calculada** do rótulo mais longo do próprio quadro,
+  nunca cravada: a mensagem do técnico tem duas linhas a mais (`OS` e
+  `ORÇAMENTO`, 9 letras) e tem de continuar alinhada sozinha.
+- **Teto de 36 colunas** (`LARGURA`, uma constante só), e a quebra é **nossa**:
+  linha comprida é quebrada pelo celular, e quebra do celular destrói o
+  alinhamento que o quadro existe para ter. A quebra acontece **na junta do
+  dado** — o ` · ` do endereço, a `, ` das placas —, nunca no meio da palavra.
+- ⚠️ **O separador não fica pendurado** no fim da linha (`Centro ·` com o resto
+  embaixo): a própria quebra já separa.
+- 🚨 **DUAS FORMAS, UMA REGRA.** Ao lado do rótulo sobram ~22 colunas, e isso
+  basta para data, hora, técnico, placas e para o endereço curto. Um endereço
+  real dos sete campos da migração 073 **não cabe** em 22, e forçá-lo ali daria
+  `"Presidente Prudente -"` / `"SP"`. Então: cabendo em até **duas** linhas, o
+  valor fica **ao lado**; passando disso, **desce para baixo** do rótulo com a
+  linha quase inteira, e aí cada pedaço (rua, bairro, complemento, cidade, CEP)
+  cabe numa linha só. ⚠️ A escolha é por **caber**, não por nome de campo — um
+  técnico de nome comprido cai na mesma régua sem ninguém tocar no código.
+- **O cabeçalho fica FORA da cerca** (tipo | placas | cliente): comprido por
+  natureza, dentro do monoespaçado quebraria em três linhas e sujaria o quadro.
+  Fora, o WhatsApp o trata como texto normal.
+- ⚠️ **`ACOMPANHA` vazio sai em branco, sem `—`.** O desenho que foi mostrado a
+  ele tinha um traço, e o traço era **meu**: a decisão de 21/10 é não inventar
+  nome, e um `—` faria um campo que **espera** ser preenchido parecer resolvido.
+  A linha é aparada no fim para não deixar espaço solto.
+
+🚨 **Um defeito meu, achado pelo teste novo e não pela leitura:** eu
+normalizava o acento para **medir** (`NFC`) e emitia o rótulo **como veio**. Em
+NFD, `HORÁRIO` ocupa 8 unidades e desenha 7 colunas — e o quadro saía um
+caractere torto. Agora normaliza para emitir.
+
+⚠️ **Nenhum teste vê fonte (`M9`).** O `quadro_2610.teste.js` prova a geometria
+(alinhamento, cerca, largura, acento, as duas formas); se 36 colunas é a
+largura certa, **só o celular dele diz**.
+
+### 2. A trava do modal ganhou botões com nome
+
+🔵 Ele pediu em 21/10: *"se clicar fora dele no movizap ele aparece aviso de
+'cancelar' ou 'continuar'"*. O que entrou naquele dia foi `window.confirm`, que
+**não nomeia botão** — e o texto teve de **explicar a inversão**: *"OK cancela o
+agendamento. Cancelar continua aqui"*. Era a tela pedindo desculpa pela
+ferramenta.
+
+Agora a pergunta mora **dentro da caixa**, com **"Cancelar o agendamento"** e
+**"Continuar"** escritos, e dizendo o que se perde. Mais o que o `confirm` não
+permitia ter:
+
+- **`mousedown` + `click`**: a trava só vale para quem apertou **e** soltou no
+  fundo. Quem seleciona texto num campo e solta o mouse além da borda dispara
+  `click` no fundo — antes isso pediria para cancelar no meio de uma digitação.
+- **`Esc` em dois níveis**: fecha a pergunta antes de falar do modal.
+
+⚠️ **NÃO foi envolvido no `ModalEdicao.vue`**, e o plano dizia que seria: aquele
+componente traz rodapé fixo de **Salvar / Cancelar alterações**, e este modal
+tem **três abas** com botões próprios. Um "Salvar" a mais seria botão que não
+cumpre o que promete. Reaproveitou-se o **mecanismo** dele, não a casca.
+
+### 3. Tokens e toque
+
+- 🚨 **A casca passou a ser a `.modal` global** (`componentes.css`), que já traz
+  `position: fixed`, `inset: 0`, `z-index: var(--z-modal)` e o fundo. Até aqui
+  o `.agm__fundo` copiava as seis propriedades à mão — com **`z-index: 60`**
+  quando o token é **200**. Com 60, qualquer coisa em `--z-flutuante` (100)
+  passava **por cima do modal**.
+- **Toque de 44 px** no calendário e na grade de horas. `docs/02` §3: *"16px e
+  44px não são estética"*, e isto é tela que se usa no celular.
+
+### 4. Um calendário só, para as duas telas
+
+🚨 **A grade do mês estava escrita DUAS VEZES** — no `ModalAgendar` e na
+`ATD_7.1`: a mesma conta dos vazios antes do dia 1, o mesmo `andarMes`, o mesmo
+`rotuloDoMes`, o CSS quase igual. Virou **`componentes/CalendarioMes.vue`**.
+
+⚠️ **As duas cópias divergiam em QUATRO medidas, e ninguém escolheu nenhuma:**
+coluna de 34 px × 36 px, altura 30 px × 32 px, `gap` 3 px × 4 px, fundo
+`--superficie-2` × `--superficie`. **Nenhuma** chegava ao `--altura-toque` do
+padrão. É o melhor retrato do que a cópia custa: ficou diferente sem decisão. E
+foi exatamente por ela que o toque de 44 px, nesta mesma sessão, entrou **num
+lugar só** antes da extração.
+
+O componente **não sabe o que é um agendamento**: mostra um mês e avisa qual dia
+foi clicado. O que isso significa é de cada tela (no modal, preenche o `quando`
+preservando a hora; na `ATD_7.1`, move a âncora do carrossel). ⚠️ O **selo de
+"tem serviço" continua fora** dele, pela justificativa original da `ATD_7.1`: o
+que está carregado é a semana da âncora, então o mês saberia de uns dias e não
+de outros — e um mês com pontos em três dias afirmaria que nos outros não há
+nada.
+
+🚨 **Uma sobra que o `grep` pegou e a suíte não:** ao tirar a grade do modal, a
+função `andarMes` ficou lá, referenciando um `mesCursor` que **tinha saído**.
+Chamá-la estouraria em tempo de execução, e nenhum teste a chamava. `M2` em ato:
+o `grep` é pelo que **vai sair**.
+
+### 5. Os três diálogos do navegador saíram da `ATD_7.1`
+
+Eram **dois `window.prompt`** (cancelar e reagendar) e **um `window.confirm`** (o
+"esta conversa já tem texto não enviado"). Todos viraram modal com as classes
+`.modal` globais.
+
+- 🚨 **O `prompt` não validava enquanto se digitava:** data errada só virava
+  erro **depois** de o diálogo fechar, com o que a pessoa escreveu já perdido. O
+  modal novo **fica aberto no erro**.
+- Pedir data por texto (`AAAA-MM-DD HH:MM`) numa tela que **tem calendário** era
+  oferecer o caminho pior; agora é `datetime-local`, que no celular abre o
+  seletor do aparelho.
+- 🚨 **O `confirm` do rascunho perguntava sem mostrar nada.** A pergunta é
+  "substituir o que o colega digitou?" e a pessoa decidia **às cegas** sobre o
+  texto de outra pessoa. O modal mostra o começo do que seria perdido.
+
+### 6. A varredura dos avisos (`M11`)
+
+Lista **nominal**, não por padrão achado na hora: **24 avisos** —
+**18** no `ModalAgendar` e **6** na `ATD_7.1` (o `CalendarioMes` não tem
+nenhum: quem avisa é a tela, pelo slot `nota`).
+
+⚠️ **O plano falava em "9", e eram 24.** O número veio de uma contagem por
+grupos de um relatório, não da lista nominal — que é exatamente o que o `M11`
+manda não fazer.
+
+**Resultado da leitura: nenhum dos 24 ficou falso.** Os três estados do CEP
+seguem separando *"não existe"* de *"não deu para consultar"*; o
+*"ainda não foi confirmado pelo cliente, então o campo sai vazio"* continua
+descrevendo o que o quadro novo faz (a linha `ACOMPANHA` sem valor); o *"dia já
+passou, dá para agendar, mas confira"* mudou de lugar (foi para o slot) e não de
+sentido. 🚨 E **nenhum texto fora do diário descrevia o formato da mensagem** —
+conferido por `grep` dos rótulos antigos em `frontend/` e em `docs/`: as únicas
+ocorrências são os comentários que explicam a troca e as asserções que impedem
+os rótulos antigos de voltar.
+
+### O que entrou
+
+| Arquivo | O quê |
+|---|---|
+| `frontend/src/util/mensagem_agendamento.js` | o quadro (`quadro`, `LARGURA`), a cerca, as duas formas, a normalização |
+| `frontend/src/componentes/CalendarioMes.vue` | **novo** — um calendário para as duas telas |
+| `frontend/src/componentes/ModalAgendar.vue` | trava com botões nomeados, `.modal` global, 44 px, usa o calendário |
+| `frontend/src/telas/Agendamentos.vue` | os três diálogos do navegador viraram modal; usa o calendário |
+| `frontend/src/quadro_2610.teste.js` | **novo**, 15 testes — a FORMA do quadro |
+| `frontend/src/calendario_2610.teste.js` | **novo**, 10 testes — o componente que serve duas telas |
+| `frontend/src/agendar_2110.teste.js` | 58 → **65** testes; os da trava e do rascunho reescritos **mantendo a intenção** |
+
+### 🔴 Falta dele (`M9`)
+
+1. **Receber uma mensagem de verdade no celular** — o quadro monoespaçado só se
+   prova ali.
+2. **Abrir o modal nos dois tipos** (conversa de técnico e de cliente) e fechar,
+   para ver **"Cancelar o agendamento / Continuar"**.
+3. Exercitar **reagendar** e **cancelar** na `ATD_7.1`, e o aviso de rascunho.
+
+---
+
+## 26/10 — A calculadora de KM do técnico (bloco C)
+
+🔵 *"na parte de agendamento do tecnico: proponha no deslocamento uma
+calculadora km técnico que pode abrir outro modal para calcular, dai o endereço
+do tecnico sempre fica preenchido conforme o ultimo (...) se for alterado,
+permanece alterado (...) E dali coloca os dados de endereço do cliente puxando
+do CEP, etc para o orlamento"*. E, perguntado de onde sai a distância: *"o km é
+o calculo a ser feito (...) Hoje é feita na mão via 'rotas' do google e dai esse
+KM é inserido manualmente"*.
+
+### 🚨 A entrega de hoje funciona SEM a chave da API — e isso não é consolo
+
+O pedido dele tem **duas metades**, e elas não dependem uma da outra:
+
+| metade | estado |
+|---|---|
+| *"o endereço fica salvo para proximas, se for alterado permanece alterado"* | ✅ **no ar, funcionando hoje** |
+| *"o km é o calculo a ser feito"* | 🔴 espera a chave da Routes API |
+
+O que faz a primeira metade valer sem chave é uma decisão de desenho: **a rota
+grava a memória da origem mesmo quando o cálculo falha**. A origem é o que o
+atendente **digitou** — guardá-la não depende de a API responder. Provado em
+teste (`test_a_MEMORIA_e_gravada_mesmo_com_o_calculo_FALHANDO`) e ao vivo, com
+a rota devolvendo 503 e a memória gravada na mesma chamada.
+
+### A tela
+
+Botão **`⚐ km`** ao lado da quantidade, **só na linha cuja unidade é `km`** —
+pela unidade e não pelo nome do serviço, para um serviço novo por km ganhar a
+calculadora sozinho. Ele abre o `ModalKm` por cima do de agendar (o que só
+funciona porque o `--z-modal` foi arrumado no bloco B).
+
+Dentro: **origem** (já preenchida com a última, dizendo **de quando** é) e
+**destino** (vindo dos sete campos do passo 3, sem redigitar), os dois com
+consulta de CEP pelo backend e os **três estados** separados — achou · não
+existe · **não deu para consultar**.
+
+🚨 **SEM CHAVE, A TELA DIZ POR QUÊ** e o campo de km fica manual, como é desde
+21/10 — em vez de oferecer um botão que falha. E diz, na mesma frase, que a
+origem fica guardada de qualquer forma.
+
+✅ **Ida e volta é o padrão**, decidido por ele, e **as duas contas ficam à
+vista** (`Ida 38.5 km · total a cobrar 77 km`): ninguém cobra errado por
+distração. O número calculado **continua editável** — e um `—` nunca vira
+zero, porque zero é um número que vai para orçamento.
+
+### O que o backend faz, e as quatro respostas
+
+`movizap/rotas.py`, no molde do `cep.py`, com **quatro** respostas
+distinguíveis: achou · **não localizou a rota** · não deu para perguntar ·
+**sem chave configurada**. A quarta não existe no `cep.py` porque o ViaCEP é
+público.
+
+🚨 **E a ordem das checagens importa:** *"falta a rua"* é sabível **sem chave
+nenhuma**, e sai como **400**. A primeira versão conferia a chave antes e
+devolvia 503 — o que mandaria o operador procurar defeito no serviço quando o
+problema é o campo em branco na frente dele. **Achado pela prova ao vivo**, não
+pela leitura.
+
+🚨 **De quem é a origem NÃO vem do navegador.** A rota recebe `conversa_id` e
+**o servidor** descobre o técnico — o mesmo caminho que a rota de emitir
+orçamento já percorre. Com o id do contato no corpo, qualquer um com a tela
+sobrescreveria a origem de outro técnico trocando um número. ⚠️ A primeira
+versão fazia isso; o `defineProps` do modal (que **não tem** o id do contato) é
+que forçou a olhar, e o desenho melhorou junto.
+
+### O cache, e o princípio da casa que ele contraria
+
+`rota_cache` guarda a distância por **par de endereços normalizados** — "Rua X,
+123" e "rua x 123" são a mesma consulta, e pagar duas vezes por isso é
+desperdício que ninguém vê na fatura.
+
+🚨 **O `cep.py` diz, escrito:** *"Não vira tabela porque cache que sobrevive a
+deploy é cache que guarda erro para sempre"*. Vale para o CEP, que é grátis.
+Aqui cada consulta **custa**, e as duas condições que respondem ao medo dele
+estão presas por teste: **falha nunca entra** (nem "não localizou") e
+**`consultado_em` fica à vista**, com prazo de 90 dias — a mesma régua da
+migração 076, que guardou a situação **com a hora**.
+
+### ⚠️ O que está escrito e NÃO foi verificado ao vivo
+
+`rotas._perguntar` — a chamada HTTP à Routes API. **Sem chave não dá para
+exercitar a API**, e `M5` manda não afirmar o que não se mediu. Está isolada
+nessa função de propósito, com o aviso no topo do módulo: quando a chave
+existir, é **ela e só ela** que precisa ser conferida contra a resposta real. O
+resto (cache, normalização, as quatro respostas, a memória) não depende da
+forma dela, e está todo coberto com a consulta **dublada** — nenhum teste gasta
+dinheiro, porque suíte que gasta é suíte que alguém desliga.
+
+### O que entrou
+
+| Arquivo | O quê |
+|---|---|
+| `migracoes/077_km_do_tecnico.sql` | `tecnico_origem` (memória) · `agendamento.origem_endereco` + `km` (retrato) · `rota_cache` |
+| `movizap/rotas.py` | **novo** — distância, normalização, cache e a memória da origem |
+| `movizap/main.py` | `GET /api/rotas/origem` · `POST /api/rotas/km`, sob `ATD_1.2` |
+| `movizap/agendamento.py` | o `criar` grava o retrato do deslocamento |
+| `movizap/config.py` + `scripts/gerar_env.py` | `MOVIZAP_ROTAS_CHAVE` (vazia = cálculo desligado) |
+| `frontend/src/componentes/ModalKm.vue` | **novo** |
+| `frontend/src/componentes/ModalAgendar.vue` | o botão na linha de km, e o retrato indo ao compromisso |
+| `tests/teste_rotas.py` | **28 testes**, consulta dublada |
+| `frontend/src/km_2610.teste.js` | **13 testes** |
+
+### 🔴 Falta dele
+
+1. **Criar a chave da Routes API no Google Cloud** e medir endpoint e preço
+   correntes no console. Até então, o km é digitado — e a memória já funciona.
+2. Depois da chave: conferir `rotas._perguntar` contra a resposta real.
+3. ⏳ Abrir o modal numa conversa de técnico, calcular (ou digitar) e **emitir
+   um orçamento de verdade**, conferindo que o km impresso é o que ficou na
+   tela.
+
+---
+
+### 26/10, volta 2 do bloco C — o caminho SEM API, e por que o DeepSeek não serve
+
+🔵 Perguntas dele, nesta ordem: *"se não me engano, temos uma API google dentro
+da VPS nao temos? ela serviria?"* · *"veja do deepseek e teste para ver quanto
+custaria"* · *"ainda acho que é possivel fazer isso sem API, talvez botões que
+abrem no browser da pessoa e a rota pronta e pegue o KM"*.
+
+#### 1. O que de Google existe no nosso ecossistema, medido
+
+| Onde | O quê | Serve para rotas? |
+|---|---|---|
+| `movizap_painel/.env` · `fpsl_weso/.env` | **OAuth**: client id + secret, escopos `gmail.modify`, `gmail.send`, `calendar.readonly` | **não** — é credencial de "agir em nome de uma pessoa", não chave de API |
+| `movizap_painel/.google_sa.json` | **conta de serviço** `movizap-e-mail@movisat-movizap...`, projeto **`movisat-movizap`**, usada pela delegação do Gmail | não como está |
+
+🚨 **A boa notícia está no `project_id`:** existe um projeto Google **nosso**
+(`movisat-movizap`). Habilitar a Routes API é tarefa de console **nesse
+projeto** — não conta nova, não organização nova.
+
+⚠️ E a chave de IA que havia na VPS era do **imagohub**, que **não faz parte
+deste ecossistema** (dito por ele). Mesmo que servisse, compartilhar chave entre
+dois produtos é chave que não se pode rotacionar sem derrubar o outro — a mesma
+razão escrita no `config.py` para a chave de LLM do MoviZap ser própria.
+
+#### 2. O DeepSeek: custa quase nada, e é por isso que a tentação existe
+
+Medido em 26/10, três voltas com temperatura 0, e um teste de falsificação:
+
+| caso | resposta |
+|---|---|
+| dois endereços reais, mesma cidade | **`4,3`** — estável nas três voltas |
+| rua **inexistente** | recusou: *"o endereço de destino é inexistente"* |
+| mesmo endereço nos dois lados | `0,0` |
+| par de ~100 km (outra cidade) | **recusou**: *"Não tenho acesso a um roteador de mapas em tempo real"* |
+
+**Custo: ~98 tokens de entrada + 3 de saída por consulta** — praticamente nada.
+⚠️ O preço em reais sai do painel da conta, não da minha memória (`M5`).
+
+🚨 **E ele se comportou melhor do que eu previa** — eu esperava número
+inventado para a rua falsa, e ele recusou. Mas a conclusão é a mesma, e vem do
+próprio modelo: ele **não tem mapa**. Responde o trajeto curto e recusa o
+longo, e **campo de dinheiro que às vezes responde e às vezes recusa é pior que
+campo manual**, porque ninguém sabe qual das duas aconteceu.
+
+#### 3. A ideia dele é a certa, e virou o caminho PRINCIPAL
+
+**Botão "Ver a rota no Google"**, que abre o Maps na aba nova **com os dois
+endereços já preenchidos** (`/maps/dir/?api=1&origin=…&destination=…&travelmode=driving`
+— o esquema público "Maps URLs", **sem chave**).
+
+Por que é melhor que a API, e não só mais barato:
+- **custa zero** e não depende de chave, projeto habilitado nem faturamento;
+- o número sai da **mesma fonte que ele já confere à mão** — não há divergência
+  entre "o que o sistema diz" e "o que o Google diz";
+- o número que vai ao orçamento é **lido por uma pessoa**. Para campo de
+  dinheiro, isso é vantagem, não limitação.
+
+O que o link resolve é o trabalho real: hoje ele digita os dois endereços no
+Google; agora chega lá com os dois prontos e só lê o km.
+
+⚠️ **O botão de "Calcular aqui" ficou DEPOIS do link**, e só aparece com chave:
+o link é o que funciona sempre. E o campo avisa que **o Google mostra a ida** —
+para ida e volta, dobra.
+
+🚨 **Um defeito meu, achado pelo teste:** `comoTexto` anexa `"Brasil"` sempre,
+então com os campos em branco ela devolvia `"Brasil"` — texto não vazio — e o
+link nascia válido, abrindo uma rota **de um país para ele mesmo**. A régua
+passou a ser **conteúdo útil** (rua ou cidade nos dois lados), não "o texto não
+está vazio".
+
+⚠️ **O formato do link não foi conferido por mim num navegador** (`M5`): é o
+esquema documentado do Google, e **um clique dele prova** — de graça.
+
+---
+
+## 26/10 — A pasta de coleta das gravações: diagnóstico e canal de volta (bloco D)
+
+🔵 *"veja se da para atualizar do lado de ca para os computadores o local de
+coleta das ligações gravadas, por exemplo, da claudia está em: REC da Claudia
+diz sem comunicação · Caminho de busca dela é: user, lenovo, one drive,
+backups, área de trabalho"*. E o desenho que ele mandou depois: *"primeiro a
+correção do .exe e que permita inserir mais endereços por aqui ou buscar pelo
+nome da pasta, pedindo permissão ao instalar"*.
+
+### 🚨 O que estava errado, medido
+
+1. **A pasta era 100% derivada do `MicroSIP.ini`** — e, com `recordingPath`
+   vazio, o agente **chutava** `GetFolderPath('Desktop')\Recordings`. O próprio
+   comentário do código dizia que era *"HIPOTESE a medir no PC da Claudia"*:
+   **com OneDrive, a Área de Trabalho muda de lugar.**
+2. **O batimento era só de ida.** Devolvia `{ok, ramal, servidor_em}` e o
+   agente **descartava a resposta** (`[void](Batimento …)`). Não havia canal
+   nenhum da VPS para o PC.
+3. **O aviso não dizia ONDE procurou.** *"pasta de gravacoes ainda nao existe"*,
+   sem o caminho — e é por isso que era impossível ver pelo painel que o
+   caminho calculado estava errado.
+4. **6 dos 7 PCs** com `gravacao automatica desligada`.
+
+### Migração 078 — três colunas de diagnóstico e uma de instrução
+
+`agente_ligacao.pasta` · `pasta_origem` (CHECK com lista fechada) ·
+`auto_gravacao` · `pastas_extra text[]`.
+
+🚨 **O diagnóstico vem ANTES do canal de volta, e a ordem é o desenho:** sem
+saber onde o agente procurou, mandar um caminho novo é adivinhar duas vezes.
+
+⚠️ **`pasta_origem` é COMO a pasta foi decidida**, não frase livre: `vps` ·
+`escolhida` · `ini` · `relativa` · `busca` · `palpite`. Lista fechada porque a
+tela explica cada caso em texto — frase livre viraria 7 variações do mesmo
+recado.
+
+### O backend
+
+- `ligacoes.batimento` aceita os três campos de diagnóstico e **devolve
+  `config.pastas`**.
+- ⚠️ **Campo novo é OPCIONAL, e vai continuar:** os 7 PCs rodam o `0.4` e não
+  sabem mandar nada disso. Exigi-los derrubaria a coleta inteira para ganhar um
+  diagnóstico. E `COALESCE`: batimento sem os campos **não apaga** o que a
+  passada boa gravou.
+- ⚠️ `pasta_origem` fora da lista vira **nulo**, não erro: o CHECK recusaria, e
+  um agente com versão nova demais não pode fazer o batimento falhar — perder a
+  gravação é pior que perder o rótulo.
+- `PUT /api/ligacoes/agentes/{agente_id}/pastas` — 🚨 **só owner**, e não é excesso:
+  este campo manda um programa no computador de outra pessoa ler uma pasta e
+  **subir o conteúdo**. A `LIG_1.1` é `atendimento` (aberta a todo atendente,
+  decisão dele de 15/10), e *"todo atendente vê a aba"* não pode virar *"todo
+  atendente aponta o agente do colega para onde quiser"*. Ver continua aberto;
+  escrever, não.
+- A resposta diz **`obedece`**: o `0.4` descarta a resposta do batimento, e
+  gravar deixando a pessoa achar que resolveu seria a tela mentindo.
+
+🚨 **E o REC passou a preferir o dado explícito.** Até hoje *"ligado"* era
+deduzido da **ausência** de um aviso de texto — dedução que quebra de dois
+jeitos: muda a frase do agente e ela inverte; chega aviso novo sobre outra
+coisa e o REC "desliga" sozinho. Com `auto_gravacao` vindo do PC não há o que
+deduzir. ⚠️ O terceiro estado fica: nulo em quem **já falou** é **agente
+velho**, não "desligado".
+
+### 🚨 Um defeito que estava lá antes de hoje, consertado de passagem
+
+Existem **duas** `BatimentoEntrada` — uma em `app_ligacoes.py` (a porta 8010,
+que o agente usa) e outra em `main.py` (o painel). **A do painel não tinha
+`aviso`**, e a chamada descartava `aviso` e `ip`. Um PC que caísse nessa rota
+perderia exatamente o campo que carrega *"gravacao automatica desligada"* e
+*"pasta de gravacoes ainda nao existe"* — os dois avisos que o vigia das
+08:10/18:10 lê, e que originaram este bloco. O alerta chegaria vazio e ninguém
+saberia por quê.
+
+⚠️ **A duplicação fica**, e é escolha: unificá-la pede importar o modelo de um
+módulo no outro, e `app_ligacoes` existe justamente para **não** depender do
+painel (tem de servir com o painel fora do ar — é a razão da porta 8010). Os
+dois foram igualados campo a campo, e está escrito que são dois.
+
+### A tela (`LIG_1.1`)
+
+Na faixa de cobertura, por linha: o **caminho** observado e **como** foi
+decidido, com a explicação de cada origem em texto. 🚨 Quando o agente não
+informa, a tela escreve **"agente antigo"** — e **não "sem pasta"**: o PC pode
+estar coletando perfeitamente e só não saber contar onde. É o estado dos 7 em
+26/10. Origem `palpite` sai em vermelho, nomeando o OneDrive.
+
+E, **só para o owner**, o campo dos caminhos — que **diz** que só vale a partir
+do `0.7`.
+
+### O agente `0.7`
+
+**A ordem de precedência**, e o palpite **saiu**:
+
+| # | fonte | origem |
+|---|---|---|
+| 1 | o que a **VPS** mandou | `vps` |
+| 2 | a escolha confirmada na **instalação** | `escolhida` |
+| 3 | `recordingPath` do `.ini` | `ini` / `relativa` |
+| 4 | **busca pelo nome** da pasta | `busca` |
+| — | ~~chute da Área de Trabalho~~ | **removido** |
+
+🚨 **As travas moram NO PC, não na VPS** — e isto é o oposto do padrão da casa
+(*"quem barra é o backend"*), de propósito: o backend do risco, aqui, é o
+agente. Um agente que confia na VPS para dizer o que é seguro é um agente que
+obedece a VPS invadida. Provado no PC dele, seis casos:
+
+| caminho | resultado |
+|---|---|
+| `C:\Users\Lenovo\Desktop\Recordings` | aceita |
+| `%USERPROFILE%\Recordings` | aceita |
+| `C:\Windows\System32` | **recusa** |
+| `C:\Users\Outra\Desktop` | **recusa** |
+| `\\servidor\compartilhada\audio` | **recusa** (unidade de rede) |
+| `C:\Users\Lenovo\..\Outra\x` | **recusa** (travessia) |
+
+A busca por nome, rodada no PC dele, achou `C:\Users\Lenovo\Desktop\Recordings`
+— e as raízes permitidas incluem o OneDrive dele, que é o que resolve o caso da
+Claudia **sem ninguém descobrir o caminho dela antes**.
+
+**O instalador pergunta** (🔵 *"pedindo permissão ao instalar"*): mostra o que
+achou, aceita outro caminho, e grava a escolha no `config.json` — **no mesmo
+`Set-Content` da chave**, porque dois momentos de escrita daquele arquivo são
+dois jeitos de perder o alistamento. ⚠️ Sem ninguém na frente (instalação
+silenciosa), **não inventa escolha**.
+
+🚨 **E é consentimento de verdade**, não formalidade: a partir do `0.7` o agente
+**procura** pastas dentro do perfil do usuário e **sobe** áudio. Quem usa o PC
+tem de ver isso escrito e concordar — não descobrir depois.
+
+### ⚠️ Duas armadilhas de codificação, uma delas minha
+
+1. **O `.ps1` não tem BOM, e o PS 5.1 lê arquivo sem BOM como ANSI.** Emoji
+   dentro de **string** virou bytes que quebraram o terminador — aconteceu no
+   meu script de prova. Em **comentário** é inofensivo, e é por isso que o
+   agente passou. 🚨 **E eu havia validado com o decodificador errado:** usei
+   `ReadAllText` (que detecta UTF-8), não o leitor do PowerShell. A validação
+   certa é `Parser::ParseFile`, que é o mesmo leitor do `powershell -File` — os
+   dois arquivos passam por ele.
+2. **O Python no Windows converteu o arquivo inteiro para CRLF** (1.097 linhas).
+   O original era LF. Restaurado: um diff em que **toda** linha mudou esconde a
+   mudança real de quem for revisar — e este arquivo vai para 7 PCs.
+
+### O `.exe`
+
+| | 0.6 (19/10, nunca circulou) | **0.7 (26/10)** |
+|---|---|---|
+| bytes | 81.408 | **93.184** |
+| sha256 | `9a0b5899c3fbfc4c…` | **`775586093355c9ce…`** |
+| versão no Windows | 0.6.0.0 | **0.7.0.0** |
+
+⚠️ **O assembly tinha a versão cravada à parte**: a primeira compilação saiu
+`v0.6.0.0` carregando scripts `0.7`, e o Windows (e o "Programas e Recursos")
+afirmaria 0.6. Corrigido nos dois `.cs`.
+
+### 🔴 Falta
+
+1. 🔴 **Instalar, nas etapas que ele decidiu:** PC dele (controle) → **Claudia**
+   (é onde a busca por nome se prova, com OneDrive) → os 4 que estão falando →
+   e **Ludmila e Rodrigo só depois de descobrir por que estão mudos desde
+   22/10** — mandar instalador para quem não responde é repetir o que matou o
+   0.5 e o 0.6.
+2. ⚠️ **O que este bloco NÃO conserta: a gravação desligada.** Pasta certa com
+   `autoRecording=0` continua sem gravar, e são 6 dos 7. Escrever
+   `autoRecording=1` no `.ini` **não é confiável com o MicroSIP aberto**
+   (medido em 16/10: ele regrava o arquivo da memória). As três saídas seguem
+   não decididas por ele desde então.
+
+---
+
+---
+
+## 26/10 — AUDITORIA FINAL DA SPRINT: o que ficou, e o gêmeo que ela achou
+
+🔵 Pedido dele no fim do dia: *"depois documente tudo nos .md corretos com o que
+ja foi feito e veja o que faltou do plano"*.
+
+🚨 **Medida, não relida.** A regra dele de 19/10 — *"tem demandas aqui que ja
+foram passadas e ainda permanece, verifique antes de propor demandas"* — vale
+para a própria auditoria: cada item foi conferido contra o **código, o banco ou
+o binário**, nunca contra a lista de tarefas. O script está em
+`/tmp/auditar_sprint_2610.py` (38 itens).
+
+### 🔴 O que ela achou: eu havia consertado UM de DOIS
+
+O `window.confirm` do rascunho — *"esta conversa já tem texto não enviado"* —
+existia em **dois** arquivos: a `ATD_7.1` e o `ModalAgendar`. Consertei o da
+`ATD_7.1`, rodei `grep` **no arquivo que estava olhando**, e escrevi no controle
+da sprint que os diálogos do navegador tinham saído.
+
+⚠️ **A lição não é "faltou atenção":** é que varredura por arquivo prova coisa
+sobre **arquivo**. A mesma pergunta existia nos dois lugares porque o mecanismo
+(o rascunho por conversa, do Bloco 7) é usado por **duas telas**. E o gêmeo
+tinha o mesmo defeito do original: perguntava *"substituir?"* **sem mostrar o
+texto** — quem decidia decidia às cegas sobre o que outra pessoa digitou.
+
+**Corrigido**, e agora há um teste que varre as **quatro peças** do agendamento
+por **lista nominal** (`M11`): `ModalAgendar`, `Agendamentos`, `CalendarioMes` e
+`ModalKm`, nenhuma usando `confirm`, `prompt` ou `alert`. É essa lista que tem
+de crescer quando nascer tela nova.
+
+⚠️ **E não há teste de exercício do gêmeo**, por escolha: as fixtures vivem
+dentro de outro `describe`, e o comportamento *"mostra o texto que seria
+perdido"* já está provado em 4 testes do gêmeo da `ATD_7.1` — o mesmo caminho de
+código. Duplicar mal o mesmo teste é pior que não duplicar: teste que precisa de
+remendo para rodar é teste que alguém afrouxa na primeira vez que incomoda.
+
+### ⚠️ Cinco falsos vermelhos, todos meus, todos do mesmo jeito
+
+Ao longo do dia, **cinco** guarda-corpos e asserções minhas reprovaram código
+**certo**, sempre por medir **menção** em vez de **uso**:
+
+| onde | o padrão acusou | era |
+|---|---|---|
+| guarda do `window.prompt` | a palavra no comentário | o comentário que explica por que ele saiu |
+| `calendario_2610` | `/marca\|ponto/` | a prop `marcarPassado` |
+| `calendario_2610` | a palavra "agendamento" | o comentário que diz que ele não sabe de agendamento |
+| `teste_pasta_agente` | `"sem pasta"` | o comentário que diz para **não** escrever isso |
+| auditoria da sprint | o rótulo antigo | o comentário que explica o encurtamento |
+
+🚨 **A regra que sai disso:** asserção sobre ausência mede a **chamada** ou o
+**uso** (`window.confirm(`, o rótulo entre aspas), nunca a palavra. E, em
+arquivo `.vue`, mede o `<template>` **sem comentários** — e cortado no
+**último** `</template>`, porque `<template v-if>` existe dentro dele (isso
+custou outro vermelho).
+
+### O que FICOU no ar, por bloco
+
+| bloco | estado |
+|---|---|
+| **A** — aba Orçamentos (`ORC_1.1`) | ✅ no ar, **validado por ele** (*"orçamento ja aparece"*) |
+| **B** — layout e texto do agendamento | ✅ no ar: quadro monoespaçado, trava com nome, calendário único, zero diálogo do navegador |
+| **C** — calculadora de KM | ✅ no ar, com o **link do Google** (sem API) como caminho principal |
+| **D** — pasta de coleta | ✅ lado da VPS no ar + `.exe` **0.7** compilado |
+| **E** — play da jornada e pausa Almoço | 🔴 **não começado** |
+| **F** — ferramentas de grupo | 🔴 **não começado** |
+
+**Suítes:** de **1746 Python · 440 JS** no começo do dia para **1833 · 502**.
+**Migrações:** 076 → **078**.
+
+### 🔴 O QUE FALTA, nomeado
+
+**Dele, e só dele:**
+1. **Validar no navegador** (`M9`) — ele pediu para deixar para depois da
+   entrega: receber uma mensagem de agendamento **no celular** (o quadro
+   monoespaçado só se prova ali), fechar o modal para ver *"Cancelar o
+   agendamento / Continuar"*, clicar uma vez no **"Ver a rota no Google"**, e
+   abrir a aba de Orçamentos.
+2. **Criar a chave da Routes API** no projeto `movisat-movizap` — 🟡 **opcional
+   agora**: com o link, o fluxo de KM está completo.
+3. **Instalar o agente `0.7`** nas etapas que ele decidiu: PC dele → Claudia →
+   os 4 que falam → **Ludmila e Rodrigo só depois de descobrir por que estão
+   mudos desde 22/10**.
+4. **A gravação desligada em 6 dos 7 PCs** — as três saídas seguem não
+   decididas desde 16/10.
+
+**Dos blocos não começados:**
+5. **Bloco E (play da jornada)** — ✅ as decisões dele estão todas tomadas
+   (*"sem play a régua não vale"*, quem não tem jornada escapa do portão), e
+   duas pontas finas seguem com ele: play antes do turno e o teto de pausa.
+   🚨 É o bloco de **maior risco**: mexe na régua de presença que 9 pessoas usam
+   todo dia, e o curativo + a borda de início **têm de parar de agir** sem play.
+6. **Bloco F (grupos)** — depende de **medir** se a Evolution dele expõe
+   `leaveGroup`, e de **re-medir** o "22% dos participantes com nome", que não
+   existe em arquivo nenhum do projeto (o banco diz 210 de 211).
+
+**Meu, e não é dele:**
+7. **`rotas._perguntar` está escrito e NÃO verificado ao vivo** — sem chave não
+   dá para exercitar a API (`M5`). Isolado nessa função de propósito.
+8. **A árvore do git tem 33 arquivos sem commit.**

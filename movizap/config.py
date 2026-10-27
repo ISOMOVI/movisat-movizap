@@ -109,6 +109,18 @@ class Settings:
     # é a mesma coisa dita de um jeito mais confuso.
     llm_strategy: str = _ler("MOVIZAP_LLM_STRATEGY", "single")
 
+    # 🔵 26/10: a API de rotas do Google, para a calculadora de KM do tecnico.
+    # E o servico que ELE ja usa a mao ("via 'rotas' do google"), e por isso o
+    # numero do sistema bate com o que ele confere.
+    #
+    # 🚨 VAZIA POR PADRAO, E ISSO E O DESENHO: sem chave, `rotas.disponivel()`
+    # devolve False e a tela cai no campo manual DIZENDO por que. Instalacao
+    # sem chave nao quebra -- ela so nao calcula.
+    #
+    # ⚠️ Nome prefixado, pela mesma razao das chaves de LLM: `GOOGLE_*` puro
+    # colidiria com as do OAuth que ja vivem aqui.
+    rotas_chave: str = _ler("MOVIZAP_ROTAS_CHAVE")
+
     # 🚨 SÓ EXISTE DURANTE UMA ROTAÇÃO, e sair é parte do procedimento.
     # Segredo errado devolve 404, e o Evolution trata 404 como falha: trocar o
     # valor e reiniciar criaria uma janela em que todo evento é recusado. Com

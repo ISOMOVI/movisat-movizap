@@ -119,7 +119,8 @@ def _endereco_para_a_os(linha: dict) -> dict:
 def criar(*, conversa_id: int, tecnico_contato_id: int, cliente_harmonit_id: str,
           cliente_nome: str, inicio, fim=None, endereco: str | None,
           ordens: list[dict], criado_por: int, orcamento_id: int | None = None,
-          estado: str = "aguardando", campos_endereco: dict | None = None) -> int:
+          estado: str = "aguardando", campos_endereco: dict | None = None,
+          origem_endereco: str | None = None, km=None) -> int:
     """Grava o compromisso e as OS dele. Devolve o id.
 
     `ordens` são dicts `{"numero_os": int, "placa": str | None,
@@ -166,18 +167,23 @@ def criar(*, conversa_id: int, tecnico_contato_id: int, cliente_harmonit_id: str
         # texto digitado deixa de valer: é o mesmo endereço dito de duas
         # formas, e duas fontes para o mesmo fato divergem na primeira edição.
         linha = linha_do_endereco(campos) or endereco
+        # 🆕 Migração 077: a origem e o km são RETRATO deste compromisso --
+        # de onde o técnico saiu e quanto se cobrou naquele dia. A memória
+        # atual da origem vive em `tecnico_origem` (ver `movizap/rotas.py`);
+        # se o técnico mudar de endereço, a memória muda e esta linha
+        # continua dizendo de onde se cobrou. Mesmo desenho do `tipo_nome`.
         cur.execute(
             "INSERT INTO agendamento (conversa_id, tecnico_contato_id, "
             "    cliente_harmonit_id, cliente_nome, inicio, fim, endereco, "
             "    estado, orcamento_id, criado_por, cep, logradouro, numero, "
-            "    bairro, cidade, uf, complemento) "
-            "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) "
+            "    bairro, cidade, uf, complemento, origem_endereco, km) "
+            "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) "
             "RETURNING id",
             (conversa_id, tecnico_contato_id, str(cliente_harmonit_id),
              cliente_nome, inicio, fim, linha, estado, orcamento_id, criado_por,
              campos["cep"], campos["logradouro"], campos["numero"],
              campos["bairro"], campos["cidade"], campos["uf"],
-             campos["complemento"]),
+             campos["complemento"], (origem_endereco or None), km),
         )
         novo = cur.fetchone()["id"]
         for o in ordens:

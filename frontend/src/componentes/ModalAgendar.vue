@@ -16,11 +16,13 @@
    (decisão 6 dele). Este modal escreve no compositor e sai da frente -- não
    manda nada sozinho.
    ============================================================================ */
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 
 import { api } from '../api/cliente.js'
 import { agrupar, dataBr, horaBr, textosDoGrupo } from '../util/mensagem_agendamento.js'
+import CalendarioMes from './CalendarioMes.vue'
+import ModalKm from './ModalKm.vue'
 
 const props = defineProps({
   conversaId: { type: Number, required: true },
@@ -46,13 +48,42 @@ const router = useRouter()
 
    ⚠️ "Continuar" NAO E "salvar": e voltar ao modal. Quem fecha perde o que
    nao gravou, e o aviso diz isso -- botao que promete o que nao cumpre e o
-   defeito do "Nao perturbe". */
+   defeito do "Nao perturbe".
+
+   🚨 26/10: SAIU O `window.confirm`. Ele pediu os botões "cancelar" e
+   "continuar", e o `confirm` do navegador só tem OK/Cancelar -- o texto antigo
+   precisava EXPLICAR a inversão ("OK cancela o agendamento. Cancelar continua
+   aqui"), que é a tela pedindo desculpa pela ferramenta. Agora a pergunta mora
+   dentro da caixa, e cada botão diz o que faz.
+
+   ⚠️ A pergunta fica DENTRO da caixa, não num segundo modal: o fundo
+   escurecido de outro modal esconderia justamente o trabalho que está em jogo.
+   Mesmo desenho do `ModalEdicao.vue` (24/09).
+
+   ⚠️ "CLIQUE FORA" É APERTAR E SOLTAR NO FUNDO -- quem seleciona texto num
+   campo e solta o mouse além da borda dispara `click` no fundo. Sem conferir
+   onde o botão desceu, arrastar uma seleção pediria para cancelar o
+   agendamento. Também do `ModalEdicao`. */
+const perguntandoSair = ref(false)
+let desceuNoFundo = false
+
 function tentarFechar() {
-  if (!window.confirm('Fechar o agendamento?\n\nO que não foi gravado se '
-                      + 'perde: orçamento em digitação, OS marcadas, data e '
-                      + 'endereço.\n\nOK cancela o agendamento. Cancelar '
-                      + 'continua aqui.')) return
-  emit('fechar')
+  perguntandoSair.value = true
+}
+
+function aoDescerNoFundo(e) { desceuNoFundo = e.target === e.currentTarget }
+
+function aoClicarNoFundo(e) {
+  if (desceuNoFundo && e.target === e.currentTarget) tentarFechar()
+  desceuNoFundo = false
+}
+
+/* Esc em dois níveis: fecha a pergunta antes de falar do modal. */
+function aoTeclarNoModal(e) {
+  if (e.key !== 'Escape') return
+  e.preventDefault()
+  if (perguntandoSair.value) perguntandoSair.value = false
+  else tentarFechar()
 }
 
 const ehTecnico = computed(() => props.relacao === 'tecnico')
@@ -84,6 +115,55 @@ function linhaNova() {
   const padrao = catalogo.value[0] || { servico: '', unidade: 'un' }
   return { servico: padrao.servico, preco_unit: '', quantidade: '1',
            unidade: padrao.unidade }
+}
+
+/* ---- A calculadora de KM (26/10) ------------------------------------------
+   🔵 *"proponha no deslocamento uma calculadora km técnico que pode abrir
+   outro modal para calcular"*.
+
+   ⚠️ `kmDaLinha` guarda QUAL linha está calculando, não um booleano: o
+   orçamento pode ter mais de uma linha por km, e um booleano devolveria o
+   número para a linha errada.
+
+   ⚠️ `origemDoKm` é o RETRATO que vai ao compromisso (migração 077). A
+   memória de quem é essa origem já foi gravada pelo backend no momento do
+   cálculo -- aqui fica só o que este agendamento vai registrar. */
+const kmDaLinha = ref(null)
+const origemDoKm = ref(null)
+
+/* A origem vira a linha de texto que o compromisso guarda. ⚠️ É o mesmo
+   formato do endereço de destino (`linha_do_endereco` do backend), para os
+   dois lados do deslocamento se lerem igual. */
+function linhaDaOrigem(o) {
+  const primeiro = [o.logradouro, o.numero].filter(Boolean).join(', ')
+  const local = [o.cidade, o.uf].filter(Boolean).join(' - ')
+  const partes = [primeiro, o.bairro, o.complemento, local]
+  if (o.cep) partes.push(`CEP ${o.cep}`)
+  return partes.filter(Boolean).join(' · ') || null
+}
+
+/* O km que o compromisso registra: o da linha de deslocamento do orçamento.
+   ⚠️ Sai das LINHAS, não de uma variável à parte: o atendente pode corrigir a
+   quantidade à mão depois de calcular, e o compromisso tem de registrar o que
+   foi cobrado -- não o que a API disse. */
+const kmDoOrcamento = computed(() => {
+  const linha = linhas.value.find((l) => l.unidade === 'km')
+  if (!linha) return null
+  const n = Number(String(linha.quantidade).replace(',', '.'))
+  return Number.isFinite(n) && n > 0 ? n : null
+})
+
+function abrirCalculadoraDeKm(linha) {
+  kmDaLinha.value = linha
+}
+
+function aplicarKm({ km, origem }) {
+  if (kmDaLinha.value) {
+    /* Vírgula, porque é o que o resto do modal usa nos campos numéricos. */
+    kmDaLinha.value.quantidade = String(km).replace('.', ',')
+  }
+  origemDoKm.value = origem
+  kmDaLinha.value = null
 }
 
 function trocarServico(linha) {
@@ -169,27 +249,15 @@ function _iso(d) {
 }
 
 const hojeIso = _iso(new Date())
-const mesCursor = ref(new Date(new Date().getFullYear(), new Date().getMonth(), 1, 12))
 
 const diaEscolhido = computed(() => (quando.value || '').slice(0, 10))
 const horaEscolhida = computed(() => (quando.value || '').slice(11, 16))
 
-const rotuloDoMes = computed(() =>
-  mesCursor.value.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' }))
-
-const diasDoMes = computed(() => {
-  const base = mesCursor.value
-  const primeiro = new Date(base.getFullYear(), base.getMonth(), 1, 12)
-  const lista = []
-  for (let i = 0; i < primeiro.getDay(); i += 1) lista.push(null)
-  const d = new Date(primeiro)
-  while (d.getMonth() === base.getMonth()) {
-    const iso = _iso(d)
-    lista.push({ iso, dia: d.getDate(), hoje: iso === hojeIso, passado: iso < hojeIso })
-    d.setDate(d.getDate() + 1)
-  }
-  return lista
-})
+/* 🚨 26/10: a grade do mês saiu daqui para `componentes/CalendarioMes.vue`.
+   Ela estava escrita igual na `telas/Agendamentos.vue` -- e a cópia foi o que
+   fez o toque de 44px entrar num lugar só. O que ficou aqui é o que é DESTE
+   modal: a hora, e o que escolher um dia significa (preencher o `quando` sem
+   apagar a hora já escolhida). */
 
 const horarios = computed(() => {
   const lista = []
@@ -202,18 +270,12 @@ const horarios = computed(() => {
   return lista
 })
 
-function andarMes(passoMes) {
-  const d = new Date(mesCursor.value)
-  d.setMonth(d.getMonth() + passoMes)
-  mesCursor.value = new Date(d.getFullYear(), d.getMonth(), 1, 12)
-}
-
 /* ⚠️ Dia e hora se escolhem SEPARADO, e por isso cada um preserva o outro:
    trocar o dia depois de escolher a hora nao pode apagar a hora. Sem hora
    ainda, o dia nasce com a primeira do expediente -- e `quando` nunca fica
    meio preenchido, que e o que o `Continuar` mede. */
-function escolherDia(d) {
-  quando.value = `${d.iso}T${horaEscolhida.value || String(HORA_DE).padStart(2, '0') + ':00'}`
+function escolherDia(diaIso) {
+  quando.value = `${diaIso}T${horaEscolhida.value || String(HORA_DE).padStart(2, '0') + ':00'}`
 }
 
 function escolherHora(h) {
@@ -417,6 +479,11 @@ async function gravarAgendamento() {
       endereco_campos: { ...campos.value },
       ordens: osEscolhidas.value,
       orcamento_id: orcamentoEmitido.value ? orcamentoEmitido.value.id : null,
+      // 🆕 O retrato do deslocamento (migração 077): de onde saiu e quanto se
+      // cobrou NESTE compromisso. ⚠️ Nulos quando a calculadora não foi usada,
+      // que é o caso de todo dia.
+      origem_endereco: origemDoKm.value ? linhaDaOrigem(origemDoKm.value) : null,
+      km: kmDoOrcamento.value,
     })
     passo.value = 4
   } catch (e) {
@@ -491,6 +558,14 @@ async function enviarAoCliente(m) {
   }
 }
 
+/* O rascunho que seria perdido ao abrir a conversa do técnico.
+   🚨 26/10: ERA UM `window.confirm`, e ele perguntava *"substituir?"* SEM
+   MOSTRAR o texto -- quem decidia decidia às cegas sobre o que outra pessoa
+   digitou. Mesmo defeito, mesma correção da `ATD_7.1`. ⚠️ Este era o GÊMEO
+   que a auditoria final pegou: eu havia consertado um de dois, porque o
+   mecanismo do rascunho (Bloco 7) é usado por duas telas. */
+const rascunhoEmRisco = ref(null)   // { mensagem, chave, havia }
+
 function abrirNoTecnico(m) {
   if (!m.conversaDoTecnico) return
   /* 🚨 O caminho e o RASCUNHO POR CONVERSA (Bloco 7, 15/10): a Caixa semeia
@@ -499,13 +574,27 @@ function abrirNoTecnico(m) {
   const chave = `movizap.rascunho.${m.conversaDoTecnico}`
   try {
     const havia = localStorage.getItem(chave)
-    if (havia && havia.trim() && havia !== m.doTecnico
-        && !window.confirm('A conversa do técnico já tem texto não enviado no '
-                           + 'compositor. Substituir?')) return
+    if (havia && havia.trim() && havia !== m.doTecnico) {
+      rascunhoEmRisco.value = { mensagem: m, chave, havia }
+      return
+    }
     localStorage.setItem(chave, m.doTecnico)
   } catch { /* sem storage: abre de todo jeito, o texto esta na tela */ }
   emit('fechar')
   router.push(`/atendimento/${m.conversaDoTecnico}`)
+}
+
+/* A segunda metade: a pessoa viu o que seria perdido e disse para substituir.
+   ⚠️ A gravação continua dentro de `try`: o motivo do `catch` (janela privada,
+   storage bloqueado) não desaparece porque a pergunta mudou de forma. */
+function substituirRascunhoDoTecnico() {
+  const { mensagem, chave } = rascunhoEmRisco.value
+  try {
+    localStorage.setItem(chave, mensagem.doTecnico)
+  } catch { /* sem storage: abre de todo jeito, o texto esta na tela */ }
+  rascunhoEmRisco.value = null
+  emit('fechar')
+  router.push(`/atendimento/${mensagem.conversaDoTecnico}`)
 }
 
 async function confirmar() {
@@ -544,7 +633,10 @@ function usar(texto) {
   emit('fechar')
 }
 
+onBeforeUnmount(() => document.removeEventListener('keydown', aoTeclarNoModal))
+
 onMounted(() => {
+  document.addEventListener('keydown', aoTeclarNoModal)
   if (ehTecnico.value) {
     api.get('/api/orcamento/catalogo').then((r) => {
       catalogo.value = r.catalogo || []
@@ -558,7 +650,7 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="agm__fundo" @click.self="tentarFechar">
+  <div class="modal agm__fundo" @mousedown="aoDescerNoFundo" @click="aoClicarNoFundo">
     <section class="agm" role="dialog" aria-label="Agendar serviço">
       <header class="agm__topo">
         <h2 class="agm__titulo">Agendar serviço</h2>
@@ -567,6 +659,71 @@ onMounted(() => {
           <i class="bi bi-x-lg" aria-hidden="true"></i>
         </button>
       </header>
+
+      <!-- A calculadora de KM, por cima deste modal (26/10).
+           ⚠️ O destino nasce de `campos` (os sete do passo 3), NÃO de
+           `endereco` -- aquele é a LINHA de texto montada, e o modal precisa
+           dos campos para consultar CEP e para o serviço de rotas. Eu ia
+           passar a linha: o `grep` nas refs pegou antes.
+           ⚠️ E vai `conversa-id`, não o id do contato: quem descobre de quem é
+           a origem é o servidor (ver `KmEntrada`). -->
+      <ModalKm
+        v-if="kmDaLinha"
+        :conversa-id="conversaId"
+        :destino-inicial="campos"
+        @usar="aplicarKm"
+        @fechar="kmDaLinha = null"
+      />
+
+      <!-- O rascunho do colega que seria substituído ao abrir a conversa do
+           técnico (26/10). 🚨 MOSTRA O QUE SERIA PERDIDO: o `window.confirm`
+           daqui perguntava sem mostrar nada. Fica DENTRO da caixa, no mesmo
+           lugar da trava de sair -- um segundo modal por cima esconderia o
+           texto de que ele fala. -->
+      <div v-if="rascunhoEmRisco" class="agm__pergunta" role="alertdialog"
+           aria-label="Substituir o texto do compositor?">
+        <div class="agm__pergunta-caixa">
+          <p class="modal__titulo">Substituir o texto do compositor?</p>
+          <p class="modal__texto">
+            A conversa do técnico já tem texto não enviado. Substituir apaga o
+            que está lá.
+          </p>
+          <pre class="agm__rascunho">{{ rascunhoEmRisco.havia.slice(0, 400) }}</pre>
+          <div class="agm__pergunta-acoes">
+            <button class="botao botao--perigo" type="button"
+                    @click="substituirRascunhoDoTecnico">
+              Substituir e abrir
+            </button>
+            <button class="botao botao--primario" type="button"
+                    @click="rascunhoEmRisco = null">
+              Voltar
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 🔵 A trava que ele pediu em 21/10, com os botões NOMEADOS (26/10).
+           Dentro da caixa de propósito: um segundo modal escureceria o
+           trabalho que está em jogo. -->
+      <div v-if="perguntandoSair" class="agm__pergunta" role="alertdialog"
+           aria-label="Cancelar o agendamento?">
+        <div class="agm__pergunta-caixa">
+          <p class="modal__titulo">Cancelar o agendamento?</p>
+          <p class="modal__texto">
+            O que não foi gravado se perde: orçamento em digitação, OS
+            marcadas, data e endereço.
+          </p>
+          <div class="agm__pergunta-acoes">
+            <button class="botao botao--perigo" type="button" @click="emit('fechar')">
+              Cancelar o agendamento
+            </button>
+            <button class="botao botao--primario" type="button"
+                    @click="perguntandoSair = false">
+              Continuar
+            </button>
+          </div>
+        </div>
+      </div>
 
       <!-- 🚨 Sem contato o botão EXPLICA, em vez de sumir. -->
       <p v-if="!abas.length" class="aviso aviso--info">
@@ -663,8 +820,22 @@ onMounted(() => {
                   </td>
                   <td><input v-model="l.preco_unit" class="campo__entrada agm__num"
                              inputmode="decimal" placeholder="0,00" /></td>
-                  <td><input v-model="l.quantidade" class="campo__entrada agm__num"
-                             inputmode="decimal" /></td>
+                  <td>
+                    <div class="agm__qtd">
+                      <input v-model="l.quantidade" class="campo__entrada agm__num"
+                             inputmode="decimal" />
+                      <!-- 🚨 Só na linha cuja UNIDADE é km: calcular distância
+                           para "PAGAMENTO DE TECNICO" não quer dizer nada. Pela
+                           unidade e não pelo nome, para um serviço novo por km
+                           ganhar a calculadora sozinho. -->
+                      <button v-if="l.unidade === 'km'" type="button"
+                              class="botao botao--pequeno botao--contorno"
+                              title="Calcular o KM do deslocamento"
+                              @click="abrirCalculadoraDeKm(l)">
+                        <i class="bi bi-signpost-2" aria-hidden="true"></i> km
+                      </button>
+                    </div>
+                  </td>
                   <td>{{ l.unidade }}</td>
                   <td>
                     R$ {{ emReais(Math.round(
@@ -730,35 +901,17 @@ onMounted(() => {
               <!-- 🔵 Sempre aberto: e parte da tela, nao um popup. -->
               <div class="agm__quando">
                 <div class="agm__cal">
-                  <header class="agm__cal-topo">
-                    <button class="botao botao--fantasma" type="button"
-                            aria-label="Mês anterior" @click="andarMes(-1)">
-                      <i class="bi bi-chevron-left" aria-hidden="true"></i>
-                    </button>
-                    <strong class="agm__cal-mes">{{ rotuloDoMes }}</strong>
-                    <button class="botao botao--fantasma" type="button"
-                            aria-label="Mês seguinte" @click="andarMes(1)">
-                      <i class="bi bi-chevron-right" aria-hidden="true"></i>
-                    </button>
-                  </header>
-                  <div class="agm__cal-grade">
-                    <span v-for="(s, i) in ['D', 'S', 'T', 'Q', 'Q', 'S', 'S']"
-                          :key="`s${i}`" class="agm__cal-semana">{{ s }}</span>
-                    <template v-for="(d, i) in diasDoMes" :key="d ? d.iso : `v${i}`">
-                      <span v-if="!d" class="agm__cal-vago"></span>
-                      <button v-else type="button" class="agm__cal-dia"
-                              :class="{ 'agm__cal-dia--ativo': d.iso === diaEscolhido,
-                                        'agm__cal-dia--hoje': d.hoje,
-                                        'agm__cal-dia--passado': d.passado }"
-                              @click="escolherDia(d)">{{ d.dia }}</button>
+                  <CalendarioMes :selecionado="diaEscolhido" marcar-passado
+                                 @escolher="escolherDia">
+                    <!-- ⚠️ Dia passado NAO e proibido: remarcar servico que ja
+                         aconteceu e caso real. A tela avisa, nao barra. -->
+                    <template #nota>
+                      <p v-if="diaEscolhido && diaEscolhido < hojeIso"
+                         class="aviso aviso--atencao agm__cal-nota">
+                        Este dia já passou. Dá para agendar, mas confira.
+                      </p>
                     </template>
-                  </div>
-                  <!-- ⚠️ Dia passado NAO e proibido: remarcar servico que ja
-                       aconteceu e caso real. A tela avisa, nao barra. -->
-                  <p v-if="diaEscolhido && diaEscolhido < hojeIso"
-                     class="aviso aviso--atencao agm__cal-nota">
-                    Este dia já passou. Dá para agendar, mas confira.
-                  </p>
+                  </CalendarioMes>
                 </div>
                 <div class="agm__horas">
                   <span class="agm__horas-rotulo">Horário</span>
@@ -1036,17 +1189,16 @@ onMounted(() => {
 </template>
 
 <style scoped>
-.agm__fundo {
-  position: fixed;
-  inset: 0;
-  z-index: 60;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: var(--e-3);
-  background: rgba(15, 23, 42, .55);
-}
+/* 🚨 26/10: A CASCA PASSOU A SER A `.modal` GLOBAL (`componentes.css`), que
+   já traz `position: fixed`, `inset: 0`, `z-index: var(--z-modal)`, a
+   centralização e o fundo escurecido. Até aqui este bloco copiava as seis
+   propriedades à mão -- com `z-index: 60` (o token é **200**) e a cor cravada
+   em `rgba(15,23,42,.55)`. Com 60, qualquer coisa em `--z-flutuante` (100)
+   passava POR CIMA do modal. Sobra só o que difere do padrão: o respiro, que
+   aqui é menor porque a caixa é grande. */
+.agm__fundo { padding: var(--e-3); }
 .agm {
+  position: relative;   /* a pergunta da trava se ancora aqui */
   display: flex;
   flex-direction: column;
   gap: var(--e-3);
@@ -1058,27 +1210,53 @@ onMounted(() => {
   background: var(--superficie);
   color: var(--texto);
 }
+
+/* A pergunta da trava, dentro da caixa (molde do `ModalEdicao.vue`). */
+.agm__pergunta {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--e-4);
+  background: rgba(15, 23, 42, .45);
+}
+.agm__pergunta-caixa {
+  width: 100%;
+  max-width: 380px;
+  padding: var(--e-5);
+  border: var(--borda-fina) solid var(--borda);
+  border-radius: var(--r-lg);
+  background: var(--superficie);
+}
+.agm__pergunta-acoes { display: flex; flex-wrap: wrap; gap: var(--e-2); }
+
+/* O trecho do rascunho que seria perdido: teto de altura, porque pode ser
+   texto longo e a pergunta não é um leitor. */
+.agm__rascunho {
+  max-height: 22vh;
+  overflow: auto;
+  margin: 0 0 var(--e-4);
+  padding: var(--e-3);
+  border: var(--borda-fina) solid var(--borda);
+  border-radius: var(--r-sm);
+  background: var(--superficie-2);
+  font-size: var(--txt-sm);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
 .agm__topo { display: flex; align-items: center; justify-content: space-between; }
 
 /* O calendario sempre aberto (F3) */
 .agm__quando { display: flex; gap: var(--e-3); flex-wrap: wrap; align-items: flex-start; }
-.agm__cal { display: flex; flex-direction: column; gap: var(--e-2); }
-.agm__cal-topo { display: flex; align-items: center; justify-content: space-between; gap: var(--e-2); }
-.agm__cal-mes { text-transform: capitalize; }
-.agm__cal-grade { display: grid; grid-template-columns: repeat(7, 34px); gap: 3px; }
-.agm__cal-semana { text-align: center; font-size: var(--txt-xs); color: var(--texto-fraco); }
-.agm__cal-vago { display: block; }
-.agm__cal-dia {
-  height: 30px;
-  border: var(--borda-fina) solid transparent;
-  border-radius: var(--r-sm);
-  background: var(--superficie-2);
-  color: inherit;
-  cursor: pointer;
-}
-.agm__cal-dia--hoje { border-color: var(--acento); }
-.agm__cal-dia--ativo { background: var(--acento); color: #fff; }
-.agm__cal-dia--passado { color: var(--texto-fraco); }
+/* 🚨 26/10: o CSS da grade mudou de casa junto com ela, para
+   `CalendarioMes.vue`. Aqui fica só o que é do modal: a coluna que embrulha o
+   calendário e a nota do dia passado. */
+.agm__cal { display: flex; flex-direction: column; gap: var(--e-2); min-width: 15rem; }
+
+/* A quantidade e o botão de calcular, na mesma célula. */
+.agm__qtd { display: flex; align-items: center; gap: var(--e-1); }
 .agm__cal-nota { margin: 0; max-width: 30ch; }
 .agm__horas { display: flex; flex-direction: column; gap: var(--e-1); }
 .agm__horas-rotulo { font-size: var(--txt-xs); text-transform: uppercase; color: var(--texto-fraco); }
@@ -1090,7 +1268,8 @@ onMounted(() => {
   overflow-y: auto;
 }
 .agm__hora {
-  padding: 4px 8px;
+  min-height: var(--altura-toque);
+  padding: var(--e-2) var(--e-3);
   border: var(--borda-fina) solid var(--borda);
   border-radius: var(--r-sm);
   background: var(--superficie-2);

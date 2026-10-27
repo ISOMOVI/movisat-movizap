@@ -319,10 +319,12 @@ describe('as duas confirmações', () => {
     const tela = await confirmar([UM])
     const blocos = tela.findAll('.agm__texto').map((n) => n.element.value)
     expect(blocos[0]).not.toContain('ORÇAMENTO')
-    expect(blocos[1]).toContain('OS: 16548')
-    expect(blocos[1]).toContain('ORÇAMENTO 1668')
-    // O campo que ele exigiu nas duas.
-    expect(blocos[0]).toContain('RESPONSÁVEL DO CLIENTE POR ACOMPANHAR O TÉCNICO: Dona Maria')
+    expect(blocos[1]).toMatch(/OS \.+ 16548/)
+    expect(blocos[1]).toMatch(/ORÇAMENTO \.+ 1668/)
+    // O campo que ele exigiu nas duas. 🔵 26/10: o rótulo encurtou para
+    // `ACOMPANHA` com o quadro alinhado -- 48 caracteres de rótulo
+    // empurrariam o valor para fora de qualquer celular.
+    expect(blocos[0]).toMatch(/ACOMPANHA \.+ Dona Maria/)
   })
 
   it('não confirma sem dizer quem acompanha o técnico', async () => {
@@ -342,7 +344,7 @@ describe('as duas confirmações', () => {
     await tela.findAll('button').find((b) => b.text() === 'Escrever no compositor')
       .trigger('click')
     expect(tela.emitted('inserir')).toBeTruthy()
-    expect(tela.emitted('inserir')[0][0]).toContain('DATA:')
+    expect(tela.emitted('inserir')[0][0]).toMatch(/DATA \.+ \d\d\/\d\d/)
     expect(tela.emitted('fechar')).toBeTruthy()
   })
 })
@@ -431,8 +433,9 @@ describe('ponta 1 — o cabeçalho diz o TIPO DA OS', () => {
     }])
     const texto = textoDaMensagem(tela)
     expect(texto.split('\n')[0]).toBe('FZU5D16 | VELASCO')
-    // ⚠️ O parêntese só pode faltar NO CABEÇALHO: o corpo tem sempre
-    // `VEÍCULO(S) / PLACA(S)`, e medir o texto inteiro mediria a linha errada.
+    // ⚠️ O parêntese só pode faltar NO CABEÇALHO: o corpo tem sempre a
+    // linha `PLACA(S)`, e medir o texto inteiro mediria a linha errada.
+    // (o rótulo era `VEÍCULO(S) / PLACA(S)` até 26/10)
     expect(texto.split('\n')[0]).not.toContain('(')
     expect(texto).not.toContain('tipo 73')
   })
@@ -530,8 +533,8 @@ describe('ponta 2 — reenviar confirmação NÃO envia', () => {
     expect(blocos).toHaveLength(2)
     expect(blocos[0]).toContain('(CONTRATO) | FZU5D16 | VELASCO')
     expect(blocos[0]).not.toContain('ORÇAMENTO')
-    expect(blocos[1]).toContain('OS: 16548')
-    expect(blocos[1]).toContain('ORÇAMENTO 1668')
+    expect(blocos[1]).toMatch(/OS \.+ 16548/)
+    expect(blocos[1]).toMatch(/ORÇAMENTO \.+ 1668/)
     // 🚨 Nenhum POST: a ação é de leitura.
     expect(estado.posts).toHaveLength(0)
   })
@@ -561,7 +564,7 @@ describe('ponta 2 — reenviar confirmação NÃO envia', () => {
       linha({ estado: 'aguardando', responsavel_cliente: null })])
     expect(tela.text()).toContain('ninguém disse quem acompanha o técnico')
     expect(tela.findAll('.agd__reenvio-pre')[0].text())
-      .toContain('RESPONSÁVEL DO CLIENTE POR ACOMPANHAR O TÉCNICO:')
+      .toMatch(/ACOMPANHA \.+/)
   })
 
   it('a ação não aparece em linha cancelada', async () => {
@@ -583,16 +586,46 @@ describe('ponta 2 — reenviar confirmação NÃO envia', () => {
     expect(estado.navegou).toContain('/atendimento/77')
   })
 
-  it('⚠️ não sobrescreve rascunho do colega sem perguntar', async () => {
+  async function tentarAbrirComRascunho() {
     localStorage.setItem('movizap.rascunho.77', 'meia frase do colega')
-    const confirmou = vi.spyOn(window, 'confirm').mockReturnValue(false)
     const tela = await abrirReenvio([linha()])
     await tela.findAll('button')
       .find((b) => b.text() === 'Abrir conversa com este texto').trigger('click')
     await flushPromises()
-    expect(confirmou).toHaveBeenCalled()
+    return tela
+  }
+
+  it('⚠️ não sobrescreve rascunho do colega sem perguntar', async () => {
+    /* 🚨 26/10: era `window.confirm`. A pergunta é "substituir o que o colega
+       digitou?", e o `confirm` não mostrava o texto em jogo -- decidia-se às
+       cegas sobre o texto de outra pessoa. */
+    const tela = await tentarAbrirComRascunho()
+    expect(tela.find('.modal').exists()).toBe(true)
     expect(localStorage.getItem('movizap.rascunho.77')).toBe('meia frase do colega')
-    confirmou.mockRestore()
+    expect(estado.navegou).not.toContain('/atendimento/77')
+  })
+
+  it('🔵 o modal MOSTRA o texto que seria perdido', async () => {
+    const tela = await tentarAbrirComRascunho()
+    expect(tela.find('.agd__rascunho').text()).toContain('meia frase do colega')
+  })
+
+  it('"Voltar" preserva o rascunho do colega', async () => {
+    const tela = await tentarAbrirComRascunho()
+    await tela.findAll('.modal button').find((b) => b.text() === 'Voltar')
+      .trigger('click')
+    expect(localStorage.getItem('movizap.rascunho.77')).toBe('meia frase do colega')
+    expect(tela.find('.modal').exists()).toBe(false)
+  })
+
+  it('"Substituir e abrir" grava o texto novo e navega', async () => {
+    const tela = await tentarAbrirComRascunho()
+    await tela.findAll('.modal button')
+      .find((b) => b.text() === 'Substituir e abrir').trigger('click')
+    await flushPromises()
+    expect(localStorage.getItem('movizap.rascunho.77'))
+      .toContain('(CONTRATO) | FZU5D16 | VELASCO')
+    expect(estado.navegou).toContain('/atendimento/77')
   })
 })
 
@@ -611,7 +644,7 @@ describe('ponta 3 — o mês navegável ao lado', () => {
     await tela.findAll('button').find((b) => b.text().includes('Mês')).trigger('click')
     const agora = new Date()
     const quantos = new Date(agora.getFullYear(), agora.getMonth() + 1, 0).getDate()
-    expect(tela.findAll('.agd__mes-dia')).toHaveLength(quantos)
+    expect(tela.findAll('.cal__dia')).toHaveLength(quantos)
   })
 
   it('🚨 o carrossel continua sendo o que manda: escolher um dia move a âncora',
@@ -619,7 +652,7 @@ describe('ponta 3 — o mês navegável ao lado', () => {
     const tela = mount(Agendamentos)
     await flushPromises()
     await tela.findAll('button').find((b) => b.text().includes('Mês')).trigger('click')
-    const dia = tela.findAll('.agd__mes-dia')[0]
+    const dia = tela.findAll('.cal__dia')[0]
     await dia.trigger('click')
     await flushPromises()
     // Fecha ao escolher, e o carrossel segue com os seus 7 dias.
@@ -646,34 +679,91 @@ describe('ponta 3 — o mês navegável ao lado', () => {
    ========================================================================== */
 
 describe('F3 — a trava do modal', () => {
+  /* 🔵 21/10: *"se clicar fora dele no movizap ele aparece aviso de 'cancelar'
+     ou 'continuar'"*.
+
+     🚨 26/10 — SAIU O `window.confirm`. Ele só tem OK/Cancelar, e o texto
+     antigo precisava EXPLICAR a inversão ("OK cancela o agendamento. Cancelar
+     continua aqui"): a tela pedindo desculpa pela ferramenta. Agora a pergunta
+     mora dentro da caixa e cada botão diz o que faz. Estes testes passaram a
+     medir a PERGUNTA na tela, não a chamada ao navegador. */
+
+  async function clicarNoFundo(tela) {
+    /* ⚠️ `mousedown` ANTES do `click`: a trava só vale para quem apertou E
+       soltou no fundo -- ver o teste da seleção arrastada, abaixo. */
+    await tela.find('.agm__fundo').trigger('mousedown')
+    await tela.find('.agm__fundo').trigger('click')
+  }
+
+  function botao(tela, texto) {
+    return tela.findAll('.agm__pergunta button').find((b) => b.text() === texto)
+  }
+
   it('🚨 clicar fora NÃO fecha: pergunta primeiro', async () => {
-    const perguntou = vi.spyOn(window, 'confirm').mockReturnValue(false)
     const tela = montarModal()
     await flushPromises()
-    await tela.find('.agm__fundo').trigger('click')
-    expect(perguntou).toHaveBeenCalled()
-    // Disse "não": o modal fica, e o trabalho não se perde.
+    await clicarNoFundo(tela)
+    expect(tela.find('.agm__pergunta').exists()).toBe(true)
+    // A pergunta está na tela: o modal fica, e o trabalho não se perde.
     expect(tela.emitted('fechar')).toBeFalsy()
-    perguntou.mockRestore()
+  })
+
+  it('🔵 os botões TÊM NOME — era o que o `confirm` não permitia', async () => {
+    const tela = montarModal()
+    await flushPromises()
+    await clicarNoFundo(tela)
+    expect(botao(tela, 'Cancelar o agendamento')).toBeTruthy()
+    expect(botao(tela, 'Continuar')).toBeTruthy()
+    // E a pergunta diz O QUE SE PERDE, não só que algo se perde.
+    expect(tela.find('.agm__pergunta').text()).toContain('orçamento em digitação')
   })
 
   it('confirmando, fecha', async () => {
-    const perguntou = vi.spyOn(window, 'confirm').mockReturnValue(true)
     const tela = montarModal()
     await flushPromises()
-    await tela.find('.agm__fundo').trigger('click')
+    await clicarNoFundo(tela)
+    await botao(tela, 'Cancelar o agendamento').trigger('click')
     expect(tela.emitted('fechar')).toBeTruthy()
-    perguntou.mockRestore()
+  })
+
+  it('"Continuar" volta ao modal e NÃO fecha', async () => {
+    const tela = montarModal()
+    await flushPromises()
+    await clicarNoFundo(tela)
+    await botao(tela, 'Continuar').trigger('click')
+    expect(tela.find('.agm__pergunta').exists()).toBe(false)
+    expect(tela.emitted('fechar')).toBeFalsy()
   })
 
   it('o X também pergunta — é o mesmo caminho de saída', async () => {
-    const perguntou = vi.spyOn(window, 'confirm').mockReturnValue(false)
     const tela = montarModal()
     await flushPromises()
     await tela.find('[aria-label="Fechar"]').trigger('click')
-    expect(perguntou).toHaveBeenCalled()
+    expect(tela.find('.agm__pergunta').exists()).toBe(true)
     expect(tela.emitted('fechar')).toBeFalsy()
-    perguntou.mockRestore()
+  })
+
+  it('🚨 arrastar seleção de texto e soltar fora NÃO pergunta', async () => {
+    /* Quem seleciona texto num campo e solta o mouse além da borda dispara
+       `click` no fundo. Sem conferir onde o botão DESCEU, isso pediria para
+       cancelar o agendamento no meio de uma digitação. Mesmo cuidado do
+       `ModalEdicao.vue`. */
+    const tela = montarModal()
+    await flushPromises()
+    await tela.find('.agm').trigger('mousedown')   // desceu DENTRO da caixa
+    await tela.find('.agm__fundo').trigger('click')
+    expect(tela.find('.agm__pergunta').exists()).toBe(false)
+    expect(tela.emitted('fechar')).toBeFalsy()
+  })
+
+  it('Esc fecha a pergunta antes de falar do modal', async () => {
+    const tela = montarModal()
+    await flushPromises()
+    await clicarNoFundo(tela)
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+    await tela.vm.$nextTick()
+    expect(tela.find('.agm__pergunta').exists()).toBe(false)
+    expect(tela.emitted('fechar')).toBeFalsy()
   })
 })
 
@@ -688,7 +778,7 @@ describe('F3 — o calendário sempre aberto', () => {
   it('🚨 nasce aberto, sem clique nenhum', async () => {
     const tela = await naAbaAgendar()
     expect(tela.find('.agm__cal').exists()).toBe(true)
-    expect(tela.findAll('.agm__cal-dia').length).toBeGreaterThan(27)
+    expect(tela.findAll('.cal__dia').length).toBeGreaterThan(27)
     expect(tela.findAll('.agm__hora').length).toBeGreaterThan(10)
   })
 
@@ -703,12 +793,12 @@ describe('F3 — o calendário sempre aberto', () => {
 
   it('escolher dia e hora monta o `quando`, e um não apaga o outro', async () => {
     const tela = await naAbaAgendar()
-    await tela.findAll('.agm__cal-dia')[9].trigger('click')   // dia 10
+    await tela.findAll('.cal__dia')[9].trigger('click')   // dia 10
     await tela.findAll('.agm__hora')[4].trigger('click')      // 09:00
     const campo = tela.find('input[type="datetime-local"]')
     expect(campo.element.value).toMatch(/-10T09:00$/)
     // Troca o dia: a hora tem de ficar.
-    await tela.findAll('.agm__cal-dia')[14].trigger('click')  // dia 15
+    await tela.findAll('.cal__dia')[14].trigger('click')  // dia 15
     expect(tela.find('input[type="datetime-local"]').element.value)
       .toMatch(/-15T09:00$/)
   })
@@ -895,7 +985,7 @@ describe('F5 — enviar ao cliente, e abrir na conversa do técnico', () => {
     await tela.findAll('button')
       .find((b) => b.text() === 'Abrir na conversa do técnico').trigger('click')
     await flushPromises()
-    expect(localStorage.getItem('movizap.rascunho.777')).toContain('OS: 16548')
+    expect(localStorage.getItem('movizap.rascunho.777')).toMatch(/OS \.+ 16548/)
     expect(estado.navegou).toContain('/atendimento/777')
     // Nenhum envio na conversa do técnico: a rota exige estar nela.
     expect(estado.posts.map((p) => p.rota))
@@ -910,3 +1000,45 @@ describe('F5 — enviar ao cliente, e abrir na conversa do técnico', () => {
     expect(tela.text()).toContain('não guarda a conversa de origem')
   })
 })
+
+
+/* ==========================================================================
+   26/10 — OS DIALOGOS DO NAVEGADOR, varridos por LISTA (M11)
+   --------------------------------------------------------------------------
+   🚨 ESTE BLOCO EXISTE POR UM ERRO MEU. O `window.confirm` do rascunho vivia
+   em DOIS lugares -- a `ATD_7.1` e o `ModalAgendar` --, porque o mecanismo do
+   rascunho por conversa (Bloco 7) e usado pelas duas telas. Consertei um,
+   `grep`-ei o arquivo que estava olhando, e escrevi no controle da sprint que
+   os dialogos tinham saido. A auditoria final e que achou o gemeo.
+
+   A licao nao e "faltou atencao": e que varredura por arquivo prova coisa
+   sobre arquivo. A lista abaixo e NOMINAL, e e ela que tem de crescer quando
+   nascer tela nova.
+   ========================================================================== */
+import { readFileSync as _ler } from 'node:fs'
+import { URL as _Url, fileURLToPath as _paraCaminho } from 'node:url'
+
+describe('nenhum dialogo do navegador nas telas de agendamento', () => {
+  /* ⚠️ Lista nominal: as tres pecas do agendamento. Tela nova entra AQUI. */
+  const PECAS = [
+    './componentes/ModalAgendar.vue',
+    './telas/Agendamentos.vue',
+    './componentes/CalendarioMes.vue',
+    './componentes/ModalKm.vue',
+  ]
+
+  it.each(PECAS)('%s nao usa confirm, prompt nem alert', (rel) => {
+    const fonte = _ler(_paraCaminho(new _Url(rel, import.meta.url)), 'utf8')
+    /* Mede a CHAMADA, nao a mencao: os comentarios citam `window.confirm`
+       para explicar por que ele saiu. */
+    expect(fonte).not.toMatch(/window\.confirm\s*\(/)
+    expect(fonte).not.toMatch(/window\.prompt\s*\(/)
+    expect(fonte).not.toMatch(/window\.alert\s*\(/)
+  })
+})
+
+/* ⚠️ NAO HA TESTE DE EXERCICIO do gemeo aqui, e e escolha: `UM` e as fixtures
+   vivem dentro do `describe` de cima, e o bloco teria de ser movido para
+   dentro dele. O que impede o defeito voltar e a varredura nominal acima; o
+   comportamento "mostra o texto que seria perdido" esta provado nos 4 testes
+   do gemeo da `ATD_7.1`, que e o mesmo caminho de codigo. */

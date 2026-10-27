@@ -61,6 +61,11 @@ FPSL_BASE_URL=http://127.0.0.1:8005
 # ---- formularios publicos (Etapa 1, 2026-10-22) ----
 # Assina a abertura do formulario e o desafio. NAO e credencial.
 MOVIZAP_FORMULARIOS_SEGREDO={FORMULARIOS_SEGREDO}
+
+# Calculadora de KM do tecnico (26/10). Vazia = o calculo fica desligado e a
+# tela pede o km a mao, dizendo por que. Preencher exige criar a chave da
+# Routes API no Google Cloud.
+MOVIZAP_ROTAS_CHAVE=
 """
 
 # grava com 600 desde o nascimento, não depois -- não existe janela aberta

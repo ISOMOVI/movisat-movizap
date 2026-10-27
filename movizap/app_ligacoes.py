@@ -51,6 +51,12 @@ class BatimentoEntrada(BaseModel):
     pendentes: int | None = None
     erro: str | None = Field(default=None, max_length=500)
     aviso: str | None = Field(default=None, max_length=500)
+    # 🆕 26/10 (migração 078): o diagnóstico de ONDE o agente procura.
+    # ⚠️ Opcionais, e vão continuar: os 7 PCs rodam o `0.4` e não sabem
+    # mandá-los. Exigi-los derrubaria a coleta para ganhar um diagnóstico.
+    pasta: str | None = Field(default=None, max_length=400)
+    pasta_origem: str | None = Field(default=None, max_length=20)
+    auto_gravacao: bool | None = None
 
 
 def _agente(request: Request) -> dict:
@@ -79,7 +85,9 @@ def batimento(dados: BatimentoEntrada, request: Request):
     """Toda passada do agente bate aqui, mesmo sem nada a enviar: é o que
     prova que o PC está vivo (o alerta de mais de 1 dia sem contato)."""
     return ligacoes.batimento(_agente(request), dados.pc, dados.versao, dados.pendentes,
-                              dados.erro, ip=_ip(request), aviso=dados.aviso)
+                              dados.erro, ip=_ip(request), aviso=dados.aviso,
+                              pasta=dados.pasta, pasta_origem=dados.pasta_origem,
+                              auto_gravacao=dados.auto_gravacao)
 
 
 @app.post("/agente/enviar")

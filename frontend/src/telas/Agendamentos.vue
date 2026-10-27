@@ -16,7 +16,8 @@ import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 
 import { api } from '../api/cliente.js'
-import { agrupar, chaveDoGrupo, textosDoGrupo } from '../util/mensagem_agendamento.js'
+import CalendarioMes from '../componentes/CalendarioMes.vue'
+import { agrupar, chaveDoGrupo, dataBr, textosDoGrupo } from '../util/mensagem_agendamento.js'
 
 const router = useRouter()
 
@@ -126,36 +127,70 @@ function irParaHoje() {
   carregar()
 }
 
-async function cancelar(a) {
-  const motivo = window.prompt(
-    `Cancelar o agendamento de ${a.cliente_nome}?\n\nPor quê? (fica registrado)`)
-  if (!motivo || !motivo.trim()) return
+/* ---- As duas ações que PERGUNTAM (26/10) -----------------------------------
+   🚨 SAÍRAM OS DOIS `window.prompt`. Além de não nomear botão, o `prompt` não
+   valida enquanto se digita: data errada só virava erro depois de o diálogo
+   fechar, com o que a pessoa escreveu já perdido. E pedir data por texto
+   (`AAAA-MM-DD HH:MM`) numa tela que tem calendário é oferecer o caminho pior
+   -- em celular, um teclado cego por cima da tela.
+
+   ⚠️ A REGRA NÃO MUDOU: cancelar exige motivo (o backend grava em
+   `motivo_cancelamento`) e reagendar manda ISO. Mudou como se pergunta. */
+const acao = ref(null)        // { tipo: 'cancelar' | 'reagendar', agendamento }
+const motivoDigitado = ref('')
+const quandoDigitado = ref('')
+const salvandoAcao = ref(false)
+
+function pedirCancelar(a) {
+  motivoDigitado.value = ''
   acaoErro.value = ''
-  try {
-    await api.post(`/api/agendamentos/${a.id}/cancelar`, { motivo: motivo.trim() })
-    await carregar()
-  } catch (e) {
-    acaoErro.value = e?.message || 'Não deu para cancelar.'
-  }
+  acao.value = { tipo: 'cancelar', agendamento: a }
 }
 
-async function reagendar(a) {
-  const quando = window.prompt(
-    `Nova data e hora para ${a.cliente_nome}:`,
-    (a.inicio || '').slice(0, 16).replace('T', ' '))
-  if (!quando) return
-  const normalizado = quando.trim().replace(' ', 'T')
-  if (Number.isNaN(Date.parse(normalizado))) {
-    acaoErro.value = 'Data não reconhecida. Use AAAA-MM-DD HH:MM.'
-    return
-  }
+function pedirReagendar(a) {
+  /* O `datetime-local` quer `AAAA-MM-DDTHH:MM`, que é exatamente o que o ISO
+     do compromisso já traz nos 16 primeiros caracteres. */
+  quandoDigitado.value = (a.inicio || '').slice(0, 16)
+  acaoErro.value = ''
+  acao.value = { tipo: 'reagendar', agendamento: a }
+}
+
+function fecharAcao() {
+  if (salvandoAcao.value) return
+  acao.value = null
+}
+
+const podeConfirmarAcao = computed(() => {
+  if (!acao.value) return false
+  if (acao.value.tipo === 'cancelar') return !!motivoDigitado.value.trim()
+  if (acao.value.tipo === 'rascunho') return true
+  return !!quandoDigitado.value && !Number.isNaN(Date.parse(quandoDigitado.value))
+})
+
+async function confirmarAcao() {
+  if (!acao.value || !podeConfirmarAcao.value) return
+  /* O terceiro tipo não fala com o servidor: é decisão de navegador. */
+  if (acao.value.tipo === 'rascunho') return substituirRascunho()
+  const { tipo, agendamento } = acao.value
+  salvandoAcao.value = true
   acaoErro.value = ''
   try {
-    await api.post(`/api/agendamentos/${a.id}/reagendar`,
-                   { inicio: new Date(normalizado).toISOString() })
+    if (tipo === 'cancelar') {
+      await api.post(`/api/agendamentos/${agendamento.id}/cancelar`,
+                     { motivo: motivoDigitado.value.trim() })
+    } else {
+      await api.post(`/api/agendamentos/${agendamento.id}/reagendar`,
+                     { inicio: new Date(quandoDigitado.value).toISOString() })
+    }
+    acao.value = null
     await carregar()
   } catch (e) {
-    acaoErro.value = e?.message || 'Não deu para reagendar.'
+    /* ⚠️ O modal FICA ABERTO no erro: fechar jogaria fora o que foi digitado,
+       que é o defeito do `prompt` que esta volta veio consertar. */
+    acaoErro.value = e?.message
+      || (tipo === 'cancelar' ? 'Não deu para cancelar.' : 'Não deu para reagendar.')
+  } finally {
+    salvandoAcao.value = false
   }
 }
 
@@ -174,39 +209,12 @@ async function reagendar(a) {
    nada. Tela que mente é defeito. */
 const mesAberto = ref(false)
 
-function primeiroDoMes(isoDia) {
-  const d = new Date(`${isoDia}T12:00:00`)
-  return new Date(d.getFullYear(), d.getMonth(), 1, 12, 0, 0)
-}
-
-const mesCursor = ref(primeiroDoMes(iso(hoje)))
-
-const rotuloDoMes = computed(() =>
-  mesCursor.value.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' }))
-
-const diasDoMes = computed(() => {
-  const base = mesCursor.value
-  const primeiro = new Date(base.getFullYear(), base.getMonth(), 1, 12, 0, 0)
-  const lista = []
-  // Os vazios antes do dia 1, para o dia cair na coluna do seu dia da semana.
-  for (let i = 0; i < primeiro.getDay(); i += 1) lista.push(null)
-  const d = new Date(primeiro)
-  while (d.getMonth() === base.getMonth()) {
-    lista.push({ iso: iso(d), dia: d.getDate(), hoje: iso(d) === iso(hoje) })
-    d.setDate(d.getDate() + 1)
-  }
-  return lista
-})
-
-function andarMes(passo) {
-  const d = new Date(mesCursor.value)
-  d.setMonth(d.getMonth() + passo)
-  mesCursor.value = new Date(d.getFullYear(), d.getMonth(), 1, 12, 0, 0)
-}
-
-function escolherDoMes(d) {
-  ancora.value = d.iso
-  selecionado.value = d.iso
+/* 🚨 26/10: a grade do mês saiu daqui para `componentes/CalendarioMes.vue` --
+   ela era a MESMA do `ModalAgendar`, copiada, com 36px de coluna contra 34px
+   lá. O que fica aqui é o que é desta tela: o que escolher um dia significa. */
+function escolherDoMes(diaIso) {
+  ancora.value = diaIso
+  selecionado.value = diaIso
   mesAberto.value = false
   carregar()
 }
@@ -279,9 +287,12 @@ function abrirConversaComTexto(a, texto) {
   const chave = `movizap.rascunho.${a.conversa_id}`
   try {
     const havia = localStorage.getItem(chave)
-    if (havia && havia.trim() && havia !== texto
-        && !window.confirm('Esta conversa já tem texto não enviado no '
-                           + 'compositor. Substituir pelo da confirmação?')) {
+    if (havia && havia.trim() && havia !== texto) {
+      /* 🚨 26/10: ERA UM `window.confirm`. Além de não nomear botão, ele não
+         mostrava o texto em jogo -- a pergunta é "substituir o que o colega
+         digitou?" e a pessoa decidia às cegas. O modal mostra o começo do que
+         seria perdido. */
+      acao.value = { tipo: 'rascunho', agendamento: a, texto, chave, havia }
       return
     }
     localStorage.setItem(chave, texto)
@@ -293,6 +304,23 @@ function abrirConversaComTexto(a, texto) {
   }
   reenvio.value = null
   router.push(`/atendimento/${a.conversa_id}`)
+}
+
+/* A segunda metade do fluxo acima: a pessoa viu o que seria perdido e disse
+   para substituir. ⚠️ A gravação continua dentro de `try`: o motivo de haver
+   `catch` ali (janela privada, storage bloqueado) não desaparece porque a
+   pergunta mudou de forma. */
+function substituirRascunho() {
+  const { agendamento, texto, chave } = acao.value
+  try {
+    localStorage.setItem(chave, texto)
+  } catch {
+    acaoErro.value = 'Abri a conversa, mas não deu para deixar o texto no '
+      + 'compositor neste navegador. Copie o texto acima.'
+  }
+  acao.value = null
+  reenvio.value = null
+  router.push(`/atendimento/${agendamento.conversa_id}`)
 }
 
 function abrirConversa(a) {
@@ -348,34 +376,16 @@ onMounted(carregar)
     </nav>
 
     <div v-if="mesAberto" class="agd__mes">
-      <header class="agd__mes-topo">
-        <button class="botao botao--fantasma" type="button" @click="andarMes(-1)"
-                aria-label="Mês anterior">
-          <i class="bi bi-chevron-left" aria-hidden="true"></i>
-        </button>
-        <strong class="agd__mes-rotulo">{{ rotuloDoMes }}</strong>
-        <button class="botao botao--fantasma" type="button" @click="andarMes(1)"
-                aria-label="Mês seguinte">
-          <i class="bi bi-chevron-right" aria-hidden="true"></i>
-        </button>
-      </header>
-      <div class="agd__mes-grade">
-        <span v-for="s in ['D', 'S', 'T', 'Q', 'Q', 'S', 'S']" :key="s"
-              class="agd__mes-semana">{{ s }}</span>
-        <template v-for="(d, i) in diasDoMes" :key="d ? d.iso : `vazio-${i}`">
-          <span v-if="!d" class="agd__mes-vago"></span>
-          <button v-else type="button" class="agd__mes-dia"
-                  :class="{ 'agd__mes-dia--ativo': d.iso === selecionado,
-                            'agd__mes-dia--hoje': d.hoje }"
-                  @click="escolherDoMes(d)">{{ d.dia }}</button>
+      <CalendarioMes :selecionado="selecionado" @escolher="escolherDoMes">
+        <!-- 🚨 Dizer isto evita que a ausência de marca pareça ausência de
+             serviço: o que está carregado é a semana da âncora. -->
+        <template #nota>
+          <p class="agd__mes-nota">
+            Escolher um dia move a semana do carrossel. As marcas de serviço
+            ficam no carrossel, que é o que está carregado.
+          </p>
         </template>
-      </div>
-      <!-- 🚨 Dizer isto evita que a ausência de marca pareça ausência de
-           serviço: o que está carregado é a semana da âncora. -->
-      <p class="agd__mes-nota">
-        Escolher um dia move a semana do carrossel. As marcas de serviço ficam
-        no carrossel, que é o que está carregado.
-      </p>
+      </CalendarioMes>
     </div>
 
     <p v-if="erro" class="aviso aviso--erro">{{ erro }}</p>
@@ -421,9 +431,9 @@ onMounted(carregar)
             </td>
             <td class="agd__acoes">
               <button v-if="a.estado !== 'cancelado'" class="botao botao--fantasma"
-                      type="button" @click="reagendar(a)">Reagendar</button>
+                      type="button" @click="pedirReagendar(a)">Reagendar</button>
               <button v-if="a.estado !== 'cancelado'" class="botao botao--fantasma"
-                      type="button" @click="cancelar(a)">Cancelar</button>
+                      type="button" @click="pedirCancelar(a)">Cancelar</button>
               <button v-if="a.estado !== 'cancelado'" class="botao botao--fantasma"
                       type="button" @click="reenviarConfirmacao(a)">Reenviar confirmação</button>
               <button v-if="a.conversa_id" class="botao botao--fantasma"
@@ -501,6 +511,85 @@ onMounted(carregar)
       </p>
     </div>
   </section>
+
+    <!-- Os dois diálogos que substituíram os `window.prompt` (26/10). As
+         classes são as `.modal` globais: casca nova para isto seria um
+         segundo padrão de modal no mesmo projeto. -->
+    <div v-if="acao" class="modal" @click.self="fecharAcao">
+      <div class="modal__caixa" role="dialog" aria-modal="true"
+           :aria-label="acao.tipo === 'cancelar' ? 'Cancelar agendamento'
+                                                 : 'Reagendar'">
+        <template v-if="acao.tipo === 'cancelar'">
+          <p class="modal__titulo">Cancelar o agendamento?</p>
+          <p class="modal__texto">
+            {{ acao.agendamento.cliente_nome }} —
+            {{ dataBr(acao.agendamento.inicio) }} às {{ hora(acao.agendamento.inicio) }}
+          </p>
+          <label class="campo">
+            <span class="campo__rotulo">Por quê? (fica registrado)</span>
+            <textarea v-model="motivoDigitado" class="campo__entrada" rows="3"
+                      placeholder="O cliente pediu para remarcar, técnico..."></textarea>
+            <!-- O motivo é obrigatório, e a tela DIZ isso em vez de só
+                 desabilitar o botão e deixar a pessoa adivinhar. -->
+            <span class="campo__ajuda">
+              Sem motivo não dá para cancelar: ele fica no histórico do
+              compromisso.
+            </span>
+          </label>
+        </template>
+
+        <template v-else-if="acao.tipo === 'rascunho'">
+          <p class="modal__titulo">Substituir o texto do compositor?</p>
+          <p class="modal__texto">
+            A conversa de {{ acao.agendamento.cliente_nome }} já tem texto não
+            enviado. Substituir pelo da confirmação apaga o que está lá.
+          </p>
+          <!-- 🚨 MOSTRA O QUE SERIA PERDIDO. O `window.confirm` daqui até
+               26/10 perguntava sem mostrar nada, e quem decidia decidia às
+               cegas sobre o texto de outra pessoa. -->
+          <pre class="agd__rascunho">{{ acao.havia.slice(0, 400) }}</pre>
+        </template>
+
+        <template v-else>
+          <p class="modal__titulo">Reagendar</p>
+          <p class="modal__texto">
+            {{ acao.agendamento.cliente_nome }} — hoje em
+            {{ dataBr(acao.agendamento.inicio) }} às {{ hora(acao.agendamento.inicio) }}
+          </p>
+          <label class="campo">
+            <span class="campo__rotulo">Nova data e hora</span>
+            <input v-model="quandoDigitado" class="campo__entrada"
+                   type="datetime-local" />
+            <span class="campo__ajuda">
+              No celular isto abre o seletor do próprio aparelho.
+            </span>
+          </label>
+        </template>
+
+        <p v-if="acaoErro" class="aviso aviso--erro" role="alert">
+          <i class="bi bi-exclamation-octagon aviso__icone" aria-hidden="true"></i>
+          <span>{{ acaoErro }}</span>
+        </p>
+
+        <div class="modal__acoes">
+          <button class="botao botao--contorno" type="button"
+                  :disabled="salvandoAcao" @click="fecharAcao">
+            Voltar
+          </button>
+          <button
+            :class="['botao', acao.tipo === 'reagendar' ? 'botao--primario' : 'botao--perigo']"
+            type="button"
+            :disabled="salvandoAcao || !podeConfirmarAcao"
+            @click="confirmarAcao"
+          >
+            <span v-if="salvandoAcao" class="girando"></span>
+            {{ acao.tipo === 'cancelar' ? 'Cancelar o agendamento'
+               : acao.tipo === 'rascunho' ? 'Substituir e abrir'
+               : 'Reagendar' }}
+          </button>
+        </div>
+      </div>
+    </div>
 </template>
 
 <style scoped>
@@ -558,21 +647,26 @@ onMounted(carregar)
   border-radius: var(--r-md);
   background: var(--superficie-2);
 }
-.agd__mes-topo { display: flex; align-items: center; justify-content: space-between; gap: var(--e-2); }
-.agd__mes-rotulo { text-transform: capitalize; }
-.agd__mes-grade { display: grid; grid-template-columns: repeat(7, 36px); gap: 4px; }
-.agd__mes-semana { text-align: center; font-size: var(--txt-xs); color: var(--texto-fraco); }
-.agd__mes-vago { display: block; }
-.agd__mes-dia {
-  height: 32px;
-  border: var(--borda-fina) solid transparent;
+/* 🚨 26/10: o CSS da grade foi para `CalendarioMes.vue`.
+   ⚠️ AS DUAS CÓPIAS DIVERGIAM EM QUATRO MEDIDAS, todas sem razão: coluna de
+   36px aqui contra 34px no modal, altura 32px contra 30px, `gap` de 4px contra
+   3px, e fundo `--superficie` contra `--superficie-2`. Nenhuma delas chegava
+   ao `--altura-toque: 44px` do padrão. É o melhor retrato do que a cópia
+   custa: ninguém escolheu ser diferente -- ficou diferente. */
+/* O trecho do rascunho que seria perdido: monoespaçado e com teto de altura,
+   porque pode ser texto longo e o modal não é um leitor. */
+.agd__rascunho {
+  max-height: 30vh;
+  overflow: auto;
+  margin: 0 0 var(--e-4);
+  padding: var(--e-3);
+  border: var(--borda-fina) solid var(--borda);
   border-radius: var(--r-sm);
-  background: var(--superficie);
-  color: inherit;
-  cursor: pointer;
+  background: var(--superficie-2);
+  font-size: var(--txt-sm);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
-.agd__mes-dia--hoje { border-color: var(--acento); }
-.agd__mes-dia--ativo { background: var(--acento); color: #fff; }
 .agd__mes-nota { margin: 0; max-width: 34ch; color: var(--texto-fraco); font-size: var(--txt-xs); }
 
 /* Reenviar confirmação (ponta 2) */

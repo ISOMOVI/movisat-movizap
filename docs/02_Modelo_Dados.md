@@ -2235,3 +2235,114 @@ separados no banco.
 com `situacao_em` nulo = não tentou; nulo com data = deu certo.
 ⚠️ **Ninguém escreve nestas colunas ainda** — a leitura e a escrita de
 `situacaoId` são da volta seguinte, e dependem de decisão dele.
+
+## Migração 077 — o KM do técnico: memória, retrato e cache da rota
+
+🔵 *"na parte de agendamento do tecnico: proponha no deslocamento uma
+calculadora km técnico (...) o endereço do tecnico sempre fica preenchido
+conforme o ultimo (...) se for alterado, permanece alterado"*, e *"o km é o
+calculo a ser feito (...) Hoje é feita na mão via 'rotas' do google"*.
+
+🚨 **São três coisas porque têm TRÊS TEMPOS DE VIDA diferentes.**
+
+**`tecnico_origem`** (tabela nova) — a **memória**, e vale *agora*. Uma linha
+por técnico (`tecnico_contato_id` é a PK, referência a `contato`), com os
+**mesmos sete campos e os mesmos limites** do endereço de destino da 073 —
+duas réguas para o mesmo endereço é uma delas mentindo. **Sobrescrita**, que é
+a frase dele ao pé da letra: *"se for alterado, permanece alterado"*.
+⚠️ **Não é cadastro:** ninguém digita isto num formulário — a linha é escrita
+pelo **uso** da calculadora. Cadastro é coisa que alguém tem de manter, e o
+projeto já tem **117 contatos de técnico sem cadastro no Harmonit** para
+provar o que acontece quando ninguém mantém.
+
+**`agendamento.origem_endereco` e `agendamento.km`** — o **retrato**, e valem
+*naquele dia*. Se o técnico mudar de endereço, a memória muda e o compromisso
+antigo continua dizendo de onde se cobrou. Mesmo desenho do `tipo_nome` da
+072 (*"retrato do momento do agendamento"*).
+⚠️ Aqui é a **linha de texto**, não sete colunas: a origem estruturada vive na
+memória, e sete colunas aqui seriam a **terceira** cópia do mesmo endereço.
+⚠️ `km numeric(12,3)` igual ao `orcamento_item.quantidade` — o km vai para lá
+como quantidade, e arredondar diferente nos dois lados faria o compromisso e o
+orçamento discordarem do mesmo deslocamento.
+
+**`rota_cache`** (tabela nova) — cache de **consulta paga**, e vale por um
+prazo. Chave: o **par de endereços normalizados** (minúsculas, sem acento, sem
+pontuação), porque "Rua X, 123" e "rua x 123" são a mesma consulta e pagar
+duas vezes por isso é desperdício que ninguém vê na fatura.
+
+🚨 **E o cache em TABELA contraria um princípio escrito da casa, então a
+objeção se responde aqui.** O `movizap/cep.py` diz: *"Não vira tabela porque
+cache que sobrevive a deploy é cache que guarda erro para sempre"*. Vale para o
+CEP, que é grátis. Aqui muda o que importa: cada consulta **custa**, e o mesmo
+técnico vai ao mesmo cliente muitas vezes — cache de processo pagaria de novo a
+cada deploy. E as duas condições que respondem ao medo do `cep.py`: **só
+resultado bom entra** (falha nunca é gravada) e **`consultado_em` fica à
+vista**, com prazo de 90 dias aplicado por quem lê — a mesma razão pela qual a
+076 guardou a situação **com a hora**.
+
+⚠️ **Ninguém escreve nestas três ainda.** A calculadora e a rota são da mesma
+volta; as colunas nascem agora porque acrescentá-las depois obrigaria a mexer
+em quem lê. E o cache **continua vazio enquanto não houver chave da API** —
+sem chave, `rotas.disponivel()` é `False` e a tela cai no campo manual dizendo
+por quê.
+
+## Migração 078 — onde o agente procura a gravação, e o canal de volta
+
+🔵 *"veja se da para atualizar do lado de ca para os computadores o local de
+coleta das ligações gravadas"*, e o desenho dele: *"que permita inserir mais
+endereços por aqui ou buscar pelo nome da pasta, pedindo permissão ao
+instalar"*.
+
+🚨 **O ponto de partida, medido em 26/10:** a pasta era **100% derivada** do
+`MicroSIP.ini` e, com `recordingPath` vazio, o agente **chutava**
+`Desktop\Recordings` — palpite que o próprio código marcava como *"HIPOTESE a
+medir no PC da Claudia"*, porque **com OneDrive a Área de Trabalho muda de
+lugar**. E **não existia canal VPS → agente**: o batimento devolvia
+`{ok, ramal, servidor_em}` e o agente **descartava a resposta**.
+
+### Três colunas de diagnóstico
+
+`agente_ligacao.pasta` · `pasta_origem` · `auto_gravacao`.
+
+**`pasta`** é o caminho que o agente realmente observa. 🚨 Sem ele, o aviso
+*"pasta de gravacoes ainda nao existe"* não dizia **qual** pasta — e era por
+isso que ninguém via, pelo painel, que o caminho calculado estava errado. Aviso
+que não diz onde procurou não é diagnóstico.
+
+**`pasta_origem`** é **COMO** a pasta foi decidida, com `CHECK` de lista
+fechada: `vps` · `escolhida` · `ini` · `relativa` · `busca` · `palpite`. ⚠️
+Fechada porque a tela explica cada caso em texto — frase livre viraria seis
+variações do mesmo recado. `palpite` é o comportamento de até o agente 0.6 e
+**sai no 0.7**.
+
+**`auto_gravacao`** é a gravação automática do MicroSIP, dita pelo PC. 🚨 Até
+aqui, *"REC ligado"* era **deduzido da ausência** de um aviso de texto —
+dedução que inverte se a frase do agente mudar, e que "desliga" o REC sozinho se
+chegar aviso novo sobre outra coisa. ⚠️ **Nulo é o terceiro estado:** em quem
+**já falou**, significa **agente velho**, não "desligado" — e aí vale a dedução
+de antes, que é o melhor que existe para ele.
+
+### Uma coluna de instrução
+
+**`pastas_extra text[]`** — os caminhos que a VPS manda o agente tentar, em
+ordem. Vazio = **não interfiro**, que é o estado de todos os 7 PCs hoje.
+
+🚨 **É INSTRUÇÃO QUE SAI DAQUI E VIRA LEITURA DE DISCO ALHEIO.** O que impede
+estrago mora **no PC** — caminho só dentro do perfil do usuário ou de uma raiz
+de OneDrive, unidade de rede recusada, travessia (`..`) recusada, e só
+`.mp3`/`.wav` sobem. É o **oposto** do padrão da casa (*"quem barra é o
+backend"*), e tem de ser: o backend do risco, neste caso, é o agente. Um agente
+que confia na VPS para dizer o que é seguro é um agente que obedece a VPS
+invadida.
+
+⚠️ E a escrita é **só do owner** (`PUT /api/ligacoes/agentes/{id}/pastas`),
+embora a aba `LIG_1.1` seja `atendimento`: *"todo atendente vê a aba"* não pode
+virar *"todo atendente aponta o agente do colega para onde quiser"*.
+
+### ⚠️ Nada disto vale nos PCs antes do agente 0.7
+
+Os 7 rodam o `0.4`, e o agente **não se atualiza sozinho**. As colunas nascem
+agora porque o lado da VPS (rota, tela, teste) é o que dá para fazer sem tocar
+em máquina nenhuma — e porque acrescentá-las depois obrigaria a mexer em quem
+lê. Em 26/10 as três de diagnóstico estão **nulas nos 7**, e `pastas_extra`
+vazio em todos.
