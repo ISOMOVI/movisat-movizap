@@ -1453,3 +1453,154 @@ aprofundar o painel — e os dois são decisão dele, não trabalho meu.
 ⚠️ **Nenhuma delas é trabalho meu parado:** as seis são frases dele. O que eu
 posso fazer sem esperar nada é o item **1** da §11.3 — ligar o formato novo nos
 14 — e ele é uma linha por formulário.
+
+---
+
+# 12. VALIDAÇÃO DO FEITO CONTRA O PLANO (29/10, noite)
+
+> 🔵 Pedido dele: *"valide os feitos contra a documentação do plano do painel OP
+> e o .md dele, veja se tem algo faltando"*.
+>
+> Duas fontes conferidas item a item: **este documento** (o pipeline do painel
+> OP) e **`C:\Users\Lenovo\Desktop\Formularios_Movisat_Design.md`** (o plano de
+> 6 blocos dos formulários, escrito a pedido dele em 23/10).
+
+## 12.1 O plano do painel OP — este documento
+
+| bloco | estado | prova |
+|---|---|---|
+| **A** criar a OS do chamado | ✅ no ar | OS 17056 criada e apagada |
+| **B** o painel monta as OS | ✅ no ar | 11 cards reais |
+| **C** tempo por etapa | ❌ **não começou** | o dado é colhido desde 29/10 |
+| **D** mover o card | ✅ no ar | OS 16991 movida e devolvida |
+| **E** o card aberto | ⚠️ **parcial** | abre, mostra o que existe e **diz** o que falta; os 4 resumos não |
+| **F** o espelho da OS | ❌ **não começou** | só situação e endereço são escritos |
+
+**As 12 decisões dele (D1–D12):** todas honradas, com duas observações:
+
+- **D10** (*"o fluxo em texto dentro da `solucaoTecnica` vai ser apagado"*) —
+  🔴 **é dele**, e não foi feito. Nenhuma OS teve a `solucaoTecnica` tocada.
+- **D11** (o espelho) — é o **Bloco F**, não começou.
+
+**As 9 pendências da §4, hoje:**
+
+| # | estado |
+|---|---|
+| 1 validar no navegador | 🔴 dele — e ele já achou **4 defeitos** assim |
+| 2 as OS com situação `0` | 🔴 dele — a 17050 saiu sozinha, **128 OS** seguem |
+| 3 os tipos 76 e 57 | ✅ **morreu**: existem no catálogo de 28 |
+| 4 a aba Network | 🔴 dele |
+| 5 ordem das etapas | ✅ **respondida**: *"que tal de caminho proibido é esse??"* — livre |
+| 6 ligar o formato novo nos 14 | 🔵 **ele mandou ligar** — ver §12.3 |
+| 7 o texto dos termos | 🔴 dele |
+| 8 os 50 chassis na coluna `placa` | 🔴 dele |
+| 9 apagar a solicitação 39 | 🔴 dele — **e a 544** |
+
+## 12.2 🚨 O PLANO DOS FORMULÁRIOS — entregue para **1 de 15**
+
+Aqui está o que faltava, e é bem maior do que eu vinha dizendo. Os 6 blocos do
+`.md` dele estão de pé **só no SUPORTE**:
+
+| bloco do `.md` dele | no SUPORTE | nos outros 14 |
+|---|---|---|
+| **1** o `+` (repetidor) | ✅ | ❌ **28 dos 30 campos múltiplos** seguem perdendo dado em silêncio |
+| **2** lista múltipla → caixas de marcar | ❌ | ❌ os 2 campos são do **ADMINISTRATIVO** e da **FICHA_CADASTRAL**, ambos clássicos |
+| **3** máscaras e dígito verificador | ✅ | 🚨 **56 campos em 13 formulários** sem validação |
+| **4** endereço em 7 campos, com CEP | ❌ | ❌ são **6 caixas de texto livre** em 4 formulários |
+| **5** etapas | ✅ (4 etapas) | ❌ |
+| **6** identidade visual | ✅ | ❌ |
+
+### 🚨 O número que mais importa: 56 campos sem validação
+
+Medido nos 15, campo a campo: **56 campos pedem CPF, CNPJ, telefone, e-mail ou
+CEP e não têm `validacao` nenhuma.** E isso **não é só máscara no navegador**:
+sem `validacao`, o `_um_valor` do servidor **não cobra dígito verificador nem
+tamanho** — então hoje qualquer texto passa nesses 56 campos.
+
+| formulário | campos sem validação |
+|---|---|
+| rescisao | **8** |
+| credenciamento-tecnico | **7** |
+| aditivo · ficha-cadastral · fornecedores | 5 cada |
+| administrativo · financeiro · substituicao-veiculos · teste-gratuito | 4 cada |
+| contato · demonstracao | 3 cada |
+| nps · pagamento-tecnicos | 2 cada |
+
+⚠️ **É defeito de coleta, em produção, nos 14 que o cliente já abre** — não uma
+melhoria de tela.
+
+### 🚨 E o meu "é uma linha por formulário" estava ERRADO
+
+Eu disse na §11.3 que ligar o formato novo nos 14 é *"uma linha por formulário
+no `FORMATO_NOVO`, sem migração e sem deploy"*. **Medi e não é.** As três
+tabelas do carregador — `ETAPAS`, `VALIDACOES` e `AJUSTES` — existem **só para
+o SUPORTE**. Ligar o formato sem elas dá:
+
+- a **pele** nova e o **`+`** ✅ (vêm do renderizador, não da tabela);
+- **nenhuma etapa** (rolo único na pele nova);
+- **nenhuma máscara** — os 56 campos seguem sem validação.
+
+### ⚠️ E o Bloco 5 do `.md` dele também precisa de correção
+
+O `.md` diz *"as **15 `page`** já existentes viram as etapas. Nada se
+inventa"*. **Medido no mapa bruto do Bitrix: os 15 `page` estão em 4
+formulários**, não nos 15:
+
+| formulário | `page` |
+|---|---|
+| ficha-cadastral | **7** |
+| credenciamento-tecnico | **4** |
+| fornecedores | **3** |
+| demonstracao | **1** |
+| **os outros 11** | **zero** |
+
+🚨 Então para **11 formulários as etapas têm de ser PROPOSTAS**, como foi no
+SUPORTE — e lá o próprio `.md` registra que *"o agrupamento é NOSSO, proposto
+por mim, e está em dado exatamente para ele poder rever"*. ⚠️ E `ETAPAS` que
+cita campo inexistente **para a carga**, então escrever 11 à mão é caro e
+quebradiço.
+
+## 12.3 🟡 O que eu proponho, agora que o tamanho está medido
+
+🔵 Ele mandou **ligar os 14**. Com a medição, o caminho honesto muda de "14
+linhas" para **derivar em vez de escrever à mão**:
+
+| peça | como |
+|---|---|
+| **as máscaras (Bloco 3)** | 🟡 **derivar do nome do campo**, não de tabela por formulário. Foi assim que eu achei os 56 — a regra sai de `nosso_nome`/rótulo, e vale para os 15 de uma vez. ⚠️ `VALIDACOES` continua existindo para **exceção** |
+| **as etapas (Bloco 5)** | 🟡 usar o **`page` do Bitrix** nos 4 que têm; nos 11 sem `page`, **uma etapa só** (a pele nova, sem trilho) até ele revisar um agrupamento proposto |
+| **o `+` e a identidade (1 e 6)** | ✅ já vêm do renderizador — é o que o `FORMATO_NOVO` liga de fato |
+| **lista múltipla (Bloco 2)** | 🟡 2 campos, derivável de `list` + `multiplo` |
+| **endereço (Bloco 4)** | 🔴 **não é derivável**: trocar 1 caixa de texto por 7 campos **muda o que é gravado** em 4 formulários no ar. Precisa de decisão dele |
+
+🚨 **Por que derivar e não escrever 14 tabelas:** a tabela à mão é a terceira
+verdade (já me custou o fixture que pulava 12 travas hoje), e `ETAPAS` errada
+**para a carga dos 15**. A derivação é uma regra, testável uma vez.
+
+## 12.4 🔴 O que falta, em uma lista
+
+**Dele:**
+1. validar no navegador (ele já achou 4 defeitos assim)
+2. o **mapa `problemaId`** — 8 formulários não abrem OS
+3. o **texto dos termos** — 3 formulários
+4. a **situação `0`** — 128 OS
+5. a **aba Network** do Harmonit
+6. **"cliente avulso"** no ERP
+7. **o endereço em 7 campos** (Bloco 4) — muda o que é gravado em 4 formulários
+8. o **limite do tempo de etapa** (um número, para o Bloco C)
+9. apagar a solicitação **544**
+10. 🆕 **a placa de teste**: ele decidiu *"aceitar sem testar a placa"* — fica
+    registrado como **risco conhecido**: a regra *"chamado só para placa ativa
+    na WESO"* só será provada pelo primeiro chamado real
+
+**Meu, desbloqueado:**
+- derivar as máscaras (fecha o Bloco 3 nos 15 e **conserta 56 campos em
+  produção**)
+- as etapas pelo `page` nos 4 + uma etapa nos 11
+- ligar o formato novo nos 14 (depois das duas acima, senão ligo uma pele sem
+  validação)
+- os blocos **E**, **C** e **F**, na ordem que ele pediu
+
+⚠️ **A ordem muda por causa da medição:** eu ia ligar os 14 primeiro. Ligar
+antes de derivar as máscaras poria 14 formulários na pele nova **com os 56
+campos ainda sem validação** — pele nova não conserta coleta.
