@@ -5091,6 +5091,62 @@ def mover_card_do_painel(
         situacao_esperada=dados.situacao_esperada)
 
 
+@app.get("/api/paineis/operacao/ficha")
+def ficha_do_card(numero_os: int = Query(..., ge=1),
+                  usuario: dict = Depends(auth.requer_tela("PNL_1.1"))):
+    """A OS ao vivo, para o card aberto — os quatro temas do mockup.
+
+    🔵 Ele: *"onde estão os temas do card, após clicar?"*.
+
+    ⚠️ UMA CHAMADA POR CARD ABERTO, e é o desenho: `descricao` e
+    `solucaoTecnica` não estão no cache, então vêm do ERP. Pôr isso na montagem
+    do quadro seriam 11 chamadas por abertura de tela.
+
+    🚨 Falha da ponte vira **502 com a frase**, não ficha vazia: ficha vazia é
+    indistinguível de OS sem dados.
+    """
+    try:
+        ficha = fpsl_ponte.ficha_da_os(numero_os)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(
+            status_code=502,
+            detail=f"não deu para ler a OS {numero_os} no Harmonit agora: {e}")
+
+    # 🔵 "Dados do chamado": as respostas do formulário, quando a OS veio de um.
+    # ⚠️ Nulo quando a OS é do ERP -- e a tela diz isso, em vez de caixa vazia.
+    linha = banco.um(
+        """SELECT s.id, s.valores, f.titulo AS formulario,
+                  (SELECT count(*) FROM formulario_arquivo a
+                    WHERE a.solicitacao_id = s.id) AS anexos
+             FROM solicitacao_os x
+             JOIN formulario_solicitacao s ON s.id = x.solicitacao_id
+             JOIN formulario f ON f.id = s.formulario_id
+            WHERE x.numero_ordem = %s
+            LIMIT 1""", (numero_os,))
+    if not linha:
+        linha = banco.um(
+            """SELECT s.id, s.valores, f.titulo AS formulario,
+                      (SELECT count(*) FROM formulario_arquivo a
+                        WHERE a.solicitacao_id = s.id) AS anexos
+                 FROM formulario_solicitacao s
+                 JOIN formulario f ON f.id = s.formulario_id
+                WHERE s.numero_ordem = %s
+                LIMIT 1""", (str(numero_os),))
+
+    ficha["chamado"] = None
+    if linha:
+        d = formularios_mod.uma(linha["id"])
+        ficha["chamado"] = {
+            "solicitacao_id": linha["id"],
+            "formulario": linha["formulario"],
+            "anexos": linha["anexos"],
+            # 🚨 Os campos com RÓTULO, não as chaves do Bitrix: a tela do painel
+            # não pode mostrar `COMPANY_UF_CRM_1646332310941` a ninguém.
+            "respostas": (d or {}).get("respostas") or [],
+        }
+    return ficha
+
+
 @app.get("/api/paineis/operacao/passagens")
 def passagens_do_painel(
         numero_os: int = Query(0, ge=0),

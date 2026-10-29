@@ -363,3 +363,16 @@ def gravar_situacao_da_os(numero_os: int, situacao_id: int,
                 "incerto": incerto, "numero_os": int(numero_os),
                 "para": int(situacao_id),
                 "motivo": ("🚨 " if incerto else "") + str(e)}
+
+
+def ficha_da_os(numero_os: int) -> dict:
+    """A OS ao vivo, para o card aberto — o Bloco E.
+
+    🔵 Ele: *"onde estão os temas do card, após clicar?"*.
+
+    🚨 ESTOURA `FpslIndisponivel` quando a ponte cai, e NÃO devolve ficha
+    vazia: ficha vazia é indistinguível de OS sem dados, e o operador
+    concluiria que não há o que ver. Quem chama mostra *"não deu para ler a OS
+    agora"*.
+    """
+    return _pedir("/api/os/ficha", {"numero_os": int(numero_os)})

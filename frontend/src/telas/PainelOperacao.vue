@@ -92,23 +92,105 @@ const cardAberto = ref(null)
 const passagens = ref([])
 const lendoPassagens = ref(false)
 
+/* 🔵 OS QUATRO TEMAS DO MOCKUP — Descrição da OS, Solução técnica, Dados do
+   chamado e Agendamento. Ele perguntou *"onde estão os temas do card, após
+   clicar?"* e eu os havia deixado para depois, com um texto no modal dizendo
+   que faltavam. Dizer o que falta é melhor que caixa vazia -- e não substitui
+   o recurso.
+
+   🚨 UMA CHAMADA POR CARD ABERTO: `descricao` e `solucaoTecnica` NÃO estão no
+   cache, vêm ao vivo do ERP. Na montagem do quadro seriam 11 chamadas. */
+const ficha = ref(null)
+const lendoFicha = ref(false)
+const erroDaFicha = ref('')
+const temaAberto = ref('descricao')
+
 async function abrirCard(card) {
   cardAberto.value = card
   passagens.value = []
+  ficha.value = null
+  erroDaFicha.value = ''
+  temaAberto.value = 'descricao'
   if (!card.numero_ordem) return
+
   lendoPassagens.value = true
-  try {
-    const r = await api.get(
-      `/api/paineis/operacao/passagens?numero_os=${card.numero_ordem}`)
-    passagens.value = r.passagens || []
-  } catch (e) {
-    /* ⚠️ Falha ao ler o log NAO fecha o modal nem derruba a tela: o resto do
-       card continua valendo. A ausencia e dita no proprio modal. */
-    passagens.value = []
-  } finally {
-    lendoPassagens.value = false
-  }
+  lendoFicha.value = true
+  /* ⚠️ As duas leituras em paralelo: o log é nosso (rápido) e a ficha vai ao
+     ERP. Em série, o log esperaria o Harmonit por nada. */
+  const log = api.get(
+    `/api/paineis/operacao/passagens?numero_os=${card.numero_ordem}`)
+    .then((r) => { passagens.value = r.passagens || [] })
+    /* ⚠️ Falha ao ler o log NÃO fecha o modal: o resto do card continua
+       valendo, e a ausência é dita no próprio modal. */
+    .catch(() => { passagens.value = [] })
+    .finally(() => { lendoPassagens.value = false })
+
+  const f = api.get(
+    `/api/paineis/operacao/ficha?numero_os=${card.numero_ordem}`)
+    .then((r) => { ficha.value = r })
+    .catch((e) => {
+      /* 🚨 FICHA VAZIA SERIA PIOR QUE ERRO: ela é indistinguível de uma OS sem
+         dados, e o operador concluiria que não há o que ver. */
+      erroDaFicha.value = e instanceof ErroDeApi
+        ? e.message : 'Não deu para ler a OS no Harmonit agora.'
+    })
+    .finally(() => { lendoFicha.value = false })
+
+  await Promise.all([log, f])
 }
+
+/* 🔵 O Agendamento *"nasce desabilitado e acende em Serviço Agendado"*. */
+const SITUACAO_AGENDADO = 1316
+
+const temas = computed(() => {
+  const f = ficha.value
+  const c = cardAberto.value
+  if (!c) return []
+  return [
+    {
+      chave: 'descricao',
+      titulo: 'Descrição da OS',
+      resumo: f ? (f.descricao || 'sem descrição escrita') : '…',
+      texto: f?.descricao || null,
+      vazio: !!f && !f.descricao,
+      ligado: true,
+    },
+    {
+      chave: 'solucao',
+      titulo: 'Solução técnica',
+      resumo: f ? (f.solucao_tecnica || 'sem solução técnica escrita') : '…',
+      texto: f?.solucao_tecnica || null,
+      vazio: !!f && !f.solucao_tecnica,
+      ligado: true,
+    },
+    {
+      chave: 'chamado',
+      titulo: 'Dados do chamado',
+      resumo: f
+        ? (f.chamado
+            ? `${f.chamado.formulario} · ${f.chamado.respostas.length} campos`
+              + (f.chamado.anexos ? ` · ${f.chamado.anexos} anexo(s)` : '')
+            : 'esta OS não veio de formulário')
+        : '…',
+      respostas: f?.chamado?.respostas || [],
+      vazio: !!f && !f.chamado,
+      ligado: true,
+    },
+    {
+      chave: 'agendamento',
+      titulo: 'Agendamento',
+      /* 🔵 Acende em "Serviço Agendado", e DIZ por que está apagado. */
+      ligado: c.situacao_id === SITUACAO_AGENDADO || !!f?.tem_agendamento,
+      resumo: f
+        ? (f.tem_agendamento
+            ? `${f.agendamentos.length} compromisso(s)`
+            : 'só a partir de "Serviço Agendado"')
+        : '…',
+      agendamentos: f?.agendamentos || [],
+      vazio: !!f && !f.tem_agendamento,
+    },
+  ]
+})
 
 function fecharCard() {
   cardAberto.value = null
@@ -119,7 +201,11 @@ function nomeDaSituacao(sid) {
   const c = (quadro.value?.colunas || []).find((x) => x.situacao_id === sid)
   /* 🚨 Situacao fora das 17 mostra o NUMERO CRU, nunca um rotulo inventado --
      e a regua do grid do FPSL. */
-  return c ? c.titulo : (sid === null ? 'nunca lida' : `situação ${sid}`)
+  /* ⚠️ "situação nunca lida" e não só "nunca lida": a pílula do card aparece
+     sozinha, e fora de contexto "nunca lida" não diz nunca lida O QUE. A trava
+     pegou isto. */
+  return c ? c.titulo
+           : (sid === null ? 'situação nunca lida' : `situação ${sid}`)
 }
 
 function verNaFRM(card) {
@@ -481,12 +567,12 @@ onMounted(carregar)
                 </span>
 
                 <span class="card__pistas">
-                  <!-- ⚠️ A situação CRUA fica à vista: `0` é um valor que
-                       existe em 129 OS, e o que fazer com ele é decisão dele. -->
-                  <span v-if="card.situacao_id !== null" class="pilula">
-                    situação {{ card.situacao_id }}
-                  </span>
-                  <span v-else class="pilula">situação nunca lida</span>
+                  <!-- 🔵 O NOME da situação, não o número: *"obviamente deve
+                       ser o texto da situacao real"*. 🚨 Eu havia invertido a
+                       régua da casa -- o valor cru é a EXCEÇÃO, para a situação
+                       que não está nas 17 (como o `0`, que existe em 129 OS), e
+                       o `nomeDaSituacao` devolve o cru só nesse caso. -->
+                  <span class="pilula">{{ nomeDaSituacao(card.situacao_id) }}</span>
 
                   <span v-if="card.origem === 'erp'" class="pilula">Harmonit</span>
                   <span v-else-if="card.formulario" class="pilula">{{ card.formulario }}</span>
@@ -513,23 +599,13 @@ onMounted(carregar)
                 </span>
               </div>
 
-              <!-- ⚠️ O MESMO CAMINHO, OUTRO GESTO. Arrastar foi a escolha dele
-                   e é o gesto principal; mas arrastar **não é alcançável por
-                   teclado**, e sem isto o painel passaria a ter uma ação que
-                   só funciona com mouse. São 6 linhas, e é o que faz o recurso
-                   existir para quem usa teclado ou leitor de tela. -->
-              <label v-if="quadro.pode_mover && card.numero_ordem"
-                     class="card__mover">
-                <span class="so-leitor">
-                  Mover a OS {{ card.numero_ordem }} para outra etapa
-                </span>
-                <select :value="card.situacao_id"
-                        :disabled="movendo === card.numero_ordem"
-                        @change="mover(card, Number($event.target.value))">
-                  <option v-for="c in quadro.colunas" :key="c.chave"
-                          :value="c.situacao_id">{{ c.titulo }}</option>
-                </select>
-              </label>
+              <!-- 🔵 A CAIXA DE SELEÇÃO SAIU DAQUI, a pedido dele: *"pq ela foi
+                   substituida por uma caixa de selecao?"*. Ele decidiu
+                   arrastar, e enquanto o arrasto estava quebrado a caixa era o
+                   único jeito de mover — então ela parecia a substituição.
+                   ⚠️ O teclado continua alcançando por outro caminho: o número
+                   da OS abre o card (Enter), e o `select` de etapa vive DENTRO
+                   do card aberto. -->
             </article>
 
             <p v-if="!coluna.cards.length" class="apagado pequeno">Vazia.</p>
@@ -624,19 +700,60 @@ onMounted(carregar)
             </ul>
           </section>
 
-          <!-- 🚨 O QUE AINDA NÃO EXISTE, DITO. Os quatro resumos do mockup
-               (descrição, solução técnica, dados do chamado, agendamento)
-               dependem de ler a OS ao vivo no ERP -- é o Bloco E. Caixa vazia
-               sem explicação faria parecer defeito. -->
-          <p class="aviso aviso--nota">
-            <i class="bi bi-info-circle aviso__icone" aria-hidden="true"></i>
-            <span>
-              A <strong>descrição</strong>, a <strong>solução técnica</strong>,
-              os <strong>dados do chamado</strong> e o
-              <strong>agendamento</strong> ainda não aparecem aqui — eles exigem
-              ler a OS ao vivo no Harmonit.
-            </span>
-          </p>
+          <!-- ================= OS QUATRO TEMAS (Bloco E) ================= -->
+          <!-- 🔵 Ele: *"onde estão os temas do card, após clicar?"*. São os
+               quatro do mockup, e vêm da OS LIDA AO VIVO no ERP -- `descricao`
+               e `solucaoTecnica` não existem no cache. -->
+          <section class="modal__temas">
+            <p v-if="lendoFicha" class="apagado pequeno">Lendo a OS no Harmonit…</p>
+            <!-- 🚨 ERRO, NÃO FICHA VAZIA: ficha vazia é indistinguível de OS
+                 sem dados, e o operador concluiria que não há o que ver. -->
+            <p v-else-if="erroDaFicha" class="aviso aviso--erro" role="alert">
+              {{ erroDaFicha }}
+            </p>
+
+            <div class="temas__abas" role="tablist">
+              <button v-for="t in temas" :key="t.chave" type="button"
+                      role="tab" class="temas__aba"
+                      :class="{ 'temas__aba--ativa': temaAberto === t.chave,
+                                'temas__aba--apagada': !t.ligado }"
+                      :aria-selected="temaAberto === t.chave"
+                      :disabled="!t.ligado"
+                      @click="temaAberto = t.chave">
+                <strong>{{ t.titulo }}</strong>
+                <span class="temas__resumo">{{ t.resumo }}</span>
+              </button>
+            </div>
+
+            <div v-for="t in temas" :key="`c-${t.chave}`" class="temas__corpo">
+              <template v-if="temaAberto === t.chave">
+                <!-- ⚠️ VAZIO É DITO, não deixado em branco: a solução técnica é
+                     nula na maioria das OS, e uma caixa branca parece defeito. -->
+                <p v-if="t.vazio" class="apagado pequeno">{{ t.resumo }}</p>
+
+                <pre v-else-if="t.texto" class="temas__texto">{{ t.texto }}</pre>
+
+                <!-- os dados do chamado, com RÓTULO e nunca a chave do Bitrix -->
+                <dl v-else-if="t.respostas && t.respostas.length"
+                    class="temas__respostas">
+                  <template v-for="r in t.respostas" :key="r.nome">
+                    <dt>{{ r.rotulo }}</dt>
+                    <dd>{{ Array.isArray(r.valor) ? r.valor.join(' · ') : r.valor }}</dd>
+                  </template>
+                </dl>
+
+                <ul v-else-if="t.agendamentos && t.agendamentos.length"
+                    class="temas__respostas">
+                  <li v-for="a in t.agendamentos" :key="a.agendamento_id">
+                    {{ a.nome || `usuário ${a.usuario_id}` }} —
+                    compromisso {{ a.agendamento_id }}
+                  </li>
+                </ul>
+
+                <p v-else class="apagado pequeno">{{ t.resumo }}</p>
+              </template>
+            </div>
+          </section>
 
           <footer class="modal__pe">
             <button v-if="cardAberto.id" class="botao botao--contorno"
@@ -730,8 +847,21 @@ onMounted(carregar)
 
 .card { display: block; }
 /* 🔵 O gesto dele. ⚠️ `grab` no card inteiro, e `grabbing` enquanto arrasta. */
-.card[draggable="true"] { cursor: grab; }
+.card[draggable="true"] {
+  cursor: grab;
+  /* 🚨 ESTA LINHA É O QUE FAZ O ARRASTO EXISTIR, e faltava: no Chrome, apertar
+     o botão sobre TEXTO SELECIONÁVEL dentro de um `draggable` inicia uma
+     SELEÇÃO DE TEXTO, não o arrasto do elemento. O card é todo texto, então
+     qualquer ponto onde se tentasse arrastar selecionava palavras.
+     ⚠️ E nenhum teste meu pegou: `trigger('dragstart')` é evento sintético --
+     prova que o handler está ligado, não que o navegador começa o arrasto. */
+  user-select: none;
+  -webkit-user-select: none;
+}
 .card[draggable="true"]:active { cursor: grabbing; }
+/* ⚠️ O texto do card volta a ser selecionável DENTRO do card aberto, que é
+   onde alguém copia um número de OS. */
+.modal__caixa { user-select: text; }
 /* Enquanto a escrita no ERP não voltou, o card fica apagado e o select
    desabilitado -- dois cliques seguidos seriam duas escritas. */
 .card--movendo { opacity: .55; pointer-events: none; }
@@ -816,6 +946,30 @@ onMounted(carregar)
 .modal__log h3 { margin: 0 0 var(--e-2); font-size: var(--txt-sm); }
 .modal__passagens { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--e-2); }
 .modal__passagens li { display: flex; flex-wrap: wrap; gap: var(--e-2); align-items: center; font-size: var(--txt-sm); }
+.modal__temas { display: flex; flex-direction: column; gap: var(--e-2); }
+.temas__abas { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: var(--e-2); }
+.temas__aba {
+  text-align: left; min-height: 56px; padding: var(--e-2) var(--e-3);
+  border: var(--borda-fina) solid var(--borda); border-radius: var(--r-sm, 6px);
+  background: var(--superficie); color: var(--texto); cursor: pointer;
+  display: flex; flex-direction: column; gap: 2px;
+  transition: border-color .15s ease, box-shadow .15s ease;
+}
+.temas__aba:hover:not(:disabled) { box-shadow: var(--sombra-1); }
+.temas__aba--ativa { border-color: var(--acento); box-shadow: var(--sombra-1); }
+/* 🔵 Apagada = "só a partir de Serviço Agendado", e o resumo diz isso. */
+.temas__aba--apagada { border-style: dashed; opacity: .65; cursor: not-allowed; }
+.temas__resumo { font-size: var(--txt-xs); color: var(--texto-fraco); }
+.temas__corpo:empty { display: none; }
+.temas__texto {
+  margin: 0; white-space: pre-wrap; word-break: break-word;
+  font-family: inherit; font-size: var(--txt-sm);
+  background: var(--superficie-2); border-radius: var(--r-sm, 6px);
+  padding: var(--e-3); max-height: 240px; overflow-y: auto;
+}
+.temas__respostas { margin: 0; font-size: var(--txt-sm); max-height: 240px; overflow-y: auto; }
+.temas__respostas dt { font-size: var(--txt-xs); color: var(--texto-fraco); margin-top: var(--e-2); }
+.temas__respostas dd { margin: 0; }
 .modal__pe { display: flex; gap: var(--e-2); justify-content: flex-end; flex-wrap: wrap; }
 .card__ha { font-size: var(--txt-xs); color: var(--texto-fraco); }
 .card__cliente { font-size: var(--txt-sm); font-weight: var(--peso-forte); }

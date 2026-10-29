@@ -36,7 +36,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 
 const estado = { quadro: null, empurrado: [], postado: [],
-                 resposta: null, passagens: [] }
+                 resposta: null, passagens: [],
+                 ficha: null, fichaFalha: false }
 
 vi.mock('../src/api/cliente.js', () => ({}))
 vi.mock('./api/cliente.js', () => ({
@@ -46,6 +47,14 @@ vi.mock('./api/cliente.js', () => ({
          quadro e o teste passaria lendo a coisa errada. */
       if (String(caminho).includes('/passagens')) {
         return { passagens: estado.passagens || [] }
+      }
+      if (String(caminho).includes('/ficha')) {
+        /* 🚨 A ficha pode FALHAR, e o teste precisa desse caminho: ficha vazia
+           seria indistinguivel de OS sem dados. */
+        if (estado.fichaFalha) {
+          throw new Error('não deu para ler a OS 17099 no Harmonit agora')
+        }
+        return estado.ficha || {}
       }
       return estado.quadro
     },
@@ -135,6 +144,8 @@ beforeEach(() => {
   estado.postado = []
   estado.resposta = null
   estado.passagens = []
+  estado.ficha = null
+  estado.fichaFalha = false
   estado.empurrado = []
 })
 
@@ -230,22 +241,26 @@ describe('mover o card — Bloco D (29/10)', () => {
     expect(tela.find('.card').attributes('draggable')).toBe('false')
   })
 
-  it('🚨 o TECLADO tambem move — o select existe ao lado do arrasto', async () => {
-    /* 🚨 Arrastar não é alcançável por teclado. Ele escolheu arrastar, e sem
-       este `select` o painel passaria a ter uma ação que só funciona com
-       mouse. As 17 etapas estão nele, na ordem dele. */
+  it('🚨 o CARD nao tem mais caixa de selecao', async () => {
+    /* 🔵 Ele: *"pq ela foi substituida por uma caixa de selecao?"*. Ele decidiu
+       arrastar, e enquanto o arrasto estava quebrado a caixa era o unico jeito
+       de mover -- entao ela parecia a substituicao. Saiu do card. */
     const tela = await abrir(comCard())
-    const sel = tela.find('.card__mover select')
-    expect(sel.exists()).toBe(true)
-    expect(sel.findAll('option')).toHaveLength(17)
-    /* O valor é a etapa ATUAL -- o select mostra onde o card está. */
-    expect(sel.element.value).toBe('38')
+    expect(tela.find('.card__mover').exists()).toBe(false)
   })
 
-  it('o select tem rotulo para leitor de tela', async () => {
+  it('🚨 o TECLADO move pelo card ABERTO, nao pelo card fechado', async () => {
+    /* ⚠️ Arrastar nao e alcancavel por teclado. O caminho ficou: o numero da OS
+       e um botao (abre o card com Enter) e o `select` das 17 vive DENTRO do
+       card aberto. */
     const tela = await abrir(comCard())
-    expect(tela.find('.card__mover .so-leitor').text())
-      .toContain('Mover a OS 17099')
+    expect(tela.find('.card__os').element.tagName).toBe('BUTTON')
+    await tela.find('.card__os').trigger('click')
+    await flushPromises()
+    const sel = tela.find('.modal__mover select')
+    expect(sel.exists()).toBe(true)
+    expect(sel.findAll('option')).toHaveLength(17)
+    expect(sel.element.value).toBe('38')
   })
 
   it('🚨 manda a situacao ESPERADA no pedido — a trava de concorrencia',
@@ -254,7 +269,9 @@ describe('mover o card — Bloco D (29/10)', () => {
        área especifica do fluxo"* · *"mas pode ter sim"*. Sem o
        `situacao_esperada`, mover escreveria por cima do que outra pessoa fez. */
     const tela = await abrir(comCard())
-    await tela.find('.card__mover select').setValue('1316')
+    await tela.find('.card__os').trigger('click')
+    await flushPromises()
+    await tela.find('.modal__mover select').setValue('1316')
     await flushPromises()
     expect(estado.postado).toHaveLength(1)
     expect(estado.postado[0]).toEqual([
@@ -267,7 +284,9 @@ describe('mover o card — Bloco D (29/10)', () => {
     /* 🚨 Falha silenciosa aqui faria a pessoa pensar que gravou. */
     estado.resposta = { ok: false, motivo: 'a OS esta na situacao 1316 no Harmonit' }
     const tela = await abrir(comCard())
-    await tela.find('.card__mover select').setValue('890')
+    await tela.find('.card__os').trigger('click')
+    await flushPromises()
+    await tela.find('.modal__mover select').setValue('890')
     await flushPromises()
     const alerta = tela.findAll('[role="alert"]').map((p) => p.text()).join(' ')
     expect(alerta).toContain('no Harmonit')
@@ -325,7 +344,11 @@ describe('o card', () => {
     expect(texto).toContain('Suporte')
     expect(texto).toContain('Cliente de exemplo')
     expect(texto).toContain('OS 17042')
-    expect(texto).toContain('situação 38')
+    /* 🔵 Ele: *"o card esta aparecendo como 'situacao n' - obviamente deve ser
+       o texto da situacao real"*. 🚨 Eu havia invertido a regua da casa: o
+       valor cru e a EXCECAO, para a situacao fora das 17. */
+    expect(texto).toContain('Novo Solicitação 1ª')
+    expect(texto).not.toContain('situação 38')
   })
 
   it('OS sem situação lida diz isso, e não finge um número', async () => {
@@ -716,5 +739,114 @@ describe('os efeitos do mockup', () => {
   it('a placa da OS aparece quando existe', async () => {
     const tela = await abrir(comCard())
     expect(tela.text()).toContain('ABC1D23')
+  })
+})
+
+
+/* ============================================================================
+   OS QUATRO TEMAS DO CARD ABERTO — Bloco E (29/10)
+   ----------------------------------------------------------------------------
+   🔵 Ele: *"onde estão os temas do card, após clicar?"* — e eu os havia deixado
+   para depois, com um texto no modal dizendo que faltavam. Dizer o que falta é
+   melhor que caixa vazia, e **não substitui o recurso**.
+
+   🚨 `descricao` e `solucaoTecnica` NÃO estão no cache: vêm ao vivo do ERP, uma
+   chamada POR CARD ABERTO. Na montagem do quadro seriam 11.
+   ============================================================================ */
+describe('os quatro temas do card aberto', () => {
+  const comFicha = (extra = {}) => {
+    estado.ficha = {
+      numero_os: 17099, descricao: 'MANUTENCAO COM TROCA: UQD 7I19',
+      solucao_tecnica: null, tipo_nome: 'Solicitação de Cliente',
+      prioridade: 382, situacao_id: 38, tem_agendamento: false,
+      agendamentos: [], chamado: null, ...extra,
+    }
+    return quadro({ cards: { s38: [card({ numero_ordem: 17099 })] } })
+  }
+
+  it('os QUATRO temas aparecem', async () => {
+    const tela = await abrir(comFicha())
+    await tela.find('.card__abrir').trigger('click')
+    await flushPromises()
+    const abas = tela.findAll('.temas__aba').map((a) => a.text())
+    expect(abas).toHaveLength(4)
+    expect(abas.join(' ')).toContain('Descrição da OS')
+    expect(abas.join(' ')).toContain('Solução técnica')
+    expect(abas.join(' ')).toContain('Dados do chamado')
+    expect(abas.join(' ')).toContain('Agendamento')
+  })
+
+  it('a descricao vem da OS lida ao vivo', async () => {
+    const tela = await abrir(comFicha())
+    await tela.find('.card__abrir').trigger('click')
+    await flushPromises()
+    expect(tela.find('.temas__texto').text()).toContain('MANUTENCAO COM TROCA')
+  })
+
+  it('🚨 VAZIO e DITO, nao deixado em branco', async () => {
+    /* ⚠️ A solução técnica é nula na maioria das OS, e caixa branca parece
+       defeito. */
+    const tela = await abrir(comFicha())
+    await tela.find('.card__abrir').trigger('click')
+    await flushPromises()
+    const solucao = tela.findAll('.temas__aba')[1]
+    expect(solucao.text()).toContain('sem solução técnica escrita')
+  })
+
+  it('🔵 o Agendamento nasce APAGADO e diz por que', async () => {
+    /* 🔵 Desenho dele: *"nasce desabilitado e acende em Serviço Agendado"*. */
+    const tela = await abrir(comFicha())
+    await tela.find('.card__abrir').trigger('click')
+    await flushPromises()
+    const ag = tela.findAll('.temas__aba')[3]
+    expect(ag.classes()).toContain('temas__aba--apagada')
+    expect(ag.attributes('disabled')).toBeDefined()
+    expect(ag.text()).toContain('só a partir de "Serviço Agendado"')
+  })
+
+  it('o Agendamento ACENDE quando a OS tem compromisso', async () => {
+    const tela = await abrir(comFicha({
+      tem_agendamento: true,
+      agendamentos: [{ usuario_id: 7493, nome: 'Franck', agendamento_id: 930447 }],
+    }))
+    await tela.find('.card__abrir').trigger('click')
+    await flushPromises()
+    const ag = tela.findAll('.temas__aba')[3]
+    expect(ag.classes()).not.toContain('temas__aba--apagada')
+    expect(ag.text()).toContain('1 compromisso')
+  })
+
+  it('os dados do chamado saem com ROTULO, nunca a chave do Bitrix', async () => {
+    /* 🚨 A tela do painel não pode mostrar `COMPANY_UF_CRM_1646332310941`. */
+    const tela = await abrir(comFicha({
+      chamado: {
+        solicitacao_id: 544, formulario: 'Suporte', anexos: 0,
+        respostas: [{ nome: 'COMPANY_UF_CRM_1646332310941',
+                      rotulo: 'CNPJ', valor: 'WQ0P6GLD000108' }],
+      },
+    }))
+    await tela.find('.card__abrir').trigger('click')
+    await flushPromises()
+    await tela.findAll('.temas__aba')[2].trigger('click')
+    const corpo = tela.find('.temas__respostas').text()
+    expect(corpo).toContain('CNPJ')
+    expect(corpo).not.toContain('COMPANY_UF_CRM')
+  })
+
+  it('🚨 falha ao ler a OS vira ERRO, nao ficha vazia', async () => {
+    /* 🚨 Ficha vazia é indistinguível de OS sem dados, e o operador concluiria
+       que não há o que ver. */
+    estado.fichaFalha = true
+    const tela = await abrir(quadro({
+      cards: { s38: [card({ numero_ordem: 17099 })] },
+    }))
+    await tela.find('.card__abrir').trigger('click')
+    await flushPromises()
+    const alerta = tela.findAll('[role="alert"]').map((p) => p.text()).join(' ')
+    /* ⚠️ INSENSIVEL A CAIXA: a frase comeca com maiuscula na tela e
+       minuscula na mensagem do servidor, e comparar com caixa fixa e o
+       defeito que a memoria desta casa chama de
+       varredura-de-rotulo-ignora-caixa. */
+    expect(alerta.toLowerCase()).toContain('deu para ler a os')
   })
 })
