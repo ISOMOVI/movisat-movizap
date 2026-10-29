@@ -136,3 +136,119 @@ def quem_mexeu(desde_dias: int = 7, teto: int = 200) -> list[dict]:
             WHERE p.em > now() - (%s || ' days')::interval
             ORDER BY p.em DESC
             LIMIT %s""", (desde_dias, teto))
+
+
+# ----------------------------------------------------------------------------
+# BLOCO C — de quando é a etapa atual de cada OS
+# ----------------------------------------------------------------------------
+# 🔵 *"o card mostra dois tempos: nesta etapa e total da OS"*.
+#
+# 🚨 UMA CONSULTA PARA TODOS OS CARDS. O quadro tem 11 cards e uma consulta por
+# card seriam 11 idas ao banco por abertura de tela.
+
+
+def etapa_desde(numeros: list[int]) -> dict:
+    """`numero_os` -> quando a etapa atual começou, da última passagem CONFIRMADA.
+
+    ⚠️ OS QUE NÃO ESTÁ NO RESULTADO NÃO TEM PASSAGEM, e isso é informação: a
+    `os_passagem` começou em 29/10, então OS movida antes disso (ou nunca
+    movida) não tem de onde tirar o tempo da etapa. Quem monta o card **diz
+    "não medido"** em vez de inventar um zero -- a OS pode estar na etapa desde
+    setembro e ninguém sabe.
+
+    🚨 SÓ PASSAGEM CONFIRMADA (`ok`): uma tentativa recusada não moveu a OS, e
+    contar o tempo a partir dela seria medir desde um evento que não aconteceu.
+    """
+    if not numeros:
+        return {}
+    linhas = banco.varios(
+        """SELECT DISTINCT ON (numero_os) numero_os, em, de_situacao,
+                  para_situacao
+             FROM os_passagem
+            WHERE ok AND numero_os = ANY(%s)
+            ORDER BY numero_os, em DESC, id DESC""",
+        ([int(n) for n in numeros],))
+    return {linha["numero_os"]: linha for linha in linhas}
+
+
+# ----------------------------------------------------------------------------
+# A OBSERVAÇÃO DO PAINEL — Bloco F, fase 1 (migração 084)
+# ----------------------------------------------------------------------------
+# 🔵 *"observação do painel, com autor e hora, **no MoviZap**. Não vai para a
+# `solucaoTecnica`"*.
+#
+# 🚨 NÃO SE APAGA E NÃO SE EDITA, e não há coluna para isso: reescrever recado é
+# reescrever a história que a operação leu. É a mesma régua do *"log de quem faz
+# o que SEMPRE"*.
+
+PRIORIDADES = {381: "Baixa", 382: "Normal", 383: "Alta", 384: "Urgente"}
+
+
+def observar(numero_os: int, texto: str, atendente_id: int | None) -> dict:
+    """Grava uma observação do painel sobre a OS."""
+    texto = (texto or "").strip()
+    if not texto:
+        raise DadoInvalido("Escreva a observação antes de salvar.")
+    if len(texto) > 4000:
+        raise DadoInvalido("A observação passa de 4000 caracteres.")
+    linha = banco.um(
+        """INSERT INTO os_observacao (numero_os, texto, atendente_id)
+           VALUES (%s, %s, %s) RETURNING id, em""",
+        (int(numero_os), texto, atendente_id))
+    log.info("OS %s: observacao %s por %s", numero_os, linha["id"], atendente_id)
+    return {"id": linha["id"], "em": linha["em"]}
+
+
+def observacoes(numero_os: int) -> list[dict]:
+    """As observações desta OS, da mais nova para a mais velha."""
+    return banco.varios(
+        """SELECT o.id, o.texto, o.em, a.nome AS quem
+             FROM os_observacao o
+             LEFT JOIN atendente a ON a.id = o.atendente_id
+            WHERE o.numero_os = %s
+            ORDER BY o.em DESC, o.id DESC""", (int(numero_os),))
+
+
+def quantas_observacoes(numeros: list[int]) -> dict:
+    """`numero_os` -> quantas observações. 🚨 UMA consulta para todos os cards.
+
+    ⚠️ O card fechado mostra só o NÚMERO: recado é para ler no card aberto, e
+    um trecho no card fechado faria a coluna crescer sem limite.
+    """
+    if not numeros:
+        return {}
+    linhas = banco.varios(
+        """SELECT numero_os, count(*) AS quantas
+             FROM os_observacao
+            WHERE numero_os = ANY(%s)
+            GROUP BY numero_os""", ([int(n) for n in numeros],))
+    return {linha["numero_os"]: linha["quantas"] for linha in linhas}
+
+
+def mudar_prioridade(numero_os: int, prioridade_id: int,
+                     atendente_id: int | None,
+                     prioridade_esperada: int | None = None) -> dict:
+    """Muda a prioridade da OS no Harmonit, e REGISTRA quem mudou.
+
+    🔵 *"deve ter o log de quem faz o que SEMPRE"* — vale para a prioridade
+    como vale para a etapa. ⚠️ O registro vai na `os_observacao`, como uma
+    linha escrita pelo sistema: criar uma segunda tabela de log para uma
+    escrita de um campo seria tabela por campo.
+    """
+    if prioridade_id not in PRIORIDADES:
+        raise DadoInvalido(
+            f"A prioridade {prioridade_id} não existe. "
+            f"As quatro são: {', '.join(PRIORIDADES.values())}.")
+
+    resposta = fpsl_ponte.gravar_prioridade_da_os(
+        numero_os, prioridade_id, prioridade_esperada=prioridade_esperada)
+
+    if resposta.get("ok") and resposta.get("gravou"):
+        de = PRIORIDADES.get(resposta.get("de"), resposta.get("de"))
+        para = PRIORIDADES[prioridade_id]
+        banco.executar(
+            """INSERT INTO os_observacao (numero_os, texto, atendente_id)
+               VALUES (%s, %s, %s)""",
+            (int(numero_os), f"[sistema] prioridade: {de} → {para}",
+             atendente_id))
+    return resposta

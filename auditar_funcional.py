@@ -182,6 +182,141 @@ with TestClient(main.app) as c:
                    "criaria OS no ERP; o caminho esta provado por teste HTTP "
                    "(teste_rotas_pipeline) e pela OS 17056, criada e apagada")
 
+# ============================================================================
+# 5 A 7 — ACRESCENTADOS EM 29/10, noite: *"audite tudo e documente"*
+# ============================================================================
+import re  # noqa: E402
+
+from movizap import passagem  # noqa: E402
+
+with TestClient(main.app) as c:
+    cab = {"Authorization": f"Bearer {auth.criar_token(settings.admin_login)}"}
+
+    print()
+    print("=" * 72)
+    print("5. BLOCO C — OS DOIS TEMPOS")
+    print("=" * 72)
+
+    q = c.get("/api/paineis/operacao", headers=cab).json()
+    cards = [cd for col in q["colunas"] for cd in col["cards"]]
+    conferir("todo card traz o campo da etapa",
+             all("etapa_desde" in cd for cd in cards))
+    conferir("todo card do ERP traz a data de criacao (o TOTAL)",
+             all(cd.get("criada_em") for cd in cards if cd["origem"] == "erp"))
+    medidos = [cd["numero_ordem"] for cd in cards if cd.get("etapa_desde")]
+    print(f"     com etapa medida: {len(medidos)} de {len(cards)} "
+          f"(a os_passagem comecou em 29/10)")
+    conferir("a etapa_desde sai da passagem, nao de palpite",
+             all(passagem.etapa_desde([n]).get(n) for n in medidos)
+             if medidos else True)
+
+    print()
+    print("=" * 72)
+    print("6. BLOCO F — PRIORIDADE E OBSERVACAO")
+    print("=" * 72)
+
+    conferir("as 4 prioridades sao as que ele decidiu",
+             passagem.PRIORIDADES == {381: "Baixa", 382: "Normal",
+                                      383: "Alta", 384: "Urgente"})
+    com_prio = [cd["numero_ordem"] for cd in cards if cd.get("prioridade_nome")]
+    print(f"     cards com prioridade no cache: {len(com_prio)} de {len(cards)}")
+    conferir("prioridade inventada e recusada",
+             c.post("/api/paineis/operacao/prioridade",
+                    json={"numero_os": 90901, "prioridade_id": 99999},
+                    headers=cab).status_code in (400, 422))
+    conferir("observacao vazia e recusada",
+             c.post("/api/paineis/operacao/observacao",
+                    json={"numero_os": 90901, "texto": "  "},
+                    headers=cab).status_code in (400, 422))
+    r = c.post("/api/paineis/operacao/observacao",
+               json={"numero_os": 90901, "texto": "zz auditoria"}, headers=cab)
+    try:
+        obs = r.json().get("observacoes") or []
+        conferir("observacao grava com autor e hora",
+                 bool(obs) and bool(obs[0].get("quem")) and bool(obs[0].get("em")),
+                 f"{len(obs)} observacao(oes)")
+        conferir("o card fechado conta os recados",
+                 passagem.quantas_observacoes([90901]) == {90901: 1})
+    finally:
+        banco.executar("DELETE FROM os_observacao WHERE numero_os = %s",
+                       (90901,))
+    conferir("o log do teste foi limpo",
+             passagem.observacoes(90901) == [])
+
+    print()
+    print("=" * 72)
+    print("7. OS FILTROS E ORDENADORES")
+    print("=" * 72)
+
+    conferir("a rota aceita busca e ordem",
+             c.get("/api/paineis/operacao?busca=zz&ordem=cliente",
+                   headers=cab).status_code == 200)
+    if cards:
+        alvo = cards[0]
+        porOS = c.get(f"/api/paineis/operacao?busca={alvo['numero_ordem']}",
+                      headers=cab).json()
+        conferir("busca por OS acha 1 e diz que casou por OS",
+                 porOS["total"] == 1 and porOS["filtro_casou_por"] == ["OS"],
+                 f"{porOS['total']} card(s), casou por {porOS['filtro_casou_por']}")
+        if alvo.get("cliente"):
+            nome = alvo["cliente"].split()[0]
+            porCli = c.get(f"/api/paineis/operacao?busca={nome}",
+                           headers=cab).json()
+            conferir("busca por CLIENTE acha e diz",
+                     porCli["total"] >= 1
+                     and "cliente" in (porCli["filtro_casou_por"] or []),
+                     f"{porCli['total']} card(s) com {nome!r}")
+    vazio = c.get("/api/paineis/operacao?busca=zzznaoexistezzz",
+                  headers=cab).json()
+    conferir("busca sem resultado DIZ que esta filtrada",
+             vazio["total"] == 0 and vazio["busca"] == "zzznaoexistezzz")
+    for ordem in ("os_desc", "os_asc", "parado", "cliente", "antiga"):
+        r = c.get(f"/api/paineis/operacao?ordem={ordem}", headers=cab)
+        if r.status_code != 200 or r.json()["ordem"] != ordem:
+            falho.append((f"ordem {ordem}", f"status {r.status_code}"))
+        else:
+            ok.append((f"ordem {ordem}", ""))
+    print(f"  OK   as 5 ordens respondem")
+    conferir("ordem inventada cai no padrao, sem estourar",
+             c.get("/api/paineis/operacao?ordem=zzz",
+                   headers=cab).status_code == 200)
+    from movizap import paineis as _p
+    conferir("a busca ignora acento e caixa",
+             _p._normalizar("VEICULO") == _p._normalizar("veiculo")
+             == _p._normalizar("veículo"))
+
+    print()
+    print("=" * 72)
+    print("8. O PLANO DOS FORMULARIOS (o .md dele) — quantos de 15")
+    print("=" * 72)
+
+    forms = c.get("/api/formularios", headers=cab).json()
+    novos = [x["slug"] for x in forms if x.get("formato") == "novo"]
+    print(f"     no formato novo: {len(novos)} de {len(forms)} -> {novos}")
+    # 🚨 Os 56 campos sem validacao: a conta que a validacao de 29/10 achou.
+    PEDE = {"cnpj": ("cnpj",), "cpf": ("cpf",), "placa": ("placa",),
+            "telefone": ("telefone", "celular", "whatsapp"),
+            "e-mail": ("mail",), "cep": ("cep",)}
+    sem_total = 0
+    for f in forms:
+        d = formularios.definicao(f["slug"], so_ativo=False)
+        for campo in d["campos"]:
+            alvo_t = ((campo.get("nosso_nome") or "") + " "
+                      + (campo.get("rotulo") or "")).lower()
+            if campo.get("validacao"):
+                continue
+            if any(k in alvo_t for chaves in PEDE.values() for k in chaves):
+                sem_total += 1
+    print(f"     campos que pedem mascara e NAO tem: {sem_total}")
+    conferir("o SUPORTE tem as mascaras",
+             any(cp.get("validacao") == "cnpj"
+                 for cp in formularios.definicao("suporte")["campos"]))
+    # ⚠️ Isto NAO e uma falha da entrega: e a lacuna medida e documentada na
+    # secao 12. Fica como NUMERO para nao se perder.
+    nao_exercitado(f"{sem_total} campos sem validacao nos outros 14",
+                   "lacuna medida e documentada na secao 12 do doc 16 -- "
+                   "o plano dos formularios esta entregue para 1 de 15")
+
 print()
 print("=" * 72)
 print(f"RESULTADO: {len(ok)} OK · {len(falho)} FALHAS · "

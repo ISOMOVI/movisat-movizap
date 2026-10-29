@@ -518,3 +518,249 @@ class TestMoverOCard:
         r = cliente.get("/api/paineis/operacao",
                         headers={"Authorization": f"Bearer {token}"})
         assert r.json()["pode_mover"] is True
+
+
+# ============================================================================
+# BLOCO C — os dois tempos · BLOCO F — prioridade e observação · FILTROS
+# ============================================================================
+class TestOsDoisTempos:
+    """🔵 *"o card mostra dois tempos: nesta etapa e total da OS"*."""
+
+    def test_sem_passagem_o_card_nao_finge_um_tempo(self, cliente, token):
+        """🚨 `etapa_desde` NULO = "não medido". A `os_passagem` começou em
+        29/10, e a OS pode estar na etapa desde setembro — mostrar "0h" seria
+        afirmar o que ninguém mediu."""
+        r = cliente.get("/api/paineis/operacao",
+                        headers={"Authorization": f"Bearer {token}"})
+        cards = [c for col in r.json()["colunas"] for c in col["cards"]]
+        assert cards, "o quadro veio sem card"
+        # Todos têm a chave, e hoje nenhuma OS foi movida por aqui.
+        for c in cards:
+            assert "etapa_desde" in c
+        # 🚨 E o TOTAL existe sempre, porque a data de criação é medida.
+        assert all(c.get("criada_em") for c in cards if c["origem"] == "erp")
+
+    def test_a_passagem_passa_a_medir_a_etapa(self, cliente, token,
+                                              monkeypatch):
+        """Movida a OS, o card passa a ter de quando é a etapa."""
+        def gravar(numero_os, situacao_id, situacao_esperada=None,
+                   conferir_antes=True):
+            return {"ok": True, "gravou": True, "numero_os": numero_os,
+                    "de": 38, "para": situacao_id}
+
+        monkeypatch.setattr(passagem.fpsl_ponte, "gravar_situacao_da_os",
+                            gravar)
+        cliente.post("/api/paineis/operacao/mover",
+                     json={"numero_os": 90990, "para_situacao": 1316,
+                           "situacao_esperada": 38},
+                     headers={"Authorization": f"Bearer {token}"})
+        try:
+            assert passagem.etapa_desde([90990]).get(90990)
+            # ⚠️ E OS sem passagem continua fora do mapa, que é a informação.
+            assert passagem.etapa_desde([90989]) == {}
+        finally:
+            banco.executar("DELETE FROM os_passagem WHERE numero_os = %s",
+                           (90990,))
+
+    def test_tentativa_RECUSADA_nao_conta_como_etapa(self, cliente, token,
+                                                     monkeypatch):
+        """🚨 Uma recusa não moveu a OS; contar o tempo a partir dela seria
+        medir desde um evento que não aconteceu."""
+        def recusar(numero_os, situacao_id, situacao_esperada=None,
+                    conferir_antes=True):
+            return {"ok": False, "gravou": False, "numero_os": numero_os,
+                    "de": 38, "para": situacao_id, "motivo": "zz"}
+
+        monkeypatch.setattr(passagem.fpsl_ponte, "gravar_situacao_da_os",
+                            recusar)
+        cliente.post("/api/paineis/operacao/mover",
+                     json={"numero_os": 90988, "para_situacao": 1316,
+                           "situacao_esperada": 38},
+                     headers={"Authorization": f"Bearer {token}"})
+        try:
+            assert passagem.historico(90988)      # a tentativa está no log
+            assert passagem.etapa_desde([90988]) == {}   # e não conta o tempo
+        finally:
+            banco.executar("DELETE FROM os_passagem WHERE numero_os = %s",
+                           (90988,))
+
+
+class TestAObservacao:
+    """🔵 *"observação do painel, com autor e hora, no MoviZap"*."""
+
+    def test_sem_token_nao_passa(self, cliente):
+        r = cliente.post("/api/paineis/operacao/observacao",
+                         json={"numero_os": 1, "texto": "x"})
+        assert r.status_code in (401, 403)
+
+    def test_grava_com_autor_e_hora(self, cliente, token):
+        cab = {"Authorization": f"Bearer {token}"}
+        r = cliente.post("/api/paineis/operacao/observacao",
+                         json={"numero_os": 90987, "texto": "zz teste"},
+                         headers=cab)
+        try:
+            assert r.status_code == 200, r.text
+            obs = r.json()["observacoes"]
+            assert obs[0]["texto"] == "zz teste"
+            assert obs[0]["em"]
+            # 🔵 *"o log de quem faz o que SEMPRE"*.
+            assert obs[0]["quem"]
+        finally:
+            banco.executar("DELETE FROM os_observacao WHERE numero_os = %s",
+                           (90987,))
+
+    @pytest.mark.parametrize("vazio", ["", "   ", "\n"])
+    def test_texto_vazio_e_recusado(self, cliente, token, vazio):
+        r = cliente.post("/api/paineis/operacao/observacao",
+                         json={"numero_os": 90986, "texto": vazio},
+                         headers={"Authorization": f"Bearer {token}"})
+        assert r.status_code in (400, 422)
+        assert passagem.observacoes(90986) == []
+
+    def test_o_card_fechado_conta_os_recados(self, cliente, token):
+        """⚠️ Só o NÚMERO: o texto é no card aberto, senão a coluna cresce sem
+        limite."""
+        cab = {"Authorization": f"Bearer {token}"}
+        cliente.post("/api/paineis/operacao/observacao",
+                     json={"numero_os": 90985, "texto": "a"}, headers=cab)
+        cliente.post("/api/paineis/operacao/observacao",
+                     json={"numero_os": 90985, "texto": "b"}, headers=cab)
+        try:
+            assert passagem.quantas_observacoes([90985]) == {90985: 2}
+            assert passagem.quantas_observacoes([]) == {}
+        finally:
+            banco.executar("DELETE FROM os_observacao WHERE numero_os = %s",
+                           (90985,))
+
+
+class TestAPrioridade:
+    def test_prioridade_inventada_e_recusada(self, cliente, token):
+        """🚨 Não há rota de leitura confiável de prioridade, então um id
+        inventado entraria no ERP sem ninguém poder conferir o que significa."""
+        r = cliente.post("/api/paineis/operacao/prioridade",
+                         json={"numero_os": 90984, "prioridade_id": 99999},
+                         headers={"Authorization": f"Bearer {token}"})
+        assert r.status_code in (400, 422)
+
+    def test_a_troca_entra_como_observacao_do_sistema(self, cliente, token,
+                                                      monkeypatch):
+        """🔵 *"o log de quem faz o que SEMPRE"* — vale para a prioridade."""
+        def gravar(numero_os, prioridade_id, prioridade_esperada=None):
+            return {"ok": True, "gravou": True, "numero_os": numero_os,
+                    "de": 382, "para": prioridade_id}
+
+        monkeypatch.setattr(passagem.fpsl_ponte, "gravar_prioridade_da_os",
+                            gravar)
+        r = cliente.post("/api/paineis/operacao/prioridade",
+                         json={"numero_os": 90983, "prioridade_id": 383,
+                               "prioridade_esperada": 382},
+                         headers={"Authorization": f"Bearer {token}"})
+        try:
+            assert r.status_code == 200 and r.json()["ok"] is True
+            obs = passagem.observacoes(90983)
+            assert len(obs) == 1
+            assert "Normal" in obs[0]["texto"] and "Alta" in obs[0]["texto"]
+            assert obs[0]["quem"]
+        finally:
+            banco.executar("DELETE FROM os_observacao WHERE numero_os = %s",
+                           (90983,))
+
+    def test_recusa_do_ERP_nao_registra_troca(self, cliente, token,
+                                              monkeypatch):
+        """⚠️ Registrar uma troca que o ERP negou diria que a prioridade mudou,
+        e ela não mudou."""
+        def recusar(numero_os, prioridade_id, prioridade_esperada=None):
+            return {"ok": False, "gravou": False, "motivo": "o ERP recusou"}
+
+        monkeypatch.setattr(passagem.fpsl_ponte, "gravar_prioridade_da_os",
+                            recusar)
+        cliente.post("/api/paineis/operacao/prioridade",
+                     json={"numero_os": 90982, "prioridade_id": 383,
+                           "prioridade_esperada": 382},
+                     headers={"Authorization": f"Bearer {token}"})
+        assert passagem.observacoes(90982) == []
+
+
+class TestOFiltroEAOrdem:
+    """🔵 *"filtros para os cards, por cliente, OS, placa // ordenadores tbm"*."""
+
+    def test_o_quadro_diz_o_filtro_e_a_ordem(self, cliente, token):
+        """🚨 Quadro filtrado que não diz que está filtrado é `M12`: alguém abre
+        o painel, vê 1 card e conclui que a operação está vazia."""
+        r = cliente.get("/api/paineis/operacao?busca=zzz&ordem=cliente",
+                        headers={"Authorization": f"Bearer {token}"})
+        q = r.json()
+        assert q["busca"] == "zzz"
+        assert q["ordem"] == "cliente"
+        assert len(q["ordens"]) == 5
+
+    def test_a_busca_casa_por_OS_e_diz_onde(self, cliente, token):
+        cab = {"Authorization": f"Bearer {token}"}
+        todos = cliente.get("/api/paineis/operacao", headers=cab).json()
+        cards = [c for col in todos["colunas"] for c in col["cards"]]
+        if not cards:
+            pytest.skip("o quadro esta vazio agora")
+        alvo = cards[0]
+        r = cliente.get(
+            f"/api/paineis/operacao?busca={alvo['numero_ordem']}",
+            headers=cab).json()
+        assert r["total"] == 1
+        assert r["filtro_casou_por"] == ["OS"]
+
+    def test_a_busca_casa_por_CLIENTE(self, cliente, token):
+        cab = {"Authorization": f"Bearer {token}"}
+        todos = cliente.get("/api/paineis/operacao", headers=cab).json()
+        cards = [c for col in todos["colunas"] for c in col["cards"]
+                 if c.get("cliente")]
+        if not cards:
+            pytest.skip("nenhum card com nome de cliente agora")
+        nome = cards[0]["cliente"].split()[0]
+        r = cliente.get(f"/api/paineis/operacao?busca={nome}",
+                        headers=cab).json()
+        assert r["total"] >= 1
+        assert "cliente" in (r["filtro_casou_por"] or [])
+
+    def test_busca_sem_resultado_devolve_quadro_vazio_e_DIZ(self, cliente,
+                                                            token):
+        r = cliente.get("/api/paineis/operacao?busca=zzznaoexistezzz",
+                        headers={"Authorization": f"Bearer {token}"}).json()
+        assert r["total"] == 0
+        # 🚨 E diz que está filtrado, senão parece painel vazio.
+        assert r["busca"] == "zzznaoexistezzz"
+        assert r["filtro_casou_por"] is None
+
+    @pytest.mark.parametrize("ordem", ["prazo", "os_desc", "os_asc",
+                                       "parado", "cliente"])
+    def test_as_cinco_ordens_respondem(self, cliente, token, ordem):
+        r = cliente.get(f"/api/paineis/operacao?ordem={ordem}",
+                        headers={"Authorization": f"Bearer {token}"})
+        assert r.status_code == 200, r.text
+        assert r.json()["ordem"] == ordem
+
+    def test_ordem_inventada_cai_no_padrao_e_nao_estoura(self, cliente, token):
+        """⚠️ Ordem desconhecida não derruba a tela."""
+        r = cliente.get("/api/paineis/operacao?ordem=zzinventada",
+                        headers={"Authorization": f"Bearer {token}"})
+        assert r.status_code == 200
+        # 🔵 O PADRAO MUDOU em 29/10: *"o ordenador padrão deve ser por 'Prazo
+        # de entrega'"*. Esta trava afirmava o padrao antigo (numero da OS) --
+        # e a ordem desconhecida tem de cair no padrao ATUAL, que e um so e vive
+        # num lugar so.
+        q = r.json()
+        padrao = cliente.get("/api/paineis/operacao?ordem=prazo",
+                             headers={"Authorization": f"Bearer {token}"}).json()
+        # 🚨 A ORDEM E POR COLUNA, nao global -- a minha primeira versao desta
+        # trava juntava os cards das 17 colunas e exigia ordem global, e
+        # reprovou com a tela CERTA. Cada coluna e uma fila.
+        for inventada, certa in zip(q["colunas"], padrao["colunas"]):
+            assert ([c["numero_ordem"] for c in inventada["cards"]]
+                    == [c["numero_ordem"] for c in certa["cards"]]),                 certa["titulo"]
+
+    def test_a_busca_ignora_acento_e_caixa(self, cliente, token):
+        """🚨 Quem procura "veiculo" tem de achar "veículo". ⚠️ E insensível a
+        caixa, que é o defeito que a memória desta casa chama de
+        varredura-de-rotulo-ignora-caixa."""
+        from movizap import paineis as p
+        assert p._normalizar("VEÍCULO") == p._normalizar("veiculo")
+        assert p._normalizar("ABC-1D23") == p._normalizar("abc1d23")
+        assert p._normalizar("Transformadores") == "transformadores"

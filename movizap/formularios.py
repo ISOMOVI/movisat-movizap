@@ -161,6 +161,11 @@ def lista_para_o_painel() -> list[dict]:
     """O que a FRM_1.1 mostra no alto: cada formulário e quanto chegou nele."""
     return banco.varios(
         """SELECT f.id, f.codigo, f.slug, f.titulo, f.setor, f.ativo, f.ordem,
+                  -- 🔵 O FORMATO entra na lista em 29/10: sem ele a tela nao
+                  -- tem como mostrar quais formularios ja estao no formato
+                  -- novo, que e a informacao de que ele precisa para decidir
+                  -- ligar os outros 14.
+                  f.formato,
                   count(s.id)                                  AS solicitacoes,
                   count(s.id) FILTER (WHERE s.estado = 'nova') AS novas,
                   max(s.criada_em)                             AS ultima_em

@@ -5044,13 +5044,17 @@ def saude(request: Request):
 @app.get("/api/paineis/{painel}")
 def ver_painel(painel: str,
                so_abertas: int = Query(1, ge=0, le=1),
+               busca: str = Query("", max_length=60),
+               ordem: str = Query("prazo", max_length=20),
                usuario: dict = Depends(auth.requer_tela("PNL_1.1"))):
     """🚨 `so_abertas` É INTERRUPTOR DE TELA, não de sistema, e por isso vem na
     consulta e não da `CFG_7.1`: é a pergunta "quero ver as finalizadas?", que
     cada pessoa faz a cada abertura. A razão de existir é medida — com ele
     ligado, o Financeiro cai de 6 para 2 cards, porque OS financeira nasce
     `Finalizado`."""
-    return paineis_mod.quadro(painel, so_abertas=bool(so_abertas))
+    return paineis_mod.quadro(painel, so_abertas=bool(so_abertas),
+                              busca=(busca or "").strip() or None,
+                              ordem=ordem)
 
 
 class DataMatrizDoPainel(BaseModel):
@@ -5089,6 +5093,48 @@ def mover_card_do_painel(
         dados.numero_os, dados.para_situacao,
         atendente_id=usuario.get("id"),
         situacao_esperada=dados.situacao_esperada)
+
+
+class ObservacaoDoCard(BaseModel):
+    numero_os: int
+    texto: str
+
+
+@app.post("/api/paineis/operacao/observacao")
+def observar_o_card(dados: ObservacaoDoCard,
+                    usuario: dict = Depends(auth.requer_tela("PNL_1.1"))):
+    """A observação do painel sobre a OS — Bloco F, fase 1.
+
+    🔵 *"observação do painel, com autor e hora, **no MoviZap**. Não vai para a
+    `solucaoTecnica`"*. 🚨 Não se apaga e não se edita: reescrever recado é
+    reescrever a história que a operação leu.
+    """
+    passagem.observar(dados.numero_os, dados.texto,
+                      atendente_id=usuario.get("id"))
+    return {"numero_os": dados.numero_os,
+            "observacoes": passagem.observacoes(dados.numero_os)}
+
+
+class PrioridadeDoCard(BaseModel):
+    numero_os: int
+    prioridade_id: int
+    prioridade_esperada: int | None = None
+
+
+@app.post("/api/paineis/operacao/prioridade")
+def mudar_prioridade_do_card(
+        dados: PrioridadeDoCard,
+        usuario: dict = Depends(auth.requer_tela("PNL_1.1"))):
+    """A prioridade da OS — Bloco F, fase 1.
+
+    🚨 ESCREVE A OS INTEIRA no Harmonit, e o plano dele já avisava. A troca é
+    registrada como observação do sistema, com autor — *"o log de quem faz o
+    que SEMPRE"*.
+    """
+    return passagem.mudar_prioridade(
+        dados.numero_os, dados.prioridade_id,
+        atendente_id=usuario.get("id"),
+        prioridade_esperada=dados.prioridade_esperada)
 
 
 @app.get("/api/paineis/operacao/ficha")
@@ -5133,6 +5179,11 @@ def ficha_do_card(numero_os: int = Query(..., ge=1),
                 WHERE s.numero_ordem = %s
                 LIMIT 1""", (str(numero_os),))
 
+    # 🔵 As observacoes do painel (Bloco F) vao na mesma leitura: o card aberto
+    # ja faz uma ida ao ERP, e uma segunda chamada para ler o nosso proprio
+    # banco seria ida por nada.
+    ficha["observacoes"] = passagem.observacoes(numero_os)
+    ficha["prioridades"] = passagem.PRIORIDADES
     ficha["chamado"] = None
     if linha:
         d = formularios_mod.uma(linha["id"])

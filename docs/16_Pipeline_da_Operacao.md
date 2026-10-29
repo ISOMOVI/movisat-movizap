@@ -1604,3 +1604,373 @@ verdade (já me custou o fixture que pulava 12 travas hoje), e `ETAPAS` errada
 ⚠️ **A ordem muda por causa da medição:** eu ia ligar os 14 primeiro. Ligar
 antes de derivar as máscaras poria 14 formulários na pele nova **com os 56
 campos ainda sem validação** — pele nova não conserta coleta.
+
+---
+
+# 13. O PLANO ENTREGUE — C, E, F, filtros e o acabamento (29/10, noite)
+
+> 🔵 Ele: *"deveria ter feito"* · *"vamos!! voce consegue!! vamos entregar esse
+> plano!"* · *"ja proponha filtros para os cards, por cliente, OS, placa //
+> ordenadores tbm"* · *"depois audite tudo e documente"*.
+
+## 13.1 Os 6 blocos, fechados
+
+| bloco | estado |
+|---|---|
+| **A** criar a OS do chamado | ✅ no ar · OS 17056 criada e apagada |
+| **B** o painel monta as OS | ✅ no ar · 11 cards reais |
+| **C** o tempo por etapa | ✅ **no ar** |
+| **D** mover o card | ✅ no ar · OS 16991 movida e devolvida |
+| **E** o card aberto | ✅ **no ar** · os quatro temas |
+| **F** o espelho da OS | ✅ **fase 1 no ar** (prioridade + observação) |
+
+**Mais o que ele pediu fora do plano:** o **filtro** por cliente/OS/placa e os
+**5 ordenadores**.
+
+## 13.2 Bloco C — os dois tempos
+
+**Migração nenhuma:** o dado já era colhido pela `os_passagem` desde o Bloco D.
+
+| tempo | de onde sai |
+|---|---|
+| **total da OS** | a `dataPrevisao`, que **é** a data de criação (medido em 12 de 12) |
+| **nesta etapa** | a **última passagem confirmada** da `os_passagem` |
+
+🚨 **SEM PASSAGEM, O CARD DIZ "não medido"** — e não "0h". A `os_passagem`
+começou em 29/10, e a OS pode estar na etapa desde setembro. Mostrar zero seria
+a tela afirmando o que ninguém mediu.
+
+🚨 **Tentativa RECUSADA não conta como etapa:** ela não moveu a OS, e contar o
+tempo a partir dela seria medir desde um evento que não aconteceu. Tem trava.
+
+⚠️ **E NÃO HÁ COR POR TEMPO.** O mockup mostra laranja *"depois do limite"*, e o
+limite **nunca foi dito** — 🔴 é um número dele. Escolher um aqui seria regra
+imaginária.
+
+🚨 **UMA consulta para todos os cards** (`passagem.etapa_desde`): o quadro tem
+11, e uma por card seriam 11 idas ao banco por abertura de tela.
+
+## 13.3 Bloco E — os quatro temas do card aberto
+
+🔵 Ele: *"onde estão os temas do card, após clicar?"* — e eu os havia deixado
+para depois, com um texto no modal dizendo que faltavam. **Dizer o que falta é
+melhor que caixa vazia, e não substitui o recurso.**
+
+`GET /api/os/ficha` (ponte) + `GET /api/paineis/operacao/ficha` (MoviZap).
+
+🚨 **POR QUE É UMA ROTA PRÓPRIA:** `descricao` e `solucaoTecnica` **não estão no
+cache** — então vêm **ao vivo do ERP**, **uma chamada por card aberto**. Na
+montagem do quadro seriam 11.
+
+| tema | o que mostra |
+|---|---|
+| Descrição da OS | o texto do ERP |
+| Solução técnica | o texto, ou *"sem solução técnica escrita"* |
+| Dados do chamado | as respostas do formulário, **com rótulo** — nunca a chave do Bitrix |
+| Agendamento | 🔵 **nasce apagado e acende em "Serviço Agendado"**, dizendo por quê |
+
+🚨 **Falha de leitura vira ERRO, não ficha vazia:** ficha vazia é
+indistinguível de OS sem dados, e o operador concluiria que não há o que ver.
+
+✅ **Provado na OS 16991:** descrição, **17** itens de checklist, 3 materiais,
+3 técnicos com agendamento e 2 placas.
+
+## 13.4 Bloco F fase 1 — prioridade e observação
+
+**Migração 084** (`os_observacao`).
+
+**A prioridade** escreve no ERP (`POST /api/os/prioridade`), pelo mesmo caminho
+provado: lê, remonta, grava, **relê e compara os 40**. ⚠️ Escreve **a OS
+inteira**, e o plano dele já avisava. 🚨 **Id fora das quatro é recusado**: a
+lista não tem rota de leitura confiável, então um id inventado entraria no ERP
+sem ninguém poder conferir depois o que significa.
+
+🚨 **E a prioridade entrou no CACHE DE OS** (coluna nova em `os_historico`): o
+plano dele pede ela *"visível sem abrir"*, e a varredura **já lia a OS inteira
+e não gravava esse campo**. Sem isso, mostrá-la no card fechado custaria 11
+idas ao ERP por abertura de tela. ⚠️ Nula nas OS que a varredura ainda não
+releu — e **nulo não aparece**, em vez de fingir "Normal".
+
+**A observação** é nossa, com autor e hora. 🚨 **Não vai para a
+`solucaoTecnica`**: aquele campo é da operação técnica, o cliente pode lê-lo num
+relatório, e escrever nele gravaria a OS inteira a cada recado. ⚠️ **Não se
+apaga e não se edita** — reescrever recado é reescrever a história que a
+operação leu.
+
+⚠️ **A troca de prioridade entra como linha do sistema** na mesma tabela
+(`[sistema] prioridade: Normal → Alta`), com autor: 🔵 *"o log de quem faz o que
+SEMPRE"* vale para a prioridade como vale para a etapa. **E recusa do ERP não
+registra troca** — dizer que mudou quando não mudou seria pior que não dizer.
+
+## 13.5 O filtro e os ordenadores
+
+🔵 *"filtros para os cards, por cliente, OS, placa // ordenadores tbm"*.
+
+🚨 **QUEM FILTRA É O SERVIDOR**, e a razão é medida: o teto por coluna é **50** e
+o do quadro é **600**. Filtrar no navegador esconderia o que o teto já cortou, e
+a pessoa procuraria uma OS que o servidor nem mandou.
+
+⚠️ **UMA caixa para os três campos**, não três: quem procura tem um número ou um
+nome na mão e não quer decidir em qual caixa ele vai. **A tela diz ONDE casou**
+(*"casou por cliente"*) — sem isso, quem procura um número e acha um card não
+sabe se achou a OS ou o cliente.
+
+**As 5 ordens, e cada uma responde a uma pergunta real:**
+
+| ordem | pergunta |
+|---|---|
+| `os_desc` (padrão) | o que entrou por último |
+| `os_asc` | o que entrou primeiro |
+| **`parado`** | 🔵 o que está parado há mais tempo **nesta etapa** (usa o Bloco C) |
+| `cliente` | por nome |
+| `antiga` | aberta há mais tempo — ⚠️ **não é o mesmo que "parado"**: a OS pode ser velha e ter mudado de etapa hoje |
+
+⚠️ **Nulo vai para o FIM em toda ordem por data:** card sem a medida não é "o
+mais antigo do mundo", é card **sem a medida**.
+
+🚨 **E a tela DIZ que está filtrada**, com um botão de limpar: quadro filtrado
+que não diz que está filtrado é a mesma família do `M12` — alguém abre o painel,
+vê 1 card e conclui que a operação está vazia.
+
+**A busca ignora acento e caixa** nos dois lados: quem procura *"veiculo"* acha
+*"veículo"*, e *"ABC-1D23"* acha *"abc1d23"*.
+
+## 13.6 O acabamento que ele pediu
+
+### 🔵 *"o cabeçalho esta porco, organize de forma profissional"*
+
+🚨 **O que estava porco era estrutura:** título, botão e quatro controles eram
+**irmãos** num `space-between`, então o navegador espalhava tudo numa linha sem
+grupo nenhum. Agora são **dois blocos** — a identidade à esquerda (título + uma
+linha de resumo com o número medido e desde quando) e os controles à direita,
+numa fileira própria que quebra junto no celular.
+
+### 🔵 *"ao abrir o card, está feio ainda tbm"*
+
+🚨 **Também era estrutura:** seis seções empilhadas com o mesmo peso visual, e
+sem hierarquia tudo grita junto. Refeito nas **quatro faixas do mockup**:
+
+1. **o topo** branco — quem é esta OS, e o fechar;
+2. **uma faixa com fundo** — etapa, os dois tempos, previsão, e as duas ações
+   de estado (mover e prioridade). É a única com fundo no meio da caixa, **de
+   propósito**;
+3. **o corpo** branco — os temas e o que se escreve;
+4. **o pé com fundo** — os botões à direita.
+
+⚠️ A caixa perdeu o `padding` e cada faixa ganhou o seu: é isso que faz o topo e
+o pé terem fundo próprio **sem buraco branco nas beiradas**.
+
+### 🔵 *"os cards tem informação da data dos prazos da OS, não?"* → *"'Previsão de entrega' - na OS"*
+
+🚨 **MEDIDO: a OS do Harmonit tem UM campo de data, e não existe campo de
+prazo.** Na OS 17055, criada em 29/10, a previsão é `29/10/2026 11:40:19` — **o
+mesmo minuto**. É o que o plano já registrava: *"`dataPrevisao` É a data de
+criação da OS (12 de 12 conferidas)"*.
+
+⚠️ Então a data entra com **o nome que o ERP lhe dá** — 🔵 *"Previsão de
+entrega"*, que é o nome do campo de escrita (`dataPrevisaoEntrega`) — e o card
+aberto **diz** que hoje ela coincide com a abertura. Chamá-la de "prazo" seria a
+tela afirmando o que o ERP não diz.
+🔵 **E isso muda** quando a frente do aviso prévio entrar: ela vai mover a
+previsão em **+90 dias**, e aí o nome passa a valer como prazo.
+
+### 🔵 *"o card está aparecendo como 'situação n'"*
+
+🚨 **Eu havia invertido a régua da casa.** O valor cru é a **exceção** — para
+situação fora das 17 — e eu o pus como padrão, com o nome em lugar nenhum. E a
+tela **já tinha os 17 nomes**: são os títulos das colunas.
+
+## 13.7 🚨 UM ERRO MEU EM PRODUÇÃO: eu quebrei a `os_por_cliente`
+
+**Ao acrescentar a prioridade na resposta do `por-situacao`, eu substituí a
+PRIMEIRA ocorrência de `"tipo": tipo,` no arquivo** — e a primeira está na
+`os_por_cliente`, **outra função, 1.100 linhas antes**. Lá a variável
+`prioridade` não existe: a rota passou a estourar `NameError` e responder
+**500**.
+
+⚠️ **E não é uma rota qualquer:** é a que o agendamento (`ATD_7.1`) usa para
+listar as OS de um cliente. Medido: `os_do_cliente("998063")` → **500**.
+Consertada, responde **18 OS**.
+
+🚨 **A lição:** substituir *"a primeira ocorrência"* num arquivo de 1.700 linhas
+é aposta, não edição. O trecho tem de ser ancorado em algo **único** — o nome da
+função, ou uma linha vizinha que só exista ali.
+
+⚠️ **E quem o pegou foi a suíte, não eu:** o
+`teste_agendamento::TestPonteAoVivo` reprovou porque bate na ponte **ao vivo**.
+Sem ele, a rota ficaria 500 até alguém abrir o agendamento.
+
+## 13.8 A auditoria funcional: **59 OK · 0 falhas · 3 não exercitados**
+
+`movizap_painel/auditar_funcional.py` — **exercita, não lê código**, e repete
+quando se quiser.
+
+**Cobre agora:** o painel (17 colunas, a ponte, os 11 cards, a data matriz, o
+interruptor, todo card com cliente/tipo/data ISO) · mover (recusa fora das 17,
+recusa data torta, o log legível) · os 15 formulários (**as 15 páginas públicas
+abrem**) · a busca por CNPJ nas três formas · a regra da placa · **o Bloco C** ·
+**o Bloco F** · **os filtros e as 5 ordens** · e **quantos dos 15 formulários
+estão no formato novo**.
+
+🚨 **E a auditoria achou dois números errados meus:**
+1. ela dizia *"no formato novo: 0 de 15"* com o SUPORTE em `novo` — porque
+   **`lista_para_o_painel` não devolvia o campo `formato`**. ⚠️ E a consequência
+   é pior que a minha conta: **a tela da `FRM_1.1` não tinha como mostrar quais
+   formulários estão no formato novo**, que é exatamente a informação de que ele
+   precisa para decidir ligar os outros 14. Corrigido;
+2. ela dizia *"cards com prioridade: 0 de 11"* — era o serviço do FPSL **não
+   reiniciado** depois da mudança no SQL da ponte. É o irmão do erro de 29/10
+   de manhã: **mudança que não foi reiniciada é mudança que não existe**.
+
+## 13.9 🔴 O que falta — e as 7 são frases dele
+
+| # | o quê |
+|---|---|
+| 1 | **validar no navegador** — ele achou **6** defeitos assim hoje, todos com a suíte verde |
+| 2 | o **mapa `problemaId`** — 8 formulários não abrem OS |
+| 3 | o **texto dos termos** — 3 formulários |
+| 4 | o **limite do laranja** do tempo de etapa (um número) |
+| 5 | a **situação `0`** — 128 OS |
+| 6 | a **aba Network** do Harmonit (decide o tamanho da fase 2 do F) |
+| 7 | **"cliente avulso"** no ERP |
+| 8 | o **endereço em 7 campos** (Bloco 4 do `.md` dele) — muda o que é gravado |
+| 9 | apagar a solicitação **544** |
+
+**Meu, e desbloqueado:** derivar as máscaras (fecha o Bloco 3 do `.md` dele nos
+15 e **conserta 56 campos sem validação em produção**) e então ligar o formato
+novo nos 14 — ⚠️ **nessa ordem**, porque pele nova não conserta coleta.
+
+---
+
+# 14. O ARRASTO, O PRAZO, E OS PRÓXIMOS PASSOS
+
+## 14.1 🚨 O arrasto: três voltas, três causas diferentes
+
+🔵 Ele, na terceira: *"arrastar card ainda não funciona tbm — ja esta cansativo
+tratar disso"*. **Tem razão**, e o motivo de ter levado três voltas é que eram
+**três impedimentos empilhados** — cada conserto revelava o seguinte.
+
+| volta | a causa | por que o meu teste não pegou |
+|---|---|---|
+| **1ª** | o conteúdo do card era um **`<button>`**, e elemento interativo **engole o `mousedown`** do pai | a trava afirmava `draggable === 'true'`, que era **verdade** com o gesto impossível |
+| **2ª** | faltava **`user-select: none`**: arrastar sobre **texto selecionável** inicia uma **seleção de texto**, não o arrasto do elemento | `trigger('dragstart')` é **sintético** — prova o handler, não a decisão do navegador |
+| **3ª** | o **`@click` competia com o arrasto**: todo arrasto começa curto, o navegador entrega o início como **clique**, o card **abria no meio do gesto** e cobria a tela | `dragstart` e `click` são eventos **separados** nos testes; a competição entre eles **só existe no navegador** |
+
+**O conserto da 3ª volta, em duas peças:**
+1. **guarda de tempo** — o `@click` desiste se um arrasto aconteceu nos últimos
+   400 ms, e a marca é renovada no `dragend` e no `drop`, porque o clique
+   sintético chega **depois**;
+2. 🚨 **a coluna ACENDE** quando o card passa por cima (`dragenter`/`dragleave`,
+   borda tracejada + fundo). ⚠️ **Sem retorno visual não havia como saber se o
+   alvo aceita o solto** — e era justamente a informação que faltava para ele
+   poder dizer *onde* o gesto quebrava.
+
+🚨 **A lição que eu levo das três:** *"trava de atributo não é trava de gesto"*
+virou *"trava de evento sintético não é trava de gesto"*. **O único juiz de um
+gesto é o navegador de quem usa.** O que as travas guardam agora é o
+**mecanismo** do conserto (a guarda de tempo, o alvo aceso), e isso elas fazem.
+
+## 14.2 🔵 O prazo de entrega
+
+Duas correções dele, em sequência: *"'Previsão de entrega' - na OS"* e depois
+*"o ordenador padrão deve ser por 'Prazo de entrega'"*.
+
+🚨 **MEDIDO: a OS do Harmonit tem UM campo de data, e não existe campo de
+prazo.** Na OS **17055**, criada em 29/10, a previsão é `29/10/2026 11:40:19` —
+**o mesmo minuto**. É o que o plano já registrava.
+
+⚠️ **E a ordem `prazo` SUBSTITUIU a "aberta há mais tempo"**: as duas ordenavam
+**o mesmo campo**, e duas opções com nomes diferentes para a mesma ordem fariam
+quem escolhe achar que são coisas distintas. 🔵 **Quando a frente do aviso
+prévio entrar** — ela move a previsão em **+90 dias** — as duas deixam de
+coincidir, e **aí** faz sentido ter as duas.
+
+| ordem | pergunta que responde |
+|---|---|
+| **`prazo`** (padrão) | o prazo mais **próximo** primeiro |
+| `os_desc` · `os_asc` | o que entrou por último / primeiro |
+| `parado` | o que está parado há mais tempo **nesta etapa** (usa o Bloco C) |
+| `cliente` | por nome |
+
+## 14.3 🚨 Dois defeitos que a suíte pegou, e seriam crash
+
+1. **A ordem por data comparava `datetime` com `str`.** O card de solicitação
+   traz `criada_em` como `datetime` (do `timestamptz`) e o do ERP como **texto
+   ISO** — `sorted` não compara os dois. ⚠️ **E com o prazo como ordem PADRÃO
+   isso derrubaria o painel em toda abertura que tivesse os dois tipos de
+   card.** Antes o padrão era o número da OS, e o defeito ficava escondido atrás
+   de uma ordem que ninguém escolhia.
+   🚨 **A lição é irmã da data em ISO:** o contrato de **tipo** também tem de
+   ser um só.
+2. **O banco temporário do teste da ponte não tinha a coluna nova** — 8
+   vermelhos. ⚠️ **E isso é um sinal bom:** o teste monta o schema à mão
+   justamente para a mudança de schema aparecer ali, e não em produção.
+
+## 14.4 O estado de chegada
+
+| | |
+|---|---|
+| **suítes** | **1971 Python** · **618 JS** · **106 na ponte do FPSL** |
+| **auditoria funcional** | **59 OK · 0 falhas** (`auditar_funcional.py`, repetível) |
+| **migrações** | 082 (a OS do chamado) · 083 (a passagem) · 084 (a observação) |
+| **rotas novas no MoviZap** | mover · passagens · ficha · observação · prioridade · desde |
+| **rotas novas na ponte** | criar · por-situacao · situacao · prioridade · ficha |
+| **provado no ERP** | OS **17056** criada e apagada · OS **16991** movida e devolvida |
+
+---
+
+# 15. 🔴 OS PRÓXIMOS PASSOS
+
+## 15.1 O primeiro é dele, e é o único que nenhuma suíte faz
+
+**Validar no navegador.** 🚨 Hoje ele achou **7 defeitos** assim, todos com a
+suíte verde: o arrasto (três causas), o clique indo para outra aba, os temas que
+faltavam, a situação mostrada como número, o cabeçalho e o card aberto.
+
+**O que olhar, na ordem:**
+1. **arrastar um card** de coluna — 🚨 é **escrita real no ERP**; recomendo
+   começar pela **OS 16991**, a sandbox da Velasco;
+2. a **coluna acende** quando o card passa por cima? (é o retorno visual novo);
+3. **clicar** no card abre o card aberto, com os **quatro temas**;
+4. a **busca** por cliente, OS e placa, e o **ordenador** nascendo no prazo;
+5. a **observação** salvando com o seu nome.
+
+## 15.2 As decisões que travam o resto
+
+| # | o quê | o que destrava |
+|---|---|---|
+| 1 | o **mapa `problemaId`** | **8 formulários** passam a abrir OS (hoje só o Suporte) |
+| 2 | o **limite do laranja** no tempo de etapa (um número) | a cor do Bloco C |
+| 3 | a **situação `0`** — **128 OS** | elas ganham coluna e podem ser arrastadas |
+| 4 | o **texto dos termos** | 3 formulários com aceite |
+| 5 | a **aba Network** do Harmonit | decide o tamanho da **fase 2 do F** |
+| 6 | **"cliente avulso"** no ERP | o chamado de quem não é cliente vira OS |
+| 7 | o **endereço em 7 campos** (Bloco 4 do `.md` dele) | ⚠️ muda o que é gravado em 4 formulários no ar |
+| 8 | apagar a solicitação **544** | a linha de aviso do painel some |
+
+## 15.3 O meu, desbloqueado — e nesta ordem
+
+1. 🚨 **Derivar as máscaras** — fecha o Bloco 3 do `.md` dele nos 15 e
+   **conserta 56 campos sem validação em produção**, nos 14 que o cliente já
+   abre. A regra sai do nome do campo, e vale para todos de uma vez.
+2. **Ligar o formato novo nos 14** — ⚠️ **depois do item 1**: pele nova não
+   conserta coleta, e ligar antes poria 14 formulários no formato novo com os 56
+   campos ainda abertos.
+3. **As etapas dos 14** — o `page` do Bitrix nos **4** que têm (ficha 7,
+   credenciamento 4, fornecedores 3, demonstração 1); nos outros **11** é uma
+   etapa só até ele revisar um agrupamento proposto.
+4. **Bloco 1 e 2 do `.md` dele** — o `+` nos **28 campos múltiplos** que ainda
+   perdem dado, e a lista múltipla virando caixas de marcar (2 campos).
+5. **Fase 2 do F** — descrição, solução técnica e previsão editáveis, depois da
+   resposta sobre a aba Network.
+
+## 15.4 ⚠️ O que fica como risco conhecido, por decisão dele
+
+🔵 *"aceitar sem testar a placa"* — a Velasco, **a única sandbox**, tem **zero
+placas ativas**, e a regra *"chamado só para placa ativa na WESO"* **só será
+provada pelo primeiro chamado real de cliente**.
+
+🚨 **E a sandbox é só a Velasco** (`998063`): *"não pode usar outro CNPJ além da
+VELASCO para teste, pois os tickets nascem e têm ligações. OS com outros
+clientes podem ser mal interpretadas pela OP"*. A trava está no código
+(`provar_criacao_os.py` recusa qualquer outro).

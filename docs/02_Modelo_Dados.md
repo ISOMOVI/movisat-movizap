@@ -2575,3 +2575,40 @@ sair barato depois, porque o dado passa a ser colhido desde já.
 **Os três índices:** por OS (a linha do tempo que o Bloco E vai ler), por
 atendente (*"o log de quem faz o que"* respondido sem varrer a tabela) e um
 parcial sobre as recusadas (`WHERE NOT ok`).
+
+## Migração 084 — a observação do painel
+
+🔵 **Pedido dele no plano:** *"observação do painel, com autor e hora, **no
+MoviZap**. Não vai para a `solucaoTecnica` — aquele campo é da operação, e o
+fluxo que está lá vai ser apagado"* (a decisão **D10**).
+
+`os_observacao` — tabela nova. Uma linha por recado do painel sobre uma OS.
+
+| coluna | tipo | o que é |
+|---|---|---|
+| `numero_os` | `integer NOT NULL` | a OS no Harmonit |
+| `texto` | `text NOT NULL` | o recado. CHECK impede texto em branco |
+| `atendente_id` | `integer` | **quem** escreveu (`ON DELETE SET NULL`) |
+| `em` | `timestamptz` | quando |
+
+🚨 **POR QUE ELA NÃO VAI PARA O ERP, e é o ponto:** a `solucaoTecnica` é da
+operação técnica, **o cliente pode lê-la num relatório**, e escrever nela
+**grava a OS inteira** (`SalvarOrdemServico`) a cada recado — risco sem ganho.
+
+🚨 **NÃO SE APAGA E NÃO SE EDITA, e não há coluna para isso.** Reescrever recado
+é reescrever a história que a operação leu. É a mesma régua do 🔵 *"deve ter o
+log de quem faz o que SEMPRE"*.
+
+⚠️ **A CHAVE É O `numero_os` E NÃO A SOLICITAÇÃO:** desde a **D8** o card é a OS
+de qualquer origem, e a maioria **não tem solicitação** — amarrar na solicitação
+deixaria 10 dos 11 cards sem onde escrever.
+
+⚠️ **A troca de prioridade entra aqui como linha do sistema** (`[sistema]
+prioridade: Normal → Alta`), em vez de ganhar tabela própria: uma tabela de log
+por campo escrito seria tabela por campo.
+
+**Os dois índices:** por OS (o que o card aberto lê) e por atendente (*"o log de
+quem faz o que"* respondido sem varrer a tabela).
+
+⚠️ **O card fechado mostra só o NÚMERO de recados**, nunca um trecho: trecho na
+coluna faria o card crescer sem limite.

@@ -376,3 +376,23 @@ def ficha_da_os(numero_os: int) -> dict:
     agora"*.
     """
     return _pedir("/api/os/ficha", {"numero_os": int(numero_os)})
+
+
+def gravar_prioridade_da_os(numero_os: int, prioridade_id: int,
+                            prioridade_esperada: int | None = None) -> dict:
+    """Escreve a prioridade da OS no Harmonit — Bloco F, fase 1.
+
+    ⚠️ Escreve a OS INTEIRA do outro lado; o plano dele já avisava disso.
+    🚨 `gravou: None` no timeout, pelo mesmo motivo da situação.
+    """
+    corpo = {"numero_os": int(numero_os),
+             "prioridade_id": int(prioridade_id),
+             "prioridade_esperada": prioridade_esperada,
+             "conferir_antes": True}
+    try:
+        return _postar("/api/os/prioridade", corpo)
+    except FpslIndisponivel as e:
+        incerto = bool(getattr(e, "incerto", False))
+        return {"ok": False, "gravou": None if incerto else False,
+                "incerto": incerto, "numero_os": int(numero_os),
+                "motivo": ("🚨 " if incerto else "") + str(e)}

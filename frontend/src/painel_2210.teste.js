@@ -113,6 +113,11 @@ function quadro({ cards = {}, podeMover = false, fora = null } = {}) {
        `undefined` (falso) TODOS os testes renderizavam o alarme "O FPSL nao
        respondeu", e a trava da ponte caida passava pelo motivo errado. */
     ponte_respondeu: true,
+    /* O filtro e a ordem, como a resposta real os manda. */
+    busca: null,
+    ordem: 'prazo',
+    filtro_casou_por: null,
+    ordens: ['prazo', 'os_desc', 'os_asc', 'parado', 'cliente'],
     ponte_motivo: null,
     desde: '2026-10-24',
     so_abertas: true,
@@ -130,8 +135,22 @@ const card = (extra = {}) => ({
   id: 7, formulario: 'Suporte', slug: 'suporte', criada_em: '2026-10-22T14:02:00-03:00',
   estado: 'nova', cliente: 'Cliente de exemplo', resumo: 'zz · prova',
   anexos: 0, os_id: 555, numero_ordem: '17042', situacao_id: 38, situacao_em: null,
+  /* 🚨 Os campos de C e F entram no duble TAMBEM no caso vazio: sem
+     eles a tela leria `undefined` e a trava passaria por acidente. */
+  etapa_desde: null, observacoes: 0,
+  prioridade: null, prioridade_nome: null,
   ...extra,
 })
+
+
+/* ⚠️ A faixa do card aberto tem dois selects (mover e prioridade). Procurar
+   pelo ROTULO em vez do indice: indice quebra quando a ordem muda, e o rotulo
+   e o que a pessoa le. */
+function selectDaFaixa(tela, rotulo) {
+  return tela.findAll('.faixa__campo')
+    .find((l) => l.text().includes(rotulo))
+    ?.find('select')
+}
 
 async function abrir(dados) {
   estado.quadro = dados
@@ -257,7 +276,7 @@ describe('mover o card — Bloco D (29/10)', () => {
     expect(tela.find('.card__os').element.tagName).toBe('BUTTON')
     await tela.find('.card__os').trigger('click')
     await flushPromises()
-    const sel = tela.find('.modal__mover select')
+    const sel = selectDaFaixa(tela, 'Mover para')
     expect(sel.exists()).toBe(true)
     expect(sel.findAll('option')).toHaveLength(17)
     expect(sel.element.value).toBe('38')
@@ -271,7 +290,7 @@ describe('mover o card — Bloco D (29/10)', () => {
     const tela = await abrir(comCard())
     await tela.find('.card__os').trigger('click')
     await flushPromises()
-    await tela.find('.modal__mover select').setValue('1316')
+    await selectDaFaixa(tela, 'Mover para').setValue('1316')
     await flushPromises()
     expect(estado.postado).toHaveLength(1)
     expect(estado.postado[0]).toEqual([
@@ -286,7 +305,7 @@ describe('mover o card — Bloco D (29/10)', () => {
     const tela = await abrir(comCard())
     await tela.find('.card__os').trigger('click')
     await flushPromises()
-    await tela.find('.modal__mover select').setValue('890')
+    await selectDaFaixa(tela, 'Mover para').setValue('890')
     await flushPromises()
     const alerta = tela.findAll('[role="alert"]').map((p) => p.text()).join(' ')
     expect(alerta).toContain('no Harmonit')
@@ -401,7 +420,7 @@ describe('o card', () => {
     }))
     await tela.find('.card__abrir').trigger('click')
     await flushPromises()
-    const botoes = tela.findAll('.modal__pe button')
+    const botoes = tela.findAll('.modal__acoes button')
     const ver = botoes.find((b) => b.text().includes('Ver o chamado'))
     expect(ver).toBeTruthy()
     await ver.trigger('click')
@@ -848,5 +867,256 @@ describe('os quatro temas do card aberto', () => {
        defeito que a memoria desta casa chama de
        varredura-de-rotulo-ignora-caixa. */
     expect(alerta.toLowerCase()).toContain('deu para ler a os')
+  })
+})
+
+
+/* ============================================================================
+   O CARD ABERTO: AS QUATRO FAIXAS DO MOCKUP — 🔵 *"está feio ainda tbm"*
+   ----------------------------------------------------------------------------
+   🚨 O QUE ESTAVA FEIO ERA ESTRUTURA, não cor: eu havia empilhado seis seções
+   soltas com o mesmo peso visual, e sem hierarquia tudo grita junto. O mockup
+   tem quatro faixas, e a hierarquia vem delas:
+     1. o topo branco (quem é esta OS)
+     2. UMA faixa com fundo: etapa, os dois tempos, e as duas ações de estado
+     3. o corpo branco (os temas e o que se escreve)
+     4. o pé com fundo (os botões)
+
+   ⚠️ As travas olham a ESTRUTURA, não os pixels: quem redesenhar de novo pode
+   mudar cor e espaço, mas não pode voltar a empilhar tudo com o mesmo peso.
+   ============================================================================ */
+describe('o card aberto tem as quatro faixas', () => {
+  const abrirOCard = async () => {
+    estado.ficha = {
+      numero_os: 17099, descricao: 'x', solucao_tecnica: null,
+      prioridade: 382, prioridades: { 381: 'Baixa', 382: 'Normal',
+                                      383: 'Alta', 384: 'Urgente' },
+      tem_agendamento: false, agendamentos: [], chamado: null,
+      observacoes: [],
+    }
+    const tela = await abrir(quadro({
+      cards: { s38: [card({ numero_ordem: 17099, situacao_id: 38 })] },
+      podeMover: true,
+    }))
+    await tela.find('.card__abrir').trigger('click')
+    await flushPromises()
+    return tela
+  }
+
+  it('as quatro faixas existem', async () => {
+    const tela = await abrirOCard()
+    for (const classe of ['.modal__topo', '.modal__faixa', '.modal__corpo',
+                          '.modal__rodape']) {
+      expect(tela.find(classe).exists(), classe).toBe(true)
+    }
+  })
+
+  it('a faixa traz os DOIS TEMPOS e a etapa', async () => {
+    const tela = await abrirOCard()
+    const faixa = tela.find('.modal__faixa').text()
+    expect(faixa).toContain('Etapa agora')
+    expect(faixa).toContain('Novo Solicitação 1ª')
+    expect(faixa).toContain('Nesta etapa')
+    expect(faixa).toContain('Total da OS')
+  })
+
+  it('sem passagem, a faixa diz nao medido e nao um zero', async () => {
+    /* 🚨 A `os_passagem` começou em 29/10, e a OS pode estar na etapa desde
+       setembro. "0h" seria afirmar o que ninguém mediu. */
+    const tela = await abrirOCard()
+    expect(tela.find('.modal__faixa').text()).toContain('não medido')
+  })
+
+  it('as duas acoes de estado vivem na FAIXA, nao soltas', async () => {
+    const tela = await abrirOCard()
+    const campos = tela.findAll('.faixa__campo').map((c) => c.text())
+    expect(campos.join(' ')).toContain('Mover para')
+    expect(campos.join(' ')).toContain('Prioridade')
+  })
+
+  it('a observacao DIZ que nao vai para a OS', async () => {
+    /* ⚠️ Sem essa frase, alguém escreve ali pensando que o técnico vai ler. */
+    const tela = await abrirOCard()
+    const recados = tela.find('.modal__recados').text()
+    expect(recados).toContain('Não vai para a OS')
+    expect(recados).toContain('não se apaga')
+  })
+
+  it('o pe diz que mover escreve no Harmonit', async () => {
+    const tela = await abrirOCard()
+    expect(tela.find('.modal__rodape').text())
+      .toContain('escreve a situação na OS do Harmonit')
+  })
+})
+
+/* ============================================================================
+   O FILTRO E A ORDEM NA TELA — 🔵 *"filtros para os cards, por cliente, OS,
+   placa // ordenadores tbm"*
+   ============================================================================ */
+describe('o filtro e a ordem', () => {
+  it('a caixa de busca e o seletor de ordem existem', async () => {
+    const tela = await abrir(quadro())
+    expect(tela.find('.painel__busca input').exists()).toBe(true)
+    expect(tela.findAll('.painel__ordem option')).toHaveLength(5)
+  })
+
+  it('a tela DIZ que esta filtrada, e por onde casou', async () => {
+    /* 🚨 Quadro filtrado que não diz que está filtrado é `M12`: alguém abre o
+       painel, vê 1 card e conclui que a operação está vazia. */
+    const dados = quadro({ cards: { s38: [card()] } })
+    dados.busca = 'MINUZZI'
+    dados.filtro_casou_por = ['cliente']
+    const tela = await abrir(dados)
+    const texto = tela.text()
+    expect(texto).toContain('MINUZZI')
+    expect(texto).toContain('casou por cliente')
+  })
+
+  it('busca sem resultado DIZ que nenhum card casou', async () => {
+    const dados = quadro()
+    dados.busca = 'zzz'
+    dados.filtro_casou_por = null
+    const tela = await abrir(dados)
+    expect(tela.text()).toContain('nenhum card casou')
+  })
+
+  it('tem como limpar o filtro', async () => {
+    const dados = quadro()
+    dados.busca = 'zzz'
+    const tela = await abrir(dados)
+    expect(tela.find('.painel__limpar').exists()).toBe(true)
+  })
+})
+
+/* ============================================================================
+   OS DOIS TEMPOS NO CARD FECHADO — Bloco C
+   ============================================================================ */
+describe('os dois tempos no card fechado', () => {
+  it('diz nao medido quando nao houve passagem', async () => {
+    const tela = await abrir(quadro({
+      cards: { s38: [card({ numero_ordem: 17099, etapa_desde: null })] },
+    }))
+    expect(tela.find('.card__tempos').text()).toContain('não medido')
+  })
+
+  it('mostra o tempo da etapa quando houve passagem', async () => {
+    const ontem = new Date(Date.now() - 36 * 3600 * 1000).toISOString()
+    const tela = await abrir(quadro({
+      cards: { s38: [card({ numero_ordem: 17099, etapa_desde: ontem })] },
+    }))
+    expect(tela.find('.card__tempos').text()).toContain('1d')
+  })
+
+  it('a prioridade diferente de Normal fica MARCADA', async () => {
+    /* ⚠️ *"mudar é exceção, e exceção precisa estar visível sem abrir"*.
+       🚨 E não só por cor -- o nome está escrito. */
+    const tela = await abrir(quadro({
+      cards: { s38: [card({ numero_ordem: 17099, prioridade: 383,
+                            prioridade_nome: 'Alta' })] },
+    }))
+    const pil = tela.findAll('.pilula').find((p) => p.text() === 'Alta')
+    expect(pil).toBeTruthy()
+    expect(pil.classes()).toContain('pilula--forte')
+  })
+
+  it('prioridade NAO LIDA nao aparece, em vez de fingir Normal', async () => {
+    const tela = await abrir(quadro({
+      cards: { s38: [card({ numero_ordem: 17099, prioridade: null,
+                            prioridade_nome: null })] },
+    }))
+    expect(tela.find('.card').text()).not.toContain('Normal')
+  })
+})
+
+
+/* ============================================================================
+   O ARRASTO, TERCEIRA VOLTA — 🔵 *"arrastar card ainda não funciona tbm -- ja
+   esta cansativo tratar disso"*
+   ----------------------------------------------------------------------------
+   🚨 TRÊS CAUSAS DIFERENTES, e eu consertei uma por volta:
+     1. o conteúdo era um `<button>` — elemento interativo engole o `mousedown`;
+     2. faltava `user-select: none` — arrastar sobre texto selecionável inicia
+        uma SELEÇÃO DE TEXTO, não o arrasto;
+     3. **o `@click` competia com o arrasto** — todo arrasto começa curto, e o
+        navegador entrega o início como clique: o card abria no meio do gesto,
+        cobria a tela, e o arrasto morria.
+
+   ⚠️ NENHUMA DAS TRÊS UM TESTE MEU PODIA PEGAR SOZINHO: `trigger('dragstart')`
+   e `trigger('click')` são eventos separados e sintéticos, e a competição entre
+   os dois só existe no navegador. O que estas travas guardam é o MECANISMO do
+   conserto — a guarda de tempo e o alvo aceso —, e quem julga o gesto continua
+   sendo o navegador dele.
+   ============================================================================ */
+describe('o arrasto nao compete mais com o clique', () => {
+  const comCard = () => quadro({
+    cards: { s38: [card({ numero_ordem: 17099, situacao_id: 38 })] },
+    podeMover: true,
+  })
+
+  it('🚨 clique DEPOIS de arrastar NAO abre o card', async () => {
+    /* 🚨 Era A causa da terceira volta: o card abria no meio do gesto. */
+    const tela = await abrir(comCard())
+    await tela.find('.card').trigger('dragstart',
+                                     { dataTransfer: { setData: () => {} } })
+    await tela.find('.card__abrir').trigger('click')
+    await flushPromises()
+    expect(tela.find('.modal').exists()).toBe(false)
+  })
+
+  it('clique SEM arrasto continua abrindo o card', async () => {
+    /* ⚠️ A guarda não pode engolir o clique de quem só quer abrir. */
+    const tela = await abrir(comCard())
+    await tela.find('.card__abrir').trigger('click')
+    await flushPromises()
+    expect(tela.find('.modal').exists()).toBe(true)
+  })
+
+  it('🚨 a coluna ACENDE quando o card passa por cima', async () => {
+    /* 🚨 Sem retorno visual não há como saber se o alvo aceita o solto -- e era
+       justamente a informação que faltava para dizer ONDE o gesto quebrava. */
+    const tela = await abrir(comCard())
+    await tela.find('.card').trigger('dragstart',
+                                     { dataTransfer: { setData: () => {} } })
+    const terceira = tela.findAll('.coluna')[2]
+    await terceira.trigger('dragenter')
+    expect(terceira.classes()).toContain('coluna--alvo')
+  })
+
+  it('a coluna APAGA quando o card sai dela', async () => {
+    const tela = await abrir(comCard())
+    await tela.find('.card').trigger('dragstart',
+                                     { dataTransfer: { setData: () => {} } })
+    const terceira = tela.findAll('.coluna')[2]
+    await terceira.trigger('dragenter')
+    await terceira.trigger('dragleave')
+    expect(terceira.classes()).not.toContain('coluna--alvo')
+  })
+
+  it('⚠️ sem arrasto em curso, passar por cima NAO acende nada', async () => {
+    /* Senão a coluna acenderia com o mouse passeando. */
+    const tela = await abrir(comCard())
+    const terceira = tela.findAll('.coluna')[2]
+    await terceira.trigger('dragenter')
+    expect(terceira.classes()).not.toContain('coluna--alvo')
+  })
+
+  it('soltar ainda escreve, com a trava de concorrencia', async () => {
+    const tela = await abrir(comCard())
+    await tela.find('.card').trigger('dragstart',
+                                     { dataTransfer: { setData: () => {} } })
+    await tela.findAll('.coluna')[2].trigger('drop')
+    await flushPromises()
+    expect(estado.postado[0]).toEqual([
+      '/api/paineis/operacao/mover',
+      { numero_os: 17099, para_situacao: 251, situacao_esperada: 38 },
+    ])
+  })
+
+  it('🔵 o ordenador nasce no PRAZO DE ENTREGA', async () => {
+    /* 🔵 Decisão dele: *"o ordenador padrão deve ser por 'Prazo de entrega'"*. */
+    const tela = await abrir(quadro())
+    const sel = tela.find('.painel__ordem select')
+    expect(sel.element.value).toBe('prazo')
+    expect(sel.findAll('option')[0].text()).toContain('prazo de entrega')
   })
 })

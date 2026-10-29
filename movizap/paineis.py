@@ -37,7 +37,7 @@ aqui dentro.
 import logging
 from datetime import date, datetime
 
-from . import banco, chamado_os, fpsl_ponte
+from . import banco, chamado_os, fpsl_ponte, passagem
 from .operacao import DadoInvalido
 
 log = logging.getLogger("movizap.paineis")
@@ -295,7 +295,9 @@ def _nomes_de_cliente(ids: set) -> dict:
     return {linha["harmonit_id"]: linha["nome"] for linha in linhas}
 
 
-def quadro(painel: str, so_abertas: bool = True) -> dict:
+def quadro(painel: str, so_abertas: bool = True,
+           busca: str | None = None,
+           ordem: str = "prazo") -> dict:
     """O painel inteiro: as colunas, na ordem, com os cards de cada uma.
 
     🔵 **D8 dele (29/10):** o card é a OS, **de qualquer origem** — *"seja pelo
@@ -351,6 +353,15 @@ def quadro(painel: str, so_abertas: bool = True) -> dict:
     por_os = _solicitacoes_por_os()
     # Lido a cada montagem, de propósito -- ver `_mapa_de_painel`.
     mapa_de_painel = _mapa_de_painel()
+    # 🔵 Bloco C: de quando é a etapa atual de cada OS. 🚨 UMA consulta para
+    # todos os cards -- ver `passagem.etapa_desde`.
+    numeros_do_erp = [o.get("numero_os") for o in os_do_erp
+                      if o.get("numero_os")]
+    desde_a_etapa = passagem.etapa_desde(numeros_do_erp)
+    # 🔵 Bloco F: quantos recados cada OS tem. ⚠️ O card fechado mostra so o
+    # NUMERO -- recado e para ler no card aberto, e um trecho no card fechado
+    # faria a coluna crescer sem limite.
+    quantos_recados = passagem.quantas_observacoes(numeros_do_erp)
     nomes = _nomes_de_cliente({o.get("cliente_id") for o in os_do_erp
                                if o.get("cliente_id")})
 
@@ -456,6 +467,17 @@ def quadro(painel: str, so_abertas: bool = True) -> dict:
             # Harmonit 01/10". Rotulo que mente sobre frescor e pior que
             # rotulo nenhum, porque ele existe exatamente para isso.
             "visto_em": o.get("atualizado_em") or o.get("visto_em"),
+            # 🔵 BLOCO C — os dois tempos. ⚠️ `etapa_desde` NULO quer dizer
+            # "não medido", e a tela DIZ isso: a `os_passagem` começou em
+            # 29/10, então OS nunca movida por aqui não tem de onde tirar o
+            # tempo da etapa. Mostrar "0h" seria afirmar o que ninguém mediu.
+            "etapa_desde": (desde_a_etapa.get(numero) or {}).get("em"),
+            # 🔵 Bloco F -- ver o comentario em `quantos_recados`.
+            "observacoes": quantos_recados.get(numero) or 0,
+            # 🔵 *"a prioridade vem escrita porque ela nasce Normal e mudar e
+            # excecao, e excecao precisa estar visivel sem abrir"*.
+            "prioridade": o.get("prioridade"),
+            "prioridade_nome": passagem.PRIORIDADES.get(o.get("prioridade")),
         }, o.get("situacao_id"))
 
     # ---- os cards das nossas solicitações que a ponte não trouxe ---------
@@ -498,7 +520,39 @@ def quadro(painel: str, so_abertas: bool = True) -> dict:
             "placas": [],
             "tecnicos": [],
             "visto_em": None,
+            # ⚠️ Nulo pelo mesmo motivo dos campos acima: esta OS não veio na
+            # lista da ponte, então não se mediu a etapa dela.
+            "etapa_desde": None,
+            "observacoes": 0,
+            "prioridade": None,
+            "prioridade_nome": None,
         }, linha["situacao_id"])
+
+    # ----------------------------------------------------------------------
+    # 🔵 O FILTRO E A ORDEM — *"filtros para os cards, por cliente, OS, placa
+    # // ordenadores tbm"*.
+    # ----------------------------------------------------------------------
+    # 🚨 FILTRA NO SERVIDOR, não na tela, e a razão é medida: o teto por coluna
+    # é 50 e o do quadro é 600. Filtrar no navegador esconderia o que o teto já
+    # cortou, e a pessoa procuraria uma OS que o servidor nem mandou.
+    #
+    # ⚠️ UMA CAIXA SÓ para os três campos, e não três caixas: quem procura tem
+    # um número ou um nome na mão e não quer decidir em qual caixa ele vai. O
+    # que casa é dito em `filtro_casou_por`, para a tela poder mostrar.
+    casou_por = set()
+    if busca:
+        alvo = _normalizar(busca)
+        for coluna in colunas:
+            ficam = []
+            for card in coluna["cards"]:
+                onde = _onde_casa(card, alvo)
+                if onde:
+                    casou_por.update(onde)
+                    ficam.append(card)
+            coluna["cards"] = ficam
+
+    for coluna in colunas:
+        coluna["cards"] = _ordenar(coluna["cards"], ordem)
 
     total = 0
     for coluna in colunas:
@@ -514,6 +568,13 @@ def quadro(painel: str, so_abertas: bool = True) -> dict:
         # 🔵 D9: desde quando o quadro monta, e a tela DIZ isso.
         "desde": desde,
         "so_abertas": so_abertas,
+        # 🔵 O filtro e a ordem, devolvidos para a tela DIZER o que está
+        # aplicado -- quadro filtrado que não diz que está filtrado é a mesma
+        # família do `M12`.
+        "busca": busca or None,
+        "ordem": ordem,
+        "filtro_casou_por": sorted(casou_por) or None,
+        "ordens": list(ORDENS),
         # 🚨 A tela tem de dizer quando está vendo menos. Ver o docstring.
         "ponte_respondeu": ponte_respondeu,
         "ponte_motivo": ponte_motivo,
@@ -552,3 +613,117 @@ def _mapa_de_painel() -> dict:
     """
     return {linha["slug"]: linha["painel"]
             for linha in banco.varios("SELECT slug, painel FROM formulario")}
+
+
+# ----------------------------------------------------------------------------
+# O FILTRO E OS ORDENADORES (29/10)
+# ----------------------------------------------------------------------------
+# 🔵 *"filtros para os cards, por cliente, OS, placa // ordenadores tbm"*.
+
+# ⚠️ As ordens que existem, e cada uma responde a uma pergunta de verdade:
+ORDENS = {
+    # 🔵 O PADRÃO, por decisão dele: *"o ordenador padrão deve ser por 'Prazo de
+    # entrega'"*. ⚠️ CRESCENTE -- prazo mais PRÓXIMO primeiro, que é o que a
+    # operação precisa ver.
+    #
+    # 🚨 ELE SUBSTITUI a antiga "aberta há mais tempo": as duas ordenavam pelo
+    # MESMO campo, porque hoje a previsão de entrega **é** a data de criação
+    # (medido em 12 de 12 OS). Duas opções com nomes diferentes para a mesma
+    # ordem fariam quem escolhe achar que são coisas distintas.
+    # ⚠️ Quando a frente do aviso prévio entrar (ela move a previsão em +90
+    # dias) as duas deixam de coincidir, e aí faz sentido ter as duas.
+    "prazo": "prazo de entrega (mais próximo)",
+    "os_desc": "OS, da mais nova",
+    "os_asc": "OS, da mais antiga",
+    # 🔵 "o que está parado há mais tempo" -- usa o Bloco C
+    "parado": "parado há mais tempo nesta etapa",
+    "cliente": "cliente (A-Z)",
+}
+
+
+def _normalizar(texto: str) -> str:
+    """Minúsculas, sem acento e sem pontuação — para a busca casar de verdade.
+
+    🚨 SEM ACENTO DOS DOIS LADOS: quem procura "veiculo" tem de achar
+    "veículo", e quem procura uma placa escreve "ABC-1D23" tanto quanto
+    "abc1d23". ⚠️ E insensível a caixa, que é o defeito que a memória desta
+    casa chama de varredura-de-rótulo-ignora-caixa.
+    """
+    import unicodedata
+    sem = unicodedata.normalize("NFKD", str(texto or ""))
+    sem = "".join(c for c in sem if not unicodedata.combining(c))
+    return "".join(c for c in sem.lower() if c.isalnum())
+
+
+def _onde_casa(card: dict, alvo: str) -> set:
+    """Em quais dos três campos a busca casou. Vazio = o card sai.
+
+    ⚠️ Devolve ONDE casou, e não só sim/não, porque a tela diz *"casou por
+    placa"* -- sem isso, quem procura um número e acha um card não sabe se
+    achou a OS ou o cliente.
+    """
+    onde = set()
+    if not alvo:
+        return onde
+    numero = str(card.get("numero_ordem") or "")
+    if alvo in _normalizar(numero):
+        onde.add("OS")
+    if card.get("cliente") and alvo in _normalizar(card["cliente"]):
+        onde.add("cliente")
+    # ⚠️ O id do cliente também: a operação às vezes tem o código, não o nome.
+    if card.get("cliente_id") and alvo in _normalizar(card["cliente_id"]):
+        onde.add("cliente")
+    for p in (card.get("placas") or []):
+        if alvo in _normalizar(p.get("placa")):
+            onde.add("placa")
+            break
+    return onde
+
+
+def _ordenar(cards: list, ordem: str) -> list:
+    """Ordena os cards de uma coluna. ⚠️ Ordem desconhecida cai no padrão."""
+    def numero(c):
+        try:
+            return int(c.get("numero_ordem") or 0)
+        except (TypeError, ValueError):
+            return 0
+
+    # 🚨 NULO VAI PARA O FIM em toda ordem por data: card sem a medida não é
+    # "o mais antigo do mundo", é card sem a medida.
+    def por_data(chave):
+        """🚨 NORMALIZA O TIPO, e faltava: o card de solicitação traz a data
+        como `datetime` (do `timestamptz` do Postgres) e o card do ERP como
+        **texto ISO**. `sorted` não compara os dois -- `TypeError`. Com o prazo
+        como ordem PADRÃO isso derrubaria o painel em toda abertura que tivesse
+        os dois tipos de card.
+
+        ⚠️ `isoformat()` ordena como texto porque o ISO é lexicograficamente
+        ordenado -- é o que permite comparar os dois mundos sem converter o
+        texto em data.
+        """
+        def f(c):
+            v = c.get(chave)
+            if v is None:
+                # 🚨 Nulo vai para o FIM: card sem a medida não é "o mais
+                # antigo do mundo", é card SEM a medida.
+                return (True, "")
+            return (False, v.isoformat() if hasattr(v, "isoformat") else str(v))
+        return f
+
+    if ordem == "os_asc":
+        return sorted(cards, key=numero)
+    if ordem == "cliente":
+        return sorted(cards, key=lambda c: (not c.get("cliente"),
+                                            _normalizar(c.get("cliente") or "")))
+    if ordem in ("prazo", "antiga"):
+        # 🔵 O padrão. ⚠️ "antiga" segue aceito para não quebrar link salvo --
+        # é o mesmo campo, e o rótulo antigo sumiu da tela.
+        return sorted(cards, key=por_data("criada_em"))
+    if ordem == "parado":
+        # 🔵 Usa o Bloco C: quanto mais antiga a última passagem, mais parado.
+        # ⚠️ Card SEM passagem vai para o fim, porque "não medido" não é "parado
+        # há mais tempo" -- afirmar isso seria inventar.
+        return sorted(cards, key=por_data("etapa_desde"))
+    # ⚠️ Ordem desconhecida cai no PADRAO dele, que e o prazo -- nao no
+    # numero da OS. O padrao e um so, em um lugar so.
+    return sorted(cards, key=por_data("criada_em"))
