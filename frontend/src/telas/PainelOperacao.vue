@@ -75,9 +75,26 @@ async function carregar() {
     if (busca.value.trim()) q.set('busca', busca.value.trim())
     quadro.value = await api.get(`/api/paineis/operacao?${q}`)
     for (const coluna of quadro.value.colunas) {
-      /* Vazia nasce fechada; com card, aberta. ⚠️ Nenhuma é fixa desde
-         29/10 -- as duas que não eram situação saíram do painel. */
-      abertas.value[coluna.chave] = coluna.total > 0
+      /* 🚨 TODA COLUNA NASCE ABERTA, e isto consertou o arrasto -- foi ELE
+         quem achou: *"não é necessário ter card para que elas existam... Sem
+         as colunas, arrastar o card do 17054 não vai para lugar algum"*.
+
+         A coluna fechada **não tem corpo** (ver o `v-if` do `coluna__corpo`),
+         então a única área dela era a tira do título, ~44 px. Com mover no ar,
+         uma coluna sem corpo não é um detalhe de espaço: é **um destino que
+         não existe**.
+
+         ⚠️ Antes do Bloco D isto era aceitável -- o painel só lia, e colapsar
+         a coluna vazia fazia as 17 caberem na tela. Quando mover entrou, a
+         mesma linha virou defeito.
+
+         ⚠️ E colapsar CONTINUA existindo, como escolha de quem usa: é o clique
+         no título. O que saiu foi o automático por estar vazia.
+         🚨 `!== false` para a escolha dela sobreviver ao `carregar()` -- senão
+         toda atualização reabriria o que a pessoa fechou. */
+      if (abertas.value[coluna.chave] === undefined) {
+        abertas.value[coluna.chave] = true
+      }
     }
   } catch (e) {
     erro.value = e instanceof ErroDeApi ? e.message : 'Não consegui ler o painel.'
@@ -889,7 +906,16 @@ onMounted(carregar)
                    do card aberto. -->
             </article>
 
-            <p v-if="!coluna.cards.length" class="apagado pequeno">Vazia.</p>
+            <!-- 🚨 O ALVO DA COLUNA VAZIA: é ao mesmo tempo a área de
+                 soltar e o convite. Um "Vazia." de uma linha não dava altura
+                 para acertar o solto, e era parte do arrasto "não ir a lugar
+                 algum". -->
+            <p v-if="!coluna.cards.length" class="coluna__alvo-vazio">
+              <template v-if="quadro.pode_mover">
+                solte um card aqui para mover para esta etapa
+              </template>
+              <template v-else>sem OS nesta etapa</template>
+            </p>
           </div>
         </section>
       </div>
@@ -1209,6 +1235,20 @@ onMounted(carregar)
   font-weight: var(--peso-normal);
 }
 .coluna__corpo { padding: var(--e-3); display: flex; flex-direction: column; gap: var(--e-2); }
+/* 🚨 ALTURA É O QUE FAZ O ALVO EXISTIR. Uma linha de texto não dá onde soltar,
+   e era parte de o arrasto "não ir a lugar algum". ⚠️ O tracejado diz, sem
+   depender de cor, que ali se pode soltar. */
+.coluna__alvo-vazio {
+  margin: 0;
+  min-height: 72px;
+  display: flex; align-items: center; justify-content: center;
+  text-align: center;
+  padding: var(--e-2);
+  border: var(--borda-fina) dashed var(--borda-forte);
+  border-radius: var(--r-sm, 6px);
+  font-size: var(--txt-xs);
+  color: var(--texto-apagado);
+}
 
 .card { display: block; }
 /* 🔵 O gesto dele. ⚠️ `grab` no card inteiro, e `grabbing` enquanto arrasta. */

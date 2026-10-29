@@ -1974,3 +1974,177 @@ provada pelo primeiro chamado real de cliente**.
 VELASCO para teste, pois os tickets nascem e têm ligações. OS com outros
 clientes podem ser mal interpretadas pela OP"*. A trava está no código
 (`provar_criacao_os.py` recusa qualquer outro).
+
+---
+
+# 16. 🚨 POR QUE O ARRASTO NÃO EXISTIA — a causa, achada por ele
+
+> 🔵 Ele, depois de três consertos meus: *"arrastar o card ainda não existe,
+> quero saber o porque antes de voce mexer em algo que nao vai resultar em
+> nada"*. **Certo em exigir o diagnóstico antes do conserto.**
+>
+> E foi ele quem achou: *"Eu acho que é pq não fez as colunas dos demais, pois
+> não é necessario ter card para que elas existam... Sem as colunas, arrastar o
+> card por exemplo do 17054, não vai para lugar algum. E eu quero ele na
+> configuração"*.
+
+## 16.1 O diagnóstico, sem mexer em nada
+
+Quatro verificações, nesta ordem:
+
+| o que | resultado |
+|---|---|
+| a pasta servida é a que eu construí? | ✅ `FRONTEND = frontend/dist`, e o `index.html` aponta para o bundle do disco |
+| o código do arrasto está no bundle servido? | ✅ `onDragstart`, `onDragend`, `onDragenter`, `onDragover`, `onDrop` — **um de cada** |
+| o `draggable` está compilado? | ✅ `draggable: s.value.pode_mover && !!Z.numero_ordem` |
+| o CSS tem o `user-select`? | ✅ `card[draggable=true]{cursor:grab;user-select:none}` |
+| o DOM do card traz o atributo? | ✅ `{"class":"card","draggable":"true"}` |
+
+🚨 **Tudo certo — e o gesto ainda não existia.** Então o problema não era o
+card: **era o destino.**
+
+## 16.2 🚨 A causa: a coluna vazia nascia COLAPSADA, e colapsada não tem corpo
+
+**A prova, no DOM renderizado:**
+
+```
+class="coluna coluna--fechada coluna--vazia"
+```
+
+E `coluna--fechada` quer dizer que o **`coluna__corpo` não existe** — ele está
+atrás de `v-if="abertas[coluna.chave]"`. Então a **única área** daquela coluna
+era a tira do título: **~44 px de altura**.
+
+**O efeito, nas palavras dele:** para mover a OS **17054** para *"Configurar
+equipamentos e Sistemas"* era preciso acertar uma tira de 44 px no topo — e,
+visualmente, **não parece haver coluna ali**. Arrastar não ia a lugar algum.
+
+🚨 **E A CAUSA RAIZ É MINHA, de 22/10:**
+`abertas[coluna.chave] = coluna.total > 0`. Eu fiz a coluna vazia nascer
+colapsada *"para as 17 caberem na tela"*.
+
+⚠️ **Era aceitável enquanto o painel SÓ LIA.** Quando mover entrou (Bloco D, hoje
+de tarde), a mesma linha deixou de ser um detalhe de espaço e passou a ser **um
+destino que não existe**. ⚠️ **E eu não voltei a ela** ao ligar o arrasto — é o
+`M12` na forma de comportamento: a decisão era verdadeira quando foi tomada, e a
+entrega seguinte não voltou para matá-la.
+
+## 16.3 Foi a QUARTA causa do mesmo defeito
+
+| volta | causa | onde estava |
+|---|---|---|
+| 1ª | o conteúdo era um **`<button>`** | no card |
+| 2ª | faltava **`user-select: none`** | no CSS do card |
+| 3ª | o **`@click` competia** com o arrasto | no card |
+| **4ª** | **a coluna vazia não tinha corpo** | 🚨 **no destino**, e numa decisão de 22/10 |
+
+🚨 **As três primeiras eu procurei no lugar errado.** Eu olhei o card em todas
+as voltas, porque era o que eu tinha acabado de escrever. **O destino nunca
+entrou na minha conta** — e era lá.
+
+⚠️ **Nenhuma trava minha podia pegar:** elas montavam o quadro com **uma**
+coluna, ou disparavam `drop` **direto** na coluna alvo pelo índice. Um `drop`
+sintético **não precisa de área**; só o ponteiro de verdade precisa.
+
+## 16.4 O conserto, nas palavras dele
+
+🔵 *"não é necessário ter card para que elas existam"*.
+
+1. **Toda coluna nasce ABERTA**, com card ou sem — e `abertas` só é preenchido
+   quando está `undefined`, para a escolha de quem usa **sobreviver** ao
+   `carregar()`;
+2. **a coluna vazia ganhou um ALVO com altura** (72 px, tracejado) e com texto:
+   *"solte um card aqui para mover para esta etapa"*. ⚠️ **Altura é o que faz o
+   alvo existir** — um `"Vazia."` de uma linha não dá onde soltar;
+3. ⚠️ **Colapsar continua existindo, como escolha de quem usa** (o clique no
+   título). O que saiu foi o **automático por estar vazia**.
+4. ⚠️ E quando não se pode mover, o texto é outro: *"sem OS nesta etapa"* — não
+   se convida para um gesto que não existe.
+
+🚨 **Duas travas minhas afirmavam a causa.** Elas exigiam `coluna--fechada` na
+coluna vazia — eram legítimas em 22/10, com o painel só lendo, e **defendiam o
+defeito** desde que mover entrou. Trocadas, com o motivo escrito, mais duas
+novas do alvo.
+
+---
+
+# 17. 🔴 O QUE FALTA — a lista inteira, em um lugar
+
+> 🔵 Ele: *"Depois documente tudo com o que falta"*. Esta seção **substitui** a
+> §15.2 e a §15.3 como fonte: o que estiver aqui é o que falta.
+
+## 17.1 O primeiro passo é dele, e é o único que nenhuma suíte faz
+
+**Validar no navegador.** 🚨 Em 29/10 ele achou **8 defeitos** assim, todos com
+a suíte verde — e um deles (a coluna sem corpo) era a **causa** de três
+consertos meus terem sido no lugar errado.
+
+**O que olhar, na ordem:**
+
+| # | o quê | o que prova |
+|---|---|---|
+| 1 | **arrastar a OS 16991** para outra coluna | 🚨 escrita real no ERP — comece pela **sandbox** |
+| 2 | arrastar para uma coluna **vazia** (ex. *Configurar equipamentos*) | o conserto da §16 |
+| 3 | a coluna **acende** quando o card passa por cima | o retorno visual |
+| 4 | **clicar** no card abre, com os **quatro temas** | o Bloco E |
+| 5 | a **busca** (cliente, OS, placa) e o ordenador em **prazo** | o filtro |
+| 6 | a **observação** salvando com o seu nome | o Bloco F |
+
+## 17.2 As 8 decisões dele que travam o resto
+
+| # | o quê | o que destrava | onde está |
+|---|---|---|---|
+| 1 | o **mapa `problemaId`** | **8 formulários** passam a abrir OS (hoje só o Suporte) | `docs/06`, §4.2 e 4.3 |
+| 2 | o **limite do laranja** no tempo de etapa (um número) | a cor do Bloco C | §13.2 |
+| 3 | a **situação `0`** — **128 OS** | elas ganham coluna e podem ser arrastadas | §8.4, D-e |
+| 4 | o **texto dos termos** | 3 formulários com aceite | §12.1, pendência 7 |
+| 5 | a **aba Network** do Harmonit | decide o tamanho da **fase 2 do F** | §8.4, pergunta 4 |
+| 6 | **"cliente avulso"** no ERP | o chamado de quem não é cliente vira OS | §6.2 |
+| 7 | o **endereço em 7 campos** | ⚠️ muda o que é gravado em 4 formulários no ar | Bloco 4 do `.md` dele |
+| 8 | apagar a solicitação **544** | a linha de aviso do painel some | §10.4 |
+
+## 17.3 O que falta de código — meu, e nesta ordem
+
+### Desbloqueado, e por ordem de dano que conserta
+
+| # | o quê | por que primeiro |
+|---|---|---|
+| **1** | 🚨 **derivar as máscaras** nos 15 formulários | **conserta 56 campos sem validação em produção**, nos 14 que o cliente já abre — CPF, CNPJ, telefone e CEP passam **qualquer texto** hoje |
+| **2** | ligar o **formato novo nos 14** | ⚠️ **depois do 1**: pele nova não conserta coleta |
+| **3** | as **etapas dos 14** | o `page` do Bitrix nos **4** que têm (ficha 7 · credenciamento 4 · fornecedores 3 · demonstração 1); nos outros **11** uma etapa só até ele revisar |
+| **4** | **Bloco 1 e 2 do `.md` dele** | o `+` nos **28 campos múltiplos** que ainda perdem dado, e a lista múltipla virando caixas (2 campos) |
+| **5** | **fase 2 do F** | descrição, solução técnica e previsão editáveis — depende da decisão 5 |
+
+### Bloqueado por decisão dele
+
+| o quê | espera |
+|---|---|
+| a cor do tempo de etapa | o número (decisão 2) |
+| traduzir a situação `0` | a decisão 3 |
+| o endereço em 7 campos | a decisão 7 |
+| os 8 formulários abrirem OS | o mapa (decisão 1) |
+
+## 17.4 ⚠️ O que fica em aberto, com o risco escrito
+
+| o quê | o risco |
+|---|---|
+| 🔵 **a placa não será testada** (*"aceitar sem testar a placa"*) | a Velasco, **a única sandbox**, tem **zero placas ativas**; a regra *"chamado só para placa ativa na WESO"* só será provada pelo **primeiro chamado real** |
+| **os 50 chassis na coluna `placa` da WESO** | hoje a regra **recusaria** o chamado desses clientes |
+| **o "Voltar para \<etapa\>"** | a função existe (`passagem.ultima_passagem`), **o botão não** |
+| **`POST /api/os/criar` não tem chamador manual** | a OS nasce só pelo envio do formulário; abrir uma OS "à mão" pelo painel não existe |
+| 🔵 **a D10** — apagar o fluxo em texto da `solucaoTecnica` | é dele, e **nenhuma OS foi tocada** |
+| **128 OS com situação `0`** | sem coluna, contadas em `fora_do_quadro` |
+| **559 OS sem prioridade no cache** | a varredura preenche sozinha; o card não mostra o que não leu |
+
+## 17.5 🚨 O que a minha suíte NÃO alcança — e vale saber
+
+| |
+|---|
+| **o gesto num navegador de verdade** — `trigger('dragstart')` é sintético, e `drop` sintético **não precisa de área**. Foi isso que deixou quatro causas passarem |
+| **o layout** — nenhuma trava mede altura, largura ou se a coluna é alcançável |
+| **a escrita real no ERP** — provada por script na sandbox, nunca na suíte |
+| **o que o cliente vê no celular** — os 15 formulários nunca foram abertos num telefone |
+
+🚨 **A conclusão honesta de 29/10:** com **1971 Python + 620 JS verdes**, ele
+achou **8 defeitos** abrindo a tela. O placar prende regressão; **não** prende
+tela quebrada. É o `M9`, e hoje ele se provou oito vezes.

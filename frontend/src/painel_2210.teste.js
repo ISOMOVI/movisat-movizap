@@ -186,7 +186,19 @@ describe('as colunas', () => {
     expect(titulos[16]).toContain('Contratual')
   })
 
-  it('coluna vazia nasce colapsada e a com card nasce aberta', async () => {
+  it('🚨 TODA coluna nasce ABERTA, com card ou sem', async () => {
+    /* 🚨 ESTA TRAVA AFIRMAVA O CONTRARIO, e era A CAUSA do arrasto nao
+       funcionar -- quem achou foi ELE: *"não é necessário ter card para que
+       elas existam... Sem as colunas, arrastar o card do 17054 não vai para
+       lugar algum"*.
+
+       Coluna fechada **não tem corpo** (ver o `v-if` do `coluna__corpo`), então
+       a única área dela era a tira do título, ~44 px: um destino que não
+       existe.
+
+       ⚠️ A trava era legítima em 22/10, quando o painel SÓ LIA -- colapsar a
+       vazia fazia as 17 caberem. A mesma afirmação virou defeito quando mover
+       entrou. */
     const tela = await abrir(quadro({
       cards: { s15746: [card({ id: 9, situacao_id: 15746 })] },
     }))
@@ -194,7 +206,10 @@ describe('as colunas', () => {
     const comCard = colunas.find((c) => c.text().includes('Financeiro'))
     const vazia = colunas.find((c) => c.text().includes('Não atendido'))
     expect(comCard.classes()).not.toContain('coluna--fechada')
-    expect(vazia.classes()).toContain('coluna--fechada')
+    expect(vazia.classes()).not.toContain('coluna--fechada')
+    /* 🚨 E a vazia TEM corpo e TEM alvo -- é o que faz o soltar existir. */
+    expect(vazia.find('.coluna__corpo').exists()).toBe(true)
+    expect(vazia.find('.coluna__alvo-vazio').exists()).toBe(true)
     // 🚨 Colapsada mostra o CONTADOR: ninguém precisa abrir para saber que é zero.
     expect(vazia.find('.coluna__conta').text()).toBe('0')
   })
@@ -205,12 +220,27 @@ describe('as colunas', () => {
     expect(tela.findAll('.coluna__botao')).toHaveLength(17)
   })
 
-  it('clicar no cabeçalho abre e fecha uma coluna vazia', async () => {
+  it('clicar no cabeçalho FECHA uma coluna, e e escolha de quem usa', async () => {
+    /* ⚠️ Colapsar continua existindo -- o que saiu foi o AUTOMATICO por estar
+       vazia. A coluna nasce aberta, e o clique a fecha. */
     const tela = await abrir(quadro())
     const vazia = tela.findAll('.coluna').find((c) => c.text().includes('Contratual'))
-    await vazia.find('.coluna__botao').trigger('click')
     expect(vazia.classes()).not.toContain('coluna--fechada')
     expect(vazia.text()).toContain('situação 16492 no Harmonit')
+    await vazia.find('.coluna__botao').trigger('click')
+    expect(vazia.classes()).toContain('coluna--fechada')
+  })
+
+  it('🚨 o alvo da coluna vazia CONVIDA a soltar quando se pode mover', async () => {
+    const tela = await abrir(quadro({ podeMover: true }))
+    const vazia = tela.findAll('.coluna').find((c) => c.text().includes('Contratual'))
+    expect(vazia.find('.coluna__alvo-vazio').text()).toContain('solte um card aqui')
+  })
+
+  it('⚠️ e NAO convida quando nao se pode mover', async () => {
+    const tela = await abrir(quadro({ podeMover: false }))
+    const vazia = tela.findAll('.coluna').find((c) => c.text().includes('Contratual'))
+    expect(vazia.find('.coluna__alvo-vazio').text()).toContain('sem OS nesta etapa')
   })
 })
 
