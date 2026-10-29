@@ -726,3 +726,188 @@ importantes do Bloco A (o envio ponta a ponta) **começaram pulando** porque eu
 enchi os campos com `"x"` e a validação recusou. **Teste que pula é teste que
 não existe** — e foi o segundo pulo silencioso que esta frente me custou no
 mesmo dia.
+
+---
+
+# 8. BLOCO D — MOVER O CARD: A PROPOSTA
+
+> 🔵 Pedido dele, 29/10: *"proponha melhor caminho para bloco D"*, com dois
+> limites ditos por ele no mesmo momento:
+> *"ainda não desenhamos o pipeline do financeiro, não se prenda a regras
+> imaginárias"* · *"foco agora é o painel OP"*.
+>
+> 🚨 **NADA AQUI FOI IMPLEMENTADO.** *"Primeiro proposta, depois ação."*
+
+---
+
+## 8.1 O que já está provado, e o que não existe
+
+| peça | estado |
+|---|---|
+| trocar `situacaoId` de uma OS existente | ✅ **provado** em 29/10 na OS **16991** (`medir_situacao_os.py`): a releitura dos 40 campos/listas acusa **só** o `situacaoId`. ⚠️ A situação dela foi **restaurada** (está em 15694, a original) |
+| o corpo da escrita | ✅ `os_ponte._corpo_de_escrita`, o mesmo caminho do endereço (21/10) |
+| rota de "alterar situação" no ERP | 🚨 **não existe.** A única escrita é `SalvarOrdemServico`, a OS **inteira** |
+| o Harmonit recusa transição? | ❌ **não recusa nenhuma** — medido: de "Serviço Realizado" para "Agendamento" e ele aceitou |
+| a linha do tempo da OS registra a situação? | 🚨 **NÃO.** Só o `status`. Conferido em 3 OS |
+| gesto de arrastar na tela | ❌ não existe, e **há trava que garante a ausência** |
+| `pode_mover` | `false`, e é a verdade disso |
+
+🚨 **A CONSEQUÊNCIA MAIS IMPORTANTE DESSA TABELA:** como o ERP **não registra a
+situação na linha do tempo**, uma vez movido o card **não há como saber quem
+moveu, de onde, nem quando** — nem aqui, nem lá. Mover sem registrar é uma
+escrita anônima e irreversível no ERP.
+
+---
+
+## 8.2 🟡 A proposta, em 5 peças
+
+### Peça 1 — o gesto: **menu no card, não arrastar**
+
+🟡 **Sugestão minha, e é a única peça onde eu discordo do mockup.** O mockup
+desenha um kanban, e kanban sugere arrastar. Proponho **não** começar por aí:
+
+| | arrastar | menu "Mover para…" no card |
+|---|---|---|
+| teclado | ❌ não alcança | ✅ `<select>` ou botão + lista |
+| toque | difícil com 17 colunas e rolagem horizontal | ✅ |
+| erro acidental | **alto** — o dedo escorrega e escreve no ERP | baixo, exige escolher |
+| implementação | biblioteca ou 200 linhas de evento | ~20 linhas |
+
+⚠️ **E há um detalhe desta casa:** existe uma trava que **procura a palavra do
+atributo de arrastar** no HTML renderizado para garantir que o gesto não existe.
+Ligar o arrastar exige trocar essa trava — o que é certo quando for decisão
+dele, e é mais uma razão para não fazer as duas coisas na mesma volta.
+
+🔵 **O mockup já tem o lugar certo para isso:** o botão **"Avançar etapa"** no
+rodapé do card aberto. ⚠️ Mas o card aberto é o **Bloco E**, que não existe —
+então nesta volta o controle fica no **card fechado**.
+
+🟡 **Proponho:** um controle no card fechado, rótulo **"Mover para…"**, que abre
+as 17 situações na ordem dele. Arrastar entra depois, como **adição** ao menu e
+nunca como substituto.
+
+### Peça 2 — a ordem: **livre, e registrada**
+
+🔵 **Ele já disse:** *"depois vou montar as regras entre eles"*.
+
+🟡 **Proponho LIVRE nesta volta**, por três razões medidas:
+1. **o ERP não recusa nada** — uma regra nossa seria a única barreira, e barreira
+   nossa que ninguém pediu já derrubou recurso meu antes;
+2. **as 17 situações nasceram ontem** no catálogo; o fluxo real ainda não foi
+   percorrido uma vez por ninguém, e regra escrita antes do primeiro uso é regra
+   imaginária;
+3. **movimento livre + registro é reversível**; regra errada **bloqueia trabalho
+   real** e aparece como "o sistema não deixa".
+
+⚠️ O que a tela faz em vez de barrar: **mostra de onde para onde** antes de
+gravar, e deixa a pessoa cancelar.
+
+### Peça 3 — a escrita: reler e comparar, como as outras duas
+
+Reusa o caminho provado, e **não** se escreve um segundo montador de corpo:
+
+1. **relê a OS agora**, imediatamente antes de gravar;
+2. 🚨 **compara com o retrato que a tela carregou** — mudou a situação no meio,
+   **recusa** e diz o que mudou. 🔵 Ele pediu a trava mesmo achando o risco
+   pequeno (*"cada 1 atua em uma área especifica do fluxo"* · *"mas pode ter
+   sim"*);
+3. monta o corpo com `_corpo_de_escrita`, trocando **só** o `situacaoId`;
+4. grava;
+5. **relê e compara os 40 campos/listas**. Qualquer diferença fora do
+   `situacaoId` → `ok: false`, a tela diz **quais** campos, e o card **volta
+   para a coluna de origem**.
+
+⚠️ **Sem ensaio a seco na tela**, diferente da rota de criar: ali o seco serviu
+para provar o corpo antes da primeira OS existir. Aqui o corpo é o mesmo já
+provado, e um botão "conferir" que não grava seria mais um passo sem resposta
+nova.
+
+### Peça 4 — 🚨 o carimbo, que é o que torna o Bloco D honesto
+
+**Sem isto eu proponho não ligar o Bloco D.** Como o ERP não registra a
+situação, o carimbo **nosso** é o único registro de que alguém moveu:
+
+| coluna | o que |
+|---|---|
+| `numero_os` | a OS |
+| `de_situacao` / `para_situacao` | de onde, para onde |
+| `atendente_id` | **quem** |
+| `em` | quando |
+| `erro` | o motivo, quando a escrita foi recusada |
+
+🟡 **É uma tabela pequena e NÃO é o Bloco C.** O Bloco C quer *"quanto tempo em
+cada etapa"*, com os dois tempos no card e o tratamento das OS que já existem.
+Esta tabela é só **o registro da passagem** — e é ela que faz o Bloco C sair
+barato depois, porque o dado passa a ser coletado desde já.
+
+⚠️ **A tentativa RECUSADA também é carimbada.** Escrita que o ERP negou e não
+deixou rastro é a mesma família do `criada: null` da criação de OS: ninguém
+descobre depois.
+
+### Peça 5 — ⚠️ a armadilha dos 5 minutos
+
+O card vem do cache `os_historico`, varrido a cada 5 min. **Movido o card, a
+próxima abertura do painel o traz de volta para a coluna antiga** por até 5
+minutos — e a pessoa conclui que não gravou, e move de novo.
+
+🟡 **Proponho:** depois da releitura que confirma, **a ponte atualiza a linha do
+cache** daquela OS (`salvar_os_historico`, que a varredura já usa). O dado
+passa a ser o mesmo que o ERP acabou de confirmar, e o `visto_em` do card diz a
+hora nova.
+
+---
+
+## 8.3 🚨 O fato que eu NÃO vou transformar em regra
+
+**Mover um card para `15694` "Atendimento finalizado" é lido pelo FPSL**, e isso
+é **código medido hoje**, não desenho:
+
+- `services/fechamento.py` monta o **pagamento dos técnicos** (`FIN_2.1`) com as
+  OS do período **em situação 15694**, agrupadas por técnico;
+- `services/conferencia_fechamento.py` roda **a cada 1 h**, atrás do flag
+  `conferencia_fechamento_ativa` — que está **`true`** e rodou hoje às **19:43**
+  (*"8 conferidas, 0 datas preenchidas"*) —, e a porta dela é a OS **em 15694
+  com oficina, nos últimos 30 dias**.
+
+🔵 **E ele disse, nesta mesma conversa:** *"ainda não desenhamos o pipeline do
+financeiro, não se prenda a regras imaginárias"*.
+
+🟡 **Então o que eu proponho é o mínimo honesto e nada além:** a tela **diz**, no
+momento da escolha, que aquela situação é lida pelo fechamento do FPSL — uma
+linha de texto, sem porta, sem confirmação extra, sem aprovação. **Nenhuma
+regra, nenhum impedimento.** Quem decide o que o financeiro faz com isso é ele,
+quando o pipeline do financeiro for desenhado.
+
+🚨 **O que eu NÃO proponho, e registro para não voltar como "boa ideia":** porta
+de aprovação, confirmação dupla, trava por perfil, ou qualquer passo a mais por
+causa do financeiro. Seria regra imaginária em cima de um pipeline que não
+existe.
+
+---
+
+## 8.4 🔴 As 4 decisões dele que o Bloco D pede
+
+| # | pergunta | o que trava | 🟡 minha recomendação |
+|---|---|---|---|
+| **D-a** | **menu "Mover para…"** no card, ou **arrastar**? | é o gesto inteiro | **menu**, e arrastar depois como adição (§8.2, peça 1) |
+| **D-b** | ordem **livre** ou com caminho proibido? | ele já disse que monta as regras depois | **livre e registrada** nesta volta (peça 2) |
+| **D-c** | **quem** pode mover? | hoje a `PNL_1.1` é **só do owner**, então "quem tem a aba" = ele | **quem tem a aba**, sem permissão nova — e quando ele conceder a aba, reavaliar |
+| **D-d** | a tela **avisa** que a 15694 é lida pelo fechamento do FPSL? | §8.3 | **sim, uma linha de texto** — e nada além disso |
+
+---
+
+## 8.5 A ordem de execução que eu proponho, se ele aprovar
+
+1. a tabela do carimbo (migração) — **sem ela o resto não entra**;
+2. a rota na ponte: `POST /api/os/situacao`, com releitura, comparação dos 40 e
+   atualização do cache;
+3. o `chamado_os`/`paineis` do lado do MoviZap, com `pode_mover` passando a ser
+   **verdade** e não mais uma constante;
+4. o controle no card e a frase da §8.3;
+5. as travas: **a recusa por concorrência**, **a diferença fora do `situacaoId`**
+   que devolve o card, **o carimbo da tentativa recusada**, e as **rotas por
+   HTTP** — este último porque foi exatamente o buraco da auditoria de hoje.
+
+**Régua de pronto, igual à dos outros blocos:** as duas suítes passam · o estado
+é **relido** e conferido, nunca o retorno da escrita · **ele validou no
+navegador**.
