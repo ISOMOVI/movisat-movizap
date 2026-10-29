@@ -15,8 +15,8 @@ from decimal import Decimal
 import psycopg
 import psycopg_pool
 
-from fastapi import (Depends, FastAPI, File, Form, HTTPException, Request,
-                     UploadFile, status)
+from fastapi import (Depends, FastAPI, File, Form, HTTPException, Query,
+                     Request, UploadFile, status)
 from fastapi.responses import (FileResponse, JSONResponse, RedirectResponse,
                                Response)
 from fastapi.staticfiles import StaticFiles
@@ -27,6 +27,7 @@ from . import banco
 from . import bitrix
 from . import cadastro
 from . import canais as registro_canais
+from . import chamado_os
 from . import chat
 from . import conversas
 from . import evolution
@@ -5040,8 +5041,40 @@ def saude(request: Request):
 # parecer erro de digitação.
 
 @app.get("/api/paineis/{painel}")
-def ver_painel(painel: str, usuario: dict = Depends(auth.requer_tela("PNL_1.1"))):
-    return paineis_mod.quadro(painel)
+def ver_painel(painel: str,
+               so_abertas: int = Query(1, ge=0, le=1),
+               usuario: dict = Depends(auth.requer_tela("PNL_1.1"))):
+    """🚨 `so_abertas` É INTERRUPTOR DE TELA, não de sistema, e por isso vem na
+    consulta e não da `CFG_7.1`: é a pergunta "quero ver as finalizadas?", que
+    cada pessoa faz a cada abertura. A razão de existir é medida — com ele
+    ligado, o Financeiro cai de 6 para 2 cards, porque OS financeira nasce
+    `Finalizado`."""
+    return paineis_mod.quadro(painel, so_abertas=bool(so_abertas))
+
+
+class DataMatrizDoPainel(BaseModel):
+    desde: str
+
+
+@app.put("/api/paineis/operacao/desde")
+def definir_desde_do_painel(
+        dados: DataMatrizDoPainel,
+        usuario: dict = Depends(auth.requer_tela("PNL_1.1"))):
+    """A data matriz do painel da Operação.
+
+    🔵 D9 dele, 29/10: *"a data inicial é somente do Owner"* e *"não vamos
+    retroagir mais do que o dia que pedi"*.
+
+    🚨 A PERMISSÃO DA TELA NÃO BASTA AQUI, e é o ponto desta rota: `PNL_1.1`
+    abre o painel para a operação inteira, e mover a data matriz muda o que
+    **todos** veem. Então a tela é de quem tem a aba e a data é do owner — a
+    mesma régua do carimbo do nome (05/10).
+    """
+    if not usuario.get("owner"):
+        raise HTTPException(
+            status_code=403,
+            detail="Só o owner muda a data inicial do painel.")
+    return paineis_mod.definir_data_matriz(dados.desde)
 
 
 # ---------------------------------------------------- formulários próprios
@@ -5061,6 +5094,31 @@ def ver_painel(painel: str, usuario: dict = Depends(auth.requer_tela("PNL_1.1"))
 # resposta.
 
 
+def _etapas_publicas(d: dict) -> list | None:
+    """As etapas da página, com os campos no nome de ORIGEM.
+
+    🚨 A TRADUÇÃO ACONTECE AQUI, e é o motivo desta função existir: as etapas
+    são escritas no `carregar_formularios.py` citando o `nosso_nome`
+    (`veiculo-e-placa-...`), porque é o único dos dois nomes que uma pessoa
+    revisa. Mas `nosso_nome` NÃO SAI para a internet -- é nome interno --, e a
+    tela casa campo por `nome`. Então o que vai no ar é o nome de origem.
+
+    ⚠️ Campo citado que não existe mais já parou na carga
+    (`formularios.gravar_definicao`); aqui ele é só ignorado, porque uma
+    etapa a menos na tela é melhor que a página inteira em branco.
+    """
+    etapas = d.get("etapas")
+    if not etapas:
+        return None
+    de_nosso = {c["nosso_nome"]: c["nome"] for c in d["campos"]}
+    saida = []
+    for etapa in etapas:
+        nomes = [de_nosso[n] for n in (etapa.get("campos") or [])
+                 if n in de_nosso]
+        saida.append({"titulo": etapa.get("titulo") or "", "campos": nomes})
+    return saida
+
+
 def _publico_do_formulario(d: dict, ip: str | None) -> dict:
     """O que a página pública pode ver -- e nada além.
 
@@ -5071,10 +5129,17 @@ def _publico_do_formulario(d: dict, ip: str | None) -> dict:
     return {
         "slug": d["slug"], "titulo": d["titulo"], "botao": d["botao"],
         "descricao": d["descricao"],
+        # 🚨 `formato` E `etapas` SAO APRESENTACAO, nao permissao nem regra:
+        # dizem a tela como se desenhar. A validacao do envio nao olha para
+        # eles -- um POST cru sem etapa nenhuma e conferido igual.
+        "formato": d.get("formato") or "classico",
+        "etapas": _etapas_publicas(d),
         "campos": [{"nome": c["nome"], "rotulo": c["rotulo"], "tipo": c["tipo"],
                     "obrigatorio": c["obrigatorio"], "multiplo": c["multiplo"],
                     "visivel": c["visivel"], "opcoes": c["opcoes"],
-                    "ajuda": c["ajuda"]}
+                    "ajuda": c["ajuda"], "validacao": c.get("validacao"),
+                    "fantasma": c.get("fantasma"), "linhas": c.get("linhas"),
+                    "fonte": c.get("fonte")}
                    for c in d["campos"]],
         "regras": [{"lista": r["lista"]} for r in d["regras"]],
         "abertura": formularios_mod.abertura(),
@@ -5090,6 +5155,61 @@ def formulario_publico(slug: str, request: Request):
     except formularios_mod.FormularioNaoExiste:
         raise HTTPException(status_code=404, detail="Formulário não encontrado.")
     return _publico_do_formulario(d, ratelimit.ip_do_cliente(request))
+
+
+@app.post("/api/publico/formulario/{slug}/cliente")
+def cliente_do_formulario_publico(slug: str, request: Request,
+                                  documento: str = Form(...),
+                                  abertura: str = Form("")):
+    """O botão *Buscar* do CNPJ. 🔵 Pedido dele, 29/10.
+
+    🚨 Devolve `{achou, nome, varios}` e NADA ALÉM -- ver
+    `formularios.cliente_por_documento`, que explica por que não chama o
+    Harmonit e por que tem teto por hora.
+
+    ⚠️ Exige o carimbo de abertura da página, como o envio: quem chama por fora
+    da nossa página é exatamente quem não queremos consultando a base.
+    """
+    ip = ratelimit.ip_do_cliente(request)
+    try:
+        formularios_mod.definicao(slug)
+    except formularios_mod.FormularioNaoExiste:
+        raise HTTPException(status_code=404, detail="Formulário não encontrado.")
+    formularios_mod.conferir_abertura(abertura)
+    return formularios_mod.cliente_por_documento(documento, ip=ip)
+
+
+@app.post("/api/publico/formulario/{slug}/placa")
+def conferir_placa_publica(slug: str, request: Request,
+                           placa: str = Form(...),
+                           abertura: str = Form("")):
+    """Esta placa está ativa na WESO? 🔵 Regra dele, 29/10.
+
+    Existe para a tela poder AVISAR na hora, em vez de deixar a pessoa
+    preencher tudo e tomar a recusa no envio. ⚠️ A recusa de verdade continua
+    sendo no POST do formulário -- aqui é só a mensagem.
+
+    🚨 Devolve `{ativa, apelido}` e nada mais: não diz de quem é a placa. Dizer
+    o cliente aqui faria desta rota um jeito de descobrir o dono de qualquer
+    placa.
+    """
+    ip = ratelimit.ip_do_cliente(request)
+    try:
+        formularios_mod.definicao(slug)
+    except formularios_mod.FormularioNaoExiste:
+        raise HTTPException(status_code=404, detail="Formulário não encontrado.")
+    formularios_mod.conferir_abertura(abertura)
+    if formularios_mod.passou_do_teto_de_buscas(ip):
+        raise operacao.DadoInvalido("Muitas consultas seguidas. Tente mais tarde.")
+    try:
+        achado = (fpsl_ponte.conferir_placas([placa]) or {}).get(placa) or {}
+    except Exception as e:  # noqa: BLE001
+        log.warning("conferir placa %r: %s", placa, e)
+        # ⚠️ "Não deu para conferir" NÃO é "inativa": a tela diz isso, e o
+        # envio segue permitido (marcado).
+        return {"conferiu": False}
+    return {"conferiu": True, "ativa": bool(achado.get("ativa")),
+            "apelido": achado.get("apelido")}
 
 
 @app.get("/api/publico/desafio")
@@ -5167,8 +5287,38 @@ async def enviar_formulario_publico(
         por_campo.setdefault(campo, []).append(guardado)
 
     limpo = formularios_mod.validar(d, enviados, por_campo)
-    r = formularios_mod.registrar(d, limpo, guardados, ip=ip)
+    # 🔵 A REGRA DELE (29/10): chamado só para placa ativa na WESO. ⚠️ Depois do
+    # `validar`, porque conferir placa de um envio que já seria recusado por
+    # outro motivo é ida à ponte por nada.
+    conferidas = formularios_mod.conferir_regra_da_placa(d, limpo)
+    r = formularios_mod.registrar(d, limpo, guardados, ip=ip,
+                                  placas_conferidas=conferidas)
     formularios_mod.registrar_envio(ip)
+
+    # 🔵 D4 dele (29/10): *"todo chamado de suporte abrirá uma OS"* — uma por
+    # placa (D3), automático no envio.
+    #
+    # 🚨 A ORDEM É DELIBERADA E O CHAMADO VEM PRIMEIRO: o `registrar` acima já
+    # gravou, e só então a OS é tentada. O pior caso desta frente é o cliente
+    # ler "recebemos" e ninguém abrir OS -- e com esta ordem a falha fica
+    # ESCRITA na linha de `solicitacao_os` e contada no painel, em vez de o
+    # chamado se perder porque o ERP estava fora do ar.
+    #
+    # 🚨 E NUNCA DERRUBA O ENVIO: `chamado_os.abrir` não estoura, por desenho.
+    # Mas o `try` fica, porque "não estoura" é promessa de código e o cliente
+    # do outro lado já leu que foi recebido -- um erro meu aqui não pode virar
+    # HTTP 500 num chamado que está no banco.
+    try:
+        aberto = chamado_os.abrir(
+            r["id"], d, limpo,
+            cliente_id=chamado_os.cliente_do_chamado(d, limpo),
+            origem="link")
+        if aberto.get("falhas"):
+            log.warning("chamado %s: %s OS nao abriram", r["id"],
+                        aberto["falhas"])
+    except Exception:  # noqa: BLE001 -- ver a advertência acima
+        log.exception("chamado %s gravado e a abertura de OS estourou", r["id"])
+
     return {"ok": True, "id": r["id"], "mensagem": r["mensagem"]}
 
 

@@ -98,6 +98,29 @@ def os_do_cliente(harmonit_id: str, meses: int = 6, abertas: bool = True) -> lis
     return dados.get("os") or []
 
 
+def placas_ativas(harmonit_id: str) -> list[dict]:
+    """As placas ativas do cliente, pelo cruzamento Harmonit x WESO do FPSL.
+
+    🚨 Erro NÃO vira lista vazia: sobe `FpslIndisponivel`, e quem chama diz
+    "não deu para consultar" em vez de "você não tem veículo" -- a mesma razão
+    de `os_do_cliente` existir aqui em vez de um `httpx.get` solto.
+    """
+    corpo = _pedir("/api/os/placas-ativas", {"cliente_id": int(harmonit_id)})
+    return corpo.get("placas") or []
+
+
+def conferir_placas(placas: list[str]) -> dict:
+    """`{placa escrita: {ativa, apelido}}`. 🔵 Regra dele: chamado só para placa
+    ativa na WESO.
+
+    🚨 Erro NÃO vira "nenhuma ativa": sobe `FpslIndisponivel`, e quem chama
+    decide -- e a decisão tomada na rota é **deixar passar marcado**, porque
+    indisponibilidade nossa não pode barrar o chamado do cliente.
+    """
+    corpo = _postar("/api/os/placas-ativas/conferir", {"placas": placas})
+    return corpo.get("placas") or {}
+
+
 def _postar(caminho: str, corpo: dict) -> dict:
     """Igual ao `_pedir`, do outro verbo. 🚨 Falha NUNCA vira sucesso mudo."""
     if not configurada():
@@ -114,7 +137,13 @@ def _postar(caminho: str, corpo: dict) -> dict:
             timeout=25.0,
         )
     except httpx.TimeoutException:
-        raise FpslIndisponivel("o FPSL não respondeu no tempo") from None
+        # 🚨 TIMEOUT NÃO QUER DIZER "NÃO GRAVOU": a escrita pode ter chegado ao
+        # Harmonit e a resposta ter se perdido na volta. O `incerto` é o que
+        # impede a retentativa cega de quem chama -- numa criação de OS, ela
+        # abriria a segunda. Quem só lê pode ignorar a marca.
+        erro = FpslIndisponivel("o FPSL não respondeu no tempo")
+        erro.incerto = True
+        raise erro from None
     except httpx.HTTPError as e:
         log.warning("falha de rede no POST %s: %s", caminho, e)
         raise FpslIndisponivel("não foi possível falar com o FPSL") from None
@@ -236,3 +265,67 @@ def clientes_com_os(meses: int = 6, abertas: bool = True) -> dict[str, int]:
         for c in (dados.get("clientes") or [])
         if c.get("cliente_id") is not None
     }
+
+
+def criar_os(*, cliente_id: int, tipo_id: int, problema_id: int,
+             situacao_id: int, prioridade_id: int, descricao: str,
+             produto_servico_id: int | None = None,
+             conferir: bool = False) -> dict:
+    """Cria a OS de análise do chamado no Harmonit, pela ponte.
+
+    🔵 Decisão D4 dele (29/10): *"todo chamado de suporte abrirá uma OS"*.
+
+    🚨 DEVOLVE `{"ok": False, "motivo": ...}` EM VEZ DE ESTOURAR, como o
+    `agendar_tecnico` e o `gravar_endereco_da_os`: o dono do chamado é este
+    lado. O cliente já leu *"recebemos"*; derrubar o envio porque o ERP está
+    fora do ar transformaria um problema nosso em chamado perdido.
+
+    🚨 `criada` NA RESPOSTA TEM TRÊS VALORES, e o terceiro é o que importa:
+    `True` nasceu · `False` não nasceu · **`None` = NÃO SE SABE**. Quem chama
+    **não pode tentar de novo** no caso `None`, ou nascem duas OS.
+
+    🚨 TIMEOUT É `None`, NÃO `False`, e foi o erro que eu quase deixei aqui:
+    *"não respondeu no tempo"* não quer dizer *"não gravou"* -- a escrita pode
+    ter chegado ao Harmonit e a resposta ter se perdido na volta. Dizer `False`
+    ali convidaria a retentativa que abre a segunda OS. É o que o `incerto` do
+    `_postar` carrega.
+
+    ⚠️ `conferir: true` é ensaio a seco: a ponte monta o corpo, devolve e NÃO
+    escreve. Foi assim que o corpo inteiro foi provado antes de a primeira OS
+    de verdade existir no ERP.
+    """
+    corpo = {
+        "cliente_id": int(cliente_id),
+        "tipo_id": int(tipo_id),
+        "problema_id": int(problema_id),
+        "situacao_id": int(situacao_id),
+        "prioridade_id": int(prioridade_id),
+        "descricao": descricao,
+        "produto_servico_id": produto_servico_id,
+        "conferir": bool(conferir),
+    }
+    try:
+        return _postar("/api/os/criar", corpo)
+    except FpslIndisponivel as e:
+        # Ver a advertência do docstring: `None` quando a escrita pode ter
+        # chegado, `False` só quando é certo que não chegou.
+        return {"ok": False,
+                "criada": None if getattr(e, "incerto", False) else False,
+                "motivo": str(e)}
+
+
+def os_por_situacao(desde: str, so_abertas: bool = True,
+                    teto: int = 600) -> dict:
+    """As OS do ERP por situação, desde a data matriz — o Bloco B.
+
+    🔵 D8 dele: o card do painel é a OS, de qualquer origem. 🔵 D9: a data
+    matriz é 24/10/2026 e só o owner a muda.
+
+    🚨 ESTOURA `FpslIndisponivel` quando a ponte cai, e NÃO devolve lista
+    vazia: quem chama é o painel, e quadro vazio por falha de rede faria o
+    operador concluir que não há trabalho — justo na hora em que há. O painel
+    pega a exceção e DIZ que está vendo menos.
+    """
+    return _pedir("/api/os/por-situacao",
+                  {"desde": desde, "so_abertas": 1 if so_abertas else 0,
+                   "teto": teto})

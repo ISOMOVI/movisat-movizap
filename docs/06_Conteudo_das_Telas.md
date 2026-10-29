@@ -6018,3 +6018,433 @@ de fazer. O filtro é `evento IS NULL`, o mesmo que a prévia da conversa já us
 | o selo na lista | `frontend/src/telas/CaixaDeEntrada.vue` — `notasDaConversa()` + `.conversa__selo--nota` |
 | o interruptor na tela | `frontend/src/telas/Notificacoes.vue` |
 | as travas | `tests/teste_aviso_nota.py` (12) · `frontend/src/aviso_nota_2810.teste.js` (10) |
+
+## 29/10 — 🔵 O FORMATO NOVO do formulário público, começando pelo SUPORTE
+
+🔵 Pedido dele, depois de abrir `forms.movisat.com.br/f/suporte`: *"ele ainda
+não passou por aqueles ajustes de UX/UI e customização, certo? igual outros,
+ajuste ele no novo formato 'etapas, logo, cor, placas, etc'"*.
+
+🚨 **"IGUAL OS OUTROS" NÃO EXISTIA.** O formato novo estava **desenhado e não
+implementado** — o `Desktop\Formularios_Movisat_Design.md` (23/10) diz, na
+terceira linha, *"nada aqui foi implementado"*, e o que havia no ar nos 15 era
+a página de 22/10: um rolo único, tokens do painel, sem logo, sem máscara e
+sem o `+`. O mockup dos quatro formulários é que existia. **Este é o
+primeiro**, e com ele entra o motor que os outros 14 vão reusar — daí a demora
+desta volta, e daí a próxima ser uma linha por formulário.
+
+### O interruptor, e por que ele existe
+
+`formulario.formato` (migração **079**) nasce **`classico` nos 15**, e só o
+**SUPORTE** está em `novo`. Ligar o próximo é acrescentar o código a
+`FORMATO_NOVO`, em `scripts/carregar_formularios.py`, e rodar a carga: **sem
+migração e sem deploy**. 🚨 Nasce desligado porque o formato novo muda a tela
+que *a internet* vê, e ele valida formulário por formulário no navegador —
+tela nova em 15 lugares de uma vez é 15 lugares para descobrir um defeito.
+
+### O que entrou, pelos blocos do plano de 23/10
+
+| Bloco | O que está no ar |
+|---|---|
+| **1 — o `+`** | repetidor em campo `multiplo`: linha, `+ Adicionar outro` (com destaque, decisão dele), `×` **desabilitado na última linha**, e `multiple` no arquivo. 🚨 **Muda o formato do gravado:** um valor vira **lista**, e quem lê aceita os dois — a hora de fazer isso era agora, com **1 solicitação** na base |
+| **3 — máscaras** | `formulario_campo.validacao`: CPF e CNPJ com **dígito verificador de verdade**, placa nos **dois padrões** (`ABC1234` e `ABC1D23`), telefone 10/11, e-mail, CEP. 🟡 O erro só aparece **depois de sair do campo** |
+| **5 — etapas** | 4 etapas no Suporte, trilho rolável, `Voltar`/`Avançar`, e *"Etapa 2 de 4"* escrito |
+| **6 — identidade** | **logo oficial, o arquivo dele**, publicada ao lado da página · base **`#021529`** · as 6 cores do catavento **só como código de etapa** · **tema claro único** · foco em **`#1B75BB`**, que não pode ser a base senão desaparece no botão escuro |
+
+🚨 **O SUPORTE NÃO TEM NENHUMA `page`** — nos outros formulários as 15 `page`
+do Bitrix *são* as etapas e nada se inventa. Aqui o agrupamento é **nosso**
+(Contrato · Seus dados · A solicitação · Veículos e anexos), e por isso mora em
+**dado** (`formulario.etapas`), onde ele revê sem mexer em código.
+
+🚨 **A CARGA RECUSA ETAPA ERRADA DOS DOIS LADOS:** campo citado que não existe
+**e pergunta que ficou fora de toda etapa**. O segundo é o perigoso — a
+pergunta simplesmente não apareceria, e o formulário seguiria aceitando envio
+com uma pergunta a menos. Tem teste próprio.
+
+🚨 **O QUE VAI GRAVADO É A FORMA CANÔNICA**, sem pontuação e em maiúscula —
+e quem manda nisso é a `validacao` do campo, não o `tipo`. **Esta frase mudou
+de lado no fim do dia, e o motivo foi um achado dele** — ver o bloco do CNPJ
+alfanumérico, no fim desta entrada.
+
+### Os três pedidos dele na mesma tarde
+
+1. 🔵 *"na primeira aba do formulário 'escolha...' não pode ser uma opção na
+   caixa de seleção, apenas esmaecido no campo"* — o `option` virou
+   `disabled hidden` e o campo fica esmaecido enquanto nada foi escolhido.
+   ⚠️ **A opção continua existindo:** sem ela o navegador mostraria a primeira
+   resposta real como se já estivesse escolhida, e a pessoa enviaria o que não
+   leu. ⚠️ Vale para **os dois formatos** — é correção de leitura, não recurso
+   do formato novo.
+2. 🔵 *"ao colocar CPF CNPJ, ter botão de buscar pelo CNPJ para preenchimento
+   automático da base do harmonit"* — botão **Buscar** no CNPJ, que preenche a
+   **Empresa**.
+   🚨 **A rota NÃO fala com o Harmonit**, e são duas razões: a página é
+   **pública** (uma rota pública conversando com o ERP ao vivo é um caminho de
+   fora para dentro dele) e a base **já está espelhada aqui** (`cliente`, 960
+   linhas, pela `CFG_3.1`).
+   🚨 **Devolve só o nome** — nem documento, nem id, nem e-mail. E mesmo assim
+   é um oráculo (*"este CNPJ é cliente?"*): tem **teto de 20 consultas/hora por
+   IP** e exige o **carimbo de abertura** da página.
+   ⚠️ **8 dos 960 clientes têm 14 zeros no `documento`** — fachada da base, não
+   CNPJ. Sem a guarda, quem digitasse zeros receberia o nome de uma empresa de
+   verdade. ⚠️ E **10 pares compartilham documento**: a tela diz *"mais de um
+   cadastro com este CNPJ"* em vez de escolher calada.
+   ⚠️ **Só no CNPJ, não no CPF:** o CPF não tem para onde preencher — a ficha
+   pede primeiro nome e sobrenome separados, e dividir o nome de alguém no
+   palpite erra sobrenome composto.
+3. 🔵 *"antes de enviar o formulário de suporte, caixa de diálogo para
+   confirmação do operador se não tiver empresa vinculada"* — modal com
+   **Continuar / Cancelar**.
+   🚨 **Modal próprio, não `window.confirm`:** o `confirm` do navegador só tem
+   *OK* e *Cancelar*, e em 21/10 ele pediu as palavras **cancelar/continuar**.
+   Palavra no botão exige modal nosso. ⚠️ Pergunta **uma vez**: confirmado,
+   envia.
+
+### A régua que não mudou
+
+🚨 **Quem recusa é o servidor.** Máscara, dígito verificador, aviso de etapa e
+o modal são **mensagem que a pessoa lê** — `formularios.validar` continua sendo
+a autoridade, e um POST cru sem etapa nenhuma é conferido igual. Segurar o
+*Avançar* não é exceção a isso: é o que impede alguém de descobrir na última
+etapa que faltou algo na primeira.
+
+### Onde está
+
+| Peça | Arquivo |
+|---|---|
+| a migração | `migracoes/079_formato_novo_do_formulario.sql` |
+| o mapa (formato, etapas, máscaras) | `scripts/carregar_formularios.py` — `FORMATO_NOVO`, `ETAPAS`, `VALIDACOES` |
+| a definição e a busca | `movizap/formularios.py` — `gravar_definicao`, `cliente_por_documento` |
+| as rotas públicas | `movizap/main.py` — `_etapas_publicas`, `/api/publico/formulario/{slug}/cliente` |
+| máscara e conferência | `frontend/src/util/validacao_campo.js` |
+| o renderizador | `frontend/src/componentes/CamposDoFormulario.vue` |
+| a página | `frontend/publico/FormularioPublico.vue` · `publico/identidade.css` · `publico/movisat_logo.png` |
+| as travas | `tests/teste_formato_novo.py` (15) · `frontend/src/formulario_novo.teste.js` (23) |
+
+**Suítes:** **1865 Python** · **540 JS**, as duas verdes.
+
+### 🔴 O que falta — e é dele
+
+1. **Validar no navegador e no celular** — `forms.movisat.com.br/f/suporte`.
+   🚨 `M9`: em 21/10 ele tirou **sete apontamentos** com 1572 testes verdes.
+2. **Mandar ligar os outros 14** (um a um ou de uma vez) — e, onde houver
+   `page`, revisar se as etapas do Bitrix servem como estão.
+3. **A Etapa 2 não existe ainda** — o botão na conversa do MoviZap, que traz o
+   cliente vinculado já preenchido. O renderizador **já aceita** campo travado
+   (`travados`, com o rótulo *"Veio do cadastro desta conversa"*), e é esse
+   caminho que vai reusar o modal de "sem empresa vinculada". O que não existe
+   é o botão.
+4. **Decidir o `problemaId`** — sem ele o botão de criar OS não nasce, e sem OS
+   o card não sai da coluna "Sem OS" do `PNL_1.1`.
+
+### 🚨 O CNPJ ALFANUMÉRICO — achado dele, colando na tela
+
+🔵 *"tentei colar WQ0P6GLD000108, deve permitir todos os formatos para CNPJ bem
+como alfanuméricos, como os novos formatos"* · *"podem colar somente numero ou
+. e - e / tbm"*.
+
+🚨 **O defeito era meu, e era de suposição: eu tratei CNPJ como número.** Desde
+2026 o CNPJ tem **12 posições alfanuméricas + 2 dígitos**, e o valor de cada
+caractere na conta do DV é o **ASCII menos 48** — `0`–`9` dão o próprio número
+e `A` dá 17, então o CNPJ antigo passa pela **mesma** conta. Fiz a verificação
+à mão antes de mexer: **`WQ0P6GLD000108` tem DV `08` e a conta devolve `08`**.
+É CNPJ **válido**, está na nossa base (Pastelaria Velasco) — e as **duas**
+pontas o recusavam:
+
+| Onde | Como recusava |
+|---|---|
+| a tela | regex de `\d` na máscara e no DV → o botão **Buscar ficava travado** |
+| 🚨 **o servidor** | o campo CNPJ é `double` no Bitrix, e `float("WQ0P6GLD000108")` estoura → o envio responderia *"informe um número"* **num CNPJ correto** |
+
+**O conserto, nos dois lados:**
+- a **`validacao` do campo passou a valer mais que o `tipo`** — quando o campo
+  diz qual documento é, é o documento que manda, não o tipo herdado do Bitrix;
+- máscara **posicional** (`WQ.0P6.GLD/0001-08`), não "de número";
+- DV pela regra nova, com a repetição total (`00000000000000`) ainda fora —
+  ela passaria no módulo 11;
+- **todos os formatos de colagem** dão o mesmo valor gravado: só dígitos, com
+  ponto, com barra, com traço, com espaço, maiúsculo ou minúsculo;
+- o **casamento da busca é canônico dos dois lados** — na base há documento com
+  letra e a pontuação varia, então comparar texto cru perderia o cliente por
+  causa de um ponto.
+
+⚠️ **E um defeito meu que veio no mesmo pacote: a placa.** Eu canonizava o
+campo *"Veículo e Placa — um por linha"*, então `SAVEIRO ABC1234` virava
+`SAVEIROABC1234`. Agora a placa **não é reescrita**: a conferência **procura**
+uma placa dentro do texto, e `SAVEIRO BRANCA` (sem placa) é que recebe o aviso.
+
+⚠️ **Um teste mudou de lado**, e isso está escrito dentro dele: a primeira
+versão provava que o servidor **recusava** documento mascarado. Agora prova que
+ele **canoniza**. O servidor segue garantindo o **formato** (quantos
+caracteres); o **dígito verificador** é frase na tela, e passar a recusar por DV
+no servidor é mudança de régua — 🔴 decisão dele.
+
+### 🔵 Os seis ajustes dele no Suporte, e a frota do cliente (29/10, 2ª volta)
+
+Palavras dele, item por item:
+
+| # | Pedido | Como ficou |
+|---|---|---|
+| 1 | *"na aba 2, somente 1 caixa para o nome já serve"* | **sai `sobrenome`**; `primeiro-nome` passa a *"Nome completo"* |
+| 2 | *"no campo do telefone, deixar em fantasma o modelo de preenchimento `(00) 123456789`"* | `fantasma` no campo; o espaço e o traço a tela põe sozinha ao digitar |
+| 3 | *"vamos mudar as opções do 'Tipo de solicitação', pois são do bitrix e não nos satisfazem mais"* | **4 opções, em ordem alfabética** |
+| 4 | *"o assunto já é o próprio tipo de solicitação"* | **sai o campo `assunto`** |
+| 5 | *"o campo detalhe a ocorrência pode ser um pouco mais alto"* | `linhas = 6` (o campo é `string` no Bitrix, era uma linha) |
+| 6 | *"já podemos trazer no campo de veículo placa os veículos que ele tem ativo na Weso"* + *"ter um botão de 'meu veículo não está na lista'"* | frota marcável + o botão, com as palavras dele |
+
+**As 4 opções novas** (`valor` nosso, não o id do Bitrix):
+`backup` Acesso ao Backup de dados · `veiculo` Problemas com o veículo ·
+`rastreamento` Problemas com rastreamento · `sugestao` Sugestão de melhoria.
+
+🚨 **SAÍRAM 8 OPÇÕES DO BITRIX, e com elas morre uma pendência:** os **dois
+"Backup"** (ativação e desativação) não tinham candidato em nenhum dos 24
+problemas do Harmonit — era a pendência nº 2 da ponte. Viraram **uma**, "Acesso
+ao Backup de dados". O sub-mapa do Suporte que estava em aberto passa a ser de
+**4 linhas**, não de 12.
+
+🚨 **TROCAR A LISTA É TROCAR O QUE O SERVIDOR ACEITA:** `1348` ("Problema de
+software") deixou de existir, e um link antigo ou um POST guardado é **recusado**
+em vez de gravar valor morto. Tem teste.
+
+🚨 **O `nosso_nome` SAI DO RÓTULO, e essa é a armadilha silenciosa desta
+volta.** Trocar o rótulo antes do cálculo renomearia o campo — *"Primeiro
+Nome"* viraria `nome-completo` — e as tabelas `ETAPAS` e `VALIDACOES`, que
+citam `primeiro-nome`, apontariam para um campo que não existe. O ajuste de
+rótulo entra **depois**, e há teste para que não volte.
+
+#### A frota: duas bases, e nenhuma responde sozinha
+
+Ele lembrou certo — *"se não me engano temos uma rotina que roda isso"*. Mas a
+WESO sozinha não serve, e isso estava medido desde 23/10:
+
+| Base | Tem placa | Tem cliente | Tem apelido |
+|---|---|---|---|
+| **Harmonit** (`harmonit_veiculos`) | **9.114** | ✅ `clienteId` | ⚠️ só o modelo |
+| **WESO** (`weso_equipamentos`) | **1.998** | 🚨 **não tem** | ✅ "SAVEIRO / BRUNO" |
+
+O Harmonit diz **de quem** é a placa; estar na WESO é o que significa
+**ativa** (é quem tem rastreador instalado); a WESO dá o **apelido**. A lista é
+o **cruzamento**, e por isso nasceu no **FPSL** — é lá que as duas bases vivem.
+
+- **FPSL:** `GET /api/os/placas-ativas?cliente_id=` (em `os_ponte.py`).
+- **MoviZap:** `fpsl_ponte.placas_ativas()`, e as placas voltam **junto com a
+  busca do CNPJ** — uma ida ao servidor, não duas.
+- Medido ao vivo: cliente **886302** (MOTO HELP) → **77 placas** com apelido.
+- ⚠️ A chave de placa é normalizada dos dois lados (maiúscula, sem espaço e sem
+  traço): em 23/10 o cruzamento deu **95%**, e parte do que faltava era espaço
+  no meio da placa.
+
+🚨 **LISTA VAZIA E PONTE FORA DO AR SÃO COISAS DIFERENTES**, e a tela diz qual
+é: *"não consegui consultar seus veículos agora"* ≠ *"não encontrei veículo
+ativo neste cadastro"*. Nos dois casos sobra o campo de digitar — mas o que se
+digita é **conferido**, ver a regra da placa no fim desta entrada.
+
+⚠️ **Marcar e desmarcar não embaralha o que foi digitado à mão** — a conta é
+por posição dentro das digitadas, e tem teste, porque esse é o tipo de defeito
+que só aparece com o cliente preenchendo.
+
+⚠️ **O que a resposta pública passou a conter:** o nome do cliente **e as
+placas ativas dele**. Quem souber o CNPJ (que é público) vê a frota ativa. O
+`harmonit_id` continua fora. 🔴 **Se isso não estiver bom, é uma linha para
+restringir ao caminho autenticado** — ele pediu os dois caminhos
+explicitamente (*"se for pelo movizap, já tem como trazer e se for manual, tbm
+já tem a esse ponto"*), e fica registrado aqui para ele poder rever.
+
+### 🚨 A REGRA DA PLACA — e um erro meu de método
+
+🔵 **Ele, em uma linha:** *"só é possível abrir chamados para placas ativas na
+weso. o match é basicamente de 100% mesmo. essa é a regra"*.
+🚨 **E, logo depois:** *"a regra sempre foi essa, voce quem decidiu algo sem
+perguntar e acabou fazendo trabalho atoa"*.
+
+**Ele está certo, e o erro não foi de código, foi de método:** eu escrevi, em
+três arquivos, que *"a lista sugere, nunca restringe"* e que *"lista nossa
+incompleta não pode barrar chamado"*. **Ninguém me disse isso.** Eu inferi de
+uma medição minha (95% de casamento) e tratei a inferência como decisão — numa
+frente em que ele já havia dito *"primeiro proposta, depois ação"*. A regra do
+negócio é dele; medição não vira regra sozinha.
+
+⚠️ **E a medição que eu usei para me convencer estava grosseira.** Refeita em
+29/10, normalizando a placa dos dois lados, nas 1.998 linhas da WESO:
+
+| | quantas | o que são |
+|---|---|---|
+| casam com o Harmonit | **1.918** | frota com dono conhecido |
+| **não são placa** | **50** | a coluna `placa` da WESO tem **chassi e número de série** (`9BM951104TB416686`, `292054068`) |
+| placa que o Harmonit não tem | **30** | placa de verdade, sem `clienteId` para cruzar |
+
+Entre as que **são** placa: **1.918 de 1.948 = 98,5%**. Os 80 restantes são
+**dado sujo de um lado**, não cliente de fora — e é isso que torna verdadeira a
+frase dele sobre "basicamente 100%". O meu *"1 em 20 vai digitar"* não batia com
+o dado.
+
+**Como a regra ficou implementada:**
+- a rota de envio **recusa** placa que não está ativa na WESO, com frase que diz
+  o que fazer: *"Só conseguimos abrir chamado para veículo com rastreador ativo
+  [...] Confira a placa ou fale com a Movisat pelo WhatsApp"*. ⚠️ *"Placa não
+  permitida"* deixaria a pessoa sem saída — ela não sabe o que é a WESO;
+- a tela **avisa ao sair do campo**, para ninguém preencher tudo e tomar a
+  recusa no fim — mas quem recusa continua sendo o servidor;
+- quem responde *"ativa?"* é a **WESO sozinha** (`POST
+  /api/os/placas-ativas/conferir`), **sem o Harmonit**: a outra rota cruza as
+  duas para saber **de quem** é a placa, e exigir isso aqui recusaria as 30
+  órfãs — que, pela regra dele, podem abrir chamado;
+- 🚨 **ponte fora do ar DEIXA PASSAR, marcado** (`placas_conferidas = false`,
+  migração **081**). Recusar o chamado por indisponibilidade nossa transformaria
+  o nosso problema no problema do cliente, e ele não tem como consertar;
+- ⚠️ **o botão *"Meu veículo não está na lista"* continua**, com papel novo: é
+  o caminho das 30 órfãs e de quem não foi identificado pelo CNPJ. O que se
+  digita ali é **conferido**, não aceito.
+
+🔴 **O que fica para ele decidir:** os **50 registros cujo campo `placa` tem
+chassi**. Se o veículo de um desses clientes precisar de chamado, a placa não
+vai constar como ativa e a rota vai recusar — a saída é limpar a WESO ou abrir
+uma exceção. **Não inventei a exceção**; está aqui como pergunta.
+
+#### 🔵 A pergunta dele sobre a Etapa 2, respondida
+
+*"Se já tiver sido pego do Movizap, pela conversa que vamos criar o botão
+ainda, essas 2 já virão preenchidas com os dados do cliente vinculado — só
+valide rapidamente se satisfaz"*.
+
+**Satisfaz, e as peças existem:** o renderizador já aceita `travados` (campo
+preenchido e não editável, com o rótulo *"Veio do cadastro desta conversa"*),
+e a conversa já tem `cliente_id`/`contato_id` — é o mesmo vínculo que
+`formularios.registrar` grava na solicitação. O que **falta é o botão na
+conversa**, que é a Etapa 2 e não existe ainda.
+⚠️ **Um detalhe a decidir quando ela nascer:** o contato da conversa tem
+**nome e telefone**, mas **e-mail é do cliente, não do contato** — então o
+e-mail pode vir vazio mesmo com cliente vinculado, e aí o campo não pode
+nascer travado. 🔴 Decisão dele na hora.
+
+**Suítes depois desta volta:** **1874 Python** · **550 JS** · **46** na ponte
+do FPSL.
+
+### 🔵 AS 17 SITUAÇÕES DA OS, e o painel ajustado a elas (29/10, 3ª volta)
+
+🔵 Ele mandou a lista e disse *"as situações já estão na Ordem"* — e a ordem é o
+**fluxo da operação**, que passou a ser a ordem das colunas.
+
+**O catálogo do Harmonit foi ajustado para as 17**
+(`fpsl_weso/ajustar_situacoes_os.py`): **11 renomeadas, 6 criadas, nenhuma
+excluída, nenhuma sobrando**.
+
+| # | id | Situação | o que foi |
+|---|---|---|---|
+| 1 | **38** | Novo Solicitação 1ª | era *Nova sollicitação* (280 OS) |
+| 2 | **16487** | Pendente de ação da Movisat | 🆕 |
+| 3 | **251** | Configurar equipamentos e Sistemas | era *Configuração* |
+| 4 | **16488** | Entrega de materiais prontos | 🆕 |
+| 5 | **677** | Enviar por correio/transportadora | era *Envio dos Equipamentos* (4 OS) |
+| 6 | **15747** | Aguardando recebimento via correio/transportadora | era *Aguardando Chegada do Fornecedor* |
+| 7 | **15797** | Rescisão Aguardando Aviso Prévio | era *Aguardando aviso prévio* |
+| 8 | **890** | Agendar serviço | era *Agendamento* (5 OS) |
+| 9 | **16489** | Confirmação agendamento | 🆕 |
+| 10 | **1316** | Serviço Agendado | igual (17 OS) |
+| 11 | **15696** | Aguardando devolução de equipamento | era *Aguardando Devolução do Equipamento* |
+| 12 | **16490** | Analise de Equipamentos Retornados | 🆕 |
+| 13 | **15694** | Atendimento finalizado | era *Serviço Realizado* (19 OS) |
+| 14 | **16491** | Não atendido | 🆕 |
+| 15 | **15746** | Financeiro | igual (99 OS) |
+| 16 | **15695** | Pós venda | era *Pós Venda* |
+| 17 | **16492** | Contratual | 🆕 |
+
+🚨 **RENOMEAR NÃO MEXE EM OS NENHUMA:** a OS guarda o `situacaoId` (número),
+nunca o nome. As 424 OS que estão nessas situações seguem onde estavam.
+🚨 **E NADA FOI EXCLUÍDO**, de propósito: excluir uma situação com OS pendurada
+deixaria OS apontando para id inexistente. O que ficar fora das 17 apenas deixa
+de ser coluna.
+
+🔵 **As duas escolhas que eram dele, e que eu perguntei em vez de supor:**
+- a **677** (4 OS) é *"Enviar por correio/transportadora"*, e *"Entrega de
+  materiais prontos"* nasceu nova;
+- a **15694** (19 OS) virou *"Atendimento finalizado"*. 🚨 **Ela é a porta do
+  Painel Financeiro do FPSL** — a rotina de conferência dispara nesse id. O
+  **id não mudou**, então o FPSL segue funcionando; o que mudou é o nome que a
+  operação lê. ⚠️ O `docs/fpsl/30_Painel_Financeiro.md` ainda cita *"15694
+  Serviço Realizado"*: fica como pendência de texto, não de código.
+
+#### O painel: 17 colunas e mais nada
+
+🔵 *"qualquer aba fora dessas não deve estar no painel"* — **saíram "Sem OS" e
+"Sem situação"**, e o motivo de cada uma caiu no mesmo dia:
+- **"Sem OS"** existia porque a OS nascia **por botão** (decisão de 23/10). Ele
+  mudou: *"todo chamado de suporte abrirá uma OS"*, **automático no envio**;
+- **"Sem situação"** existia pelas 164 OS com `situacao_id` 0 ou nulo. ⚠️ Aquelas
+  são OS de **outras origens**, não solicitações deste painel.
+
+🔵 *"os comentários tbm devem sumir dali"* — saíram os três textos: o aviso de
+que mover não existe, a lista de formulários com a contagem de campos, e o
+cartão de *"nenhuma solicitação chegou ainda"*. ⚠️ **O comportamento não
+mudou:** `pode_mover` segue falso e não há gesto de arrastar.
+
+🚨 **MAS NADA SOME DA TELA EM SILÊNCIO** (`M12`). Solicitação sem OS (a escrita
+no Harmonit falhou) ou com situação fora das 17 não cabe em coluna nenhuma —
+então o quadro devolve `fora_do_quadro` e a tela escreve **uma linha**, com o
+número cru da situação desconhecida. **Com zero, não escreve nada** — hoje o
+painel fica limpo, que é o que ele pediu.
+
+⚠️ **E nenhuma coluna é fixa agora:** as duas que nunca colapsavam eram
+justamente as que saíram. Vazia nasce colapsada, com o contador à vista.
+
+⚠️ **Correção de um número meu:** eu disse nesta sessão que a única solicitação
+da base (a **39**, de teste) era do **Suporte**. Ela é do **CES** — portanto de
+*Pós venda*, e nunca apareceu neste painel. O painel da Operação está em zero
+desde que nasceu.
+
+#### 🔴 O que falta — a OS que o chamado abre
+
+Ele definiu tudo, e **nada disso está implementado ainda**:
+
+| Campo | Valor |
+|---|---|
+| `tipoId` | **1783** Solicitação de Cliente (de dentro do MoviZap) · **1782** Demanda Interna (link público) |
+| `problemaId` | **12760 ANÁLISE OPERACIONAL** ✅ já existe no catálogo — não precisa criar |
+| `situacaoId` | **38** Novo Solicitação 1ª |
+| `produtoServicoId` | **670990** ABERTURA DE OS |
+| `descricaoDetalhada` | a observação do formulário |
+| quantas OS | 🚨 **uma por placa, por cliente** |
+
+🚨 **DUAS DECISÕES DELE MUDARAM AS DE 23/10, e ele confirmou as duas quando eu
+perguntei:**
+1. **uma OS por placa**, não mais *"somente 1 OS para análise"* por envio;
+2. **criação automática no envio**, não mais por botão.
+
+⚠️ **O que a mudança 2 traz, e está registrado porque não é hipótese:** o
+formulário é **público**. A isca invisível, o tempo mínimo de abertura, o teto
+de 5 envios/hora por IP e a conta de somar continuam sendo as únicas camadas
+entre a internet e a criação de OS no ERP — antes elas protegiam uma linha no
+banco; agora protegem o ERP.
+
+🔴 **Falta construir:** a rota de **criar OS** na ponte do FPSL
+(`SalvarOrdemServico` com `id: 0`, pelo caminho provado do
+`os_ponte._corpo_de_escrita`), a chamada dela no envio do formulário, e o
+desenho do **card** — que ele pediu que fosse *"um resumo de consulta super
+rápido para a OS que foi aberta junto com o chamado"*, e aceita mockup.
+
+### 📘 O PLANO desta frente vive em `docs/16_Pipeline_da_Operacao.md`
+
+🔵 Pedido dele no fim do dia: *"proponha o plano e documente ele certinho com o
+que avançamos e com o que falta para continuar depois"*.
+
+O arquivo novo tem: o que avançou em 29/10 (com as medições), as **12 decisões
+dele** desta volta, os **6 blocos** na ordem de dependência (criar a OS · montar
+os cards das OS que já existem · o tempo por etapa · mover o card · o card
+aberto · o espelho da OS) e as **9 pendências dele**.
+
+🚨 **Não duplicar a lista aqui nem no `Proximos_Passos`**: este arquivo é diário
+(entrada datada não se reescreve) e o `Proximos_Passos` aponta para lá. O plano é
+o único lugar onde o estado desta frente se mantém atualizado.
+
+Três coisas que o plano registra e que não estavam escritas em lugar nenhum:
+
+1. 🚨 **o Harmonit não registra a situação na linha do tempo**, só o `status` —
+   medido em três OS (17043, 17045, 17046), 2 a 3 eventos cada. O tempo por
+   etapa é nosso, carimbado na passagem;
+2. 🚨 **não existe link por OS** no Harmonit web: `/Manager/OrdemServico`
+   responde 200 e redireciona para `/Account/Login`, e a OS abre por postback —
+   a URL não muda, como ele mesmo notou. É isso que justifica o espelho no card;
+3. ⚠️ **`dataPrevisao` É a data de criação** (12 de 12 conferidas contra a linha
+   do tempo, mesmo minuto) — **mas** a frente do aviso prévio, que ele desenhou
+   em 23/10, vai movê-la em +90 dias. Então ela serve de data de criação **hoje**
+   e deixa de servir no dia em que aquela frente entrar.

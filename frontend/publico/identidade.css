@@ -1,0 +1,67 @@
+/* ============================================================================
+   A identidade da Movisat na página pública — o Bloco 6 do plano de 23/10.
+   ----------------------------------------------------------------------------
+   🔵 DUAS REGRAS DELE, 23/10, que não se reinterpretam:
+        *"não pode mudar nossa logo, deve usar o arquivo que mandei"*
+        *"o tema deve ser claro com base na cor: #021529, pode usar até como
+          base padrão nas demais tbm"*
+
+   🚨 ISTO NÃO REDEFINE OS TOKENS DO PAINEL, e é de propósito: as cores entram
+   sob `.pagina--novo`, não em `:root`. Um `:root` aqui repintaria também os 14
+   formulários que seguem no formato clássico -- e eles estão no ar. Quando ele
+   validar este no navegador e mandar ligar os outros, muda uma linha na carga
+   (`FORMATO_NOVO`) e cada um passa a entrar nesta classe. O painel é outro
+   bundle e não é alcançado por este arquivo de jeito nenhum.
+
+   🚨 TEMA CLARO ÚNICO, por decisão dele. NÃO existe bloco de tema escuro aqui,
+   e isso não é omissão: é escolha. Quem mexer depois não deve "consertar"
+   acrescentando o escuro.
+
+   🚨 O FOCO NÃO PODE SER A BASE. `--acento` é `#021529`, e o botão primário
+   tem esse fundo: um contorno de foco da mesma cor desapareceria exatamente
+   no controle mais importante da página. O foco é o azul do logo, `#1B75BB`.
+   ============================================================================ */
+
+.pagina--novo {
+  color-scheme: light;
+
+  /* A base, e o que deriva dela */
+  --acento:        #021529;  /* texto de ação, botão primário, borda marcada */
+  --acento-hover:  #0C2A47;  /* estado de passagem -- a base clara */
+  --acento-suave:  #E8EDF3;  /* fundo do botão "adicionar outro" */
+  --acento-borda:  #B9C5D3;
+  --acento-texto:  #FFFFFF;  /* texto POR CIMA da base */
+
+  --fundo:        #F1F5F9;   /* tom frio derivado da base */
+  --superficie:   #FFFFFF;
+  --superficie-2: #F1F5F9;
+  --superficie-3: #E2E8F0;
+
+  --borda:        #D8E0E9;
+  --borda-forte:  #B9C5D3;
+
+  --texto:        #021529;
+  --texto-fraco:  #4A5A6B;
+  --texto-apagado:#7E8C9B;
+
+  /* ⚠️ O vermelho é o DO LOGO, não um vermelho qualquer: erro e obrigatório
+     falam a mesma língua da marca. */
+  --erro:       #C4203F;
+  --erro-suave: #FDF2F4;
+}
+
+/* 🚨 O CONTORNO DE FOCO É VISÍVEL E NÃO É A BASE. Quem preenche no teclado --
+   e quem usa leitor de tela -- precisa ver onde está. */
+.pagina--novo :is(input, select, textarea, button):focus-visible {
+  outline: 2px solid #1B75BB;
+  outline-offset: 2px;
+}
+
+/* ⚠️ Respeita quem pediu menos movimento no sistema. */
+@media (prefers-reduced-motion: reduce) {
+  .pagina--novo * {
+    animation: none !important;
+    transition: none !important;
+    scroll-behavior: auto !important;
+  }
+}

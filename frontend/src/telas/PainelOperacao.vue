@@ -9,18 +9,21 @@
    situação da OS, por isso o painel e consulta para atualizar a situação no
    painel"*.
 
-   🚨 MOVER AINDA NÃO EXISTE, E A TELA DIZ ISSO. A rota que escreve
-   `situacaoId` no Harmonit é da volta seguinte e depende de uma decisão dele.
-   Enquanto não existir, não há `draggable` nenhum: oferecer o gesto e não
-   gravar seria pior que não ter o gesto. É o precedente do `ModalAgendar`, que
-   explica em vez de sumir.
+   🚨 MOVER AINDA NÃO EXISTE. A rota que escreve `situacaoId` no Harmonit é da
+   volta seguinte; enquanto não existir, não há `draggable` nenhum, porque
+   oferecer o gesto e não gravar é pior que não ter o gesto. ⚠️ Em 29/10 ele
+   mandou TIRAR a frase que explicava isso na tela (*"os comentários tbm devem
+   sumir dali"*) -- o comportamento não mudou, só o texto saiu.
 
-   🚨 COLUNA VAZIA NASCE COLAPSADA, com o contador à vista — são 13 colunas, e
-   nenhuma tela mostra 13 colunas sem rolar. É o que o kanban do FPSL já faz
-   com a coluna "Pago". ⚠️ As duas primeiras ("Sem OS" e "Sem situação")
-   nunca colapsam: a primeira é de onde a OS nasce, e a segunda existe porque
-   **164 das 574 OS do Harmonit não estão em nenhuma das 11 situações**
-   (medido em 22/10). Esconder essas duas seria esconder justamente o que há.
+   🚨 SÃO 17 COLUNAS, E A ORDEM É A DELE (29/10): *"as situações já estão na
+   Ordem"*. A ordem é o fluxo da operação, não alfabética nem por id, e ela
+   vive numa tupla só, em `movizap/paineis.py`.
+
+   🚨 COLUNA VAZIA NASCE COLAPSADA, com o contador à vista — são 17 colunas, e
+   nenhuma tela mostra 17 sem rolar. É o que o kanban do FPSL já faz com a
+   coluna "Pago". ⚠️ Nenhuma é fixa agora: as duas que nunca colapsavam ("Sem
+   OS" e "Sem situação") SAÍRAM em 29/10 -- *"qualquer aba fora dessas não deve
+   estar no painel"*.
 
    🚨 A COR NUNCA É O ÚNICO PORTADOR: o estado da solicitação vem escrito na
    etiqueta, e a situação vem escrita no card. É a regra do quadro de demandas
@@ -38,18 +41,27 @@ const carregando = ref(true)
 const erro = ref('')
 const abertas = ref({})
 
-/* As duas que nunca colapsam. */
-const SEMPRE_ABERTAS = ['sem_os', 'sem_situacao']
+
+/* 🔵 D9: o interruptor nasce LIGADO -- ver o comentário no `template`. */
+const soAbertas = ref(true)
+
+/* Só o dia, sem hora: a data matriz é um corte de calendário. */
+function dia(iso) {
+  if (!iso) return '—'
+  const [a, m, d] = String(iso).split('-')
+  return (d && m && a) ? `${d}/${m}/${a}` : iso
+}
 
 async function carregar() {
   carregando.value = true
   erro.value = ''
   try {
-    quadro.value = await api.get('/api/paineis/operacao')
+    quadro.value = await api.get(
+      `/api/paineis/operacao?so_abertas=${soAbertas.value ? 1 : 0}`)
     for (const coluna of quadro.value.colunas) {
-      /* Vazia nasce fechada; com card, aberta. */
-      abertas.value[coluna.chave] = SEMPRE_ABERTAS.includes(coluna.chave)
-        || coluna.total > 0
+      /* Vazia nasce fechada; com card, aberta. ⚠️ Nenhuma é fixa desde
+         29/10 -- as duas que não eram situação saíram do painel. */
+      abertas.value[coluna.chave] = coluna.total > 0
     }
   } catch (e) {
     erro.value = e instanceof ErroDeApi ? e.message : 'Não consegui ler o painel.'
@@ -59,7 +71,6 @@ async function carregar() {
 }
 
 function alternar(coluna) {
-  if (SEMPRE_ABERTAS.includes(coluna.chave)) return
   abertas.value[coluna.chave] = !abertas.value[coluna.chave]
 }
 
@@ -69,12 +80,77 @@ function abrirSolicitacao(card) {
   router.push({ path: '/solicitacoes', query: { solicitacao: card.id } })
 }
 
-const vazio = computed(
-  () => Boolean(quadro.value) && quadro.value.total === 0)
+/* 🚨 O QUE NÃO TEM COLUNA, DITO EM UMA LINHA -- e só quando existe.
+   Solicitação sem OS (a escrita no Harmonit falhou) ou com situação fora das
+   17 não cabe em coluna nenhuma, e sumir da tela é o defeito que esta casa
+   chama de `M12`. Com zero, esta linha não aparece: hoje o painel fica limpo,
+   que é o que ele pediu em 29/10. */
+const fora = computed(() => {
+  const f = quadro.value?.fora_do_quadro
+  if (!f || (!f.sem_os && !f.situacao_fora && !f.os_falhou
+             && !f.sem_tentativa)) return ''
+  const partes = []
+  /* 🚨 "SEM OS" SÃO TRÊS CASOS, E A TELA CHAMAVA TODOS DE FALHA -- achado por
+     ele em 29/10, na tela, minutos depois de o painel subir: a solicitação
+     544 nunca teve escrita tentada (é de 13:06, e o Bloco A subiu às 15:30),
+     e a frase a acusava de erro do Harmonit.
+
+     ⚠️ A ORDEM É DELIBERADA: o caso benigno primeiro, o que pede ação depois,
+     e a sobra no fim. E a sobra EXISTE de propósito -- uma linha preparada e
+     nunca tentada não cai em nenhuma das duas contas, e deixá-la desaparecer
+     entre as frases seria o mesmo defeito outra vez, mais fundo. */
+  if (f.sem_tentativa) {
+    partes.push(`${f.sem_tentativa} ${f.sem_tentativa === 1 ? 'chamado' : 'chamados'}`
+      + ` sem OS, de antes de a abertura ser automática`)
+  }
+  if (f.os_falhou) {
+    partes.push(`${f.os_falhou} ${f.os_falhou === 1 ? 'OS não abriu' : 'OS não abriram'}`
+      + ` em ${f.os_falhou_chamados} ${f.os_falhou_chamados === 1 ? 'chamado' : 'chamados'}`
+      + (f.os_falhou_em ? ` (última tentativa ${quando(f.os_falhou_em)})` : ''))
+  }
+  const explicados = (f.sem_tentativa || 0) + (f.os_falhou_chamados || 0)
+  if (f.sem_os > explicados) {
+    partes.push(`${f.sem_os - explicados} sem OS e sem motivo registrado`)
+  }
+  if (f.situacao_fora) {
+    partes.push(`${f.situacao_fora} com situação fora das 17`
+      + (f.situacoes.length ? ` (${f.situacoes.join(', ')})` : ''))
+  }
+  return partes.join(' · ')
+})
 
 function quando(iso) {
   if (!iso) return '—'
   return new Date(iso).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })
+}
+
+/* 🔵 AS 6 CORES DO CATAVENTO, como código de etapa — do mockup que ele
+   aprovou. Ciclam pelas 17 colunas, na ordem do fluxo.
+
+   🚨 A COR NUNCA É O ÚNICO PORTADOR, e é regra desta casa: o nome da etapa e
+   o número da situação no Harmonit continuam escritos em cada coluna. Quem não
+   distingue as cores perde a decoração, nunca a informação. */
+const CORES_DA_ETAPA = [
+  '#8CC63F', '#FFC20E', '#F07F13', '#C4203F', '#1B75BB', '#41BFE8',
+]
+
+function corDaEtapa(i) {
+  return CORES_DA_ETAPA[i % CORES_DA_ETAPA.length]
+}
+
+/* "há 2 dias", "hoje" — o que o card do mockup mostra no canto.
+   ⚠️ É O TEMPO DESDE A ABERTURA, não o tempo na etapa: o tempo por etapa não
+   existe no Harmonit (a linha do tempo registra só o `status`) e é o Bloco C
+   desta frente. Escrever "nesta etapa" aqui seria a tela afirmando o que
+   ninguém mediu. */
+function ha(iso) {
+  if (!iso) return ''
+  const quandoFoi = new Date(iso)
+  if (Number.isNaN(quandoFoi.getTime())) return ''
+  const dias = Math.floor((Date.now() - quandoFoi.getTime()) / 86400000)
+  if (dias <= 0) return 'hoje'
+  if (dias === 1) return 'há 1 dia'
+  return `há ${dias} dias`
 }
 
 const ROTULO_ESTADO = {
@@ -92,64 +168,98 @@ onMounted(carregar)
         <AjudaDaTela>
           As solicitações dos formulários da <strong>Operação</strong> (Suporte,
           Demonstração, Teste gratuito e Credenciamento técnico), em colunas
-          pela <strong>situação da OS no Harmonit</strong>. Quem nunca virou OS
-          fica na primeira coluna, e é de lá que a OS nasce.
+          nas <strong>17 situações da OS no Harmonit</strong>, na ordem do
+          fluxo da operação. A OS nasce junto com o chamado, na primeira
+          situação.
         </AjudaDaTela>
       </div>
       <button class="botao botao--contorno" type="button" @click="carregar">Atualizar</button>
+
+        <!-- 🔵 D9 dele: a data matriz. A tela DIZ desde quando está montando,
+             porque "o painel está vazio" e "o painel começa em 24/10" são
+             respostas diferentes para a mesma tela vazia.
+             ⚠️ Mudar a data é do OWNER (a rota recusa com 403), e por isso
+             aqui ela é só TEXTO -- botão que o servidor recusa é pior que
+             botão nenhum. -->
+        <span v-if="quadro" class="painel__desde">
+          desde {{ dia(quadro.desde) }}
+        </span>
+
+        <!-- 🚨 O INTERRUPTOR DAS FINALIZADAS, e o motivo de ele existir é
+             medido: com ele ligado o Financeiro cai de 6 para 2 cards, porque
+             OS financeira nasce `Finalizado`. Sem o interruptor, quem procura
+             uma OS finalizada concluiria que ela não existe. -->
+        <label class="painel__interruptor">
+          <input type="checkbox" v-model="soAbertas" @change="carregar">
+          <span>só as abertas</span>
+        </label>
     </header>
 
     <p v-if="erro" class="aviso aviso--erro" role="alert">{{ erro }}</p>
     <p v-if="carregando" class="apagado">Lendo…</p>
 
     <template v-if="quadro">
-      <p v-if="!quadro.pode_mover" class="aviso aviso--info">
-        <i class="bi bi-info-circle aviso__icone" aria-hidden="true"></i>
-        <span>{{ quadro.porque_nao_move }}</span>
-      </p>
-
-      <p class="apagado pequeno formularios">
-        <span v-for="f in quadro.formularios" :key="f.codigo">
-          {{ f.titulo }} <small>· {{ f.campos }} campos{{ f.ativo ? '' : ' · fora do ar' }}</small>
-        </span>
-      </p>
-
-      <p v-if="vazio" class="aviso aviso--atencao">
-        <i class="bi bi-inbox aviso__icone" aria-hidden="true"></i>
+      <!-- 🚨 A PONTE CAÍDA É O PRIMEIRO AVISO, acima de todos os outros, e
+           com cara de erro: sem ela o quadro mostra só o que o nosso banco
+           sabe, e hoje isso são 2 cards em vez de 10. Quadro pequeno sem
+           explicação faria o operador concluir que não há trabalho -- e é
+           justo nessa hora que há. -->
+      <p v-if="quadro && !quadro.ponte_respondeu" class="aviso aviso--erro"
+         role="alert">
+        <i class="bi bi-plug aviso__icone" aria-hidden="true"></i>
         <span>
-          Nenhuma solicitação da Operação chegou ainda — as colunas estão
-          desenhadas e vazias, e é o estado certo. Os quatro formulários estão
-          no ar em <strong>forms.movisat.com.br</strong>.
+          O FPSL não respondeu, então este quadro mostra <strong>só os
+          chamados que já têm OS registrada aqui</strong> — as OS abertas
+          direto no Harmonit não aparecem agora.
         </span>
       </p>
+
+      <p v-if="fora" class="aviso aviso--atencao" role="status">
+        <i class="bi bi-exclamation-triangle aviso__icone" aria-hidden="true"></i>
+        <span>{{ fora }} — abra em <strong>Solicitações</strong>.</span>
+      </p>
+
+      <!-- 🔵 29/10, ele: *"os comentários tbm devem sumir dali"*. Saíram os
+           três textos que ficavam aqui -- o aviso de que mover não existe, a
+           lista dos formulários com a contagem de campos, e o cartão de
+           "nenhuma solicitação chegou ainda".
+           ⚠️ O que saiu é o TEXTO: mover continua não existindo
+           (`quadro.pode_mover` segue falso e não há gesto de arrastar), e
+           coluna vazia continua colapsada com o contador à vista.
+           🚨 E a palavra do atributo de arrastar NÃO SE ESCREVE neste
+           comentário: comentário de HTML entra no `html()` renderizado, e a
+           trava que garante a ausência do gesto procura exatamente essa
+           palavra -- escrevê-la aqui fazia o teste reprovar com a tela
+           correta. -->
 
       <div class="quadro">
         <section
-          v-for="coluna in quadro.colunas"
+          v-for="(coluna, indice) in quadro.colunas"
           :key="coluna.chave"
           class="coluna"
-          :class="{
-            'coluna--fechada': !abertas[coluna.chave],
-            'coluna--sem-os': coluna.chave === 'sem_os',
-            'coluna--sem-situacao': coluna.chave === 'sem_situacao',
-          }"
+          :class="{ 'coluna--fechada': !abertas[coluna.chave],
+                    'coluna--vazia': !coluna.total }"
+          :style="{ borderTopColor: corDaEtapa(indice) }"
           :aria-label="coluna.titulo"
         >
           <h2 class="coluna__titulo">
+            <!-- ⚠️ Toda coluna colapsa desde 29/10: as duas que eram fixas
+                 ("Sem OS" e "Sem situacao") sairam do painel. -->
             <button
-              v-if="!SEMPRE_ABERTAS.includes(coluna.chave)"
               class="coluna__botao"
               type="button"
               :aria-expanded="abertas[coluna.chave] ? 'true' : 'false'"
               @click="alternar(coluna)"
             >
-              <span>{{ coluna.titulo }}</span>
-              <span class="coluna__conta">{{ coluna.total }}</span>
+              <span class="coluna__nome">{{ coluna.titulo }}</span>
+              <!-- 🚨 CHEIO quando tem card, vazado quando não tem: o quadro
+                   tem 17 colunas, e a diferença entre "0" e "3" precisa se ver
+                   de longe, sem contar casa por casa. -->
+              <span class="coluna__conta"
+                    :class="{ 'coluna__conta--zero': !coluna.total }">
+                {{ coluna.total }}
+              </span>
             </button>
-            <span v-else class="coluna__botao coluna__botao--fixo">
-              <span>{{ coluna.titulo }}</span>
-              <span class="coluna__conta">{{ coluna.total }}</span>
-            </span>
           </h2>
 
           <div v-if="abertas[coluna.chave]" class="coluna__corpo">
@@ -158,28 +268,69 @@ onMounted(carregar)
               situação {{ coluna.situacao_id }} no Harmonit
             </p>
 
-            <article v-for="card in coluna.cards" :key="card.id" class="card">
-              <button class="card__abrir" type="button" @click="abrirSolicitacao(card)">
+            <!-- 🚨 A OS VEM NA FRENTE, e isto mudou com a D8: até 29/10 o card
+                 começava pelo nome do formulário, e desde que o card é a OS
+                 "de qualquer origem" a maioria não tem formulário nenhum --
+                 10 de 10 medidos hoje vêm do ERP. O card começava com um
+                 campo vazio. -->
+            <article v-for="card in coluna.cards"
+                     :key="card.numero_ordem || card.id" class="card">
+              <button class="card__abrir" type="button"
+                      :style="{ borderLeftColor: corDaEtapa(indice) }"
+                      @click="abrirSolicitacao(card)">
                 <span class="card__topo">
-                  <strong>{{ card.formulario }}</strong>
-                  <span class="etiqueta" :class="`etiqueta--${card.estado}`">
-                    {{ ROTULO_ESTADO[card.estado] || card.estado }}
+                  <strong class="card__os">OS {{ card.numero_ordem || card.os_id }}</strong>
+                  <span v-if="ha(card.criada_em)" class="card__ha">
+                    {{ ha(card.criada_em) }}
                   </span>
                 </span>
+
                 <span v-if="card.cliente" class="card__cliente">{{ card.cliente }}</span>
-                <span v-if="card.resumo" class="apagado pequeno">{{ card.resumo }}</span>
-                <span class="apagado pequeno">
-                  {{ quando(card.criada_em) }}
-                  <template v-if="card.anexos"> · {{ card.anexos }} anexo(s)</template>
+                <!-- ⚠️ Cliente sem nome é DITO, não deixado em branco: o
+                     `harmonit_id` da OS pode não estar no nosso cadastro. Hoje
+                     os 9 clientes das OS estão todos lá, e por isso esta linha
+                     não aparece -- mas basta uma OS de cliente novo. -->
+                <span v-else class="card__cliente card__cliente--sem">
+                  cliente {{ card.cliente_id || '?' }}, fora do nosso cadastro
                 </span>
-                <!-- a OS, quando existir: é a outra metade do card que ele pediu -->
-                <span v-if="card.os_id" class="apagado pequeno">
-                  OS {{ card.numero_ordem || card.os_id }}
-                  <!-- ⚠️ situação crua à vista: 0 é um valor que existe em 127 OS -->
-                  <template v-if="card.situacao_id !== null">
-                    · situação {{ card.situacao_id }}
-                  </template>
-                  <template v-else> · situação nunca lida</template>
+
+                <span v-if="card.tipo_nome" class="card__tipo">{{ card.tipo_nome }}</span>
+
+                <!-- As placas da OS, que só a ponte sabe. -->
+                <span v-if="card.placas && card.placas.length" class="card__dado">
+                  {{ card.placas.map((p) => p.placa).join(' · ') }}
+                </span>
+
+                <span class="card__pistas">
+                  <!-- ⚠️ A situação CRUA fica à vista: `0` é um valor que
+                       existe em 129 OS, e o que fazer com ele é decisão dele. -->
+                  <span v-if="card.situacao_id !== null" class="pilula">
+                    situação {{ card.situacao_id }}
+                  </span>
+                  <span v-else class="pilula">situação nunca lida</span>
+
+                  <span v-if="card.origem === 'erp'" class="pilula">Harmonit</span>
+                  <span v-else-if="card.formulario" class="pilula">{{ card.formulario }}</span>
+
+                  <span v-if="card.estado" class="etiqueta"
+                        :class="`etiqueta--${card.estado}`">
+                    {{ ROTULO_ESTADO[card.estado] || card.estado }}
+                  </span>
+
+                  <span v-if="card.anexos" class="pilula">
+                    {{ card.anexos }} anexo(s)
+                  </span>
+
+                  <!-- 🚨 FINALIZADA É AVISO, não decoração: ela só aparece com
+                       o interruptor desligado, e sem esta marca ficaria
+                       indistinguível de uma OS viva na mesma coluna. -->
+                  <span v-if="card.finalizada" class="card__alerta">finalizada</span>
+                </span>
+
+                <!-- ⚠️ Quando este dado foi lido do ERP. A varredura roda a
+                     cada 5 min, e a tela não pode deixar supor que é agora. -->
+                <span v-if="card.visto_em" class="card__visto">
+                  lido do Harmonit {{ quando(card.visto_em) }}
                 </span>
               </button>
             </article>
@@ -196,15 +347,32 @@ onMounted(carregar)
 .tela__cabecalho { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--e-3); margin-bottom: var(--e-4); }
 .tela__cabecalho h1 { margin: 0; font-size: var(--txt-xl); }
 
-.formularios { display: flex; flex-wrap: wrap; gap: var(--e-3); margin: 0 0 var(--e-3); }
 
 .quadro { display: flex; gap: var(--e-3); overflow-x: auto; padding-bottom: var(--e-3); align-items: flex-start; }
 
+/* 🔵 A BORDA DE CIMA É A COR DA ETAPA — do mockup. A cor vem do `:style`,
+   porque são 17 colunas ciclando 6 cores e isso é dado, não folha de estilo. */
 .coluna {
   flex: 0 0 248px;
   background: var(--superficie);
   border: var(--borda-fina) solid var(--borda);
+  border-top: 3px solid var(--borda-forte);
   border-radius: var(--r-md);
+  transition: box-shadow .15s ease;
+}
+.coluna:hover { box-shadow: var(--sombra-1); }
+/* ⚠️ Coluna sem card fica mais apagada, mas NUNCA escondida: o contador é a
+   informação dela. */
+.coluna--vazia { background: var(--superficie-2); }
+
+.coluna__nome { line-height: 1.3; }
+
+.painel__desde { font-size: var(--txt-xs); color: var(--texto-fraco); }
+.painel__interruptor {
+  display: flex; align-items: center; gap: var(--e-1);
+  min-height: var(--altura-toque);
+  font-size: var(--txt-xs); color: var(--texto-fraco);
+  cursor: pointer;
 }
 /* 🚨 Colapsada fica ESTREITA, não invisível: o contador continua à vista. */
 .coluna--fechada { flex: 0 0 210px; }
@@ -226,12 +394,22 @@ onMounted(carregar)
 .coluna__botao--fixo { cursor: default; }
 .coluna--sem-os .coluna__botao { background: var(--acento-suave); color: var(--acento); }
 .coluna--sem-situacao .coluna__botao { background: var(--aviso-suave); color: var(--aviso); }
+/* Cheio = tem card. Ver o comentário no `template`. */
 .coluna__conta {
-  background: var(--superficie);
-  border: var(--borda-fina) solid var(--borda-forte);
+  background: var(--texto);
+  color: var(--superficie);
+  border: var(--borda-fina) solid var(--texto);
   border-radius: var(--r-full);
+  min-width: 22px;
   padding: 0 var(--e-2);
   font-size: var(--txt-xs);
+  font-weight: var(--peso-forte);
+  text-align: center;
+}
+.coluna__conta--zero {
+  background: var(--superficie);
+  color: var(--texto-apagado);
+  border-color: var(--borda-forte);
   font-weight: var(--peso-normal);
 }
 .coluna__corpo { padding: var(--e-3); display: flex; flex-direction: column; gap: var(--e-2); }
@@ -250,9 +428,46 @@ onMounted(carregar)
   color: var(--texto);
   cursor: pointer;
 }
-.card__abrir:hover { background: var(--superficie-2); }
-.card__topo { display: flex; align-items: center; justify-content: space-between; gap: var(--e-2); }
-.card__cliente { font-size: var(--txt-md); }
+/* 🔵 O EFEITO QUE ELE PEDIU: o card levanta e ganha sombra na passagem.
+   ⚠️ `prefers-reduced-motion` desliga o movimento e mantém a sombra -- quem
+   pediu menos movimento no sistema continua vendo que o card responde. */
+.card__abrir { transition: box-shadow .15s ease, transform .15s ease, border-color .15s ease; }
+.card__abrir:hover {
+  background: var(--superficie-2);
+  box-shadow: var(--sombra-1);
+  transform: translateY(-1px);
+}
+.card__abrir:active { transform: translateY(0); }
+@media (prefers-reduced-motion: reduce) {
+  .card__abrir, .coluna { transition: none; }
+  .card__abrir:hover { transform: none; }
+}
+
+.card__topo { display: flex; align-items: baseline; justify-content: space-between; gap: var(--e-2); }
+.card__os { font-size: var(--txt-md); }
+.card__ha { font-size: var(--txt-xs); color: var(--texto-fraco); }
+.card__cliente { font-size: var(--txt-sm); font-weight: var(--peso-forte); }
+.card__cliente--sem { font-weight: var(--peso-normal); color: var(--texto-fraco); font-style: italic; }
+.card__tipo { font-size: var(--txt-xs); color: var(--texto-fraco); }
+.card__dado {
+  align-self: flex-start;
+  font-size: var(--txt-xs);
+  background: var(--superficie-3, var(--superficie-2));
+  border-radius: var(--r-sm, 6px);
+  padding: 2px var(--e-1);
+}
+.card__pistas { display: flex; flex-wrap: wrap; gap: var(--e-1); align-items: center; margin-top: var(--e-1); }
+.card__visto { font-size: var(--txt-xs); color: var(--texto-apagado); }
+/* 🚨 Aviso, não decoração: ver o comentário no `template`. */
+.card__alerta { font-size: var(--txt-xs); color: var(--erro); font-weight: var(--peso-forte); }
+
+.pilula {
+  font-size: var(--txt-xs);
+  color: var(--texto-fraco);
+  border: var(--borda-fina) solid var(--borda);
+  border-radius: var(--r-full);
+  padding: 0 var(--e-2);
+}
 
 .etiqueta { padding: 0 var(--e-2); border-radius: var(--r-full); font-size: var(--txt-xs); border: var(--borda-fina) solid var(--borda); }
 .etiqueta--nova { background: var(--acento-suave); border-color: var(--acento-borda); color: var(--acento); }

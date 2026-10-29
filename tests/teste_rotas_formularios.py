@@ -352,12 +352,22 @@ class TestRotasDoPainelDeSolicitacoes:
 # A rota do painel
 # ============================================================================
 class TestRotaDoPainel:
-    def test_o_painel_da_operacao_responde_com_as_13_colunas(self, cliente, token):
+    def test_o_painel_da_operacao_responde_com_as_17_colunas(self, cliente, token):
+        """🔵 29/10: as colunas passaram a ser EXATAMENTE as 17 situacoes dele.
+
+        ⚠️ Eram 13 ate 28/10 -- as 11 situacoes de entao mais "Sem OS" e "Sem
+        situacao", que sairam porque o motivo de cada uma caiu no mesmo dia (a
+        OS passou a nascer automatica, e as OS sem situacao sao de outras
+        origens).
+        """
         r = cliente.get("/api/paineis/operacao",
                         headers={"Authorization": f"Bearer {token}"})
         assert r.status_code == 200
-        assert len(r.json()["colunas"]) == len(paineis.SITUACOES) + 2
+        assert len(paineis.SITUACOES) == 17
+        assert len(r.json()["colunas"]) == 17
         assert r.json()["pode_mover"] is False
+        # 🚨 E o que nao tem coluna vem CONTADO, nunca escondido (M12).
+        assert "fora_do_quadro" in r.json()
 
     @pytest.mark.parametrize("painel", ["pos_venda", "contratual", "financeiro"])
     def test_os_tres_sem_tela_respondem_400_dizendo_o_que_sao(self, cliente, token, painel):

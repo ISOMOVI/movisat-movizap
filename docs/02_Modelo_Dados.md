@@ -2233,6 +2233,59 @@ assim, medido em 22/10). Os três caem na mesma coluna da tela e continuam
 separados no banco.
 ⚠️ `situacao_erro` segue a régua do `agendamento.endereco_os_erro` (073): nulo
 com `situacao_em` nulo = não tentou; nulo com data = deu certo.
+
+## Migração 079 — o formato novo do formulário público
+
+🔵 Pedido dele, 29/10, sobre o Suporte: *"ajuste ele no novo formato 'etapas,
+logo, cor, placas, etc'"*. O desenho é o de 23/10 (blocos 1, 3, 5 e 6 do
+plano, em `Desktop\Formularios_Movisat_Design.md`).
+
+`formulario.formato` — `varchar(10)`, **não anulável**, CHECK em
+`classico | novo`, padrão **`classico`**.
+🚨 **Nasce `classico` nos 15**, e ligar é decisão dele: o formato novo muda a
+tela que a internet vê, e ele valida formulário por formulário no navegador.
+Hoje só o **SUPORTE** está em `novo`.
+
+`formulario.etapas` — `jsonb`, **anulável**:
+`[{"titulo": ..., "campos": [nosso_nome, ...]}]`. Nulo = rolo único, que é o
+caso dos outros 14.
+🚨 **Os campos são citados pelo `nosso_nome`**, não pelo nome do Bitrix — é o
+único dos dois que uma pessoa revisa. Quem traduz para o nome de origem é a
+rota pública (`main._etapas_publicas`), porque `nosso_nome` **não sai** para a
+internet.
+🚨 **A carga recusa etapa errada dos dois lados:** campo citado que não existe
+**e** pergunta que ficou fora de toda etapa. O segundo é o perigoso — a
+pergunta simplesmente não apareceria, e o formulário seguiria aceitando envio
+com uma pergunta a menos.
+⚠️ Onde o formulário tiver `page` (15 delas nos outros), **é ela que manda**: o
+Suporte não tem nenhuma, e por isso as 4 etapas dele são agrupamento nosso.
+
+`formulario_campo.validacao` — `varchar(16)`, **anulável**, CHECK em
+`cpf | cnpj | placa | telefone | email | cep`.
+🚨 **Existe porque o tipo do Bitrix não diz o bastante:** 30 dos 239 campos são
+`double` e são CNPJ, CPF, RG e quantidade. Sem esta coluna não há máscara nem
+dígito verificador.
+🚨 **NÃO é barreira.** Quem recusa o envio é `formularios.validar`; esta coluna
+diz à tela qual máscara pôr e qual frase mostrar.
+🚨 **O QUE VAI GRAVADO É A FORMA CANÔNICA — sem pontuação, em maiúscula — e
+a `validacao` manda mais que o `tipo`.** O campo CNPJ é `double` no Bitrix, e a
+regra do `double` é `float()`: ela recusava **`WQ0P6GLD000108`**, que é um CNPJ
+**válido** da nossa própria base (Pastelaria Velasco).
+🚨 **O CNPJ É ALFANUMÉRICO desde 2026:** 12 posições com letra ou dígito + 2
+dígitos de verificação, e o valor de cada caractere na conta do DV é o **ASCII
+menos 48** (`0`–`9` dão o próprio número, `A` dá 17) — então o CNPJ antigo é um
+caso particular da mesma conta.
+🔵 **Decisão dele, 29/10:** *"deve permitir todos os formatos para CNPJ bem como
+alfanuméricos"* e *"podem colar somente numero ou . e - e / tbm"*. Colar
+`WQ0P6GLD000108`, `WQ.0P6.GLD/0001-08` ou só dígitos dá o mesmo valor gravado.
+⚠️ **`placa` NÃO é canonizada**, de propósito: o campo do Suporte é *"Veículo e
+Placa — um por linha"*, e `SAVEIRO ABC1234` é resposta certa. Lá a regra é só
+mensagem na tela, que **procura** a placa dentro do texto.
+⚠️ O servidor garante o **formato** (quantos caracteres); o **dígito
+verificador** é frase na tela. Mudar isso é régua, e régua é decisão dele.
+As provas estão em `tests/teste_formato_novo.py`.
+🚨 **As três são reescritas a cada carga** (como `painel`, ao contrário de
+`ativo`): o mapa vive no `scripts/carregar_formularios.py`.
 ⚠️ **Ninguém escreve nestas colunas ainda** — a leitura e a escrita de
 `situacaoId` são da volta seguinte, e dependem de decisão dele.
 
@@ -2346,3 +2399,129 @@ agora porque o lado da VPS (rota, tela, teste) é o que dá para fazer sem tocar
 em máquina nenhuma — e porque acrescentá-las depois obrigaria a mexer em quem
 lê. Em 26/10 as três de diagnóstico estão **nulas nos 7**, e `pastas_extra`
 vazio em todos.
+
+## Migração 080 — os ajustes NOSSOS em cima da definição do Bitrix
+
+🔵 Pedidos dele, 29/10, no formulário de Suporte: uma caixa só para o nome · o
+modelo esmaecido no telefone · as opções novas de *Tipo de solicitação* · sai o
+*Assunto* · *Detalhe a ocorrência* mais alto · as placas ativas no campo de
+veículo.
+
+🚨 **POR QUE ISTO É COLUNA, E NÃO UMA EDIÇÃO NO BANCO:** `gravar_definicao`
+**apaga e reescreve** campos e regras a cada carga, a partir do
+`dados/formularios_bitrix/mapa_bruto.json`. Opção editada à mão no banco
+funciona hoje e **desaparece na próxima carga, sem erro e sem aviso**. O ajuste
+vive na tabela `AJUSTES` do `scripts/carregar_formularios.py` e é reaplicado
+toda vez.
+
+`formulario_campo.fantasma` — `varchar(60)`, anulável. O modelo de
+preenchimento esmaecido **dentro** do campo (`placeholder`). 🚨 É modelo, não
+valor: não é enviado e some ao digitar.
+
+`formulario_campo.linhas` — `smallint`, anulável, CHECK entre 2 e 20. Altura em
+linhas. ⚠️ *Detalhe a ocorrência* é `string` no Bitrix — sem isto seria **uma
+linha só**, o que diz a quem preenche *"escreva pouco"*.
+
+`formulario_campo.fonte` — `varchar(20)`, anulável, CHECK em `weso_placas`. De
+onde a tela puxa **sugestão** para o campo.
+🚨 **É A REGRA, NÃO SUGESTÃO.** 🔵 Dele, 29/10: *"só é possível abrir chamados
+para placas ativas na weso. o match é basicamente de 100% mesmo. essa é a
+regra"*. Placa informada é conferida contra a WESO na rota de envio, e placa sem
+rastreador ativo é **recusada**.
+⚠️ **O botão *"Meu veículo não está na lista"* continua**, com outro papel: a
+placa que está ativa na WESO mas **não aparece na lista do cliente** — as **30**
+(medido em 29/10) que a WESO tem e o Harmonit não, e que por isso não têm
+`clienteId` para cruzar.
+🚨 **A conta certa do casamento, medida em 29/10 normalizando os dois lados:**
+das 1.998 linhas da WESO, **50 não são placa** (a coluna tem chassi e número de
+série) e **30 são placa que o Harmonit não tem** — entre as que *são* placa,
+**1.918 de 1.948 = 98,5%**. Os 80 restantes são dado sujo de um lado, não
+cliente de fora. (A conta anterior, de 95%, não separava isso.)
+
+⚠️ **TIRAR CAMPO NÃO PRECISOU DE COLUNA:** o campo simplesmente não é inserido
+(`fora`, na tabela de ajustes). Trocar rótulo e opção também não — `rotulo` e
+`opcoes` já existiam.
+🚨 **E o `nosso_nome` continua saindo do rótulo ORIGINAL.** Ele é *derivado* do
+rótulo: aplicar o rótulo novo antes do cálculo renomearia o campo
+(`primeiro-nome` → `nome-completo`) e as tabelas `ETAPAS` e `VALIDACOES`
+passariam a citar campo inexistente. Tem teste próprio.
+
+## Migração 081 — o rastro da regra da placa
+
+🔵 **Regra dele, 29/10:** *"só é possível abrir chamados para placas ativas na
+weso. o match é basicamente de 100% mesmo. essa é a regra"*. A regra é cobrada
+na rota de envio: placa informada que não está ativa na WESO é **recusada**.
+
+`formulario_solicitacao.placas_conferidas` — `boolean`, anulável.
+
+🚨 **A conferência depende de outro serviço** (a ponte do FPSL, que é quem tem a
+base da WESO), e **indisponibilidade nossa não pode barrar o chamado do
+cliente**. Quando a ponte não responde, o envio **passa** — e é esta coluna que
+registra que passou sem conferir, para quem atende saber.
+
+⚠️ **Os três valores têm significado diferente:**
+- `true` — as placas foram conferidas e estão ativas;
+- `false` — **não deu para conferir** (ponte fora do ar), e **não** "placa
+  inativa": placa inativa nunca é gravada, porque a rota recusa antes;
+- `NULO` — a solicitação não informou placa, ou o formulário não tem campo de
+  placa.
+
+## Migração 082 — a OS do chamado
+
+🔵 **Duas decisões dele, de 29/10, que juntas obrigam uma tabela:**
+- **D4** — *"todo chamado de suporte abrirá uma OS"*: automático no envio, não
+  por botão (o que **inverteu** a decisão 3.6 de 23/10);
+- **D3** — **uma OS por placa**, e não uma por envio (o que inverteu a 3.5).
+
+`solicitacao_os` — tabela nova. Cada linha é **um par solicitação ↔ placa**, e
+a OS de análise que o par gerou no Harmonit.
+
+| coluna | tipo | o que é |
+|---|---|---|
+| `solicitacao_id` | `integer NOT NULL` | FK para `formulario_solicitacao`, `ON DELETE CASCADE` |
+| `placa` | `varchar(10)` | a placa do chamado, na forma canônica. **Nula** = o chamado não informou nenhuma |
+| `criada_em` | `timestamptz` | quando a linha nasceu — **não** quando a OS nasceu |
+| `os_id` | `integer` | o `id` da OS no Harmonit. Nulo até a escrita voltar |
+| `numero_ordem` | `integer` | o `numeroOrdem` da OS |
+| `erro` | `text` | por que a OS não nasceu, nas palavras de quem recusou |
+| `tentativas` | `integer NOT NULL DEFAULT 0` | quantas vezes se tentou |
+| `tentada_em` | `timestamptz` | a última tentativa |
+
+🚨 **POR QUE UMA TABELA, E NÃO MAIS UMA COLUNA:**
+`formulario_solicitacao.os_id` é **uma** OS, e a partir da D3 um envio com 4
+placas abre 4. Enfiar quatro números numa coluna (ou criar `os_id_2`) é o
+caminho que não tem fim.
+
+⚠️ **`formulario_solicitacao.os_id` CONTINUA EXISTINDO** e passa a significar
+**a primeira OS desta solicitação** — não "a OS". Quem precisa de todas lê a
+tabela nova. Não foi removida porque o painel de hoje a lê, e trocar as duas
+coisas na mesma volta esconderia qual delas quebrou.
+
+🚨 **A LINHA NASCE ANTES DA OS EXISTIR**, com `os_id` e `erro` nulos, e isso é o
+ponto do Bloco A: *"a falha tem de ser visível — chamado gravado e OS não
+criada é o pior caso: o cliente recebe 'recebemos' e ninguém abre OS"*. Então a
+ordem é **chamado primeiro, OS depois**: o envio grava, as linhas nascem vazias,
+e cada falha fica **escrita na linha** e contada no painel (`fora_do_quadro.
+os_falhou`). A alternativa — criar a OS antes e só então gravar — perderia o
+chamado inteiro quando o ERP estivesse fora do ar, que é justamente quando o
+cliente mais precisa ser ouvido.
+
+⚠️ **OS TRÊS ESTADOS DE UMA LINHA, e o terceiro não é sucesso:**
+- `os_id` preenchido, `erro` nulo — a OS nasceu;
+- `os_id` nulo, `erro` preenchido — a OS **não** nasceu, e o motivo está dito;
+- `os_id` nulo **e** `erro` nulo — a tentativa **nunca aconteceu**.
+
+🚨 **O ÍNDICE ÚNICO É A TRAVA DA DUPLICATA, não a boa intenção de quem chama:**
+`idx_solicitacao_os_unica` em `(solicitacao_id, coalesce(placa, ''))`. Sem ele,
+dois cliques no mesmo envio abrem duas OS para a mesma placa. O `coalesce`
+existe porque **em SQL dois nulos não são iguais** — sem ele a solicitação sem
+placa poderia ganhar duas linhas.
+
+🚨 **E O CASO QUE NÃO SE PODE MASCARAR — o `erro` que começa com 🚨:** quando o
+Harmonit aceita a escrita e **não diz o número da OS**, pode haver OS criada no
+ERP que ninguém sabe que existe. A linha guarda o aviso e **a retentativa não
+acontece** (a linha já existe, e `ON CONFLICT DO NOTHING` não devolve nada).
+Dizer "falhou" ali faria quem chama tentar de novo e abrir a **segunda**.
+⚠️ **Timeout da ponte cai nesse mesmo caso**, e foi um erro que quase ficou no
+código: *"não respondeu no tempo"* **não** quer dizer *"não gravou"* — a escrita
+pode ter chegado e a resposta ter se perdido na volta.

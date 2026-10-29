@@ -34,7 +34,7 @@ import time
 import unicodedata
 import uuid
 
-from . import banco, ratelimit, telefone
+from . import banco, fpsl_ponte, ratelimit, telefone
 from .operacao import DadoInvalido
 
 log = logging.getLogger("movizap.formularios")
@@ -139,14 +139,16 @@ def definicao(slug: str, so_ativo: bool = True) -> dict:
     """
     linha = banco.um(
         """SELECT id, codigo, slug, titulo, setor, botao, descricao, ativo,
-                  gera_os, problema_id, tipo_os_id, prioridade_id
+                  gera_os, problema_id, tipo_os_id, prioridade_id,
+                  formato, etapas
              FROM formulario WHERE slug = %s""", (slug,))
     if not linha or (so_ativo and not linha["ativo"]):
         raise FormularioNaoExiste(slug)
 
     linha["campos"] = banco.varios(
         """SELECT nome, nosso_nome, rotulo, tipo, obrigatorio, multiplo,
-                  visivel, ordem, opcoes, ajuda
+                  visivel, ordem, opcoes, ajuda, validacao,
+                  fantasma, linhas, fonte
              FROM formulario_campo WHERE formulario_id = %s
             ORDER BY ordem, id""", (linha["id"],))
     linha["regras"] = banco.varios(
@@ -249,9 +251,45 @@ def visiveis(d: dict, valores: dict) -> set:
 # ----------------------------------------------------------------------------
 # Validação
 # ----------------------------------------------------------------------------
+# 🚨 O CNPJ ALFANUMÉRICO (2026) OBRIGOU A `validacao` A VALER MAIS QUE O
+# `tipo`. O campo "CNPJ" é `double` no Bitrix, e a regra do `double` é
+# `float()` -- que recusa `WQ0P6GLD000108`, um CNPJ **válido** da nossa própria
+# base (Pastelaria Velasco, DV conferido). Quando o campo diz qual documento
+# é, é o documento que manda, não o tipo herdado.
+#
+# ⚠️ E ACEITA TODOS OS FORMATOS DE COLAGEM, por decisão dele: só dígitos, ou
+# com ponto, barra e traço. O que se guarda é sempre a forma canônica -- sem
+# pontuação, em maiúscula --, para não existirem duas escritas do mesmo
+# documento na mesma coluna.
+def _canonico(texto: str, regra: str) -> str:
+    if regra == "cnpj":
+        return re.sub(r"[^A-Za-z0-9]", "", texto).upper()
+    return re.sub(r"\D", "", texto)
+
+
+# Quantos caracteres cada documento tem. ⚠️ `placa` NÃO entra: o campo do
+# Suporte é *"Veículo e Placa"*, e a pessoa escreve `SAVEIRO ABC1234` --
+# cobrar 7 caracteres ali recusaria a resposta certa. Para a placa a regra é
+# só mensagem na tela.
+_TAMANHO_DO_DOCUMENTO = {"cnpj": 14, "cpf": 11, "cep": 8}
+
+
 def _um_valor(campo: dict, bruto) -> str:
     tipo = campo["tipo"]
     texto = str(bruto).strip()
+
+    regra = campo.get("validacao")
+    if regra in _TAMANHO_DO_DOCUMENTO:
+        limpo = _canonico(texto, regra)
+        if len(limpo) != _TAMANHO_DO_DOCUMENTO[regra]:
+            raise DadoInvalido(
+                f"{campo['rotulo']}: informe os "
+                f"{_TAMANHO_DO_DOCUMENTO[regra]} caracteres.")
+        # ⚠️ O dígito verificador NÃO é conferido aqui, e é escolha: a frase
+        # que a pessoa lê é da tela (`validacao_campo.js`), e o servidor
+        # garante o FORMATO. Passar a recusar DV aqui é mudança de régua, e
+        # régua é decisão dele.
+        return limpo
 
     if tipo == "list":
         ids = {str(o.get("value")) for o in (campo["opcoes"] or [])}
@@ -371,7 +409,8 @@ def guardar_arquivo(nome: str, dados: bytes) -> dict:
 
 
 def registrar(d: dict, valores: dict, arquivos: list | None = None,
-              ip: str | None = None, vinculo: dict | None = None) -> dict:
+              ip: str | None = None, vinculo: dict | None = None,
+              placas_conferidas: bool | None = None) -> dict:
     """Grava a solicitação. `valores` já passou por `validar`.
 
     `arquivos` é a lista que `guardar_arquivo` devolveu, cada item com o
@@ -381,12 +420,13 @@ def registrar(d: dict, valores: dict, arquivos: list | None = None,
     vinculo = vinculo or {}
     linha = banco.um(
         """INSERT INTO formulario_solicitacao
-               (formulario_id, ip, valores, conversa_id, contato_id, cliente_id)
-           VALUES (%s, %s, %s, %s, %s, %s)
+               (formulario_id, ip, valores, conversa_id, contato_id, cliente_id,
+                placas_conferidas)
+           VALUES (%s, %s, %s, %s, %s, %s, %s)
         RETURNING id, criada_em""",
         (d["id"], ip, json.dumps(valores, ensure_ascii=False),
          vinculo.get("conversa_id"), vinculo.get("contato_id"),
-         vinculo.get("cliente_id")))
+         vinculo.get("cliente_id"), placas_conferidas))
 
     for arq in (arquivos or []):
         banco.executar(
@@ -404,7 +444,10 @@ def registrar(d: dict, valores: dict, arquivos: list | None = None,
 
 def gravar_definicao(bruto: dict, codigo: str, slug: str, setor: str,
                      titulo: str | None = None, painel: str | None = None,
-                     ordem: int = 100) -> dict:
+                     ordem: int = 100, formato: str = "classico",
+                     etapas: list | None = None,
+                     validacoes: dict | None = None,
+                     ajustes: dict | None = None) -> dict:
     """Escreve (ou reescreve) um formulário a partir da definição do Bitrix.
 
     🚨 IDEMPOTENTE PELO `bitrix_id`: rodar de novo não duplica nem apaga
@@ -413,6 +456,16 @@ def gravar_definicao(bruto: dict, codigo: str, slug: str, setor: str,
 
     🚨 ALVO DE `show` NASCE ESCONDIDO -- é aqui que a tradução acontece, e o
     porquê está em `visiveis()`.
+
+    🚨 `formato`, `etapas` e `validacoes` SÃO REESCRITOS A CADA CARGA, como o
+    `painel` e ao contrário de `ativo`: são decisão dele e vivem no
+    `scripts/carregar_formularios.py`, então mudar o agrupamento das etapas ou
+    ligar o formato novo no 2º formulário não exige migração nem deploy.
+
+    ⚠️ `validacoes` é `{nosso_nome: regra}`, e as etapas também citam campo
+    pelo `nosso_nome`. Casar pelo nome do Bitrix
+    (`DEAL_UF_CRM_1647530180887`) seria ilegível para quem revisa -- e quem
+    revisa é ele.
     """
     dados = bruto["data"]
     campos = dados["fields"]
@@ -430,10 +483,68 @@ def gravar_definicao(bruto: dict, codigo: str, slug: str, setor: str,
                 f"Tipo de campo desconhecido no formulário {codigo}: "
                 f"{campo['type']!r} em {campo['name']!r}.")
 
+    # ----------------------------------------------------------------------
+    # OS AJUSTES NOSSOS, em cima da definição do Bitrix
+    # ----------------------------------------------------------------------
+    # 🔵 Decisão dele, 29/10: *"vamos mudar as opções do 'Tipo de solicitação',
+    # pois são do bitrix e não nos satisfazem mais"*. A definição continua
+    # vindo de lá -- o que muda é que ela deixa de ser a palavra final.
+    #
+    # 🚨 ISTO NÃO EDITA O `mapa_bruto.json`. O bruto é **procedência**: diz de
+    # onde a definição foi lida em 22/10. Reescrevê-lo apagaria a prova de como
+    # o formulário era no Bitrix, e é essa prova que permite responder *"o que
+    # foi perdido em relação ao original?"* -- pergunta que ele já fez.
+    ajustes = ajustes or {}
+    fora = set(ajustes.get("fora") or [])
+    por_campo = ajustes.get("campos") or {}
+    nao_casados = set(fora) | set(por_campo)
+    sobraram = []
+    for campo in campos:
+        nosso = nome_legivel(campo.get("label") or "", campo["name"], set())
+        nao_casados.discard(nosso)
+        if nosso in fora:
+            # ⚠️ Campo TIRADO não é campo escondido: ele não existe, não vem na
+            # definição e não entra no registro. Quem some por regra é outra
+            # coisa, e continua sendo.
+            continue
+        mudar = por_campo.get(nosso) or {}
+        # 🚨 O RÓTULO NOVO VAI NUM CAMPO À PARTE, e isto não é estilo: o
+        # `nosso_nome` é DERIVADO do rótulo (`nome_legivel`). Trocar
+        # `campo["label"]` aqui renomearia o campo -- "Primeiro Nome" viraria
+        # `nome-completo` --, e aí as tabelas `ETAPAS` e `VALIDACOES`, que
+        # citam `primeiro-nome`, apontariam para um campo que não existe mais.
+        # O nome continua saindo do rótulo ORIGINAL; o rótulo novo é só o que
+        # a pessoa lê.
+        campo["_rotulo"] = mudar.get("rotulo")
+        if "opcoes" in mudar:
+            campo["items"] = [{"value": o["value"], "label": o["label"]}
+                              for o in mudar["opcoes"]]
+        if "obrigatorio" in mudar:
+            campo["required"] = mudar["obrigatorio"]
+        campo["_fantasma"] = mudar.get("fantasma")
+        campo["_linhas"] = mudar.get("linhas")
+        campo["_fonte"] = mudar.get("fonte")
+        sobraram.append(campo)
+
+    # 🚨 AJUSTE QUE NÃO ACHOU CAMPO PARA NA CARGA. Um `nosso_nome` escrito
+    # errado aqui seria ajuste que não acontece -- e o formulário ficaria com a
+    # cara antiga sem ninguém saber por quê.
+    if nao_casados:
+        raise DadoInvalido(
+            f"{codigo}: ajuste citando campo que nao existe: "
+            + ", ".join(sorted(nao_casados)))
+
+    # ⚠️ As REGRAS continuam as do Bitrix, e podem apontar para campo tirado.
+    # Regra com alvo inexistente é ignorada por `visiveis()` (`if alvo not in
+    # todos`), então não há o que limpar -- e deixá-las registradas preserva a
+    # procedência.
+    campos = sobraram
+
     linha = banco.um(
         """INSERT INTO formulario (codigo, slug, titulo, setor, botao,
-                                   bitrix_id, bitrix_sec, painel, ordem)
-           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                                   bitrix_id, bitrix_sec, painel, ordem,
+                                   formato, etapas)
+           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
            ON CONFLICT (codigo) DO UPDATE
               SET slug = EXCLUDED.slug, titulo = EXCLUDED.titulo,
                   setor = EXCLUDED.setor, botao = EXCLUDED.botao,
@@ -445,12 +556,15 @@ def gravar_definicao(bruto: dict, codigo: str, slug: str, setor: str,
                   -- NAO entra nesta lista de proposito -- recarregar nao pode
                   -- publicar formulario nenhum.
                   painel = EXCLUDED.painel,
+                  formato = EXCLUDED.formato, etapas = EXCLUDED.etapas,
                   ordem = EXCLUDED.ordem, atualizado_em = now()
         RETURNING id, ativo""",
         (codigo, slug,
          (titulo or dados.get("title") or "").strip() or slug,
          setor, (dados.get("buttonCaption") or "Enviar").strip()[:60],
-         str(bruto.get("id")), bruto.get("sec"), painel, ordem))
+         str(bruto.get("id")), bruto.get("sec"), painel, ordem,
+         formato,
+         json.dumps(etapas, ensure_ascii=False) if etapas else None))
 
     banco.executar("DELETE FROM formulario_campo WHERE formulario_id = %s",
                    (linha["id"],))
@@ -458,21 +572,61 @@ def gravar_definicao(bruto: dict, codigo: str, slug: str, setor: str,
                    (linha["id"],))
 
     usados = set()
+    validacoes = validacoes or {}
+    sem_campo = set(validacoes)
+    nossos_todos: list[str] = []
+    nossas_perguntas: list[str] = []
     for i, campo in enumerate(campos):
         opcoes = [{"value": str(it.get("value")), "label": it.get("label") or ""}
                   for it in (campo.get("items") or [])]
+        nosso = nome_legivel(campo.get("label") or "", campo["name"], usados)
+        sem_campo.discard(nosso)
+        nossos_todos.append(nosso)
+        if campo["type"] not in TIPOS_DECORATIVOS:
+            nossas_perguntas.append(nosso)
         banco.executar(
             """INSERT INTO formulario_campo
                    (formulario_id, nome, nosso_nome, rotulo, tipo, obrigatorio,
-                    multiplo, visivel, ordem, opcoes, ajuda)
-               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
-            (linha["id"], campo["name"][:80],
-             nome_legivel(campo.get("label") or "", campo["name"], usados),
-             (campo.get("label") or "").strip(), campo["type"],
+                    multiplo, visivel, ordem, opcoes, ajuda, validacao,
+                    fantasma, linhas, fonte)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                       %s, %s, %s)""",
+            (linha["id"], campo["name"][:80], nosso,
+             # 🚨 O rotulo pode ter sido trocado pelos AJUSTES, mas o
+             # `nosso_nome` sai do rotulo ORIGINAL -- ver o comentario em
+             # `campo["_rotulo"]`, acima.
+             (campo.get("_rotulo") or campo.get("label") or "").strip(),
+             campo["type"],
              bool(campo.get("required")), bool(campo.get("multiple")),
              campo["name"] not in alvos_de_show, i,
              json.dumps(opcoes, ensure_ascii=False),
-             (campo.get("hint") or "").strip() or None))
+             (campo.get("hint") or "").strip() or None,
+             validacoes.get(nosso),
+             campo.get("_fantasma"), campo.get("_linhas"),
+             campo.get("_fonte")))
+
+    # 🚨 MÁSCARA SEM CAMPO PARA NA CARGA, nunca na tela do cliente. Um
+    # `nosso_nome` escrito errado na tabela viraria campo sem máscara -- e
+    # ninguém notaria, porque a tela ficaria só um pouco mais permissiva.
+    if sem_campo:
+        raise DadoInvalido(
+            f"{codigo}: validacao citando campo que nao existe: "
+            + ", ".join(sorted(sem_campo)))
+
+    # 🚨 E A MESMA RÉGUA PARA AS ETAPAS, com os dois erros possíveis:
+    #   · etapa que cita campo inexistente -> some da tela em silêncio;
+    #   · pergunta que ficou fora de toda etapa -> o cliente NUNCA a vê, e o
+    #     formulário segue "funcionando" com uma pergunta menos.
+    # O segundo é o perigoso, e é por isso que a conferência é dos dois lados.
+    if etapas:
+        citados = [n for e in etapas for n in (e.get("campos") or [])]
+        fantasmas = sorted(set(citados) - set(nossos_todos))
+        de_fora = sorted(set(nossas_perguntas) - set(citados))
+        if fantasmas or de_fora:
+            raise DadoInvalido(
+                f"{codigo}: etapas erradas -- "
+                f"campos que nao existem: {fantasmas or 'nenhum'}; "
+                f"perguntas fora de toda etapa: {de_fora or 'nenhuma'}")
 
     for i, regra in enumerate(regras):
         banco.executar(
@@ -738,6 +892,169 @@ def exige_desafio(ip: str | None) -> bool:
 def registrar_envio(ip: str | None) -> None:
     if ip:
         ratelimit.registrar_evento(f"formulario|{ip}")
+
+
+# ----------------------------------------------------------------------------
+# Buscar o cliente pelo documento (29/10)
+# ----------------------------------------------------------------------------
+# 🔵 Pedido dele: *"ao colocar CPF CNPJ, ter botao de buscar pelo CNPJ para
+# preenchimento automatico da base do harmonit"*.
+#
+# 🚨 NÃO FALA COM O HARMONIT. A base dele já está espelhada aqui (`cliente`,
+# pela `CFG_3.1`), e esta rota é alcançável por QUALQUER UM na internet -- uma
+# chamada ao vivo daqui seria um caminho de fora para dentro do ERP. A resposta
+# sai do nosso banco.
+#
+# 🚨 DEVOLVE SÓ O NOME. Nem documento, nem e-mail, nem id: quem preenche está
+# confirmando a empresa dele, não consultando a nossa carteira.
+#
+# 🚨 E AINDA ASSIM É UM ORÁCULO ("este CNPJ é cliente?"), por isso tem teto por
+# hora (`BUSCAS_POR_HORA`) e exige o carimbo de abertura da página.
+BUSCAS_POR_HORA = 20
+
+# ⚠️ 8 dos 960 clientes têm `documento` com 14 zeros -- é preenchimento de
+# fachada da base, não CNPJ. Sem esta guarda, quem digitasse zeros casaria com
+# oito empresas de verdade.
+_DOCUMENTO_DE_FACHADA = "0" * 14
+
+
+def passou_do_teto_de_buscas(ip: str | None) -> bool:
+    """⚠️ O mesmo teto da busca por CNPJ, e de propósito: as duas rotas
+    consultam a nossa base a partir da internet, e somar no mesmo contador
+    impede que alguém use uma para contornar o limite da outra."""
+    if not ip:
+        return False
+    return ratelimit.quantos_eventos(f"busca|{ip}") >= BUSCAS_POR_HORA
+
+
+def cliente_por_documento(documento: str, ip: str | None = None) -> dict:
+    """`{achou, nome, varios}` -- e nada mais que isso.
+
+    ⚠️ "Não achou" NÃO é erro: a maior parte de quem preenche o formulário
+    público não é cliente nosso ainda, e dizer "falhou" ali seria mentira.
+    """
+    # 🚨 ALFANUMÉRICO, e todos os formatos de colagem: `WQ0P6GLD000108`,
+    # `WQ.0P6.GLD/0001-08`, só dígitos, com ponto, barra ou traço. Tudo cai na
+    # mesma forma canônica -- foi ele quem achou isto colando o CNPJ da
+    # Velasco, que a versão só-numérica recusava.
+    so = re.sub(r"[^A-Za-z0-9]", "", documento or "").upper()
+    if len(so) not in (11, 14):
+        raise DadoInvalido("Informe o CNPJ completo, com 14 caracteres.")
+    if ip and ratelimit.quantos_eventos(f"busca|{ip}") >= BUSCAS_POR_HORA:
+        raise DadoInvalido("Muitas consultas seguidas. Tente mais tarde.")
+    if ip:
+        ratelimit.registrar_evento(f"busca|{ip}")
+    if set(so) == {"0"} or so == _DOCUMENTO_DE_FACHADA:
+        return {"achou": False}
+
+    # ⚠️ O documento é comparado SÓ POR DÍGITO dos dois lados: na base há 1
+    # registro com letra e a máscara varia. São 960 linhas -- a varredura é
+    # barata, e casar por texto cru perderia o cliente por causa de um ponto.
+    # ⚠️ Os DOIS LADOS são comparados na forma canônica: na base há documento
+    # com letra (o da Velasco) e a pontuação varia. São 960 linhas -- a
+    # varredura é barata, e casar por texto cru perderia o cliente por um
+    # ponto.
+    linhas = banco.varios(
+        """SELECT nome, nome_fantasia, harmonit_id FROM cliente
+            WHERE upper(regexp_replace(coalesce(documento, ''),
+                                       '[^A-Za-z0-9]', '', 'g')) = %s
+            ORDER BY ativo DESC, id
+            LIMIT 5""", (so,))
+    if not linhas:
+        return {"achou": False}
+    # 🚨 MAIS DE UM COM O MESMO DOCUMENTO EXISTE (10 pares na base). A tela diz
+    # que há mais de um em vez de escolher calada.
+    achado = {"achou": True, "nome": linhas[0]["nome"],
+              "varios": len(linhas) > 1}
+
+    # 🔵 As placas ativas, pedido dele em 29/10. ⚠️ `harmonit_id` NÃO SAI na
+    # resposta -- é id interno; o que sai são as placas.
+    #
+    # 🚨 FALHA DA PONTE NÃO VIRA "SEM VEÍCULO": `placas_erro` existe para a
+    # tela dizer *"não deu para consultar seus veículos"* e deixar digitar. Um
+    # `[]` silencioso faria o cliente concluir que a frota dele saiu do ar.
+    if linhas[0]["harmonit_id"]:
+        try:
+            achado["placas"] = fpsl_ponte.placas_ativas(linhas[0]["harmonit_id"])
+        except Exception as e:  # noqa: BLE001 -- qualquer falha da ponte
+            log.warning("placas do cliente %s: %s", linhas[0]["harmonit_id"], e)
+            achado["placas"] = []
+            achado["placas_erro"] = True
+    else:
+        # ⚠️ 1 dos 960 clientes não tem `harmonit_id` -- cadastro nascido no
+        # MoviZap. Sem id não há frota para cruzar, e isso não é erro.
+        achado["placas"] = []
+    return achado
+
+
+# ----------------------------------------------------------------------------
+# A REGRA DA PLACA (29/10)
+# ----------------------------------------------------------------------------
+# 🔵 Dita por ele em uma linha: *"so e possivel abrir chamados para placas
+# ativas na weso. o match e basicamente de 100% mesmo. essa e a regra"*.
+#
+# 🚨 ISTO INVERTEU O QUE EU HAVIA ESCRITO de manha. Eu tratava a lista da frota
+# como SUGESTAO -- *"lista nossa incompleta nao pode barrar chamado"* -- e a
+# regra dele diz o contrario: placa ativa na WESO e a CONDICAO do chamado.
+#
+# 🚨 E A MINHA CONTA DE 95% ESTAVA GROSSEIRA. Medido em 29/10, normalizando a
+# placa dos dois lados, nas 1.998 linhas da WESO: **50 nao sao placa** (a
+# coluna tem chassi e numero de serie) e **30 sao placa que o Harmonit nao
+# tem**. Entre as que SAO placa o casamento e 1.918 de 1.948 = **98,5%** -- e
+# os 80 restantes sao dado sujo de um lado, nao cliente de fora. A frase dele
+# bate com o dado; o meu "1 em 20 vai digitar" nao batia.
+#
+# ⚠️ POR QUE NAO ENTRA NO `validar`: ele e sincrono, puro, e roda na suite sem
+# rede. Pendurar nele uma chamada a outro servico faria 1.874 testes
+# depenaderem do FPSL de pe. A conferencia mora na ROTA, ao lado da guarda de
+# anexo.
+def placas_informadas(d: dict, valores: dict) -> list[str]:
+    """O que a pessoa escreveu nos campos de placa -- os que declaram
+    `fonte = 'weso_placas'`."""
+    saida = []
+    for campo in d["campos"]:
+        if campo.get("fonte") != "weso_placas":
+            continue
+        bruto = valores.get(campo["nome"])
+        partes = bruto if isinstance(bruto, list) else [bruto]
+        saida += [str(p).strip() for p in partes if str(p or "").strip()]
+    return saida
+
+
+def conferir_regra_da_placa(d: dict, valores: dict) -> bool | None:
+    """Levanta `DadoInvalido` se alguma placa informada não está ativa na WESO.
+
+    Devolve `True` (conferidas), `False` (**não deu para conferir** -- a ponte
+    não respondeu) ou `None` (não havia placa).
+
+    🚨 PONTE FORA DO AR DEIXA PASSAR, MARCADO. Recusar o chamado por causa de
+    uma indisponibilidade nossa transformaria o nosso problema no problema do
+    cliente -- e o cliente não tem como consertar. O rastro fica em
+    `formulario_solicitacao.placas_conferidas` (migração 081).
+    """
+    placas = placas_informadas(d, valores)
+    if not placas:
+        return None
+    try:
+        resposta = fpsl_ponte.conferir_placas(placas)
+    except Exception as e:  # noqa: BLE001 -- qualquer falha da ponte
+        log.warning("regra da placa: nao deu para conferir %s: %s", placas, e)
+        return False
+
+    inativas = [p for p in placas
+                if not (resposta.get(p) or {}).get("ativa")]
+    if inativas:
+        # ⚠️ A FRASE DIZ O QUE FAZER. "Placa não permitida" deixaria a pessoa
+        # sem saída; ela não sabe o que é a WESO nem tem como consertar o
+        # cadastro sozinha.
+        raise DadoInvalido(
+            "Só conseguimos abrir chamado para veículo com rastreador ativo. "
+            + ("Esta placa não está ativa no seu cadastro: "
+               if len(inativas) == 1 else
+               "Estas placas não estão ativas no seu cadastro: ")
+            + ", ".join(inativas)
+            + ". Confira a placa ou fale com a Movisat pelo WhatsApp.")
+    return True
 
 
 def novo_desafio() -> dict:
