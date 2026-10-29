@@ -1277,8 +1277,13 @@ outros 14 em clássico — é a pendência **nº 6** dele.
 |---|---|
 | `18392222000162` (só dígitos) | DCBM DATA CENTER BRASIL — **9 placas ativas** |
 | `18.392.222/0001-62` (mascarado) | o mesmo cliente |
-| `WQ0P6GLD000108` (**alfanumérico**) | Velasco Leite Pastelaria |
+| `WQ0P6GLD000108` (**alfanumérico**) | Velasco Leite Pastelaria — **a sandbox** |
 | `11222333000181` | `achou: false` — e não é erro |
+
+⚠️ **A DCBM aparece aqui como medição de LEITURA, e só.** A busca por CNPJ não
+cria nada; o que não se pode é **abrir OS** em cliente que não seja a sandbox —
+ver o item 2 da §10.4. A auditoria passou a usar o CNPJ da Velasco justamente
+para o exemplo não ensinar o número errado.
 
 **A regra da placa:** `ABC1D23` → `conferiu: true, ativa: false` — recusada,
 como ele mandou.
@@ -1306,8 +1311,33 @@ apagadas, e conferido: **0 passagens depois da suíte**.
    situação `0` na base — só deixou de ser urgente no quadro aberto.
 2. ⚠️ **A Velasco (a sandbox, cliente 998063) tem ZERO placas ativas.** Um
    chamado de teste por ela **não consegue informar placa**, porque a regra
-   recusa placa sem rastreador ativo. Para exercitar o fluxo com placa, o CNPJ
-   da **DCBM** (`18392222000162`, 9 placas) é o caminho.
+   recusa placa sem rastreador ativo.
+
+   🚨 **E AQUI EU DEI UM CONSELHO PERIGOSO, que fica registrado e corrigido.**
+   Eu escrevi: *"para exercitar o fluxo com placa, o CNPJ da DCBM
+   (`18392222000162`, 9 placas) é o caminho"*. **Está errado**, e a regra é
+   dele: *"não pode usar outro CNPJ além da VELASCO para teste, pois os tickets
+   nascem e têm ligações. OS com outros clientes podem ser mal interpretadas
+   pela OP"*.
+
+   ⚠️ **Eu já havia feito o erro antes de escrevê-lo:** a OS **17056** nasceu
+   no cliente **68546 (DCBM)** para provar a criação. Foi apagada no mesmo
+   minuto, mas o número foi consumido e, entre a criação e o delete, **ela
+   existiu na fila que a Operação lê** — e ninguém ali sabia que era teste.
+   Medi a conveniência (9 placas × 0) e ignorei a consequência.
+
+   **O remédio foi na causa, não no texto:** `provar_criacao_os.py` agora
+   **recusa** qualquer cliente que não seja `998063`, com a razão dele por
+   extenso, antes de qualquer chamada ao ERP. E o `68546` saiu dos quatro
+   arquivos de teste e da auditoria — ⚠️ lá ele vivia em dublê e não escrevia
+   nada, **mas é de um teste que se copia o número para um script que
+   escreve**, e foi exatamente o que aconteceu.
+
+   🔴 **E a consequência fica aberta, para ele:** o caminho da placa
+   **não pode ser exercitado** hoje — a única sandbox não tem placa ativa. As
+   opções são **ativar um rastreador para a Velasco na WESO** ou **aceitar que a
+   placa só será provada pelo primeiro chamado real**. 🚨 **Não vou escolher por
+   ele**, e nenhuma outra sandbox é alternativa.
 
 ## 10.5 Os 2 não exercitados, e por quê
 

@@ -22,6 +22,16 @@ from movizap import auth, banco, chamado_os, formularios, main  # noqa: E402
 from movizap import paineis, passagem  # noqa: E402
 from movizap.config import settings  # noqa: E402
 
+# 🚨 O CLIENTE DOS TESTES E A VELASCO (998063), E SO ELA. Regra dele, 29/10:
+# *"nao pode usar outro CNPJ alem da VELASCO para teste, pois os tickets nascem
+# e tem ligacoes. OS com outros clientes podem ser mal interpretadas pela OP"*.
+#
+# ⚠️ Aqui o id vive em DUBLE e nenhuma escrita chega ao ERP -- mas e de um teste
+# que se copia o numero para um script que escreve, e foi exatamente o que eu
+# fiz em 29/10: a OS 17056 nasceu na DCBM porque o numero dela estava a mao.
+CLIENTE_SANDBOX = 998063
+
+
 banco.abrir()
 ok, falho, naoexerc = [], [], []
 
@@ -147,7 +157,7 @@ with TestClient(main.app) as c:
     print()
     print("  -- a busca de cliente por CNPJ (o que a tela do Suporte usa) --")
     p = c.post("/api/publico/formulario/suporte/cliente",
-               data={"documento": "18392222000162",
+               data={"documento": "WQ0P6GLD000108",
                      "abertura": formularios._assinar("a0")})
     print(f"     status {p.status_code}: {str(p.text)[:160]}")
     conferir("a busca por CNPJ responde", p.status_code in (200, 400, 422),
@@ -165,7 +175,7 @@ with TestClient(main.app) as c:
              chamado_os.cliente_do_chamado(
                  formularios.definicao("suporte"),
                  {next(cp["nome"] for cp in formularios.definicao("suporte")["campos"]
-                       if cp.get("validacao") == "cnpj"): "18392222000162"}) == 68546)
+                       if cp.get("validacao") == "cnpj"): "WQ0P6GLD000108"}) == 998063)
     linha = banco.um("SELECT count(*) AS n FROM solicitacao_os")
     print(f"     solicitacao_os: {linha['n']} linhas")
     nao_exercitado("um envio real que abre OS",

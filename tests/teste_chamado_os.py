@@ -47,6 +47,16 @@ from movizap import banco, chamado_os, formularios, fpsl_ponte  # noqa: E402
 sys.path.insert(0, "/home/claude/movizap_painel/scripts")
 import carregar_formularios as carregador  # noqa: E402
 
+# 🚨 O CLIENTE DOS TESTES E A VELASCO (998063), E SO ELA. Regra dele, 29/10:
+# *"nao pode usar outro CNPJ alem da VELASCO para teste, pois os tickets nascem
+# e tem ligacoes. OS com outros clientes podem ser mal interpretadas pela OP"*.
+#
+# ⚠️ Aqui o id vive em DUBLE e nenhuma escrita chega ao ERP -- mas e de um teste
+# que se copia o numero para um script que escreve, e foi exatamente o que eu
+# fiz em 29/10: a OS 17056 nasceu na DCBM porque o numero dela estava a mao.
+CLIENTE_SANDBOX = 998063
+
+
 RAIZ = Path("/home/claude/movizap_painel")
 MAPA = json.loads((RAIZ / "dados" / "formularios_bitrix" / "mapa_bruto.json")
                   .read_text(encoding="utf-8"))
@@ -160,7 +170,7 @@ def teste_uma_linha_por_placa(formulario, campo_de_placa, ponte):
 
     r = chamado_os.abrir(sid, formulario, {campo_de_placa:
                                            ["ABC1D23", "XYZ4E56", "QWE7R89"]},
-                         cliente_id=68546)
+                         cliente_id=998063)
 
     assert r == {"abertas": 3, "falhas": 0, "motivo": None}
     linhas = chamado_os.da_solicitacao(sid)
@@ -175,7 +185,7 @@ def teste_sem_placa_abre_uma_os_com_placa_nula(formulario, ponte):
     d = ponte()
     sid = _solicitacao(formulario)
 
-    r = chamado_os.abrir(sid, formulario, {}, cliente_id=68546)
+    r = chamado_os.abrir(sid, formulario, {}, cliente_id=998063)
 
     assert r["abertas"] == 1
     linhas = chamado_os.da_solicitacao(sid)
@@ -192,7 +202,7 @@ def teste_a_mesma_placa_duas_vezes_abre_uma_so(formulario, campo_de_placa,
     valores = {campo_de_placa: ["ABC1D23", "abc1d23", "ABC1D23"]}
     sid = _solicitacao(formulario, valores)
 
-    r = chamado_os.abrir(sid, formulario, valores, cliente_id=68546)
+    r = chamado_os.abrir(sid, formulario, valores, cliente_id=998063)
 
     assert r["abertas"] == 1
     assert len(chamado_os.da_solicitacao(sid)) == 1
@@ -206,8 +216,8 @@ def teste_abrir_duas_vezes_nao_duplica(formulario, campo_de_placa, ponte):
     valores = {campo_de_placa: ["ABC1D23"]}
     sid = _solicitacao(formulario, valores)
 
-    chamado_os.abrir(sid, formulario, valores, cliente_id=68546)
-    segunda = chamado_os.abrir(sid, formulario, valores, cliente_id=68546)
+    chamado_os.abrir(sid, formulario, valores, cliente_id=998063)
+    segunda = chamado_os.abrir(sid, formulario, valores, cliente_id=998063)
 
     assert segunda["abertas"] == 0
     assert "ja as tinha" in segunda["motivo"]
@@ -225,7 +235,7 @@ def teste_a_falha_fica_escrita_na_linha(formulario, campo_de_placa, ponte):
     valores = {campo_de_placa: ["ABC1D23"]}
     sid = _solicitacao(formulario, valores)
 
-    r = chamado_os.abrir(sid, formulario, valores, cliente_id=68546)
+    r = chamado_os.abrir(sid, formulario, valores, cliente_id=998063)
 
     assert r == {"abertas": 0, "falhas": 1, "motivo": None}
     linha = chamado_os.da_solicitacao(sid)[0]
@@ -248,13 +258,13 @@ def teste_o_caso_incerto_e_marcado_e_nao_se_repete(formulario, campo_de_placa,
     valores = {campo_de_placa: ["ABC1D23"]}
     sid = _solicitacao(formulario, valores)
 
-    chamado_os.abrir(sid, formulario, valores, cliente_id=68546)
+    chamado_os.abrir(sid, formulario, valores, cliente_id=998063)
 
     linha = chamado_os.da_solicitacao(sid)[0]
     assert linha["erro"].startswith("🚨 ")
     assert "não respondeu no tempo" in linha["erro"]
     # Tentar de novo não fala com a ponte outra vez.
-    chamado_os.abrir(sid, formulario, valores, cliente_id=68546)
+    chamado_os.abrir(sid, formulario, valores, cliente_id=998063)
     assert len(d.chamadas) == 1
 
 
@@ -294,7 +304,7 @@ def teste_divergencia_guarda_o_numero_e_diz(formulario, campo_de_placa, ponte):
     valores = {campo_de_placa: ["ABC1D23"]}
     sid = _solicitacao(formulario, valores)
 
-    r = chamado_os.abrir(sid, formulario, valores, cliente_id=68546)
+    r = chamado_os.abrir(sid, formulario, valores, cliente_id=998063)
 
     assert r["abertas"] == 1
     linha = chamado_os.da_solicitacao(sid)[0]
@@ -385,13 +395,13 @@ def teste_o_tipo_vem_da_origem(formulario, campo_de_placa, ponte):
     d = ponte()
     valores = {campo_de_placa: ["ABC1D23"]}
     sid = _solicitacao(formulario, valores)
-    chamado_os.abrir(sid, formulario, valores, cliente_id=68546,
+    chamado_os.abrir(sid, formulario, valores, cliente_id=998063,
                      origem="movizap")
     assert d.chamadas[0]["tipo_id"] == 1783
 
     sid2 = _solicitacao(formulario, {campo_de_placa: ["XYZ4E56"]})
     chamado_os.abrir(sid2, formulario, {campo_de_placa: ["XYZ4E56"]},
-                     cliente_id=68546, origem="link")
+                     cliente_id=998063, origem="link")
     assert d.chamadas[1]["tipo_id"] == 1782
 
 
@@ -399,7 +409,7 @@ def teste_origem_desconhecida_cai_no_link_nao_no_vazio(formulario, ponte):
     """⚠️ Origem que eu não previ não pode mandar `tipo_id` nulo ao ERP."""
     d = ponte()
     sid = _solicitacao(formulario)
-    chamado_os.abrir(sid, formulario, {}, cliente_id=68546, origem="marte")
+    chamado_os.abrir(sid, formulario, {}, cliente_id=998063, origem="marte")
     assert d.chamadas[0]["tipo_id"] == 1782
 
 
@@ -411,7 +421,7 @@ def teste_a_descricao_leva_a_placa_e_o_numero_do_chamado(formulario,
     d = ponte()
     valores = {campo_de_placa: ["ABC1D23"]}
     sid = _solicitacao(formulario, valores)
-    chamado_os.abrir(sid, formulario, valores, cliente_id=68546)
+    chamado_os.abrir(sid, formulario, valores, cliente_id=998063)
 
     descricao = d.chamadas[0]["descricao"]
     assert f"Chamado {sid}" in descricao
@@ -423,7 +433,7 @@ def teste_a_descricao_nao_leva_anexo(formulario, ponte):
     público para ele. Seriam CPF, RG e contrato social atrás de uma URL."""
     d = ponte()
     sid = _solicitacao(formulario)
-    chamado_os.abrir(sid, formulario, {}, cliente_id=68546)
+    chamado_os.abrir(sid, formulario, {}, cliente_id=998063)
 
     descricao = d.chamadas[0]["descricao"]
     for campo in formulario["campos"]:
@@ -439,7 +449,7 @@ def teste_a_descricao_e_cortada_e_diz_que_cortou(formulario, ponte):
     campo = next(c["nome"] for c in formulario["campos"]
                  if c["tipo"] not in ("file",))
     sid = _solicitacao(formulario)
-    chamado_os.abrir(sid, formulario, {campo: "x" * 9000}, cliente_id=68546)
+    chamado_os.abrir(sid, formulario, {campo: "x" * 9000}, cliente_id=998063)
 
     descricao = d.chamadas[0]["descricao"]
     assert len(descricao) < 4000
@@ -456,7 +466,7 @@ def teste_a_falha_aparece_na_conta_do_painel(formulario, campo_de_placa, ponte):
     ponte({"ok": False, "criada": False, "motivo": "o ERP recusou"})
     valores = {campo_de_placa: ["ABC1D23"]}
     sid = _solicitacao(formulario, valores)
-    chamado_os.abrir(sid, formulario, valores, cliente_id=68546)
+    chamado_os.abrir(sid, formulario, valores, cliente_id=998063)
 
     depois = chamado_os.falhas_em_aberto()
     assert depois["quantas"] == antes["quantas"] + 1
@@ -470,7 +480,7 @@ def teste_a_os_que_nasceu_nao_entra_na_conta_de_falha(formulario,
     ponte()
     valores = {campo_de_placa: ["ABC1D23"]}
     sid = _solicitacao(formulario, valores)
-    chamado_os.abrir(sid, formulario, valores, cliente_id=68546)
+    chamado_os.abrir(sid, formulario, valores, cliente_id=998063)
 
     assert chamado_os.falhas_em_aberto()["quantas"] == antes["quantas"]
 
@@ -489,7 +499,7 @@ def teste_a_primeira_os_fica_na_solicitacao(formulario, campo_de_placa, ponte):
     valores = {campo_de_placa: ["ABC1D23", "XYZ4E56"]}
     sid = _solicitacao(formulario, valores)
 
-    chamado_os.abrir(sid, formulario, valores, cliente_id=68546)
+    chamado_os.abrir(sid, formulario, valores, cliente_id=998063)
 
     linha = banco.um(
         """SELECT os_id, numero_ordem, situacao_id
@@ -529,7 +539,7 @@ def teste_quem_tentou_e_falhou_nao_conta_como_sem_tentativa(formulario,
 
     antes_sem = chamado_os.sem_tentativa("operacao")
     antes_falha = chamado_os.falhas_em_aberto()["chamados"]
-    chamado_os.abrir(sid, formulario, valores, cliente_id=68546)
+    chamado_os.abrir(sid, formulario, valores, cliente_id=998063)
 
     # Ganhou linha com erro: saiu de "nunca tentada", entrou em "falhou".
     assert chamado_os.sem_tentativa("operacao") == antes_sem - 1
@@ -544,7 +554,7 @@ def teste_a_os_que_nasceu_sai_das_duas_contas(formulario, campo_de_placa,
 
     antes_sem = chamado_os.sem_tentativa("operacao")
     antes_falha = chamado_os.falhas_em_aberto()["quantas"]
-    chamado_os.abrir(sid, formulario, valores, cliente_id=68546)
+    chamado_os.abrir(sid, formulario, valores, cliente_id=998063)
 
     assert chamado_os.sem_tentativa("operacao") == antes_sem - 1
     assert chamado_os.falhas_em_aberto()["quantas"] == antes_falha

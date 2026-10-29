@@ -42,6 +42,16 @@ from movizap import (auth, banco, chamado_os, formularios, main,  # noqa: E402
                      paineis, passagem)
 from movizap.config import settings  # noqa: E402
 
+# 🚨 O CLIENTE DOS TESTES E A VELASCO (998063), E SO ELA. Regra dele, 29/10:
+# *"nao pode usar outro CNPJ alem da VELASCO para teste, pois os tickets nascem
+# e tem ligacoes. OS com outros clientes podem ser mal interpretadas pela OP"*.
+#
+# ⚠️ Aqui o id vive em DUBLE e nenhuma escrita chega ao ERP -- mas e de um teste
+# que se copia o numero para um script que escreve, e foi exatamente o que eu
+# fiz em 29/10: a OS 17056 nasceu na DCBM porque o numero dela estava a mao.
+CLIENTE_SANDBOX = 998063
+
+
 RAIZ = Path("/home/claude/movizap_painel")
 MAPA = json.loads((RAIZ / "dados" / "formularios_bitrix" / "mapa_bruto.json")
                   .read_text(encoding="utf-8"))
@@ -301,7 +311,7 @@ class TestOQuadro:
         monkeypatch.setattr(chamado_os.fpsl_ponte, "criar_os", recusar)
         d = formulario
         sid = formularios.registrar(d, {})["id"]
-        chamado_os.abrir(sid, d, {}, cliente_id=68546)
+        chamado_os.abrir(sid, d, {}, cliente_id=998063)
 
         cab = {"Authorization": f"Bearer {token}"}
         operacao = cliente.get("/api/paineis/operacao",
@@ -340,7 +350,7 @@ class TestOEnvioAbreAOS:
 
         monkeypatch.setattr(chamado_os.fpsl_ponte, "criar_os", criar)
         monkeypatch.setattr(chamado_os, "cliente_do_chamado",
-                            lambda d, v: 68546)
+                            lambda d, v: 998063)
 
         d = formulario
         r = self._enviar(cliente, d, _valores_bons(d), monkeypatch)
@@ -365,7 +375,7 @@ class TestOEnvioAbreAOS:
 
         monkeypatch.setattr(chamado_os.fpsl_ponte, "criar_os", estourar)
         monkeypatch.setattr(chamado_os, "cliente_do_chamado",
-                            lambda d, v: 68546)
+                            lambda d, v: 998063)
 
         d = formulario
         r = self._enviar(cliente, d, _valores_bons(d), monkeypatch)
