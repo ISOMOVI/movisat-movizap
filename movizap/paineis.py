@@ -35,7 +35,7 @@ Quando um deles nascer, nasce com módulo e rota próprios -- não com um `if`
 aqui dentro.
 """
 import logging
-from datetime import date
+from datetime import date, datetime
 
 from . import banco, chamado_os, fpsl_ponte
 from .operacao import DadoInvalido
@@ -254,6 +254,33 @@ def _solicitacoes_por_os() -> dict:
     return por_numero
 
 
+def _iso_da_previsao(valor) -> str | None:
+    """`dd/mm/aaaa HH:MM:SS` do Harmonit -> ISO, que é o que a tela sabe ler.
+
+    🚨 O CONTRATO COM A TELA É UM FORMATO SÓ. Antes daqui o `quadro` devolvia
+    ISO para o card de solicitação (`timestamptz` do Postgres) e brasileiro
+    para o card de OS (texto do Harmonit) -- dois formatos no mesmo campo, e o
+    navegador calado no segundo.
+
+    ⚠️ Formato que eu não conheço devolve `None`, e `None` a tela já sabe
+    tratar (não escreve a linha). O que não se pode é devolver o texto cru e
+    deixar o `new Date` decidir.
+    """
+    if not valor:
+        return None
+    texto = str(valor).strip()
+    for forma in ("%d/%m/%Y %H:%M:%S", "%d/%m/%Y %H:%M", "%d/%m/%Y"):
+        try:
+            return datetime.strptime(texto, forma).isoformat()
+        except ValueError:
+            continue
+    try:
+        return datetime.fromisoformat(texto).isoformat()
+    except ValueError:
+        log.warning("data_previsao em formato desconhecido no card: %r", texto)
+        return None
+
+
 def _nomes_de_cliente(ids: set) -> dict:
     """`harmonit_id` (texto) -> nome, do nosso cadastro.
 
@@ -322,6 +349,8 @@ def quadro(painel: str, so_abertas: bool = True) -> dict:
             ORDER BY s.id DESC""", (painel,))
 
     por_os = _solicitacoes_por_os()
+    # Lido a cada montagem, de propósito -- ver `_mapa_de_painel`.
+    mapa_de_painel = _mapa_de_painel()
     nomes = _nomes_de_cliente({o.get("cliente_id") for o in os_do_erp
                                if o.get("cliente_id")})
 
@@ -331,7 +360,7 @@ def quadro(painel: str, so_abertas: bool = True) -> dict:
     por_chave = {c["chave"]: c for c in colunas}
 
     # 🚨 O que não tem coluna é CONTADO, não escondido (ver o cabeçalho).
-    falhas = chamado_os.falhas_em_aberto()
+    falhas = chamado_os.falhas_em_aberto(painel)
     # 🚨 E O OUTRO CASO, que ele achou na tela: solicitação sem OS e **sem
     # tentativa**. Até 29/10 isso era o normal (a OS nascia por botão), e
     # chamá-lo de "a escrita falhou" é a tela mentindo -- ninguém escreveu.
@@ -370,14 +399,22 @@ def quadro(painel: str, so_abertas: bool = True) -> dict:
         # ⚠️ OS de outro painel não entra: a solicitação que a gerou diz de
         # quem ela é. OS sem solicitação (origem FPSL ou à mão) é da Operação
         # por decisão D8 -- e é a maioria hoje.
-        if s and s["slug"] and not _e_do_painel(s["slug"], painel):
+        if s and s["slug"] and mapa_de_painel.get(s["slug"]) != painel:
             continue
         _colocar({
             "id": (s or {}).get("solicitacao_id"),
             "origem": "formulario" if s else "erp",
             "formulario": (s or {}).get("formulario"),
             "slug": (s or {}).get("slug"),
-            "criada_em": (s or {}).get("criada_em") or o.get("data_previsao"),
+            # 🚨 ISO, SEMPRE. A OS do ERP traz `dd/mm/aaaa HH:MM:SS`, que o
+            # JavaScript NÃO sabe ler (`new Date(...)` = Invalid Date) -- e por
+            # causa disso o "há 2 dias" do card não aparecia em NENHUM dos 10
+            # cards reais. Era o efeito que ele aprovou no mockup.
+            # ⚠️ Eu conhecia a armadilha do lado da ponte (o corte por data usa
+            # `_PREVISAO_ISO` justamente por isso) e mandei o texto cru para o
+            # navegador.
+            "criada_em": ((s or {}).get("criada_em")
+                          or _iso_da_previsao(o.get("data_previsao"))),
             "estado": (s or {}).get("estado"),
             "cliente": ((s or {}).get("cliente_nome")
                         or nomes.get(str(o.get("cliente_id")))),
@@ -471,24 +508,23 @@ def quadro(painel: str, so_abertas: bool = True) -> dict:
     }
 
 
-def _e_do_painel(slug: str, painel: str) -> bool:
-    """Se o formulário daquele slug pertence a este painel.
+def _mapa_de_painel() -> dict:
+    """`slug` -> painel, lido do banco a cada montagem do quadro.
 
-    ⚠️ Uma consulta por slug e não um `JOIN`: a lista de OS vem do ERP, e a
-    maioria não tem solicitação nenhuma. O mapa é pequeno (15 formulários) e
-    fica em memória do processo por chamada.
+    🚨 ISTO ERA UM CACHE DE PROCESSO E O CACHE MENTIA. Eu o escrevi com um
+    comentário dizendo que ficar velho era "aceitável porque mover formulário
+    de painel é cadastro, não operação". **O preço medido é outro:** com o mapa
+    velho, `_e_do_painel` devolve `False` para um formulário criado depois do
+    primeiro acesso — e o `quadro` então **DESCARTA o card** daquela OS, não o
+    rotula errado. Card que desaparece da tela é `M12`, e nenhuma suíte
+    reclamaria.
+
+    ⚠️ E na suíte isso fazia o resultado depender da ORDEM dos testes: o
+    fixture cria um formulário, e se o cache já tivesse sido povoado antes o
+    card do teste simplesmente não aparecia.
+
+    A consulta é 15 linhas, uma por abertura de painel. Eu otimizei o que não
+    precisava de otimização e paguei com um caminho de silêncio.
     """
-    global _MAPA_PAINEL
-    if _MAPA_PAINEL is None:
-        _MAPA_PAINEL = {
-            linha["slug"]: linha["painel"]
+    return {linha["slug"]: linha["painel"]
             for linha in banco.varios("SELECT slug, painel FROM formulario")}
-    return _MAPA_PAINEL.get(slug) == painel
-
-
-# 🚨 CACHE DE PROCESSO, E ELE PODE FICAR VELHO: mover um formulário de painel é
-# `UPDATE formulario SET painel` (migração 075, decisão dele de que o mapa é
-# DADO), e esta cópia não vê o `UPDATE` até o serviço reiniciar. É aceitável
-# porque mover formulário de painel é cadastro, não operação -- e está dito
-# aqui para quem mover não passar uma tarde procurando.
-_MAPA_PAINEL = None

@@ -581,3 +581,148 @@ ponteiro.
 | o conserto do catálogo de tipos | `fpsl_weso/fpsl_weso/services/sync_tipos_os.py` |
 | a tela | `frontend/src/telas/PainelOperacao.vue` |
 | a prova no ERP (cria e apaga) | `fpsl_weso/provar_criacao_os.py` |
+
+---
+
+# 7. A AUDITORIA DO ENTREGUE (29/10, pedido dele)
+
+> 🔵 Pergunta dele, no mesmo dia da entrega: *"ja subiu tudo do plano? auditou e
+> validou o entregue? as rotas? — depois disso documente tudo"*.
+
+## 7.1 🔴 "Subiu tudo do plano?" — NÃO
+
+**Dos 6 blocos, 2 entraram.** A resposta honesta primeiro:
+
+| Bloco | Estado | O que falta |
+|---|---|---|
+| **A — criar a OS do chamado** | ✅ **no ar e provado** | só a decisão do "cliente avulso" |
+| **B — o painel monta as OS** | ✅ **no ar e provado** | a tradução da situação `0` (decisão dele) |
+| **C — tempo por etapa** | ❌ **não começou** | a tabela de passagem de etapa é nossa, do zero |
+| **D — mover o card** | ❌ **não começou** | `pode_mover` segue falso; espera a regra de ordem dele |
+| **E — o card aberto** | ❌ **não começou** | os 4 resumos, prioridade, observação, "falar com" |
+| **F — o espelho da OS** | ❌ **não começou** | espera a resposta dele sobre a aba Network |
+
+⚠️ **E o que do mockup não entrou está na §6.10**, item por item — os dois
+tempos, o card aberto, o "Avançar etapa" e a data editável.
+
+## 7.2 A auditoria: 7 achados, 5 eram defeitos meus
+
+🚨 **Nenhum destes apareceu nas 1.922 verificações verdes.** A varredura foi
+feita arquivo por arquivo, contra o dado de hoje.
+
+### 🚨 A1 — as 4 rotas novas e o teste HTTP: 3 de 4 tinham ZERO
+
+| rota | tinha teste HTTP? |
+|---|---|
+| `PUT /api/paineis/operacao/desde` | ❌ **nenhum** |
+| `GET /api/paineis/{painel}?so_abertas` | parcial (uma chamada em outra suíte) |
+| `POST /api/os/criar` | ❌ **nenhum** |
+| `GET /api/os/por-situacao` | ❌ **nenhum** |
+
+⚠️ **É O MESMO ACHADO DA AUDITORIA DE 22/10**, sete dias depois: *"as 10 rotas
+novas sem teste HTTP"* — e nesta casa **58 arquivos** da suíte do MoviZap usam
+`TestClient`. Testar a função não é testar a rota: **a permissão, o código de
+estado, a validação do parâmetro e a serialização só existem no caminho HTTP.**
+
+**Fechado com dois arquivos novos:**
+- `movizap_painel/tests/teste_rotas_pipeline.py` — **18** travas;
+- `fpsl_weso/tests/teste_ponte_rotas_http.py` — **25** travas.
+
+🚨 **E duas coisas só o teste HTTP pegou:**
+1. **O formulário nasce DESLIGADO** (é o desenho — o interruptor é dele), e a
+   rota pública usa `definicao(slug)` com `so_ativo=True`. O envio respondia
+   **404 "Formulário não encontrado"**, e nenhum teste de função veria isso.
+2. **`storage.DB_PATH` tem de ser `Path`, não texto** — `_connect()` faz
+   `DB_PATH.parent.mkdir(...)`.
+
+### 🚨 A2 — `falhas_em_aberto()` não filtrava por painel
+
+A função ao lado dela (`sem_tentativa(painel)`) filtrava. Então a linha de
+aviso da **Operação** somava falha de chamado do **Financeiro** e do
+**Contratual**. ⚠️ **Latente:** hoje não há falha nenhuma na base, então nada
+se via — o primeiro chamado recusado de outro setor mostraria. Corrigido com
+trava própria.
+
+### 🚨 A3 — o cache `_MAPA_PAINEL` mentia, e o preço não era o que eu escrevi
+
+Eu documentei o cache dizendo que ficar velho era *"aceitável porque mover
+formulário de painel é cadastro, não operação"*. **Medi, e o preço é outro:**
+com o mapa velho, `_e_do_painel` devolve `False` para um formulário criado
+depois do primeiro acesso — e o `quadro` então **DESCARTA o card** daquela OS,
+não o rotula errado.
+
+**Card que desaparece da tela é `M12`**, e nenhuma suíte reclamaria. ⚠️ E na
+suíte isso tornava o resultado **dependente da ordem** dos testes.
+
+**O cache saiu.** São 15 linhas, uma consulta por abertura de painel. Eu
+otimizei o que não precisava e paguei com um caminho de silêncio.
+
+### 🚨 A4 — o "há 2 dias" do mockup NÃO aparecia em nenhum card
+
+O card da OS carregava a data como o Harmonit a dá — `dd/mm/aaaa HH:MM:SS` — e
+**o JavaScript não sabe ler esse formato** (`new Date("27/10/2026 08:31:00")` =
+`Invalid Date`). O `ha()` guardava com `isNaN` e devolvia vazio: **o efeito que
+ele aprovou no mockup não aparecia em nenhum dos 10 cards reais.**
+
+⚠️ **Eu conhecia a armadilha**: o corte por data do outro lado usa o
+`_PREVISAO_ISO` exatamente por isso. Conheci de um lado e mandei o texto cru
+para o navegador do outro.
+
+### ⚠️ A5 — o `quadro` devolvia a data em dois formatos
+
+ISO para o card de solicitação (`timestamptz` do Postgres) e brasileiro para o
+card de OS (texto do Harmonit) — **dois formatos no mesmo campo**, e o
+navegador calado no segundo. O contrato com a tela passa a ser **um**: ISO,
+sempre, com `_iso_da_previsao` na junção.
+
+### 🔴 A6 — a rota da data matriz não tem quem a chame
+
+`PUT /api/paineis/operacao/desde` existe, está testada e **nenhuma tela a
+chama** — a data aparece como texto, porque mudá-la é do owner.
+
+⚠️ **E isto é a repetição de um achado meu de ONTEM**, na auditoria da
+`CAR_1.1`: *"`POST /prefatura/fechar` não tem botão — `car_leitura` continua sem
+escritor pelo uso"*. Escrevi o achado em 28/10 e refiz o padrão em 29/10.
+🔴 **Decisão dele:** dar à tela um campo de data visível só para o owner, ou
+deixar a rota como caminho de ajuste pontual.
+
+### ⚠️ A7 — a documentação de rota do FPSL não existia
+
+A ponte com o MoviZap **não tem seção de rotas em `docs/fpsl/`** — nem as 8 de
+antes, nem as 2 de hoje. E o `docs/fpsl/18_Testes.md`, que a auditoria de 28/10
+acabou de corrigir, não conhecia os arquivos de teste novos. ✅ Fechado nesta
+volta.
+
+⚠️ **Observação sobre o teste de ontem (não é meu, e passa):**
+`tests/teste_car_router.py` **não é coletável por pytest** — ele chama
+`sys.exit` e derruba a coleta com `INTERNALERROR`. Roda como script
+(`venv/bin/python tests/teste_car_router.py` → **100 OK**). Quem contar "73
+arquivos de teste" com pytest não conta esse.
+
+## 7.3 A validação do entregue — o que foi medido, não afirmado
+
+| o que | como foi provado |
+|---|---|
+| a OS nasce no ERP | OS **17056** criada, 8 campos relidos idênticos, **removida** |
+| o envio abre a OS | teste HTTP: `201` + linha em `solicitacao_os` com o número |
+| ERP fora do ar **não** derruba o envio | teste HTTP: a ponte estoura, o envio devolve **201** e o chamado está no banco |
+| a data matriz é do owner | não-owner leva **403** e **não grava** |
+| o quadro monta as OS | **10 cards** (14 com o interruptor desligado), 9 clientes casados |
+| a situação `0` é contada, não escondida | `fora_do_quadro.situacoes = [0]` |
+| a chave da ponte protege a escrita | chave errada → **401** nas duas rotas |
+| o teto é dito | `no_teto: true` com `teto=2` |
+| a aba Operações do FPSL | `sha256` do `operacoes_rotina.py` conferido |
+
+## 7.4 O placar depois da auditoria
+
+| suíte | antes | depois |
+|---|---|---|
+| MoviZap Python | 1.922 | **1.940** |
+| MoviZap JS | 579 | 579 |
+| ponte do FPSL (por nome) | 81 | **106** |
+
+⚠️ **E zero pulados nos arquivos novos**, de propósito: os dois testes mais
+importantes do Bloco A (o envio ponta a ponta) **começaram pulando** porque eu
+enchi os campos com `"x"` e a validação recusou. **Teste que pula é teste que
+não existe** — e foi o segundo pulo silencioso que esta frente me custou no
+mesmo dia.

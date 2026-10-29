@@ -98,6 +98,68 @@ aparecem todos.
 | `EML_1.1` | E-mail | `/email` | `atendimento` | 1 |
 | `FRM_1.1` | Solicitações | `/solicitacoes` | `equipe` | 1 |
 | `PNL_1.1` | Operação | `/paineis/operacao` | `owner` | 1 |
+
+### 🚨 `PNL_1.1` mudou de natureza em 29/10 — o card é a OS
+
+Até 28/10 este painel lia **só** `formulario_solicitacao`, e a base tinha **uma**
+solicitação: a tela estava tecnicamente certa e praticamente vazia.
+
+🔵 **Decisão D8 dele:** o card é a **OS**, de qualquer origem — *"seja pelo
+painel, seja pelo FPSL, seja pelo formulario, seja a mão"*.
+
+O quadro passou a ser a **união de duas fontes**, deduplicada pelo
+`numero_ordem`:
+
+1. **as OS do ERP** desde a data matriz, pela ponte do FPSL
+   (`GET /api/os/por-situacao`);
+2. **as nossas solicitações** que já têm OS — para a OS anterior à data matriz,
+   a finalizada com o interruptor ligado, e **a ponte fora do ar**.
+
+| o que | onde |
+|---|---|
+| a **data matriz** (D9: 24/10/2026, **só o owner muda**) | `config.painel_operacao_desde` · `PUT /api/paineis/operacao/desde` (**403** para quem não é owner) |
+| o interruptor **"só as abertas"** | `GET /api/paineis/operacao?so_abertas=0|1`, ligado por padrão |
+| as 17 colunas | `movizap/paineis.py` — `SITUACOES` |
+
+🚨 **PONTE FORA DO AR NÃO ESVAZIA O PAINEL**, e a tela **diz**: sem o FPSL o
+quadro cai de 10 para 2 cards. Quadro pequeno sem explicação faria o operador
+concluir que não há trabalho — e é justo nessa hora que há. É o
+`ponte_respondeu` da resposta.
+
+🚨 **MOVER O CARD CONTINUA NÃO EXISTINDO** (`pode_mover` falso, sem gesto de
+arrastar). É o **Bloco D**, e a rota que escreve `situacaoId` ainda não existe.
+⚠️ A **frase** que explicava isso saiu da tela em 29/10 a pedido dele; o
+comportamento não mudou.
+
+### A linha de aviso: três casos de "sem OS", não um
+
+🚨 **Até 29/10 a tela chamava todos de falha** — e ele achou o defeito na tela
+minutos depois de ela subir: *"1 sem OS (a escrita no Harmonit falhou)"*, quando
+**nada havia falhado**.
+
+| na `solicitacao_os` | significa | a tela escreve |
+|---|---|---|
+| nenhuma linha | **nunca se tentou** (chamado anterior ao Bloco A, ou formulário que não abre OS) | *"N chamados sem OS, de antes de a abertura ser automática"* |
+| linha com `erro` | tentou e **falhou** | *"N OS não abriram em M chamados"* |
+| a sobra das duas contas | linha preparada e nunca tentada | *"N sem OS e sem motivo registrado"* |
+
+⚠️ **A terceira frase existe de propósito**: sem ela aquele chamado
+desapareceria **entre** as duas outras.
+
+### Os efeitos visuais (do mockup que ele aprovou)
+
+A cor do **catavento** como código de etapa (borda de cima da coluna, borda
+esquerda do card), o contador **cheio** com card e **vazado** sem, a **OS na
+frente** do card, e sombra com levantada na passagem.
+
+🚨 **A COR NUNCA É O ÚNICO PORTADOR** — regra desta casa, com trava própria: o
+**nome da etapa** fica na coluna e o **número da situação** no card.
+⚠️ `prefers-reduced-motion` desliga o movimento e **mantém** a sombra.
+⚠️ Os **hexes do mockup não entraram**: cada um deles já é um token desta casa,
+e duplicá-los quebraria a tela quando o tema mudar.
+
+📘 **O detalhe inteiro, com as 12 decisões dele e a auditoria:**
+`docs/16_Pipeline_da_Operacao.md`.
 | `CAD_1.1` | Clientes | `/cadastro/clientes` | `cadastro` | 1 |
 | `CAD_1.2` | Contatos | `/cadastro/contatos` | `cadastro` | 1 |
 | `CAD_2.1` | Atendentes | `/cadastro/atendentes` | `equipe` | 1 |

@@ -257,19 +257,36 @@ def abrir(solicitacao_id: int, d: dict, valores: dict, cliente_id: int | None,
     return {"abertas": abertas, "falhas": falhas, "motivo": None}
 
 
-def falhas_em_aberto() -> dict:
+def falhas_em_aberto(painel: str | None = None) -> dict:
     """Quantos chamados ficaram sem OS, para o painel DIZER (`M12`).
 
     🚨 É O CONTRÁRIO DE ESCONDER: solicitação gravada cuja OS não nasceu não
     tem coluna no painel e sumiria da tela. Esta conta é o que faz a linha de
     aviso existir.
+
+    🚨 FILTRA POR PAINEL, e não filtrava — defeito meu, achado na auditoria do
+    mesmo dia: o `sem_tentativa()` ao lado filtrava e este não, então a linha
+    de aviso da Operação somava falha de chamado do Financeiro e do
+    Contratual. Hoje não há falha nenhuma na base, então nada se via: era
+    latente, e o primeiro chamado recusado de outro setor o mostraria.
+
+    ⚠️ `painel = None` conta TODOS, de propósito: serve a quem quer o número da
+    casa inteira (uma varredura, um relatório), e nunca a uma tela de painel.
     """
+    onde, params = "", ()
+    if painel is not None:
+        onde = """AND EXISTS (SELECT 1 FROM formulario_solicitacao s
+                               JOIN formulario f ON f.id = s.formulario_id
+                              WHERE s.id = solicitacao_id
+                                AND f.painel = %s)"""
+        params = (painel,)
     linha = banco.um(
-        """SELECT count(*) AS quantas,
+        f"""SELECT count(*) AS quantas,
                   count(DISTINCT solicitacao_id) AS chamados,
                   max(tentada_em) AS ultima
              FROM solicitacao_os
-            WHERE os_id IS NULL AND erro IS NOT NULL""")
+            WHERE os_id IS NULL AND erro IS NOT NULL
+              {onde}""", params)
     return {"quantas": (linha or {}).get("quantas") or 0,
             "chamados": (linha or {}).get("chamados") or 0,
             "ultima": (linha or {}).get("ultima")}
