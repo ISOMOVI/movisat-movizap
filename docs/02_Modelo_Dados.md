@@ -2525,3 +2525,53 @@ Dizer "falhou" ali faria quem chama tentar de novo e abrir a **segunda**.
 ⚠️ **Timeout da ponte cai nesse mesmo caso**, e foi um erro que quase ficou no
 código: *"não respondeu no tempo"* **não** quer dizer *"não gravou"* — a escrita
 pode ter chegado e a resposta ter se perdido na volta.
+
+## Migração 083 — a passagem de etapa
+
+🔵 **Decisão dele, 29/10, em uma frase:** *"deve ter o log de quem faz o que
+SEMPRE"*.
+
+`os_passagem` — tabela nova. Uma linha por tentativa de mover um card de etapa.
+
+| coluna | tipo | o que é |
+|---|---|---|
+| `numero_os` | `integer NOT NULL` | a OS no Harmonit |
+| `os_id` | `integer` | o id interno da OS, quando conhecido |
+| `de_situacao` | `integer` | de onde o card saiu. **Nula** = o ERP tinha a situação como `NULL` |
+| `para_situacao` | `integer NOT NULL` | para onde |
+| `atendente_id` | `integer` | **quem** moveu (`ON DELETE SET NULL`) |
+| `em` | `timestamptz` | quando |
+| `ok` | `boolean NOT NULL` | a escrita foi **confirmada pela releitura** |
+| `erro` | `text` | o que o ERP respondeu, quando recusou |
+| `fora_da_situacao` | `jsonb` | o que a releitura acusou **fora** da situação |
+
+🚨 **POR QUE ESTA TABELA É A CONDIÇÃO DO BLOCO D, e não um extra:** o Harmonit
+**não registra a situação na linha do tempo** — só o `status`, conferido em 3 OS
+em 29/10. Então, movido o card, **não há como saber quem moveu, de onde e
+quando**, nem aqui nem lá. Sem ela, mover é uma escrita **anônima e
+irreversível** no ERP.
+
+🚨 **A TENTATIVA RECUSADA TAMBÉM É GRAVADA**, e foi o que a prova de ponta a
+ponta mostrou: duas linhas com `ok = false` e o motivo, antes das duas que
+deram certo. Escrita negada sem rastro é a mesma família do `criada: null` da
+criação de OS — ninguém descobre depois.
+
+⚠️ **O CONFLITO DE CONCORRÊNCIA NÃO VIRA LINHA.** Quando a situação do ERP já é
+outra, nada é tentado — e registrar uma passagem que não aconteceu encheria a
+linha do tempo da OS de ruído. A recusa volta na resposta e a tela recarrega.
+
+⚠️ **`de_situacao` NULA NÃO É ZERO.** `0` é um valor que o Harmonit grava em
+**129** OS; `NULL` é "a varredura não leu". Confundir os dois já custou uma
+coluna inteira do painel em 22/10.
+
+⚠️ **ESTA TABELA NÃO É O BLOCO C.** O C quer *"quanto tempo em cada etapa"*, com
+os dois tempos no card. Aqui é o **registro da passagem** — e é ele que faz o C
+sair barato depois, porque o dado passa a ser colhido desde já.
+
+🟡 **E é o que faz o "Voltar" ser honesto:** sabendo de onde o card veio, voltar
+é uma **nova passagem**, nunca um "desfazer" — o ERP não desfaz nada, e dizer
+"desfazer" afirmaria que a primeira escrita não aconteceu.
+
+**Os três índices:** por OS (a linha do tempo que o Bloco E vai ler), por
+atendente (*"o log de quem faz o que"* respondido sem varrer a tabela) e um
+parcial sobre as recusadas (`WHERE NOT ok`).

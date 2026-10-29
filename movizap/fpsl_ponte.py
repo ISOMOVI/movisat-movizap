@@ -329,3 +329,37 @@ def os_por_situacao(desde: str, so_abertas: bool = True,
     return _pedir("/api/os/por-situacao",
                   {"desde": desde, "so_abertas": 1 if so_abertas else 0,
                    "teto": teto})
+
+
+def gravar_situacao_da_os(numero_os: int, situacao_id: int,
+                          situacao_esperada: int | None = None,
+                          conferir_antes: bool = True) -> dict:
+    """Escreve a situação da OS no Harmonit, pela ponte — o Bloco D.
+
+    🔵 É o motivo que ele deu para o painel existir: *"hoje ainda não usamos a
+    situação da OS, por isso o painel e consulta para atualizar a situação no
+    painel"*.
+
+    🚨 DEVOLVE `{"ok": False, "motivo": ...}` EM VEZ DE ESTOURAR, como as outras
+    escritas: quem chama registra a passagem com o motivo, e **o registro é o
+    ponto** — *"deve ter o log de quem faz o que SEMPRE"*.
+
+    🚨 TIMEOUT VIRA `incerto`, e quem chama NÃO pode tentar de novo às cegas: a
+    escrita pode ter chegado ao Harmonit e a resposta ter se perdido na volta.
+    Aqui isso sai como `ok: False` com `incerto: True`, e a passagem fica
+    gravada dizendo exatamente isso.
+    """
+    corpo = {
+        "numero_os": int(numero_os),
+        "situacao_id": int(situacao_id),
+        "situacao_esperada": situacao_esperada,
+        "conferir_antes": bool(conferir_antes),
+    }
+    try:
+        return _postar("/api/os/situacao", corpo)
+    except FpslIndisponivel as e:
+        incerto = bool(getattr(e, "incerto", False))
+        return {"ok": False, "gravou": None if incerto else False,
+                "incerto": incerto, "numero_os": int(numero_os),
+                "para": int(situacao_id),
+                "motivo": ("🚨 " if incerto else "") + str(e)}

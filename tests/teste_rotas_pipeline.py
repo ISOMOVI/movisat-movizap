@@ -38,7 +38,8 @@ pytest.importorskip("psycopg")
 from fastapi.testclient import TestClient  # noqa: E402
 
 import carregar_formularios as carregador  # noqa: E402
-from movizap import auth, banco, chamado_os, formularios, main, paineis  # noqa: E402
+from movizap import (auth, banco, chamado_os, formularios, main,  # noqa: E402
+                     paineis, passagem)
 from movizap.config import settings  # noqa: E402
 
 RAIZ = Path("/home/claude/movizap_painel")
@@ -254,8 +255,12 @@ class TestOQuadro:
                       "ponte_respondeu", "fora_do_quadro", "pode_mover"):
             assert chave in q, chave
         assert len(q["colunas"]) == 17
-        # 🚨 Mover ainda NÃO existe, e a rota é a verdade disso.
-        assert q["pode_mover"] is False
+        # 🚨 ESTA LINHA AFIRMAVA O CONTRARIO HA UMA HORA, e e o segundo teste
+        # meu de hoje a guardar a verdade antiga (o primeiro exigia a palavra
+        # "Harmonit" numa frase errada). Mover passou a existir no Bloco D:
+        # *"O card pode ser por arrastar"*. A verdade do gesto continua sendo
+        # este campo -- o que mudou e o valor dele.
+        assert q["pode_mover"] is True
 
     def test_o_interruptor_atravessa_a_rota(self, cliente, token):
         cab = {"Authorization": f"Bearer {token}"}
@@ -370,3 +375,130 @@ class TestOEnvioAbreAOS:
         assert "Recebemos" in r.json()["mensagem"]
         assert banco.um("SELECT id FROM formulario_solicitacao WHERE id = %s",
                         (r.json()["id"],)) is not None
+
+
+# ============================================================================
+# POST /api/paineis/operacao/mover — Bloco D (29/10)
+# ============================================================================
+# 🔵 *"deve ter o log de quem faz o que SEMPRE"* · *"pode mover que tiver acesso
+# a tela, por enquanto somente owner"* · *"que tal de caminho proibido é
+# esse??"* (ordem LIVRE).
+#
+# 🚨 ENTRA COM TESTE HTTP NA MESMA VOLTA, que foi exatamente o buraco da
+# auditoria de hoje: rota de escrita sem teste de rota.
+class TestMoverOCard:
+    def test_sem_token_nao_passa(self, cliente):
+        r = cliente.post("/api/paineis/operacao/mover",
+                         json={"numero_os": 1, "para_situacao": 38})
+        assert r.status_code in (401, 403)
+
+    def test_situacao_fora_das_17_e_recusada(self, cliente, token):
+        """⚠️ Não é "caminho proibido" — é id que não tem coluna, e o card
+        desapareceria da tela."""
+        r = cliente.post("/api/paineis/operacao/mover",
+                         json={"numero_os": 90999, "para_situacao": 99999},
+                         headers={"Authorization": f"Bearer {token}"})
+        assert r.status_code in (400, 422), r.text
+        assert "17" in r.text
+
+    def test_a_ordem_e_LIVRE_entre_as_17(self, cliente, token, monkeypatch):
+        """🔵 *"que tal de caminho proibido é esse??"* — nada valida transição.
+        Aqui se prova indo da ÚLTIMA etapa para a PRIMEIRA, que seria o pulo
+        mais estranho possível."""
+        vistos = []
+
+        def gravar(numero_os, situacao_id, situacao_esperada=None,
+                   conferir_antes=True):
+            vistos.append((numero_os, situacao_id, situacao_esperada))
+            return {"ok": True, "gravou": True, "numero_os": numero_os,
+                    "de": 16492, "para": situacao_id}
+
+        monkeypatch.setattr(passagem.fpsl_ponte, "gravar_situacao_da_os",
+                            gravar)
+        r = cliente.post(
+            "/api/paineis/operacao/mover",
+            json={"numero_os": 90999, "para_situacao": 38,
+                  "situacao_esperada": 16492},
+            headers={"Authorization": f"Bearer {token}"})
+        assert r.status_code == 200, r.text
+        assert r.json()["ok"] is True
+        # 🚨 A trava de concorrência atravessou a rota até a ponte.
+        assert vistos == [(90999, 38, 16492)]
+
+    def test_O_LOG_SAI_SEMPRE_inclusive_quando_o_ERP_recusa(
+            self, cliente, token, monkeypatch):
+        """🔵 *"deve ter o log de quem faz o que SEMPRE"*. 🚨 Escrita negada sem
+        rastro é o que ninguém descobre depois."""
+        def recusar(numero_os, situacao_id, situacao_esperada=None,
+                    conferir_antes=True):
+            return {"ok": False, "gravou": False, "numero_os": numero_os,
+                    "de": 38, "para": situacao_id,
+                    "motivo": "o Harmonit recusou"}
+
+        monkeypatch.setattr(passagem.fpsl_ponte, "gravar_situacao_da_os",
+                            recusar)
+        r = cliente.post(
+            "/api/paineis/operacao/mover",
+            json={"numero_os": 90998, "para_situacao": 1316,
+                  "situacao_esperada": 38},
+            headers={"Authorization": f"Bearer {token}"})
+        assert r.status_code == 200, r.text
+        assert r.json()["ok"] is False
+
+        linhas = passagem.historico(90998)
+        assert len(linhas) == 1
+        assert linhas[0]["ok"] is False
+        assert "recusou" in linhas[0]["erro"]
+        # 🔵 E QUEM fez: é o "quem faz o que".
+        assert linhas[0]["quem"]
+        banco.executar("DELETE FROM os_passagem WHERE numero_os = %s", (90998,))
+
+    def test_conflito_NAO_vira_passagem(self, cliente, token, monkeypatch):
+        """⚠️ Nada foi tentado no ERP, então registrar uma passagem encheria a
+        linha do tempo da OS de ruído. A resposta diz o conflito."""
+        def conflitar(numero_os, situacao_id, situacao_esperada=None,
+                      conferir_antes=True):
+            return {"ok": False, "gravou": False, "conflito": True,
+                    "numero_os": numero_os, "de": 1316, "para": situacao_id,
+                    "motivo": "alguem mudou no meio"}
+
+        monkeypatch.setattr(passagem.fpsl_ponte, "gravar_situacao_da_os",
+                            conflitar)
+        cliente.post("/api/paineis/operacao/mover",
+                     json={"numero_os": 90997, "para_situacao": 890,
+                           "situacao_esperada": 38},
+                     headers={"Authorization": f"Bearer {token}"})
+        assert passagem.historico(90997) == []
+
+    def test_o_log_e_legivel_pela_rota(self, cliente, token, monkeypatch):
+        """🔵 Um log que ninguém consegue ler não cumpre *"SEMPRE"*."""
+        def gravar(numero_os, situacao_id, situacao_esperada=None,
+                   conferir_antes=True):
+            return {"ok": True, "gravou": True, "numero_os": numero_os,
+                    "de": 38, "para": situacao_id}
+
+        monkeypatch.setattr(passagem.fpsl_ponte, "gravar_situacao_da_os",
+                            gravar)
+        cab = {"Authorization": f"Bearer {token}"}
+        cliente.post("/api/paineis/operacao/mover",
+                     json={"numero_os": 90996, "para_situacao": 1316,
+                           "situacao_esperada": 38}, headers=cab)
+        try:
+            uma = cliente.get("/api/paineis/operacao/passagens?numero_os=90996",
+                              headers=cab)
+            assert uma.status_code == 200, uma.text
+            assert uma.json()["passagens"][0]["para_situacao"] == 1316
+
+            todas = cliente.get("/api/paineis/operacao/passagens?dias=1",
+                                headers=cab)
+            assert any(p["numero_os"] == 90996
+                       for p in todas.json()["passagens"])
+        finally:
+            banco.executar("DELETE FROM os_passagem WHERE numero_os = %s",
+                           (90996,))
+
+    def test_pode_mover_virou_verdade_no_quadro(self, cliente, token):
+        """⚠️ `pode_mover` é a verdade do gesto, e ela mudou em 29/10."""
+        r = cliente.get("/api/paineis/operacao",
+                        headers={"Authorization": f"Bearer {token}"})
+        assert r.json()["pode_mover"] is True

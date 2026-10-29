@@ -365,7 +365,11 @@ class TestRotaDoPainel:
         assert r.status_code == 200
         assert len(paineis.SITUACOES) == 17
         assert len(r.json()["colunas"]) == 17
-        assert r.json()["pode_mover"] is False
+        # 🚨 A QUARTA TRAVA MINHA DO DIA a guardar a verdade antiga, e
+        # as quatro no mesmo recurso. Mover passou a existir no Bloco D
+        # (29/10): *"O card pode ser por arrastar"*. `pode_mover`
+        # continua sendo a verdade do gesto -- mudou o valor.
+        assert r.json()["pode_mover"] is True
         # 🚨 E o que nao tem coluna vem CONTADO, nunca escondido (M12).
         assert "fora_do_quadro" in r.json()
 

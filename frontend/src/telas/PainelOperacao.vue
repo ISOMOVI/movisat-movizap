@@ -100,8 +100,23 @@ const fora = computed(() => {
      nunca tentada não cai em nenhuma das duas contas, e deixá-la desaparecer
      entre as frases seria o mesmo defeito outra vez, mais fundo. */
   if (f.sem_tentativa) {
-    partes.push(`${f.sem_tentativa} ${f.sem_tentativa === 1 ? 'chamado' : 'chamados'}`
-      + ` sem OS, de antes de a abertura ser automática`)
+    /* 🔵 Ele, 29/10, lendo "1 chamado sem OS": *"pq deu erro? o que falta?"*.
+       NADA havia falhado -- era o chamado dele, enviado antes de a abertura
+       automática existir. A frase contava em vez de identificar, e contagem
+       sem número não responde "qual?". */
+    /* 🚨 O PLURAL NAO PODE DEPENDER DA LISTA DE NUMEROS, e foi o defeito que
+       a trava pegou: a frase dizia "1 chamados" quando o numero do chamado nao
+       vinha (acontece acima de 5 itens, ou se o servidor nao mandar a lista).
+       Um e singular com lista ou sem. */
+    const quais = (f.sem_tentativa_quais || []).join(', ')
+    const um = f.sem_tentativa === 1
+    partes.push(
+      (um ? (quais ? `o chamado ${quais} ainda não tem OS`
+                   : '1 chamado ainda sem OS')
+          : `${f.sem_tentativa} chamados ainda sem OS`
+            + (quais ? ` (${quais})` : ''))
+      + (um ? ' (foi enviado' : ', enviados')
+      + ' antes de a abertura automática entrar)'.slice(um ? 0 : 1))
   }
   if (f.os_falhou) {
     partes.push(`${f.os_falhou} ${f.os_falhou === 1 ? 'OS não abriu' : 'OS não abriram'}`
@@ -113,8 +128,15 @@ const fora = computed(() => {
     partes.push(`${f.sem_os - explicados} sem OS e sem motivo registrado`)
   }
   if (f.situacao_fora) {
-    partes.push(`${f.situacao_fora} com situação fora das 17`
-      + (f.situacoes.length ? ` (${f.situacoes.join(', ')})` : ''))
+    /* 🚨 A SITUAÇÃO VEM DO ERP, e dizer isso é o ponto: a OS está em `0` no
+       Harmonit, e `0` não é uma das 17. Não é defeito nosso, e a frase antiga
+       ("1 com situação fora das 17") fazia parecer que era. */
+    const quais = f.fora_quais || []
+    partes.push(quais.length
+      ? quais.map((o) => `a OS ${o.numero_os} está em situação `
+          + `${o.situacao_id} no Harmonit, que não é uma das 17`).join(' · ')
+      : `${f.situacao_fora} com situação fora das 17`
+        + (f.situacoes.length ? ` (${f.situacoes.join(', ')})` : ''))
   }
   return partes.join(' · ')
 })
@@ -122,6 +144,72 @@ const fora = computed(() => {
 function quando(iso) {
   if (!iso) return '—'
   return new Date(iso).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })
+}
+
+/* ============================================================================
+   MOVER O CARD — Bloco D. 🔵 Dele: *"O card pode ser por arrastar"*.
+   ----------------------------------------------------------------------------
+   🚨 A ORDEM É LIVRE: *"que tal de caminho proibido é esse??"*. Não há mapa de
+   transições aqui, nem no servidor, nem no Harmonit.
+
+   🚨 A TRAVA DE CONCORRÊNCIA VAI NO PEDIDO: `situacao_esperada` é a situação
+   que ESTE card carregava. Se o ERP já estiver em outra, o servidor recusa e a
+   tela recarrega -- em vez de escrever por cima do que outra pessoa fez.
+
+   ⚠️ E O CARD VOLTA SOZINHO quando a escrita falha: o movimento na tela é
+   otimista (o card pula de coluna na hora), e o `catch` recarrega o quadro.
+   Card que fica na coluna nova com a OS na antiga é a tela mentindo.
+   ============================================================================ */
+const arrastando = ref(null)
+const movendo = ref(null)
+const erroDeMover = ref('')
+
+function comecarArrasto(card, evento) {
+  if (!quadro.value?.pode_mover) return
+  arrastando.value = card
+  /* ⚠️ `move` e não `copy`: o cursor tem de dizer que isto MOVE. */
+  if (evento.dataTransfer) {
+    evento.dataTransfer.effectAllowed = 'move'
+    /* Alguns navegadores exigem algum dado para iniciar o arrasto. */
+    evento.dataTransfer.setData('text/plain', String(card.numero_ordem || ''))
+  }
+}
+
+function terminarArrasto() {
+  arrastando.value = null
+}
+
+async function soltarNaColuna(coluna) {
+  const card = arrastando.value
+  arrastando.value = null
+  if (!card || !quadro.value?.pode_mover) return
+  /* Soltar na própria coluna não é movimento. */
+  if (card.situacao_id === coluna.situacao_id) return
+  await mover(card, coluna.situacao_id)
+}
+
+async function mover(card, paraSituacao) {
+  erroDeMover.value = ''
+  movendo.value = card.numero_ordem
+  try {
+    const r = await api.post('/api/paineis/operacao/mover', {
+      numero_os: card.numero_ordem,
+      para_situacao: paraSituacao,
+      /* 🚨 A trava de concorrência -- ver o comentário do bloco. */
+      situacao_esperada: card.situacao_id,
+    })
+    if (!r.ok) {
+      erroDeMover.value = r.motivo || 'Não consegui mover este card.'
+    }
+  } catch (e) {
+    erroDeMover.value = e instanceof ErroDeApi
+      ? e.message : 'Não consegui mover este card.'
+  } finally {
+    movendo.value = null
+    /* 🚨 RECARREGA SEMPRE, deu certo ou não: a verdade é o que o ERP
+       confirmou, nunca o que a tela achou que ia acontecer. */
+    await carregar()
+  }
 }
 
 /* 🔵 AS 6 CORES DO CATAVENTO, como código de etapa — do mockup que ele
@@ -196,6 +284,12 @@ onMounted(carregar)
     </header>
 
     <p v-if="erro" class="aviso aviso--erro" role="alert">{{ erro }}</p>
+    <!-- 🚨 A RECUSA DE MOVER É DITA, e com `alert`: a escrita no ERP não
+         aconteceu, e o card já voltou para o lugar. Falha silenciosa aqui
+         faria a pessoa pensar que gravou. -->
+    <p v-if="erroDeMover" class="aviso aviso--erro" role="alert">
+      {{ erroDeMover }}
+    </p>
     <p v-if="carregando" class="apagado">Lendo…</p>
 
     <template v-if="quadro">
@@ -214,8 +308,21 @@ onMounted(carregar)
         </span>
       </p>
 
-      <p v-if="fora" class="aviso aviso--atencao" role="status">
-        <i class="bi bi-exclamation-triangle aviso__icone" aria-hidden="true"></i>
+      <!-- 🚨 CARA DE ATENÇÃO SÓ QUANDO ALGO FALHOU DE VERDADE. Ele leu esta
+           linha em 29/10 e perguntou *"pq deu erro?"* -- e nada havia
+           falhado: era um chamado aguardando e uma OS que o ERP tem em
+           situação 0. O triângulo e o estilo de atenção diziam "problema", e
+           a pessoa vai procurar um erro que não existe. Falha de abertura de
+           OS é problema; o resto é nota. -->
+      <!-- ⚠️ `aviso--fora` existe para quem TESTA poder apontar para ESTA
+           linha: a tela tem tres `.aviso` (erro de leitura, ponte caida, e
+           esta), e um seletor generico pega a primeira do DOM. -->
+      <p v-if="fora" class="aviso aviso--fora"
+         :class="quadro.fora_do_quadro.os_falhou ? 'aviso--atencao' : 'aviso--nota'"
+         role="status">
+        <i class="aviso__icone" aria-hidden="true"
+           :class="quadro.fora_do_quadro.os_falhou
+                     ? 'bi bi-exclamation-triangle' : 'bi bi-info-circle'"></i>
         <span>{{ fora }} — abra em <strong>Solicitações</strong>.</span>
       </p>
 
@@ -241,6 +348,8 @@ onMounted(carregar)
                     'coluna--vazia': !coluna.total }"
           :style="{ borderTopColor: corDaEtapa(indice) }"
           :aria-label="coluna.titulo"
+          @dragover.prevent
+          @drop.prevent="soltarNaColuna(coluna)"
         >
           <h2 class="coluna__titulo">
             <!-- ⚠️ Toda coluna colapsa desde 29/10: as duas que eram fixas
@@ -274,7 +383,11 @@ onMounted(carregar)
                  10 de 10 medidos hoje vêm do ERP. O card começava com um
                  campo vazio. -->
             <article v-for="card in coluna.cards"
-                     :key="card.numero_ordem || card.id" class="card">
+                     :key="card.numero_ordem || card.id" class="card"
+                     :class="{ 'card--movendo': movendo === card.numero_ordem }"
+                     :draggable="quadro.pode_mover && !!card.numero_ordem"
+                     @dragstart="comecarArrasto(card, $event)"
+                     @dragend="terminarArrasto">
               <button class="card__abrir" type="button"
                       :style="{ borderLeftColor: corDaEtapa(indice) }"
                       @click="abrirSolicitacao(card)">
@@ -333,6 +446,24 @@ onMounted(carregar)
                   lido do Harmonit {{ quando(card.visto_em) }}
                 </span>
               </button>
+
+              <!-- ⚠️ O MESMO CAMINHO, OUTRO GESTO. Arrastar foi a escolha dele
+                   e é o gesto principal; mas arrastar **não é alcançável por
+                   teclado**, e sem isto o painel passaria a ter uma ação que
+                   só funciona com mouse. São 6 linhas, e é o que faz o recurso
+                   existir para quem usa teclado ou leitor de tela. -->
+              <label v-if="quadro.pode_mover && card.numero_ordem"
+                     class="card__mover">
+                <span class="so-leitor">
+                  Mover a OS {{ card.numero_ordem }} para outra etapa
+                </span>
+                <select :value="card.situacao_id"
+                        :disabled="movendo === card.numero_ordem"
+                        @change="mover(card, Number($event.target.value))">
+                  <option v-for="c in quadro.colunas" :key="c.chave"
+                          :value="c.situacao_id">{{ c.titulo }}</option>
+                </select>
+              </label>
             </article>
 
             <p v-if="!coluna.cards.length" class="apagado pequeno">Vazia.</p>
@@ -368,6 +499,12 @@ onMounted(carregar)
 .coluna__nome { line-height: 1.3; }
 
 .painel__desde { font-size: var(--txt-xs); color: var(--texto-fraco); }
+/* Nota neutra: informa, nao alarma. Ver o comentario no `template`. */
+.aviso--nota {
+  background: var(--superficie-2);
+  border: var(--borda-fina) solid var(--borda);
+  color: var(--texto-fraco);
+}
 .painel__interruptor {
   display: flex; align-items: center; gap: var(--e-1);
   min-height: var(--altura-toque);
@@ -415,6 +552,23 @@ onMounted(carregar)
 .coluna__corpo { padding: var(--e-3); display: flex; flex-direction: column; gap: var(--e-2); }
 
 .card { display: block; }
+/* 🔵 O gesto dele. ⚠️ `grab` no card inteiro, e `grabbing` enquanto arrasta. */
+.card[draggable="true"] { cursor: grab; }
+.card[draggable="true"]:active { cursor: grabbing; }
+/* Enquanto a escrita no ERP não voltou, o card fica apagado e o select
+   desabilitado -- dois cliques seguidos seriam duas escritas. */
+.card--movendo { opacity: .55; pointer-events: none; }
+.card__mover { display: block; margin-top: var(--e-1); }
+.card__mover select {
+  width: 100%;
+  min-height: var(--altura-toque);
+  padding: var(--e-1) var(--e-2);
+  border: var(--borda-fina) solid var(--borda);
+  border-radius: var(--r-sm, 6px);
+  background: var(--superficie);
+  color: var(--texto-fraco);
+  font-size: var(--txt-xs);
+}
 .card__abrir {
   width: 100%;
   min-height: var(--altura-toque);

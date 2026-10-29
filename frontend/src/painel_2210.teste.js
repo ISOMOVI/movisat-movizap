@@ -20,8 +20,11 @@
      · *"os comentários tbm devem sumir dali"* -- sai o aviso de que mover não
        existe, a lista de formulários e o cartão de painel vazio.
 
-   🚨 O QUE NÃO MUDOU, e por isso continua testado aqui: **não há `draggable`**
-   (mover de verdade escreve no Harmonit, e a rota não existe), coluna vazia
+   🚨 ATENÇÃO, ISTO MUDOU EM 29/10: até então este arquivo afirmava que **não
+   há `draggable`** -- e era verdade, porque a rota que escreve a situação não
+   existia. Ela existe (Bloco D), ele decidiu *"O card pode ser por arrastar"*,
+   e agora o que se testa é o contrário: o card arrasta, o teclado também move
+   pelo `select`, e `pode_mover` continua sendo a verdade do gesto. Coluna vazia
    nasce colapsada com o contador à vista, a cor nunca é o único portador, e o
    card leva para a ficha na `FRM_1.1`.
 
@@ -32,11 +35,21 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 
-const estado = { quadro: null, empurrado: [] }
+const estado = { quadro: null, empurrado: [], postado: [],
+                 resposta: null }
 
 vi.mock('../src/api/cliente.js', () => ({}))
 vi.mock('./api/cliente.js', () => ({
-  api: { get: async () => estado.quadro },
+  api: {
+    get: async () => estado.quadro,
+    /* 🚨 O `post` registra o que foi enviado: o que importa no Bloco D é o
+       CORPO do pedido (o `situacao_esperada` da trava de concorrência), não
+       só que a chamada aconteceu. */
+    post: async (caminho, corpo) => {
+      estado.postado.push([caminho, corpo])
+      return estado.resposta ?? { ok: true }
+    },
+  },
   ErroDeApi: class extends Error {},
 }))
 
@@ -80,6 +93,13 @@ function quadro({ cards = {}, podeMover = false, fora = null } = {}) {
     colunas,
     total: colunas.reduce((soma, c) => soma + c.total, 0),
     pode_mover: podeMover,
+    /* 🚨 A PONTE NASCE DE PE, e nao setar isto era um defeito da suite: com
+       `undefined` (falso) TODOS os testes renderizavam o alarme "O FPSL nao
+       respondeu", e a trava da ponte caida passava pelo motivo errado. */
+    ponte_respondeu: true,
+    ponte_motivo: null,
+    desde: '2026-10-24',
+    so_abertas: true,
     fora_do_quadro: fora || {
       sem_os: 0, situacao_fora: 0, situacoes: [],
       /* 🚨 Os campos do Bloco A entram no dublê TAMBÉM no caso
@@ -105,6 +125,8 @@ async function abrir(dados) {
 }
 
 beforeEach(() => {
+  estado.postado = []
+  estado.resposta = null
   estado.empurrado = []
 })
 
@@ -175,10 +197,72 @@ describe('🔵 os três textos que ele mandou sumir', () => {
   })
 })
 
-describe('mover o card', () => {
-  it('🚨 não existe gesto de arrastar enquanto a escrita no Harmonit não existe', async () => {
-    const tela = await abrir(quadro({ cards: { s38: [card()] } }))
-    expect(tela.html()).not.toContain('draggable')
+describe('mover o card — Bloco D (29/10)', () => {
+  /* 🚨 ESTA TRAVA ERA O CONTRÁRIO ATÉ 29/10: ela afirmava que **não** havia
+     `draggable`, e era verdade -- a escrita de situação não existia e oferecer
+     o gesto sem gravar seria pior. Ele decidiu: *"O card pode ser por
+     arrastar"*. Trocar esta trava é parte de ligar o recurso, não um efeito
+     colateral: a afirmação antiga deixou de ser verdadeira. */
+  const comCard = () => quadro({
+    cards: { s38: [card({ numero_ordem: 17099, situacao_id: 38 })] },
+    podeMover: true,
+  })
+
+  it('o card arrasta quando pode mover', async () => {
+    const tela = await abrir(comCard())
+    expect(tela.find('.card').attributes('draggable')).toBe('true')
+  })
+
+  it('🚨 NAO arrasta quando pode_mover e falso', async () => {
+    /* ⚠️ `pode_mover` continua sendo a verdade do gesto: quem não pode mover
+       não recebe um card que parece arrastável. */
+    const tela = await abrir(quadro({
+      cards: { s38: [card({ numero_ordem: 17099 })] }, podeMover: false,
+    }))
+    expect(tela.find('.card').attributes('draggable')).toBe('false')
+  })
+
+  it('🚨 o TECLADO tambem move — o select existe ao lado do arrasto', async () => {
+    /* 🚨 Arrastar não é alcançável por teclado. Ele escolheu arrastar, e sem
+       este `select` o painel passaria a ter uma ação que só funciona com
+       mouse. As 17 etapas estão nele, na ordem dele. */
+    const tela = await abrir(comCard())
+    const sel = tela.find('.card__mover select')
+    expect(sel.exists()).toBe(true)
+    expect(sel.findAll('option')).toHaveLength(17)
+    /* O valor é a etapa ATUAL -- o select mostra onde o card está. */
+    expect(sel.element.value).toBe('38')
+  })
+
+  it('o select tem rotulo para leitor de tela', async () => {
+    const tela = await abrir(comCard())
+    expect(tela.find('.card__mover .so-leitor').text())
+      .toContain('Mover a OS 17099')
+  })
+
+  it('🚨 manda a situacao ESPERADA no pedido — a trava de concorrencia',
+     async () => {
+    /* 🔵 Ele pediu a trava mesmo achando o risco pequeno: *"cada 1 atua em uma
+       área especifica do fluxo"* · *"mas pode ter sim"*. Sem o
+       `situacao_esperada`, mover escreveria por cima do que outra pessoa fez. */
+    const tela = await abrir(comCard())
+    await tela.find('.card__mover select').setValue('1316')
+    await flushPromises()
+    expect(estado.postado).toHaveLength(1)
+    expect(estado.postado[0]).toEqual([
+      '/api/paineis/operacao/mover',
+      { numero_os: 17099, para_situacao: 1316, situacao_esperada: 38 },
+    ])
+  })
+
+  it('a recusa do servidor e DITA, com papel de alerta', async () => {
+    /* 🚨 Falha silenciosa aqui faria a pessoa pensar que gravou. */
+    estado.resposta = { ok: false, motivo: 'a OS esta na situacao 1316 no Harmonit' }
+    const tela = await abrir(comCard())
+    await tela.find('.card__mover select').setValue('890')
+    await flushPromises()
+    const alerta = tela.findAll('[role="alert"]').map((p) => p.text()).join(' ')
+    expect(alerta).toContain('no Harmonit')
   })
 })
 
@@ -198,20 +282,31 @@ describe('🚨 o que não tem coluna é DITO, não escondido (M12)', () => {
     const tela = await abrir(quadro({
       fora: { sem_os: 3, situacao_fora: 0, situacoes: [] },
     }))
-    const aviso = tela.find('.aviso--atencao')
-    expect(aviso.text()).toContain('3 sem OS')
+    /* ⚠️ Sem `sem_tentativa` nem `os_falhou`, os 3 sem OS caem na SOBRA --
+       "sem motivo registrado" -- que e a frase honesta para o caso em que nao
+       se sabe por que o chamado nao tem OS. */
+    const aviso = tela.find('.aviso--fora')
+    expect(aviso.text()).toContain('3 sem OS e sem motivo registrado')
     expect(aviso.text()).not.toContain('Harmonit')
     expect(aviso.text()).toContain('Solicitações')
   })
 
   it('situação fora das 17 aparece com o NÚMERO CRU', async () => {
     const tela = await abrir(quadro({
-      fora: { sem_os: 0, situacao_fora: 2, situacoes: [0, 99999] },
+      fora: {
+        sem_os: 0, situacao_fora: 2, situacoes: [0, 99999],
+        fora_quais: [{ numero_os: 17050, situacao_id: 0 },
+                     { numero_os: 17051, situacao_id: 99999 }],
+      },
     }))
-    const aviso = tela.find('.aviso--atencao')
-    expect(aviso.text()).toContain('2 com situação fora das 17')
+    /* 🔵 Ele, 29/10: *"1 com situação fora das 17 (0)"* -> *"pq deu erro?"*.
+       A contagem nao dizia QUAL OS nem DE QUEM era a situacao. Agora nomeia a
+       OS e diz que o numero vem do Harmonit -- nao e defeito nosso. */
+    const aviso = tela.find('.aviso--fora')
+    expect(aviso.text()).toContain('a OS 17050 está em situação 0 no Harmonit')
+    expect(aviso.text()).toContain('a OS 17051 está em situação 99999')
     // ⚠️ O número cru, nunca um rótulo inventado.
-    expect(aviso.text()).toContain('0, 99999')
+    expect(aviso.text()).toContain('99999')
   })
 })
 
@@ -275,7 +370,7 @@ describe('a falha de abertura de OS', () => {
         os_falhou_em: '2026-10-29T15:40:00-03:00',
       },
     }))
-    const aviso = tela.find('.aviso--atencao')
+    const aviso = tela.find('.aviso--fora')
     expect(aviso.text()).toContain('3 OS não abriram')
     expect(aviso.text()).toContain('2 chamados')
     expect(aviso.text()).toContain('última tentativa')
@@ -288,7 +383,7 @@ describe('a falha de abertura de OS', () => {
         os_falhou: 1, os_falhou_chamados: 1, os_falhou_em: null,
       },
     }))
-    const aviso = tela.find('.aviso--atencao')
+    const aviso = tela.find('.aviso--fora')
     expect(aviso.text()).toContain('1 OS não abriu')
     expect(aviso.text()).toContain('1 chamado')
     /* ⚠️ Sem hora, a tela não inventa uma. */
@@ -306,7 +401,7 @@ describe('a falha de abertura de OS', () => {
         sem_tentativa: 0,
       },
     }))
-    const texto = tela.find('.aviso--atencao').text()
+    const texto = tela.find('.aviso--fora').text()
     expect(texto).toContain('4 OS não abriram')
     expect(texto).toContain('1 com situação fora das 17')
     expect(texto).toContain('99999')
@@ -325,10 +420,10 @@ describe('a falha de abertura de OS', () => {
         sem_tentativa: 2,
       },
     }))
-    const texto = tela.find('.aviso--atencao').text()
+    const texto = tela.find('.aviso--fora').text()
     /* 5 sem OS - (2 nunca tentados + 1 com falha) = 2 sem explicação. */
     expect(texto).toContain('2 sem OS e sem motivo registrado')
-    expect(texto).toContain('2 chamados sem OS, de antes')
+    expect(texto).toContain('2 chamados ainda sem OS')
     expect(texto).toContain('1 OS não abriu')
   })
 })
@@ -353,11 +448,15 @@ describe('sem OS: aguardando nao e falha', () => {
     const tela = await abrir(quadro({
       fora: { ...vazio, sem_os: 1, sem_tentativa: 1 },
     }))
-    const aviso = tela.find('.aviso--atencao')
+    const aviso = tela.find('.aviso--fora')
     /* 🚨 A frase do defeito NÃO pode voltar. */
     expect(aviso.text()).not.toContain('falhou')
-    expect(aviso.text()).toContain('1 chamado sem OS')
-    expect(aviso.text()).toContain('antes de a abertura ser automática')
+    expect(aviso.text()).toContain('1 chamado ainda sem OS')
+    expect(aviso.text()).toContain('antes de a abertura automática entrar')
+    /* 🚨 E NEM A CARA DE ATENCAO: nada falhou, entao a linha e NOTA. Foi o
+       triangulo que fez ele perguntar *"pq deu erro?"*. */
+    expect(aviso.classes()).toContain('aviso--nota')
+    expect(aviso.classes()).not.toContain('aviso--atencao')
   })
 
   it('diz falha quando a escrita falhou de verdade', async () => {
@@ -375,7 +474,7 @@ describe('sem OS: aguardando nao e falha', () => {
               os_falhou: 3, os_falhou_chamados: 2 },
     }))
     const texto = tela.find('.aviso--atencao').text()
-    expect(texto).toContain('1 chamado sem OS')
+    expect(texto).toContain('1 chamado ainda sem OS')
     expect(texto).toContain('3 OS não abriram')
   })
 

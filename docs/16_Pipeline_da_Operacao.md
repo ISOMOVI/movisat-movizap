@@ -1056,3 +1056,145 @@ nunca existiu"*; a segunda frase seria falsa no ERP e no carimbo.
 **Régua de pronto, igual à dos outros blocos:** as duas suítes passam · o estado
 é **relido** e conferido, nunca o retorno da escrita · **ele validou no
 navegador**.
+
+---
+
+# 9. BLOCO D — NO AR (29/10, à noite)
+
+> 🔵 **As quatro decisões dele, que fecharam a §8.4 em uma frase cada:**
+> *"O card pode ser por arrastar"* · *"deve ter o log de quem faz o que
+> SEMPRE"* · *"que tal de caminho proibido é esse??"* · *"pode mover que tiver
+> acesso a tela, por enquanto somente owner"*.
+>
+> ⚠️ **Três das minhas seis perguntas eram minhas, não dele**, e ele cortou as
+> duas que mais custariam: o caminho proibido **não existe** (D-b) e o gesto é
+> o arrastar (D-a). A §8.4 fica como está, com as recomendações que ele não
+> seguiu à vista — o registro vale mais que a minha razão.
+
+## 9.1 O que entrou
+
+| peça | onde |
+|---|---|
+| migração **083** `os_passagem` | `migracoes/083_passagem_de_etapa.sql` |
+| a escrita no ERP | `fpsl_weso/routers/os_ponte.py` — `POST /api/os/situacao` |
+| o log e o "voltar" | `movizap/passagem.py` |
+| as rotas | `POST /api/paineis/operacao/mover` · `GET /api/paineis/operacao/passagens` |
+| o arrastar e o `select` | `frontend/src/telas/PainelOperacao.vue` |
+| `pode_mover` | passou de constante `False` para **`True`** |
+
+✅ **PROVADO PONTA A PONTA na OS 16991** (a sandbox da Velasco), pelo caminho
+real MoviZap → ponte → Harmonit:
+
+```
+1. a trava de concorrência, com a situação errada de propósito → RECUSOU
+2. 15694 → 890 ........................ ok, gravou, fora_da_situacao: nenhum
+3. o cache já sabia, sem esperar os 5 min da varredura → situação 890
+4. 890 → 15694 (a volta) .............. ok
+5. o log: 4 passagens, as 2 recusadas incluídas, com quem e quando
+6. o log do teste, apagado. A OS está em 15694, a original.
+```
+
+## 9.2 🚨 Dois defeitos meus que só a prova de ponta a ponta pegou
+
+### 9.2.1 As duas leituras da rota estavam SEM GUARDA
+
+A prova falhou **duas vezes** com `o FPSL respondeu 502` — e o 502 vinha de uma
+leitura do Harmonit sem `try`. A chamada direta da mesma função, no mesmo
+minuto, moveu a OS e devolveu `ok: True`.
+
+🚨 **A releitura DEPOIS da escrita é o caso perigoso, e é o irmão exato do
+`criada: null` da criação de OS:** a escrita já foi enviada e aceita; se a
+releitura falhar, **`gravou: False` é tão mentira quanto `gravou: True`**.
+⚠️ Nas duas vezes de hoje a OS **não** moveu (conferido no ERP) — o
+`gravou: False` foi honesto **por sorte, não por desenho**.
+
+Agora: a leitura de **antes** devolve *"nada foi escrito, pode tentar de novo"*;
+a releitura de **depois** devolve **`gravou: None`** e *"NÃO SE SABE se a OS
+mudou. Confira a mão e NÃO tente de novo às cegas"*.
+
+### 9.2.2 O card dizia "lido do Harmonit" com a data errada
+
+Movi a OS, o cache atualizou na hora, e o card seguiu dizendo *"lido do Harmonit
+01/10"*. Medido no `storage.salvar_os_historico`: **`visto_em` é a primeira vez
+que a OS foi vista** e é **preservado** em toda atualização (`visto = anterior[0]
+if existe`); quem guarda a última leitura é **`atualizado_em`**.
+
+⚠️ **Eu li o nome do campo e supus o significado.** O rótulo existia justamente
+para a pessoa saber se o dado é fresco — e dizia que tinha 28 dias quando
+acabara de ser confirmado. Rótulo que mente sobre frescor é pior que rótulo
+nenhum.
+
+## 9.3 As decisões dele, como ficaram no código
+
+### 🔵 "O card pode ser por arrastar"
+
+O card é `draggable`, a coluna aceita o solto, e o movimento na tela é
+**otimista** — mas o quadro **recarrega sempre**, deu certo ou não: a verdade é
+o que o ERP confirmou.
+
+⚠️ **E o painel não perdeu o teclado.** Arrastar não é alcançável por teclado,
+então **cada card tem também um `select` das 17 etapas**, com rótulo para
+leitor de tela. 🚨 Não é a minha recomendação por baixo: é o que faz a ação
+existir para quem não usa mouse, e custa 6 linhas. O gesto principal é o dele.
+
+🚨 **A trava que garantia a AUSÊNCIA do arrastar foi invertida**, e isso é parte
+de ligar o recurso: ela afirmava `not.toContain('draggable')` e era verdadeira
+até hoje. **Foi a terceira trava minha do dia a guardar a verdade antiga** — as
+outras duas exigiam a palavra "Harmonit" numa frase errada e `pode_mover` falso.
+
+### 🔵 "deve ter o log de quem faz o que SEMPRE"
+
+`os_passagem`: OS, de onde, para onde, **quem**, quando, `ok`, o erro e o
+`fora_da_situacao`.
+
+🚨 **A tentativa RECUSADA também é gravada** — foi o que apareceu na prova:
+duas linhas com `ok=False` e o motivo, antes das duas que deram certo. Escrita
+negada sem rastro é o que ninguém descobre depois.
+
+⚠️ **O conflito de concorrência NÃO vira passagem:** nada foi tentado no ERP, e
+registrar uma passagem que não aconteceu encheria a linha do tempo de ruído.
+
+⚠️ **E o log é LEGÍVEL na mesma volta** (`GET .../passagens`, por OS ou por
+dia): um log que ninguém consegue ler não cumpre o *"SEMPRE"*.
+
+### 🔵 "que tal de caminho proibido é esse??"
+
+**Não existe.** Nada valida transição — nem o módulo, nem a ponte, nem o
+Harmonit. O único recusado é id **fora das 17**, e não por ser proibido: é que o
+card ficaria **sem coluna** e desapareceria da tela.
+
+⚠️ **E isso corrigiu a minha pergunta, não o código:** eu inventei a hipótese do
+caminho proibido a partir de um *"depois vou montar as regras entre eles"*. Fica
+registrado: era pergunta minha.
+
+🟡 **O mapa dele, se um dia existir, sai do dado:** o carimbo grava **de onde
+para onde**, então os caminhos reais aparecem medidos em vez de supostos.
+
+### 🔵 "pode mover que tiver acesso a tela, por enquanto somente owner"
+
+A rota usa `requer_tela("PNL_1.1")` e **nada além**. Hoje a `PNL_1.1` é de
+permissão `owner`, então o alcance é ele — e no dia em que a aba for concedida,
+quem a receber **já move**, sem segunda concessão.
+
+🚨 **Não foi criada permissão nova**, e a medição é o argumento: as três opções
+davam **o mesmo alcance de hoje (1 pessoa)**, então a única diferença era o
+custo.
+
+## 9.4 Onde continua não existindo nada
+
+| | |
+|---|---|
+| **Bloco C** — os dois tempos no card | ❌ a `os_passagem` colhe o dado desde agora, mas o cálculo e a tela não existem |
+| **Bloco E** — o card aberto | ❌ o `GET /passagens` por OS já serve a linha do tempo dele |
+| **Bloco F** — o espelho da OS | ❌ |
+| **"Voltar para \\<etapa\\>"** | ⚠️ `passagem.ultima_passagem()` existe e responde de onde o card veio; **o botão não existe** |
+
+## 9.5 🔴 O que falta dele
+
+1. **Validar no navegador:** arrastar um card e ver a OS mudar no Harmonit. 🚨 É
+   escrita real no ERP — recomendo começar pela **OS 16991**, a sandbox.
+2. **A situação `0`** (D-e, ainda aberta): a OS 17050 não tem coluna, então
+   **não pode ser arrastada**. É a OS que mais precisa ser movida.
+3. **A solicitação 544** — apagar, ou eu abro a OS dela agora que o Bloco A
+   existe.
+4. O **"Voltar"** como botão: a função já responde; falta ele querer.

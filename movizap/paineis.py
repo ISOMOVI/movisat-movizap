@@ -365,13 +365,21 @@ def quadro(painel: str, so_abertas: bool = True) -> dict:
     # tentativa**. Até 29/10 isso era o normal (a OS nascia por botão), e
     # chamá-lo de "a escrita falhou" é a tela mentindo -- ninguém escreveu.
     nunca_tentadas = chamado_os.sem_tentativa(painel)
+    # 🔵 Ele, 29/10: o NÚMERO do chamado vale mais que a contagem.
+    quais_nunca = chamado_os.quais_sem_tentativa(painel)
     fora = {"sem_os": 0, "situacao_fora": 0, "situacoes": [],
             "os_falhou": falhas["quantas"],
             "os_falhou_chamados": falhas["chamados"],
             "os_falhou_em": falhas["ultima"],
             # ⚠️ "Nunca se tentou" é outra coisa de "falhou", e a tela escreve
             # frases diferentes.
-            "sem_tentativa": nunca_tentadas}
+            "sem_tentativa": nunca_tentadas,
+            # Os números, até 5. Ver `quais_sem_tentativa`.
+            "sem_tentativa_quais": quais_nunca[:5],
+            # 🚨 E as OS que não têm coluna saem com NÚMERO e situação, não só
+            # contadas: "OS 17050 está em situação 0 no Harmonit" é uma frase
+            # que leva a algum lugar; "1 com situação fora das 17" não é.
+            "fora_quais": []}
 
     vistos = set()
 
@@ -386,6 +394,10 @@ def quadro(painel: str, so_abertas: bool = True) -> dict:
             # cache. O que fazer com elas é decisão dele.
             if situacao not in fora["situacoes"]:
                 fora["situacoes"].append(situacao)
+            if len(fora["fora_quais"]) < 5:
+                fora["fora_quais"].append(
+                    {"numero_os": card.get("numero_ordem"),
+                     "situacao_id": situacao})
             return
         por_chave[f"s{situacao}"]["cards"].append(card)
 
@@ -431,10 +443,19 @@ def quadro(painel: str, so_abertas: bool = True) -> dict:
             "finalizada": o.get("finalizada"),
             "placas": o.get("placas") or [],
             "tecnicos": o.get("tecnicos") or [],
-            # ⚠️ QUANDO ESTE DADO FOI VISTO no ERP. A varredura roda a cada
+            # ⚠️ QUANDO ESTE DADO FOI LIDO DO ERP. A varredura roda a cada
             # 5 min, e a tela tem de poder dizer isso em vez de deixar o
             # operador supor que é agora.
-            "visto_em": o.get("visto_em"),
+            #
+            # 🚨 E O CAMPO E `atualizado_em`, NAO `visto_em` -- eu li o nome e
+            # supus o significado. Medido no `storage.salvar_os_historico`:
+            # `visto_em` e **a primeira vez** que a OS foi vista e e
+            # PRESERVADO em toda atualizacao; quem guarda a ultima leitura e
+            # `atualizado_em`. Achado na prova do Bloco D: movi a OS, o cache
+            # atualizou a situacao na hora, e o card seguiu dizendo "lido do
+            # Harmonit 01/10". Rotulo que mente sobre frescor e pior que
+            # rotulo nenhum, porque ele existe exatamente para isso.
+            "visto_em": o.get("atualizado_em") or o.get("visto_em"),
         }, o.get("situacao_id"))
 
     # ---- os cards das nossas solicitações que a ponte não trouxe ---------
@@ -499,12 +520,15 @@ def quadro(painel: str, so_abertas: bool = True) -> dict:
         # 🚨 O que não tem coluna. A tela só escreve se algum for maior que
         # zero -- `M12` sem encher a tela de aviso.
         "fora_do_quadro": fora,
-        # ⚠️ MOVER AINDA NÃO EXISTE, e `pode_mover` continua sendo a verdade
-        # disso -- o que saiu em 29/10, a pedido dele, foi a FRASE que a tela
-        # desenhava ao lado das colunas (*"os comentários tbm devem sumir
-        # dali"*). O gesto não passou a existir por isso: quem o ligar muda
-        # este campo, e aí a tela ganha o `draggable`. É o Bloco D.
-        "pode_mover": False,
+        # 🔵 MOVER EXISTE DESDE 29/10 (Bloco D), por decisão dele: *"O card
+        # pode ser por arrastar"*. ⚠️ Quem move é quem alcança a tela, e hoje a
+        # `PNL_1.1` é de permissão `owner` — *"pode mover que tiver acesso a
+        # tela, por enquanto somente owner"*. Então este campo é `True` para
+        # quem chegou até aqui: a permissão foi cobrada na rota.
+        #
+        # 🚨 E A ORDEM É LIVRE: *"que tal de caminho proibido é esse??"*. Não há
+        # mapa de transições, nem aqui nem na ponte — o Harmonit também não tem.
+        "pode_mover": True,
     }
 
 

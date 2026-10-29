@@ -28,6 +28,7 @@ from . import bitrix
 from . import cadastro
 from . import canais as registro_canais
 from . import chamado_os
+from . import passagem
 from . import chat
 from . import conversas
 from . import evolution
@@ -5054,6 +5055,57 @@ def ver_painel(painel: str,
 
 class DataMatrizDoPainel(BaseModel):
     desde: str
+
+
+class MoverCard(BaseModel):
+    numero_os: int
+    para_situacao: int
+    # 🚨 A situação que a TELA tinha quando carregou o card -- a trava de
+    # concorrência que ele pediu. ⚠️ Nulo é legítimo (a OS não tinha situação).
+    situacao_esperada: int | None = None
+
+
+@app.post("/api/paineis/operacao/mover")
+def mover_card_do_painel(
+        dados: MoverCard,
+        usuario: dict = Depends(auth.requer_tela("PNL_1.1"))):
+    """Move o card de etapa: escreve a situação no Harmonit e REGISTRA quem fez.
+
+    🔵 Quatro decisões dele, de 29/10:
+    *"O card pode ser por arrastar"* · *"deve ter o log de quem faz o que
+    SEMPRE"* · *"que tal de caminho proibido é esse??"* (ordem **livre**) ·
+    *"pode mover que tiver acesso a tela, por enquanto somente owner"*.
+
+    🚨 **A PERMISSÃO É A DA TELA, de propósito, e não uma nova.** Ele foi
+    explícito: quem alcança a tela move. Hoje a `PNL_1.1` é de permissão
+    `owner`, então o alcance é ele — e no dia em que a aba for concedida a
+    alguém, essa pessoa **já move**. Criar uma permissão separada agora daria o
+    mesmo alcance de hoje (1 pessoa) com duas concessões para errar depois.
+
+    🚨 **O LOG SAI ANTES DA RESPOSTA**, e inclusive quando o ERP recusa: é o
+    *"SEMPRE"* dele. Escrita negada sem rastro é o que ninguém descobre depois.
+    """
+    return passagem.mover(
+        dados.numero_os, dados.para_situacao,
+        atendente_id=usuario.get("id"),
+        situacao_esperada=dados.situacao_esperada)
+
+
+@app.get("/api/paineis/operacao/passagens")
+def passagens_do_painel(
+        numero_os: int = Query(0, ge=0),
+        dias: int = Query(7, ge=1, le=90),
+        usuario: dict = Depends(auth.requer_tela("PNL_1.1"))):
+    """O log das passagens — de uma OS, ou de todo mundo nos últimos N dias.
+
+    🔵 *"deve ter o log de quem faz o que SEMPRE"*. ⚠️ Um log que ninguém
+    consegue ler não cumpre o pedido, e é por isso que esta rota existe junto
+    com a escrita, e não "depois".
+    """
+    if numero_os:
+        return {"numero_os": numero_os,
+                "passagens": passagem.historico(numero_os)}
+    return {"dias": dias, "passagens": passagem.quem_mexeu(dias)}
 
 
 @app.put("/api/paineis/operacao/desde")

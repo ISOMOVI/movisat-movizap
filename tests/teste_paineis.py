@@ -233,12 +233,20 @@ def teste_solicitacao_de_outro_painel_nao_entra(formulario_de_operacao):
 # ============================================================================
 # O que ainda não existe — e a tela diz
 # ============================================================================
-def teste_mover_ainda_nao_existe_e_a_frase_saiu_da_tela():
-    """⚠️ Duas coisas, e elas são diferentes: mover continua não existindo
-    (`pode_mover` falso, e é o que impede o `draggable`), e a FRASE que
-    explicava isso saiu em 29/10 a pedido dele."""
+def teste_mover_existe_e_a_frase_antiga_nao_voltou():
+    """🚨 A TERCEIRA TRAVA MINHA A GUARDAR A VERDADE ANTIGA no mesmo dia, e as
+    três no mesmo recurso: uma exigia a palavra "Harmonit" numa frase errada,
+    outra exigia `pode_mover` falso na rota, e esta aqui.
+
+    O que mudou: mover **passou a existir** (Bloco D, 29/10 — *"O card pode ser
+    por arrastar"*).
+
+    ⚠️ O que NÃO mudou e continua travado: a FRASE que explicava a ausência do
+    gesto saiu da tela a pedido dele (*"os comentários tbm devem sumir dali"*) e
+    **não voltou** — o quadro não devolve `porque_nao_move`.
+    """
     q = paineis.quadro("operacao")
-    assert q["pode_mover"] is False
+    assert q["pode_mover"] is True
     assert "porque_nao_move" not in q
 
 

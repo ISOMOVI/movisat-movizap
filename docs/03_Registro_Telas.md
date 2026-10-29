@@ -126,10 +126,33 @@ quadro cai de 10 para 2 cards. Quadro pequeno sem explicação faria o operador
 concluir que não há trabalho — e é justo nessa hora que há. É o
 `ponte_respondeu` da resposta.
 
-🚨 **MOVER O CARD CONTINUA NÃO EXISTINDO** (`pode_mover` falso, sem gesto de
-arrastar). É o **Bloco D**, e a rota que escreve `situacaoId` ainda não existe.
-⚠️ A **frase** que explicava isso saiu da tela em 29/10 a pedido dele; o
-comportamento não mudou.
+### Mover o card — existe desde 29/10 (Bloco D)
+
+🔵 **Quatro decisões dele, uma frase cada:** *"O card pode ser por arrastar"* ·
+*"deve ter o log de quem faz o que SEMPRE"* · *"que tal de caminho proibido é
+esse??"* · *"pode mover que tiver acesso a tela, por enquanto somente owner"*.
+
+| peça | como ficou |
+|---|---|
+| o gesto | **arrastar** o card para a coluna · **e** um `select` das 17 em cada card, porque arrastar não alcança teclado |
+| a ordem | 🚨 **LIVRE.** Nada valida transição — nem aqui, nem na ponte, nem o Harmonit. O único recusado é id **fora das 17**, e não por ser proibido: o card ficaria sem coluna |
+| quem move | `requer_tela("PNL_1.1")` e **nada além**. Hoje a aba é `owner`, então o alcance é ele; concedida a aba, quem a receber **já move** |
+| o log | **toda** passagem em `os_passagem` (migração 083), **inclusive a recusada** |
+| a trava de concorrência | a tela manda a situação que **ela** carregou; se o ERP já estiver em outra, a escrita é **recusada** e o painel recarrega |
+| `pode_mover` | passou de `False` para **`True`**, e continua sendo a verdade do gesto |
+
+⚠️ **O movimento na tela é otimista e o quadro RECARREGA sempre**, deu certo ou
+não: a verdade é o que o ERP confirmou, nunca o que a tela achou que ia
+acontecer. A recusa aparece com `role="alert"`.
+
+🚨 **A escrita é a OS INTEIRA** (`SalvarOrdemServico` — o Harmonit não tem
+"alterar só a situação"), então a rota lê, remonta, grava, **relê e compara os
+40 campos**: diferença fora do `situacaoId` devolve o card para a coluna de
+origem.
+
+⚠️ **E a frase que explicava a ausência do gesto não voltou** — ela saiu em
+29/10 a pedido dele (*"os comentários tbm devem sumir dali"*) e o quadro
+continua sem `porque_nao_move`. Tem trava própria.
 
 ### A linha de aviso: três casos de "sem OS", não um
 

@@ -292,6 +292,29 @@ def falhas_em_aberto(painel: str | None = None) -> dict:
             "ultima": (linha or {}).get("ultima")}
 
 
+def quais_sem_tentativa(painel: str, teto: int = 5) -> list[int]:
+    """Os NÚMEROS dos chamados que nunca tiveram tentativa de abrir OS.
+
+    🚨 O NÚMERO VALE MAIS QUE A CONTAGEM, e isso foi ele quem mostrou em 29/10:
+    a linha dizia *"1 chamado sem OS"* e ele perguntou *"pq deu erro? o que
+    falta?"*. Com o número — *"chamado 544"* — a pergunta se responde sozinha:
+    é aquele, e dá para abrir.
+
+    ⚠️ `teto` existe porque a frase não pode virar uma lista de 40 números. Com
+    mais que isso, quem lê quer a contagem e a tela da `FRM_1.1`.
+    """
+    return [linha["id"] for linha in banco.varios(
+        """SELECT s.id
+             FROM formulario_solicitacao s
+             JOIN formulario f ON f.id = s.formulario_id
+            WHERE f.painel = %s
+              AND s.os_id IS NULL
+              AND NOT EXISTS (SELECT 1 FROM solicitacao_os x
+                               WHERE x.solicitacao_id = s.id)
+            ORDER BY s.id
+            LIMIT %s""", (painel, teto + 1))]
+
+
 def sem_tentativa(painel: str) -> int:
     """Quantos chamados deste painel nunca tiveram tentativa de abrir OS.
 
