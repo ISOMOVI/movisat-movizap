@@ -36,12 +36,19 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 
 const estado = { quadro: null, empurrado: [], postado: [],
-                 resposta: null }
+                 resposta: null, passagens: [] }
 
 vi.mock('../src/api/cliente.js', () => ({}))
 vi.mock('./api/cliente.js', () => ({
   api: {
-    get: async () => estado.quadro,
+    get: async (caminho) => {
+      /* ⚠️ O modal le o log de passagens; sem isto o `get` devolveria o
+         quadro e o teste passaria lendo a coisa errada. */
+      if (String(caminho).includes('/passagens')) {
+        return { passagens: estado.passagens || [] }
+      }
+      return estado.quadro
+    },
     /* 🚨 O `post` registra o que foi enviado: o que importa no Bloco D é o
        CORPO do pedido (o `situacao_esperada` da trava de concorrência), não
        só que a chamada aconteceu. */
@@ -127,6 +134,7 @@ async function abrir(dados) {
 beforeEach(() => {
   estado.postado = []
   estado.resposta = null
+  estado.passagens = []
   estado.empurrado = []
 })
 
@@ -334,12 +342,106 @@ describe('o card', () => {
     expect(tela.find('.etiqueta').text()).toBe('Em andamento')
   })
 
-  it('clicar manda para a ficha na FRM_1.1', async () => {
-    const tela = await abrir(quadro({ cards: { s38: [card({ id: 42 })] } }))
+  it('🚨 clicar ABRE O CARD, e NAO manda para outra aba', async () => {
+    /* 🚨 ESTA TRAVA GUARDAVA O DEFEITO, e foi ele quem o achou no navegador:
+       *"ao clicar no card nao esta abrindo o proposto no mockup, esta
+       direcionando para outra aba"*. Ela exigia o `router.push` para
+       `/solicitacoes` -- e desde a D8 a MAIORIA dos cards vem do ERP e nao tem
+       solicitacao, entao o push levava para uma tela com consulta vazia.
+       Agora o clique abre o card, que e o que o mockup propoe. */
+    const tela = await abrir(quadro({
+      cards: { s38: [card({ id: 42, numero_ordem: 17099 })] },
+    }))
     await tela.find('.card__abrir').trigger('click')
+    await flushPromises()
+    expect(estado.empurrado).toEqual([])
+    expect(tela.find('.modal').exists()).toBe(true)
+    expect(tela.find('.modal').text()).toContain('OS 17099')
+  })
+
+  it('o card do ERP abre sem botao de Solicitacoes', async () => {
+    /* ⚠️ Sem solicitacao nao ha ficha para abrir -- e o botao nem aparece, em
+       vez de levar para uma consulta vazia. */
+    const tela = await abrir(quadro({
+      cards: { s38: [card({ id: null, numero_ordem: 17098 })] },
+    }))
+    await tela.find('.card__abrir').trigger('click')
+    await flushPromises()
+    expect(tela.find('.modal').exists()).toBe(true)
+    expect(tela.find('.modal').text()).not.toContain('Ver o chamado')
+  })
+
+  it('o card de formulario tem o botao, e ele empurra para a FRM_1.1',
+     async () => {
+    const tela = await abrir(quadro({
+      cards: { s38: [card({ id: 42, numero_ordem: 17099 })] },
+    }))
+    await tela.find('.card__abrir').trigger('click')
+    await flushPromises()
+    const botoes = tela.findAll('.modal__pe button')
+    const ver = botoes.find((b) => b.text().includes('Ver o chamado'))
+    expect(ver).toBeTruthy()
+    await ver.trigger('click')
     expect(estado.empurrado).toEqual([
       { path: '/solicitacoes', query: { solicitacao: 42 } },
     ])
+  })
+
+  it('🚨 o conteudo do card NAO e um <button> — era o que impedia o arrasto',
+     async () => {
+    /* 🚨 A CAUSA DO ARRASTO NAO FUNCIONAR, achada no navegador por ele:
+       navegador nao inicia o arrasto do pai a partir de um elemento
+       interativo. O `<article draggable>` era preenchido inteiro por um
+       `<button>`, o `mousedown` morria nele e o `dragstart` nunca disparava.
+
+       ⚠️ A minha outra trava afirma `attributes('draggable') === 'true'`, que
+       era VERDADE enquanto o gesto era impossivel. **Trava de atributo nao e
+       trava de gesto** -- esta aqui olha o que de fato impedia. */
+    const tela = await abrir(quadro({
+      cards: { s38: [card({ numero_ordem: 17099 })] }, podeMover: true,
+    }))
+    expect(tela.find('.card__abrir').element.tagName).toBe('DIV')
+    /* E o numero da OS continua focavel, para o teclado alcancar. */
+    expect(tela.find('.card__os').element.tagName).toBe('BUTTON')
+  })
+
+  it('o dragstart dispara de verdade no card', async () => {
+    const tela = await abrir(quadro({
+      cards: { s38: [card({ numero_ordem: 17099 })] }, podeMover: true,
+    }))
+    const dados = { effectAllowed: '', setData: () => {} }
+    await tela.find('.card').trigger('dragstart', { dataTransfer: dados })
+    /* ⚠️ `move` e nao `copy`: o cursor tem de dizer que isto MOVE. */
+    expect(dados.effectAllowed).toBe('move')
+  })
+
+  it('soltar na coluna move para a situacao dela', async () => {
+    const tela = await abrir(quadro({
+      cards: { s38: [card({ numero_ordem: 17099, situacao_id: 38 })] },
+      podeMover: true,
+    }))
+    await tela.find('.card').trigger('dragstart',
+                                     { dataTransfer: { setData: () => {} } })
+    /* A terceira coluna das 17 é a 251 "Configurar equipamentos e Sistemas". */
+    await tela.findAll('.coluna')[2].trigger('drop')
+    await flushPromises()
+    expect(estado.postado[0]).toEqual([
+      '/api/paineis/operacao/mover',
+      { numero_os: 17099, para_situacao: 251, situacao_esperada: 38 },
+    ])
+  })
+
+  it('soltar na PROPRIA coluna nao escreve nada', async () => {
+    /* ⚠️ Gravar a OS inteira por nada é risco sem ganho. */
+    const tela = await abrir(quadro({
+      cards: { s38: [card({ numero_ordem: 17099, situacao_id: 38 })] },
+      podeMover: true,
+    }))
+    await tela.find('.card').trigger('dragstart',
+                                     { dataTransfer: { setData: () => {} } })
+    await tela.findAll('.coluna')[0].trigger('drop')
+    await flushPromises()
+    expect(estado.postado).toEqual([])
   })
 })
 

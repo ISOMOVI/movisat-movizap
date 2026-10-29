@@ -74,9 +74,57 @@ function alternar(coluna) {
   abertas.value[coluna.chave] = !abertas.value[coluna.chave]
 }
 
-function abrirSolicitacao(card) {
-  /* A ficha completa é da FRM_1.1 — o painel não repete a leitura dos 34
-     campos do credenciamento. */
+/* ============================================================================
+   O CARD ABERTO — 🔵 *"ao clicar no card nao esta abrindo o proposto no mockup,
+   esta direcionando para outra aba"*.
+   ----------------------------------------------------------------------------
+   🚨 ERA DEFEITO: o clique empurrava `/solicitacoes?solicitacao=<id>`, e desde
+   a D8 a maioria dos cards vem do ERP e **nao tem solicitacao** -- `card.id` e
+   nulo. Ele clicava e caia noutra tela, com uma consulta vazia.
+
+   ⚠️ O QUE ESTE MODAL MOSTRA E SO O QUE JA EXISTE: a OS que o quadro ja trouxe
+   e o log de passagens (`GET .../passagens`, do Bloco D). Os quatro resumos do
+   mockup -- descricao, solucao tecnica, dados do chamado e agendamento -- sao
+   o **Bloco E** e dependem de ler a OS ao vivo no ERP; o modal DIZ isso em vez
+   de mostrar caixa vazia.
+   ============================================================================ */
+const cardAberto = ref(null)
+const passagens = ref([])
+const lendoPassagens = ref(false)
+
+async function abrirCard(card) {
+  cardAberto.value = card
+  passagens.value = []
+  if (!card.numero_ordem) return
+  lendoPassagens.value = true
+  try {
+    const r = await api.get(
+      `/api/paineis/operacao/passagens?numero_os=${card.numero_ordem}`)
+    passagens.value = r.passagens || []
+  } catch (e) {
+    /* ⚠️ Falha ao ler o log NAO fecha o modal nem derruba a tela: o resto do
+       card continua valendo. A ausencia e dita no proprio modal. */
+    passagens.value = []
+  } finally {
+    lendoPassagens.value = false
+  }
+}
+
+function fecharCard() {
+  cardAberto.value = null
+  passagens.value = []
+}
+
+function nomeDaSituacao(sid) {
+  const c = (quadro.value?.colunas || []).find((x) => x.situacao_id === sid)
+  /* 🚨 Situacao fora das 17 mostra o NUMERO CRU, nunca um rotulo inventado --
+     e a regua do grid do FPSL. */
+  return c ? c.titulo : (sid === null ? 'nunca lida' : `situação ${sid}`)
+}
+
+function verNaFRM(card) {
+  /* A ficha completa do chamado é da `FRM_1.1`. ⚠️ Só existe quando o card
+     veio de formulário -- o botão nem aparece nos outros. */
   router.push({ path: '/solicitacoes', query: { solicitacao: card.id } })
 }
 
@@ -186,6 +234,16 @@ async function soltarNaColuna(coluna) {
   /* Soltar na própria coluna não é movimento. */
   if (card.situacao_id === coluna.situacao_id) return
   await mover(card, coluna.situacao_id)
+}
+
+async function moverDoModal(paraSituacao) {
+  const card = cardAberto.value
+  if (!card) return
+  await mover(card, paraSituacao)
+  /* 🚨 FECHA O MODAL depois de mover: o `carregar()` reconstroi os cards, e o
+     `cardAberto` ficaria apontando para um retrato velho -- com a situacao
+     antiga escrita na tela. */
+  fecharCard()
 }
 
 async function mover(card, paraSituacao) {
@@ -388,11 +446,19 @@ onMounted(carregar)
                      :draggable="quadro.pode_mover && !!card.numero_ordem"
                      @dragstart="comecarArrasto(card, $event)"
                      @dragend="terminarArrasto">
-              <button class="card__abrir" type="button"
-                      :style="{ borderLeftColor: corDaEtapa(indice) }"
-                      @click="abrirSolicitacao(card)">
+              <!-- 🚨 ERA UM `<button>` E ISSO IMPEDIA O ARRASTO: navegador
+                   não inicia o arrasto do pai a partir de um elemento
+                   interativo -- o `mousedown` morre no botão e o `dragstart`
+                   nunca dispara. O `draggable` estava no HTML e o gesto era
+                   impossível.
+                   ⚠️ O teclado continua alcançando: o NÚMERO DA OS é o botão
+                   (alvo pequeno), e o resto do card arrasta. -->
+              <div class="card__abrir"
+                   :style="{ borderLeftColor: corDaEtapa(indice) }"
+                   @click="abrirCard(card)">
                 <span class="card__topo">
-                  <strong class="card__os">OS {{ card.numero_ordem || card.os_id }}</strong>
+                  <button class="card__os" type="button"
+                          @click.stop="abrirCard(card)">OS {{ card.numero_ordem || card.os_id }}</button>
                   <span v-if="ha(card.criada_em)" class="card__ha">
                     {{ ha(card.criada_em) }}
                   </span>
@@ -445,7 +511,7 @@ onMounted(carregar)
                 <span v-if="card.visto_em" class="card__visto">
                   lido do Harmonit {{ quando(card.visto_em) }}
                 </span>
-              </button>
+              </div>
 
               <!-- ⚠️ O MESMO CAMINHO, OUTRO GESTO. Arrastar foi a escolha dele
                    e é o gesto principal; mas arrastar **não é alcançável por
@@ -469,6 +535,117 @@ onMounted(carregar)
             <p v-if="!coluna.cards.length" class="apagado pequeno">Vazia.</p>
           </div>
         </section>
+      </div>
+
+      <!-- ================= O CARD ABERTO ================= -->
+      <div v-if="cardAberto" class="modal" role="dialog" aria-modal="true"
+           :aria-label="`OS ${cardAberto.numero_ordem}`"
+           @click.self="fecharCard">
+        <div class="modal__caixa">
+          <header class="modal__topo">
+            <div>
+              <strong class="modal__os">OS {{ cardAberto.numero_ordem }}</strong>
+              <p class="modal__cliente">
+                {{ cardAberto.cliente || `cliente ${cardAberto.cliente_id || '?'}, fora do nosso cadastro` }}
+              </p>
+            </div>
+            <button class="botao botao--contorno" type="button"
+                    aria-label="Fechar" @click="fecharCard">✕</button>
+          </header>
+
+          <dl class="modal__dados">
+            <div>
+              <dt>Etapa agora</dt>
+              <dd>{{ nomeDaSituacao(cardAberto.situacao_id) }}</dd>
+            </div>
+            <div>
+              <dt>Tipo</dt>
+              <dd>{{ cardAberto.tipo_nome || '—' }}</dd>
+            </div>
+            <div>
+              <dt>Status no ERP</dt>
+              <dd>{{ cardAberto.status_str || '—' }}</dd>
+            </div>
+            <div>
+              <dt>Aberta</dt>
+              <dd>{{ quando(cardAberto.criada_em) }}</dd>
+            </div>
+            <div v-if="cardAberto.placas && cardAberto.placas.length">
+              <dt>Placas</dt>
+              <dd>{{ cardAberto.placas.map((p) => p.placa).join(' · ') }}</dd>
+            </div>
+            <div v-if="cardAberto.tecnicos && cardAberto.tecnicos.length">
+              <dt>Técnico</dt>
+              <dd>
+                {{ cardAberto.tecnicos.map((t) => t.nome || `usuário ${t.usuario_id}`).join(' · ') }}
+              </dd>
+            </div>
+          </dl>
+
+          <!-- mover, do próprio modal -->
+          <div v-if="quadro.pode_mover && cardAberto.numero_ordem"
+               class="modal__mover">
+            <label>
+              <span>Mover para</span>
+              <select :value="cardAberto.situacao_id"
+                      :disabled="movendo === cardAberto.numero_ordem"
+                      @change="moverDoModal(Number($event.target.value))">
+                <option v-for="c in quadro.colunas" :key="c.chave"
+                        :value="c.situacao_id">{{ c.titulo }}</option>
+              </select>
+            </label>
+          </div>
+
+          <!-- 🔵 *"deve ter o log de quem faz o que SEMPRE"* -- e aqui ele é
+               LIDO. Um log que ninguém consegue ler não cumpre o pedido. -->
+          <section class="modal__log">
+            <h3>Passagens de etapa</h3>
+            <p v-if="lendoPassagens" class="apagado pequeno">Lendo…</p>
+            <!-- 🚨 O HARMONIT NÃO REGISTRA SITUAÇÃO na linha do tempo: este log
+                 é nosso, e começou a existir em 29/10. Dizer isso é o que
+                 impede a tela de parecer que a OS nunca se moveu. -->
+            <p v-else-if="!passagens.length" class="apagado pequeno">
+              Nenhuma passagem registrada. O Harmonit não guarda a situação na
+              linha do tempo — este log é nosso e começou em 29/10, então OS
+              movida antes disso não aparece aqui.
+            </p>
+            <ul v-else class="modal__passagens">
+              <li v-for="p in passagens" :key="p.id">
+                <span class="apagado pequeno">{{ quando(p.em) }}</span>
+                <span>
+                  {{ nomeDaSituacao(p.de_situacao) }} →
+                  <strong>{{ nomeDaSituacao(p.para_situacao) }}</strong>
+                </span>
+                <span class="pilula">{{ p.quem || 'sem autor' }}</span>
+                <span v-if="!p.ok" class="card__alerta">
+                  recusada: {{ p.erro }}
+                </span>
+              </li>
+            </ul>
+          </section>
+
+          <!-- 🚨 O QUE AINDA NÃO EXISTE, DITO. Os quatro resumos do mockup
+               (descrição, solução técnica, dados do chamado, agendamento)
+               dependem de ler a OS ao vivo no ERP -- é o Bloco E. Caixa vazia
+               sem explicação faria parecer defeito. -->
+          <p class="aviso aviso--nota">
+            <i class="bi bi-info-circle aviso__icone" aria-hidden="true"></i>
+            <span>
+              A <strong>descrição</strong>, a <strong>solução técnica</strong>,
+              os <strong>dados do chamado</strong> e o
+              <strong>agendamento</strong> ainda não aparecem aqui — eles exigem
+              ler a OS ao vivo no Harmonit.
+            </span>
+          </p>
+
+          <footer class="modal__pe">
+            <button v-if="cardAberto.id" class="botao botao--contorno"
+                    type="button" @click="verNaFRM(cardAberto)">
+              Ver o chamado em Solicitações
+            </button>
+            <button class="botao" type="button" @click="fecharCard">Fechar</button>
+          </footer>
+        </div>
       </div>
     </template>
   </div>
@@ -598,7 +775,48 @@ onMounted(carregar)
 }
 
 .card__topo { display: flex; align-items: baseline; justify-content: space-between; gap: var(--e-2); }
-.card__os { font-size: var(--txt-md); }
+/* 🚨 O NUMERO DA OS E O BOTAO -- ver o comentario no `template`. Tem cara de
+   texto porque o card inteiro ja e clicavel; o que ele garante e o TECLADO. */
+.card__os {
+  font-size: var(--txt-md);
+  font-weight: var(--peso-forte);
+  background: none; border: 0; padding: 0;
+  color: var(--texto); cursor: pointer; text-align: left;
+}
+.card__os:focus-visible { outline: 2px solid var(--acento); outline-offset: 2px; }
+
+.modal {
+  position: fixed; inset: 0; z-index: 50;
+  background: rgba(2, 21, 41, .45);
+  display: flex; align-items: flex-start; justify-content: center;
+  padding: var(--e-4); overflow-y: auto;
+}
+.modal__caixa {
+  width: min(760px, 100%);
+  background: var(--superficie);
+  border: var(--borda-fina) solid var(--borda-forte);
+  border-radius: var(--r-md);
+  box-shadow: var(--sombra-2);
+  padding: var(--e-4);
+  display: flex; flex-direction: column; gap: var(--e-3);
+}
+.modal__topo { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--e-3); }
+.modal__os { font-size: var(--txt-lg, 18px); }
+.modal__cliente { margin: 2px 0 0; font-size: var(--txt-sm); color: var(--texto-fraco); }
+.modal__dados { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: var(--e-3); margin: 0; }
+.modal__dados dt { font-size: var(--txt-xs); color: var(--texto-fraco); text-transform: uppercase; letter-spacing: .04em; }
+.modal__dados dd { margin: 2px 0 0; font-size: var(--txt-sm); }
+.modal__mover select {
+  min-height: var(--altura-toque); margin-left: var(--e-2);
+  padding: var(--e-1) var(--e-2);
+  border: var(--borda-fina) solid var(--borda);
+  border-radius: var(--r-sm, 6px);
+  background: var(--superficie); color: var(--texto);
+}
+.modal__log h3 { margin: 0 0 var(--e-2); font-size: var(--txt-sm); }
+.modal__passagens { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--e-2); }
+.modal__passagens li { display: flex; flex-wrap: wrap; gap: var(--e-2); align-items: center; font-size: var(--txt-sm); }
+.modal__pe { display: flex; gap: var(--e-2); justify-content: flex-end; flex-wrap: wrap; }
 .card__ha { font-size: var(--txt-xs); color: var(--texto-fraco); }
 .card__cliente { font-size: var(--txt-sm); font-weight: var(--peso-forte); }
 .card__cliente--sem { font-weight: var(--peso-normal); color: var(--texto-fraco); font-style: italic; }

@@ -1198,3 +1198,228 @@ custo.
 3. **A solicitação 544** — apagar, ou eu abro a OS dela agora que o Bloco A
    existe.
 4. O **"Voltar"** como botão: a função já responde; falta ele querer.
+
+---
+
+# 10. AUDITORIA FUNCIONAL — painel + forms + os recursos (29/10, noite)
+
+> 🔵 Pedido dele: *"audite o painel + forms + recursos desse plano depois,
+> precisa funcionar"*.
+>
+> 🚨 **ESTA AUDITORIA EXERCITA, NÃO LÊ CÓDIGO.** Toda verificação chama o
+> caminho real (rota HTTP, com sessão de owner) e compara com o dado de hoje.
+> O script é `movizap_painel/auditar_funcional.py` e **repete quando se
+> quiser** — é o que a frase *"precisa funcionar"* pede.
+
+**Resultado: 38 OK · 0 falhas · 2 não exercitados.**
+
+## 10.1 Os dois defeitos que ELE achou no navegador, e tinham a mesma causa
+
+### 🚨 "não está permitindo mover ainda"
+
+**O arrasto era impossível, e o HTML parecia certo.** O `<article
+draggable="true">` era preenchido **inteiro por um `<button>`** — e o navegador
+**não inicia o arrasto do pai a partir de um elemento interativo**: o
+`mousedown` morre no botão e o `dragstart` nunca dispara.
+
+⚠️ **E a minha trava afirmava `attributes('draggable') === 'true'`** — que era
+**verdade** enquanto o gesto era impossível. **Trava de atributo não é trava de
+gesto.** Agora há trava do `dragstart`, do `drop` na coluna e do soltar na
+própria coluna (que não escreve nada).
+
+### 🚨 "ao clicar no card não está abrindo o proposto no mockup, está direcionando para outra aba"
+
+O clique empurrava `/solicitacoes?solicitacao=<card.id>`, e **desde a D8 a
+maioria dos cards vem do ERP e não tem solicitação** — `card.id` é nulo. Ele
+clicava e caía noutra tela, com uma consulta vazia.
+
+🚨 **E uma trava minha guardava esse defeito:** ela exigia o `router.push`. Foi
+a **quinta** trava do dia a guardar a verdade antiga.
+
+**O conserto é um só para os dois:** o conteúdo do card deixou de ser `<button>`
+(o arrasto passou a funcionar em todo o card) e o clique **abre o card**.
+⚠️ O teclado continua alcançando: **o número da OS é o botão**, e o resto do
+card arrasta.
+
+### O card aberto, com o que já existe
+
+| mostra | de onde vem |
+|---|---|
+| OS, cliente, etapa, tipo, status, aberta em | o quadro já trazia |
+| placas e técnico | a ponte já trazia |
+| **mover de dentro do modal** | a rota do Bloco D |
+| **as passagens de etapa**, com quem e quando | `GET .../passagens` |
+| "Ver o chamado em Solicitações" | **só aparece quando o card veio de formulário** |
+
+🚨 **E o que NÃO existe está DITO no modal:** a descrição, a solução técnica, os
+dados do chamado e o agendamento — os quatro resumos do mockup — exigem ler a
+OS ao vivo no ERP, e são o **Bloco E**. Caixa vazia sem explicação pareceria
+defeito.
+
+## 10.2 O que a auditoria mediu, e passou
+
+**O painel:** 17 colunas na ordem dele · a ponte respondeu · **11 cards** (15 com
+as finalizadas) · data matriz 24/10 · interruptor ligado · `pode_mover` verdade
+· **todo card com nome de cliente e de tipo** · **a data em ISO** (sem isso o
+*"há X dias"* não aparece) · todo card diz quando foi lido do ERP · a sobra vem
+com **o número** do chamado.
+
+**Mover:** situação fora das 17 recusada (**400**) · data matriz torta recusada
+(**400**) · o log legível pela rota.
+
+**Os 15 formulários:** todos cadastrados, **todos ligados**, e **as 15 páginas
+públicas abrem com campos**. Só o Suporte está no formato novo (4 etapas); os
+outros 14 em clássico — é a pendência **nº 6** dele.
+
+**A busca de cliente por CNPJ**, pelo caminho público real:
+
+| documento | resultado |
+|---|---|
+| `18392222000162` (só dígitos) | DCBM DATA CENTER BRASIL — **9 placas ativas** |
+| `18.392.222/0001-62` (mascarado) | o mesmo cliente |
+| `WQ0P6GLD000108` (**alfanumérico**) | Velasco Leite Pastelaria |
+| `11222333000181` | `achou: false` — e não é erro |
+
+**A regra da placa:** `ABC1D23` → `conferiu: true, ativa: false` — recusada,
+como ele mandou.
+
+## 10.3 🚨 O defeito que a auditoria achou em mim
+
+**Um teste meu gravava em `os_passagem` de PRODUÇÃO e não limpava.** O log tinha
+**5 passagens da OS fictícia 90999**, uma por rodada da suíte: os três testes
+vizinhos da classe limpam, e eu esqueci nesse.
+
+⚠️ **É a família do incidente de 19/10**, quando um teste meu apagou a config da
+distribuição: a suíte escreve em tabela de produção **de propósito** nesta casa
+— o que não pode é deixar sujeira.
+
+🚨 **E o lixo não era inofensivo:** a OS 90999 não existe no ERP, então a rota
+`/passagens?dias=` mostrava cinco passagens de uma OS inexistente — e era
+exatamente essa rota que a auditoria estava lendo. Corrigido, as 5 linhas
+apagadas, e conferido: **0 passagens depois da suíte**.
+
+## 10.4 Dois fatos novos do dado de hoje
+
+1. ✅ **A OS 17050 saiu da situação `0`**: alguém a moveu no Harmonit para
+   **677**, então ela entrou numa coluna e o painel não tem mais OS fora do
+   quadro. ⚠️ **A decisão D-e continua valendo** para as outras **128** OS com
+   situação `0` na base — só deixou de ser urgente no quadro aberto.
+2. ⚠️ **A Velasco (a sandbox, cliente 998063) tem ZERO placas ativas.** Um
+   chamado de teste por ela **não consegue informar placa**, porque a regra
+   recusa placa sem rastreador ativo. Para exercitar o fluxo com placa, o CNPJ
+   da **DCBM** (`18392222000162`, 9 placas) é o caminho.
+
+## 10.5 Os 2 não exercitados, e por quê
+
+| o que | por que não |
+|---|---|
+| mover de verdade pela rota HTTP | escreve no ERP. **Já provado** na OS 16991 pelo `provar_mover.py`, com a volta e o log |
+| um envio real que abre OS | criaria OS no ERP. **Já provado** por teste HTTP (`teste_rotas_pipeline`) e pela OS **17056**, criada e apagada |
+
+🚨 **E continua valendo o que nenhuma auditoria minha alcança (`M9`):** nada
+aqui clica num card com o mouse. Os dois defeitos desta volta foram achados
+**por ele, no navegador**, com a suíte verde.
+
+---
+
+# 11. O FLUXO INTEIRO, E O QUE FALTA PARA ELE FUNCIONAR
+
+> 🔵 Pedido dele: *"proponha para colocar os recursos para funcionar — Tem o
+> plano objetivo e fluxo — proponha"*.
+
+## 11.1 O fluxo, de ponta a ponta
+
+```
+  CLIENTE                       MOVISAT                        HARMONIT
+  ───────                       ───────                        ────────
+  abre /f/suporte
+  digita o CNPJ ──────────────► acha o cliente
+                                e traz a frota ativa ◄──────── WESO
+  escolhe a placa
+  descreve a ocorrência
+  ENVIA ──────────────────────► grava o chamado          ✅ A
+                                abre 1 OS por placa ────► OS de análise,
+                                                          situação 38
+                                                          (R$ 0,01)
+                                            ▼
+  OPERAÇÃO abre /paineis/operacao
+                                17 colunas = as 17 situações  ✅ B
+                                o card é a OS, de qualquer origem
+                                            ▼
+  clica no card ──────────────► o card aberto:                ✅ (hoje)
+                                OS, cliente, etapa, placas,
+                                técnico, as passagens
+                                            ▼
+  arrasta para outra coluna ──► escreve a situação ─────────► SalvarOrdemServico
+                                relê e compara os 40         ✅ D
+                                carimba quem moveu
+                                atualiza o cache
+                                            ▼
+                                ⬛ C  quanto tempo em cada etapa
+                                ⬛ E  os 4 resumos do card aberto
+                                ⬛ F  alterar a OS daqui
+```
+
+**Hoje o fluxo fecha** do formulário até mover o card. ⬛ são os três blocos que
+faltam.
+
+## 11.2 O que cada bloco que falta precisa — e o que ele decide
+
+### ⬛ C — quanto tempo em cada etapa
+
+| | |
+|---|---|
+| **o dado já é colhido** | ✅ desde 29/10, em `os_passagem` |
+| **o que falta** | o cálculo e os dois tempos no card (nesta etapa · total) |
+| 🚨 **o problema real** | as OS **anteriores** a 29/10 não têm passagem: o tempo delas **não existe em lugar nenhum** |
+| 🟡 **proposta** | contar a partir da **primeira passagem registrada**, e o card **dizer** *"medido desde 29/10"* em vez de inventar um número. É o que ele já havia respondido: *"pode colocar como data de criação do card"* |
+| 🔴 **decisão dele** | **o limite**: a partir de quantas horas o tempo da etapa fica laranja? O mockup mostra laranja em `1d 4h`, mas o número nunca foi dito |
+
+### ⬛ E — os quatro resumos do card aberto
+
+| | |
+|---|---|
+| **o que falta** | descrição · solução técnica · dados do chamado · agendamento |
+| 🚨 **por que não entrou hoje** | os três primeiros exigem **ler a OS ao vivo no ERP** — o cache não guarda `descricao` nem `solucaoTecnica`. É **1 chamada ao Harmonit por card aberto** |
+| 🟡 **proposta** | uma rota `GET /api/os/ficha?numero_os=` na ponte, chamada **só quando o card abre** (não na montagem do quadro — seriam 11 chamadas por abertura de tela). O modal já mostra o que tem e **diz** o que falta |
+| ⚠️ **o agendamento** | nasce desabilitado e **acende em "Serviço Agendado"**; o compromisso já existe na `ATD_7.1` com `agendamentoId` |
+| 🔴 **decisão dele** | **"Dados do chamado" mostra as respostas do formulário dentro do modal, ou o botão para a `FRM_1.1` basta?** Hoje o botão existe e leva à ficha completa |
+
+### ⬛ F — alterar a OS daqui (o espelho)
+
+| | |
+|---|---|
+| **o que já escreve** | situação (D) e endereço (21/10) |
+| 🚨 **o que o Harmonit permite** | a OS **inteira**, e só: situação · prioridade · previsão · descrição · solução técnica · endereço (7) · tipo · problema · produto · cliente · vendedor · local · as 3 retenções |
+| ⚠️ **o que NÃO entra nesse save** | materiais · técnicos/agendamento · checklist · oficina — cada um tem rota própria e **sobrevive** ao save |
+| 🟡 **proposta, em duas fases** | **fase 1**: prioridade + observação do painel (a observação é **nossa**, não vai para a `solucaoTecnica`) · **fase 2**: descrição, solução técnica e previsão |
+| 🔴 **decisão dele** | a **pergunta 4** que segue aberta: o que a aba **Network** mostra ao abrir uma OS no Harmonit? Se for `GET` com id, existe link e o espelho encolhe |
+
+## 11.3 🟡 A ordem que eu proponho, e por quê
+
+| ordem | o quê | por que primeiro |
+|---|---|---|
+| **1** | **ligar o formato novo nos outros 14** | é **uma linha por formulário** no `FORMATO_NOVO`, sem migração e sem deploy. É o maior ganho por esforço do plano inteiro, e são 14 páginas que o cliente já abre no formato velho |
+| **2** | **o mapa `problemaId` dos outros formulários** | hoje **só o Suporte abre OS**. Os outros 8 que deveriam abrir estão prontos no resto — falta o mapa, que é decisão dele (§4.2 do 06) |
+| **3** | **⬛ E, fase 1** (a ficha ao vivo no card aberto) | é o que transforma o card em "consulta rápida", que foi o motivo que ele deu. Uma rota só |
+| **4** | **⬛ C** (os dois tempos) | depende só do limite dele, e o dado já está sendo colhido |
+| **5** | **⬛ F, fase 1** (prioridade + observação) | depende da resposta da aba Network para não construir o que o ERP já dá |
+
+🚨 **Por que o 1 e o 2 vêm antes dos blocos:** o pipeline está **completo e
+funcionando para um formulário de quinze**. Ampliar a base dá mais valor que
+aprofundar o painel — e os dois são decisão dele, não trabalho meu.
+
+## 11.4 🔴 O que trava, por ordem de quanto trava
+
+| trava | o que para | o que é |
+|---|---|---|
+| **1. o mapa `problemaId`** | 8 formulários não abrem OS | decisão dele (§4.2/4.3 do `06`) |
+| **2. o texto dos termos** | 3 formulários sem a caixa de aceite | texto dele |
+| **3. o limite do tempo de etapa** | o ⬛ C | um número |
+| **4. a aba Network do Harmonit** | o tamanho do ⬛ F | uma olhada no navegador |
+| **5. a situação `0`** | **128 OS** sem coluna (a 17050 saiu sozinha) | decisão dele (D-e) |
+| **6. "cliente avulso" no ERP** | chamado de quem não é cliente fica marcado, sem OS | decisão dele |
+
+⚠️ **Nenhuma delas é trabalho meu parado:** as seis são frases dele. O que eu
+posso fazer sem esperar nada é o item **1** da §11.3 — ligar o formato novo nos
+14 — e ele é uma linha por formulário.

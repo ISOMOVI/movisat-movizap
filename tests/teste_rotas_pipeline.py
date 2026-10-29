@@ -424,6 +424,12 @@ class TestMoverOCard:
         assert r.json()["ok"] is True
         # 🚨 A trava de concorrência atravessou a rota até a ponte.
         assert vistos == [(90999, 38, 16492)]
+        # 🚨 LIMPA O QUE ESCREVEU, e faltava: este teste deixou 5 passagens da
+        # OS fictícia 90999 na tabela de PRODUÇÃO, uma por rodada da suíte --
+        # achado na auditoria funcional dele. Os três testes vizinhos limpavam;
+        # eu esqueci neste. A rota `/passagens?dias=` mostrava passagens de uma
+        # OS que não existe no ERP.
+        banco.executar("DELETE FROM os_passagem WHERE numero_os = %s", (90999,))
 
     def test_O_LOG_SAI_SEMPRE_inclusive_quando_o_ERP_recusa(
             self, cliente, token, monkeypatch):
