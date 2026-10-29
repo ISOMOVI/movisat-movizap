@@ -3401,6 +3401,101 @@ def marcar_notas_vistas(conversa_id: int, mensagem_ids: list[int],
     return linha["n"]
 
 
+# ── AVISO DE NOTA INTERNA (28/10) ────────────────────────────────────────────
+#
+# 🔵 Pedido dele: *"verifique se as notas internas tbm estao gerando
+# notificacoes como mensagens novas no movizap, se nao tiver - proponha para que
+# sejam tbm"* -> medido: NÃO geravam. O selo da conversa conta só
+# `direcao = 'entrada'`, e nota é `'interna'`; o `decidirToque` lê `nao_lidas`,
+# que a nota nunca mexe. Existiam **310 notas** em 183 conversas, 7 autores, e
+# **zero** avisos em toda a vida do recurso.
+#
+# 🚨 NÃO ENTRA NO SELO DO CLIENTE, e isso é a primeira decisão do desenho. Aquele
+# número responde *"o cliente falou comigo"*; somar nota ali faria a tela dizer
+# que o cliente falou quando foi um colega -- `M12`, tela que mente é defeito.
+# Contador próprio, selo próprio, texto próprio no balão.
+#
+# 🚨 SÓ DAQUI PARA FRENTE -- ordem dele: *"somente daqui para frente, pode
+# ajustar notific para notas"*. Sem este corte, as 310 notas que já existem
+# virariam 310 avisos no primeiro ciclo de 8 s depois do deploy. É o mesmo
+# remédio do `LEITURA_DE_NOTA_DESDE` (15/10), e por isso o nome rima.
+NOTIFICA_NOTA_DESDE = datetime(2026, 10, 28, 19, 20, tzinfo=timezone.utc)
+
+
+def notas_novas_para(atendente_id: int | None, limite: int = 200) -> list[dict]:
+    """As notas internas que ESTA pessoa ainda não viu, por conversa.
+
+    🚨 QUEM É AVISADO (a régua, nesta ordem de `OR`): o **dono** da conversa ·
+    quem é **participante ativo** (foi convidado e não saiu) · quem **já
+    escreveu nota** nesta conversa. Nunca o autor da própria nota.
+
+    O terceiro caso não é enfeite: medido em 28/10, **207 das 310 notas estão em
+    conversa SEM DONO**. Com a régua do dono sozinha, dois terços das notas
+    seguiriam mudas. Com os três, **136 de 212** notas com autor conhecido
+    teriam destinatário (204 avisos); as outras **76** são nota em conversa onde
+    o autor é o único que já anotou e não há dono nem convidado -- e aí não há
+    a quem avisar, o que é resposta, não falha.
+
+    ⚠️ "NÃO VI" É A AUSÊNCIA DE LINHA EM `nota_leitura`, a tabela do "visto por"
+    (Bloco 12, 15/10), que a tela já preenche sozinha ao rolar a nota na tela. É
+    o que faz este contador não precisar de migração nenhuma -- igual ao `@`
+    interno de 21/10.
+
+    ⚠️ `evento IS NULL`: dos 840 registros `tipo = 'nota'`, **530 são o log de
+    ações** (transferência, entrada, saída). Avisar isso encheria o selo de
+    ruído sobre o que a própria pessoa acabou de fazer.
+
+    Devolve uma linha por conversa: `{conversa_id, quantas, nome, autor,
+    trecho, mensagem_ids}`.
+    """
+    if not atendente_id:
+        return []
+    return banco.varios(
+        """WITH minhas AS (
+               SELECT m.id, m.conversa_id, m.conteudo, m.criada_em,
+                      a.nome AS autor
+                 FROM mensagem m
+                 JOIN conversa c ON c.id = m.conversa_id
+                 LEFT JOIN atendente a ON a.id = m.atendente_id
+                WHERE m.tipo = 'nota'
+                  AND m.evento IS NULL
+                  AND m.apagada_em IS NULL
+                  AND m.criada_em >= %s
+                  AND m.atendente_id IS NOT NULL
+                  AND m.atendente_id <> %s
+                  AND NOT EXISTS (SELECT 1 FROM nota_leitura v
+                                   WHERE v.mensagem_id = m.id
+                                     AND v.atendente_id = %s)
+                  AND (
+                      c.atendente_id = %s
+                      OR EXISTS (SELECT 1 FROM conversa_participante p
+                                  WHERE p.conversa_id = c.id
+                                    AND p.atendente_id = %s
+                                    AND p.saiu_em IS NULL)
+                      OR EXISTS (SELECT 1 FROM mensagem m2
+                                  WHERE m2.conversa_id = c.id
+                                    AND m2.tipo = 'nota'
+                                    AND m2.evento IS NULL
+                                    AND m2.atendente_id = %s)
+                  )
+           )
+           SELECT n.conversa_id,
+                  count(*) AS quantas,
+                  max(n.id) AS ultima_id,
+                  (array_agg(n.id ORDER BY n.id))[1:50] AS mensagem_ids,
+                  (array_agg(n.autor ORDER BY n.id DESC))[1] AS autor,
+                  (array_agg(n.conteudo ORDER BY n.id DESC))[1] AS trecho,
+                  COALESCE(ct.nome, c.nome_whatsapp, c.telefone_e164) AS nome
+             FROM minhas n
+             JOIN conversa c ON c.id = n.conversa_id
+             LEFT JOIN contato ct ON ct.id = c.contato_id
+            GROUP BY n.conversa_id, ct.nome, c.nome_whatsapp, c.telefone_e164
+            ORDER BY max(n.criada_em) DESC
+            LIMIT %s""",
+        (NOTIFICA_NOTA_DESDE, atendente_id, atendente_id, atendente_id,
+         atendente_id, atendente_id, limite))
+
+
 def _minha_nota(conversa_id: int, mensagem_id: int, atendente_id: int | None):
     """(linha, motivo). A mensagem, se ela for uma nota MINHA."""
     m = banco.um(

@@ -268,3 +268,24 @@ def aviso_solicitacao(atendente_id: int | None) -> bool:
 def definir_aviso_solicitacao(atendente_id: int, ligado: bool) -> dict:
     _gravar(atendente_id, CHAVE_AVISO_SOLICITACAO, "true" if ligado else "false")
     return {"ok": True, "aviso_solicitacao": bool(ligado)}
+
+
+# 🔵 28/10: o aviso de NOTA INTERNA. Mesmo molde do de solicitação, por decisão
+# dele de 22/10 -- *"controle de notificações no 'minha conta' de cada usuário,
+# igual as demais"*. Por pessoa, e não interruptor de sistema: quem não quer ser
+# chamado para a nota do colega desliga para si.
+#
+# 🚨 NASCE LIGADO (`!= "false"`), e aqui isso é deliberado: ele PEDIU o aviso. É
+# o oposto do atalho de teclado, que nasceu desligado porque ninguém pediu.
+CHAVE_AVISO_NOTA = "aviso_nota"
+
+
+def aviso_nota(atendente_id: int | None) -> bool:
+    if not atendente_id:
+        return False
+    return _ler(atendente_id, CHAVE_AVISO_NOTA) != "false"
+
+
+def definir_aviso_nota(atendente_id: int, ligado: bool) -> dict:
+    _gravar(atendente_id, CHAVE_AVISO_NOTA, "true" if ligado else "false")
+    return {"ok": True, "aviso_nota": bool(ligado)}

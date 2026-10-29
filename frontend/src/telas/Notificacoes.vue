@@ -35,6 +35,25 @@ const souOwner = computed(() => Boolean(sessao.usuario?.owner))
 const temSolicitacoes = computed(
   () => (sessao.telas || []).some((t) => t.codigo === 'FRM_1.1'))
 const avisoSolicitacao = ref(true)
+/* 🔵 28/10: o aviso de NOTA INTERNA do colega. Nasce `true` porque ele pediu o
+   recurso -- e o estado de verdade vem de `/api/eu/avisos` no `onMounted`, para
+   a tela não mostrar "Avisar" a quem desligou. */
+const avisoNota = ref(true)
+
+async function alternarAvisoNota() {
+  salvando.value = true
+  erro.value = ''
+  recado.value = ''
+  try {
+    const r = await api.put('/api/eu/aviso-nota', { ligado: !avisoNota.value })
+    avisoNota.value = r.aviso_nota
+    recado.value = 'Salvo.'
+  } catch (e) {
+    erro.value = e instanceof ErroDeApi ? e.message : 'Não consegui salvar.'
+  } finally {
+    salvando.value = false
+  }
+}
 
 async function alternarAvisoSolicitacao() {
   salvando.value = true
@@ -44,6 +63,7 @@ async function alternarAvisoSolicitacao() {
     const r = await api.put('/api/eu/aviso-solicitacao',
                             { ligado: !avisoSolicitacao.value })
     avisoSolicitacao.value = r.aviso_solicitacao
+    if (r.aviso_nota !== undefined) avisoNota.value = r.aviso_nota
     recado.value = 'Salvo.'
   } catch (e) {
     erro.value = e instanceof ErroDeApi ? e.message : 'Não consegui salvar.'
@@ -228,6 +248,32 @@ async function alternarPessoa(p) {
             Ligado, o menu mostra quantas solicitações chegaram pelos
             formulários e ainda estão como novas. Desligado, o número não
             aparece para você — a tela Solicitações continua lá.
+          </p>
+        </div>
+      </section>
+
+      <!-- 🔵 28/10: o aviso de NOTA INTERNA. Cartão próprio, porque é outro
+           evento: o de cima é o cliente, este é um colega. -->
+      <section class="cartao">
+        <div class="cartao__corpo pilha">
+          <h2 class="cartao__titulo">Notas internas dos colegas</h2>
+          <label class="interruptor">
+            <input type="checkbox" :checked="avisoNota"
+                   :disabled="salvando" @change="alternarAvisoNota" />
+            <span>{{ avisoNota ? 'Avisar' : 'Não avisar' }}</span>
+          </label>
+          <p class="apagado pequeno">
+            Ligado, você é avisado quando alguém escreve uma nota interna numa
+            conversa <strong>sua</strong>, numa em que você foi
+            <strong>convidado</strong>, ou numa em que você <strong>já
+            anotou</strong> — com selo na lista, som e balão. O aviso diz
+            <em>quem anotou</em>, e nunca se mistura com o número de mensagens
+            do cliente. Desligado, nada disso aparece para você e a nota
+            continua na conversa.
+          </p>
+          <p class="apagado pequeno">
+            O registro de ações (transferência, entrada e saída) não avisa — ele
+            conta o que você mesmo acabou de fazer.
           </p>
         </div>
       </section>

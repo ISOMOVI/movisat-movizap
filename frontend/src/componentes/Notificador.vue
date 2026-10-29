@@ -19,10 +19,11 @@ import { useRouter } from 'vue-router'
 
 import { api } from '../api/cliente.js'
 import { notificacoes } from '../estado/notificacoes.js'
-import { decidirToque } from '../util/regraToque.js'
+import { decidirToque, decidirToqueNota } from '../util/regraToque.js'
 import { somBloqueado, tocar } from '../util/som.js'
 import {
-  adiarConvite, conviteAdiado, foraDeFoco, mostrarBalao, pedirPermissao, permissao,
+  adiarConvite, conviteAdiado, foraDeFoco, mostrarBalao, mostrarBalaoNota,
+  pedirPermissao, permissao,
 } from '../util/balao.js'
 
 const INTERVALO_MS = 8000
@@ -95,14 +96,35 @@ async function ler() {
      zero na tela com as duas suítes verdes. */
   notificacoes.solicitacoes_novas = r.solicitacoes_novas || 0
   notificacoes.assumidasNaoLidas = (r.assumidas || []).length
+  /* 🔵 28/10: as notas internas não vistas. 🚨 CAMPO NOVO NÃO ENTRA SOZINHO --
+     esta função copia campo a campo, e em 22/10 um campo que a rota devolvia e
+     esta cópia não fazia ficou valendo zero na tela com as duas suítes verdes.
+     Por isso os três entram aqui, juntos. */
+  notificacoes.notas = r.notas || []
+  notificacoes.notasPorConversa = Object.fromEntries(
+    (r.notas || []).map((x) => [x.conversa_id, x.quantas]))
+  notificacoes.notasNovas = (r.notas || []).reduce((s, x) => s + (x.quantas || 0), 0)
 
   // 🔵 25/09: a conversa aberta com a tela à vista não toca.
   const aVista = document.hidden ? null : notificacoes.conversaAberta
   const decisao = decidirToque(antes, r, aVista)
-  antes = { donas: r.donas || [], assumidas: r.assumidas || [] }
+  // 🔵 28/10: a decisão da NOTA é tomada sobre o MESMO `antes`, antes de ele ser
+  // trocado -- as duas comparam o ciclo anterior com este.
+  const decisaoNota = decidirToqueNota(antes, r, aVista)
+  antes = { donas: r.donas || [], assumidas: r.assumidas || [], notas: r.notas || [] }
   if (!notificacoes.ativa) {
     pararDePiscar()
     return
+  }
+  /* 🚨 A NOTA TOCA PELO MESMO INTERRUPTOR GERAL (`ativa`), porque desligada
+     *"some tudo"* -- decisão dele de 24/09. O interruptor SÓ da nota mora no
+     servidor (`aviso_nota`): desligado, a rota devolve `notas: []` e não há o
+     que decidir aqui. */
+  if (decisaoNota.tocar) {
+    if (foraDeFoco()) {
+      for (const nota of decisaoNota.notas.slice(0, 4)) mostrarBalaoNota(nota, abrirConversa)
+    }
+    await tocar(notificacoes.tom, notificacoes.volume)
   }
   if (decisao.tocar) {
     // O balão sai antes do som: o som pode estar bloqueado (F5 sem clique), o

@@ -5937,3 +5937,84 @@ custou outro vermelho).
 7. **`rotas._perguntar` está escrito e NÃO verificado ao vivo** — sem chave não
    dá para exercitar a API (`M5`). Isolado nessa função de propósito.
 8. **A árvore do git tem 33 arquivos sem commit.**
+
+---
+
+## 28/10 — o AVISO DA NOTA INTERNA (`ATD_1.1` + `CFG_11.1`)
+
+🔵 **Origem, duas frases dele:** *"verifique se as notas internas tbm estao gerando notificacoes
+como mensagens novas no movizap, se nao tiver - proponha para que sejam tbm"* e, depois da proposta,
+*"somente daqui para frente, pode ajustar notific para notas"*.
+
+### O que foi medido ANTES de propor (e é por isso que a proposta existiu)
+
+A nota interna **não avisava ninguém**, e não era "faltou ligar" — não existia o caminho:
+
+1. O selo da conversa conta **só `direcao = 'entrada'`** (`conversas.py`, o LATERAL `nl`). Nota é
+   `direcao = 'interna'` → **nunca entrava na conta**. Na base: `entrada` 23.233 · `interna` 840 ·
+   `saida` 25.731.
+2. O som e o balão saem do `decidirToque`, que lê `nao_lidas` de conversa **própria**. Como a nota não
+   mexe em `nao_lidas`, **o som nunca tocou por nota**.
+3. `nota_leitura` existe desde 15/10, mas é o **"visto por"**: recibo **depois** que a pessoa rolou a
+   nota na tela (228 linhas). É o oposto de aviso.
+4. O `@` da nota (21/10) avisa pelo chat interno e tem **ZERO uso** — 0 mensagens com o link
+   `/atendimento/`.
+
+**O tamanho do silêncio:** **310 notas internas** (fora os **530 eventos** do log de ações), em
+**183 conversas**, por **7 pessoas**, a última no mesmo dia às 15:56 — uso diário. Delas, **65 em
+conversa de outra pessoa** e **207 em conversa SEM DONO**. Avisos que saíram em toda a vida do
+recurso: **zero**.
+
+### O desenho, e as três decisões que ele carrega
+
+| Decisão | Por quê |
+|---|---|
+| 🚨 **NÃO soma no selo do cliente.** Selo próprio, cor própria (âmbar × verde), ícone próprio, texto próprio no balão | Aquele número responde *"o cliente falou comigo"*. Somar nota ali faria a tela dizer que o cliente falou quando foi um colega — `M12` |
+| 🚨 **Fila de toque SEPARADA** (`decidirToqueNota`), com teto de 4 **próprio** | O teto existe para *"não sumir a atenção"* do cliente (regra dele, 24/09). Nota de bastidor gastando o teto do cliente calaria justamente quem espera resposta. Travado por teste nos dois sentidos |
+| 🚨 **Só daqui para frente** (`NOTIFICA_NOTA_DESDE = 2026-10-28 19:20 UTC`) | Ordem dele. Sem o corte, as 310 notas existentes virariam **135 avisos para 8 pessoas** no primeiro ciclo de 8 s depois do deploy — medido rodando a régua com o corte desligado |
+
+### Quem é avisado — a régua, nesta ordem de `OR`
+
+**o dono da conversa** · **quem é participante ativo** (convidado e não saiu) · **quem já escreveu
+nota naquela conversa**. Nunca o autor da própria nota.
+
+🚨 **O terceiro caso não é enfeite, e é ele que salva o recurso:** com a régua do dono sozinha, só
+**97** avisos sairiam, porque **207 das 310 notas estão em conversa sem dono**. Com os três,
+**136 de 212** notas com autor conhecido têm destinatário (**204 avisos**). As outras **76** são nota
+em conversa onde o autor é o único que já anotou e não há dono nem convidado — **e aí não há a quem
+avisar**, o que é resposta, não falha.
+
+⚠️ **O evento não avisa.** Dos 840 registros `tipo='nota'`, **530 são o log de ações** (`evento IS
+NOT NULL`): transferiu, entrou, saiu. Avisar isso encheria o selo com o que a própria pessoa acabou
+de fazer. O filtro é `evento IS NULL`, o mesmo que a prévia da conversa já usa desde 15/10.
+
+### Como entrou, e o que NÃO foi tocado
+
+- **Zero migração.** "Não vi" é a **ausência de linha em `nota_leitura`**, tabela que a tela já
+  preenche sozinha. Mesmo caminho do `@` interno de 21/10, que também entrou sem migração.
+- 🚨 **A consulta da lista (`conversas.listar`) NÃO foi tocada.** Ela é a mais quente do painel e tem
+  disciplina de **ordem posicional de parâmetro**, com aviso no próprio código de que errar ali *"não
+  dá erro de sintaxe — dá resultado errado, que é pior"*. O contador saiu em **consulta própria**
+  (`notas_novas_para`), servida pela rota que já bate em toda tela de 8 em 8 s. O selo da linha lê o
+  estado que o `Notificador` preenche.
+- **O interruptor é por pessoa**, na `CFG_11.1`, no molde do aviso de solicitação (*"controle de
+  notificações no 'minha conta' de cada usuário, igual as demais"*, 22/10). **Nasce ligado**, porque
+  ele pediu o recurso — o oposto do atalho de teclado, que nasceu desligado porque ninguém pediu.
+  Desligado, a rota devolve `notas: []`: o selo desaparece, o som não sai, e a nota continua na
+  conversa.
+- **Não mexeu** no selo do cliente, no chat interno, no `@` da nota nem na régua de toque da mensagem.
+
+### Onde está
+
+| Camada | Arquivo |
+|---|---|
+| a régua e o contador | `movizap/conversas.py` — `NOTIFICA_NOTA_DESDE`, `notas_novas_para()` |
+| o interruptor | `movizap/preferencia.py` — `CHAVE_AVISO_NOTA`, `aviso_nota()`, `definir_aviso_nota()` |
+| a rota | `movizap/main.py` — `notas` em `GET /api/eu/notificacoes` · `GET /api/eu/avisos` · `PUT /api/eu/aviso-nota` |
+| o toque, puro | `frontend/src/util/regraToque.js` — `decidirToqueNota()` |
+| o balão | `frontend/src/util/balao.js` — `mostrarBalaoNota()` |
+| o estado | `frontend/src/estado/notificacoes.js` — `notas`, `notasPorConversa`, `notasNovas` |
+| quem decide e toca | `frontend/src/componentes/Notificador.vue` |
+| o selo na lista | `frontend/src/telas/CaixaDeEntrada.vue` — `notasDaConversa()` + `.conversa__selo--nota` |
+| o interruptor na tela | `frontend/src/telas/Notificacoes.vue` |
+| as travas | `tests/teste_aviso_nota.py` (12) · `frontend/src/aviso_nota_2810.teste.js` (10) |

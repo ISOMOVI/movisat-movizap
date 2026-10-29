@@ -70,6 +70,34 @@ export function mostrarBalao(conversa, aoClicar) {
   }
 }
 
+/* 🔵 28/10: o balão da NOTA INTERNA. Título próprio de propósito -- "Nova
+   mensagem" diria que o CLIENTE falou, e foi um colega que anotou. Mesma
+   mecânica, outro texto, outra `tag` (uma nota não substitui o balão da
+   mensagem da mesma conversa). */
+export function mostrarBalaoNota(nota, aoClicar) {
+  if (permissao() !== 'granted') return null
+  try {
+    const quem = nota.autor || 'Alguém'
+    const titulo = nota.quantas > 1
+      ? `${nota.quantas} notas internas · ${nota.nome}`
+      : `Nota de ${quem} · ${nota.nome}`
+    const n = new window.Notification(titulo, {
+      body: nota.trecho || '',
+      tag: `nota-${nota.conversa_id}`,
+      renotify: true,
+      icon: ICONE,
+    })
+    n.onclick = () => {
+      window.focus()
+      aoClicar(nota.conversa_id)
+      n.close()
+    }
+    return n
+  } catch {
+    return null
+  }
+}
+
 /* "Agora não" no convite: some por 7 dias. localStorage pode falhar (aba
    privada, bloqueio); aí o convite volta a aparecer, e é só isso. */
 export function conviteAdiado(agora = Date.now()) {

@@ -31,6 +31,18 @@ export const notificacoes = reactive({
      primeira resposta faz o menu desenhar `undefined` no primeiro quadro. */
   solicitacoes_novas: 0,
   assumidasNaoLidas: 0,
+  /* 🔵 28/10: as NOTAS INTERNAS que eu ainda não vi, uma entrada por conversa
+     (`{conversa_id, quantas, nome, autor, trecho, mensagem_ids}`). Vem da mesma
+     resposta de 8 em 8 s.
+
+     🚨 DECLARADOS AQUI, os três, pela lição de 22/10: campo que só existe
+     depois da primeira resposta faz a tela desenhar `undefined` no primeiro
+     quadro -- e deixa o arquivo que É a lista do estado sem dizer que ele
+     existe. `notasPorConversa` é o mapa que a Caixa usa para o selo da linha,
+     derivado de `notas` numa volta só. */
+  notas: [],
+  notasPorConversa: {},
+  notasNovas: 0,
   /* 🔵 25/09: a conversa aberta na Caixa agora. Com a tela à vista, ela não
      toca (`decidirToque`); a Caixa escreve, o Notificador lê. */
   conversaAberta: null,

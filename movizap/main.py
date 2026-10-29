@@ -3728,6 +3728,21 @@ def minhas_notificacoes(usuario: dict = Depends(auth.get_usuario)):
         # minha voltou a ter mensagem" de "chegou uma conversa NOVA para mim"
         # -- a nova toca mesmo acima do teto de 4 (decisão dele).
         "donas": donas,
+        # 🔵 28/10: as NOTAS INTERNAS que eu ainda não vi, uma linha por
+        # conversa. Sai desta mesma rota, e não de uma própria, pelo motivo de
+        # sempre: ela já bate em toda tela de 8 em 8 s, e selo que pisca em dois
+        # relógios mostra soma que não bate com as partes.
+        #
+        # 🚨 FORA de `assumidas`: aquela lista alimenta o toque de MENSAGEM DO
+        # CLIENTE, e misturar nota ali faria o balão dizer "nova mensagem"
+        # quando foi um colega anotando.
+        "notas": ([
+            {"conversa_id": r["conversa_id"], "quantas": r["quantas"],
+             "nome": r["nome"], "autor": r["autor"],
+             "trecho": _trecho_curto(r["trecho"]),
+             "mensagem_ids": r["mensagem_ids"]}
+            for r in conversas.notas_novas_para(eu)
+        ] if preferencia.aviso_nota(eu) else []),
         "assumidas": [
             {"id": c["id"], "nao_lidas": c["nao_lidas"],
              "nome": c.get("contato_nome") or c.get("grupo_nome") or c.get("telefone_e164"),
@@ -3740,6 +3755,13 @@ def minhas_notificacoes(usuario: dict = Depends(auth.get_usuario)):
 _ROTULO_MIDIA = {"imagem": "Foto", "video": "Vídeo", "audio": "Áudio",
                  "documento": "Documento", "figurinha": "Figurinha",
                  "localizacao": "Localização", "contato": "Contato"}
+
+
+def _trecho_curto(texto: str | None, teto: int = 100) -> str:
+    """O trecho da NOTA para o balão. Mesma régua de tamanho do `_trecho_do_balao`,
+    sem o rótulo de mídia -- nota com arquivo já vem com o texto dela."""
+    t = " ".join((texto or "").split())
+    return t if len(t) <= teto else t[:teto - 1].rstrip() + "\u2026"
 
 
 def _trecho_do_balao(c: dict, teto: int = 100) -> str:
@@ -3775,6 +3797,24 @@ class MeuAvisoSolicitacao(BaseModel):
     ligado: bool
 
 
+class MeuAvisoNota(BaseModel):
+    ligado: bool
+
+
+@app.get("/api/eu/avisos")
+def meus_avisos(usuario: dict = Depends(auth.get_usuario)):
+    """Os interruptores de aviso desta pessoa, para a `CFG_11.1` desenhar.
+
+    ⚠️ Existe porque a tela precisa saber o estado ANTES de alguém clicar. Sem
+    ela, o checkbox nasceria do padrão do código e mostraria "Avisar" para quem
+    desligou -- tela que mente sobre a própria configuração."""
+    eu = _atendente_do_usuario(usuario)
+    if not eu:
+        return {"aviso_solicitacao": False, "aviso_nota": False}
+    return {"aviso_solicitacao": preferencia.aviso_solicitacao(eu),
+            "aviso_nota": preferencia.aviso_nota(eu)}
+
+
 @app.put("/api/eu/aviso-solicitacao")
 def definir_meu_aviso_de_solicitacao(dados: MeuAvisoSolicitacao,
                                      usuario: dict = Depends(auth.get_usuario)):
@@ -3786,6 +3826,22 @@ def definir_meu_aviso_de_solicitacao(dados: MeuAvisoSolicitacao,
         raise HTTPException(status_code=400,
                             detail="Sua conta não está vinculada a um atendente.")
     return preferencia.definir_aviso_solicitacao(eu, dados.ligado)
+
+
+@app.put("/api/eu/aviso-nota")
+def definir_meu_aviso_de_nota(dados: MeuAvisoNota,
+                              usuario: dict = Depends(auth.get_usuario)):
+    """🔵 28/10: liga/desliga, para mim, o aviso de nota interna do colega.
+
+    Sem `requer_tela`, como as outras de `/api/eu/...`: é a pessoa ajustando a si
+    mesma. Desligado, a rota de notificações devolve `notas: []` -- o selo
+    desaparece e o som não sai, e a nota continua na conversa, onde sempre
+    esteve."""
+    eu = _atendente_do_usuario(usuario)
+    if not eu:
+        raise HTTPException(status_code=400,
+                            detail="Sua conta não está vinculada a um atendente.")
+    return preferencia.definir_aviso_nota(eu, dados.ligado)
 
 
 @app.get("/api/notificacoes/equipe")

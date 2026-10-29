@@ -2334,6 +2334,13 @@ watch(timeDaAba, () => { if (filtro.value === 'time') carregar() })
 
 /* 🔵 25/09: o Notificador precisa saber qual conversa está aberta -- com a
    tela à vista, ela não toca. */
+/* 🔵 28/10: quantas notas internas desta conversa eu ainda não vi. Lê o mapa
+   que o Notificador preenche; `0` quando não há nada, nunca `undefined` -- o
+   `v-if` do selo compara com número. */
+function notasDaConversa(id) {
+  return (notificacoes.notasPorConversa || {})[id] || 0
+}
+
 watch(() => aberta.value?.id ?? null, (id) => { notificacoes.conversaAberta = id })
 
 /* O clique no balão do Windows leva a `/atendimento/<id>`. Com a Caixa já
@@ -3135,6 +3142,22 @@ function carregarMidiasDaConversa(c) {
                 <span v-if="c.nao_lidas > 0" class="conversa__selo"
                       :title="`${c.nao_lidas} mensagem(ns) que você ainda não viu`">
                   {{ c.nao_lidas > 99 ? '99+' : c.nao_lidas }}
+                </span>
+                <!-- 🔵 28/10: o selo da NOTA INTERNA, SEPARADO do de mensagem.
+                     🚨 Não soma nos dois: o número de cima responde "o cliente
+                     falou comigo", e nota é um colega. Somar faria a tela dizer
+                     que o cliente falou quando não falou. Vem do estado que o
+                     Notificador preenche de 8 em 8 s, e não da lista -- a
+                     consulta da lista é a mais quente do painel e tem ordem
+                     posicional de parâmetro; mexer nela por um selo seria
+                     trocar risco alto por ganho nenhum. -->
+                <span v-if="notasDaConversa(c.id) > 0" class="conversa__selo conversa__selo--nota"
+                      :title="`${notasDaConversa(c.id)} nota(s) interna(s) que você ainda não viu`">
+                  <svg viewBox="0 0 16 16" width="10" height="10" aria-hidden="true"
+                       style="vertical-align:-1px">
+                    <path fill="currentColor" d="M3 2h10a1 1 0 0 1 1 1v8l-3 3H3a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1zm2 3h6V4H5v1zm0 3h6V7H5v1zm0 3h4v-1H5v1z"/>
+                  </svg>
+                  {{ notasDaConversa(c.id) > 99 ? '99+' : notasDaConversa(c.id) }}
                 </span>
                 <span class="apagado pequeno conversa__hora">
                   {{ quando(c.ultima_atividade_em) }}
@@ -6076,6 +6099,17 @@ function carregarMidiasDaConversa(c) {
   font-weight: var(--peso-forte);
   line-height: 18px;
   text-align: center;
+}
+
+/* 🔵 28/10: o selo da NOTA INTERNA. Cor DIFERENTE do de mensagem de propósito:
+   verde é o cliente esperando; este é recado de colega, e quem olha a lista
+   precisa distinguir num relance sem ler o título. */
+.conversa__selo--nota {
+  background: var(--aviso, #D97706);
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 0 6px;
 }
 
 /* Foto de perfil no cabeçalho da conversa: pequena e redonda, ao lado do

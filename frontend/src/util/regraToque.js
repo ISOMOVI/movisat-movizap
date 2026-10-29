@@ -55,3 +55,37 @@ export function decidirToque(antes, depois, aVista = null) {
   }
   return { tocar: false, motivo: 'acima do teto', conversas: [] }
 }
+
+/* ============================================================================
+   Quando a NOTA INTERNA toca (28/10)
+   ----------------------------------------------------------------------------
+   🔵 Pedido dele: *"verifique se as notas internas tbm estao gerando
+   notificacoes como mensagens novas"* -> não geravam. Isto é a régua nova.
+
+   🚨 FUNÇÃO SEPARADA, e não um ramo dentro do `decidirToque`. Os dois eventos
+   são diferentes para quem recebe: um é o CLIENTE esperando resposta, o outro é
+   um COLEGA deixando recado. Misturar na mesma função faria o teto de 4 do
+   cliente ser gasto por nota de bastidor -- e o teto existe para *"não sumir a
+   atenção"* do cliente.
+
+   A régua, no molde da dele:
+     1. Toca quando uma conversa passa a ter nota nova PARA MIM. Nota a mais
+        numa conversa que já tinha nota nova não toca de novo.
+     2. Teto de 4 conversas, igual ao da mensagem -- contado só entre notas.
+     3. A conversa ABERTA E À VISTA não toca: a pessoa está olhando, e o
+        "visto por" vai carimbar sozinho.
+     4. A primeira leitura depois de abrir o painel nunca toca (senão todo F5
+        tocaria).
+   ⚠️ NÃO há a exceção de "conversa nova acima do teto": aquela existe porque
+   conversa nova é cliente novo esperando. Nota não cria fila.
+   ============================================================================ */
+export function decidirToqueNota(antes, depois, aVista = null) {
+  if (!antes) return { tocar: false, motivo: 'primeira leitura', notas: [] }
+
+  const tinha = new Set((antes.notas || []).map((x) => x.conversa_id))
+  const agora = (depois.notas || [])
+  const novas = agora.filter((x) => !tinha.has(x.conversa_id) && x.conversa_id !== aVista)
+  if (!novas.length) return { tocar: false, motivo: 'nada novo', notas: [] }
+  if (agora.length > TETO) return { tocar: false, motivo: 'acima do teto', notas: [] }
+  return { tocar: true, motivo: 'nota nova', notas: novas }
+}
