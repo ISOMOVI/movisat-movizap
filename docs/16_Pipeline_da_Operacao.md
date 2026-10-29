@@ -885,14 +885,159 @@ existe.
 
 ---
 
-## 8.4 🔴 As 4 decisões dele que o Bloco D pede
+## 8.4 🔴 AS 6 PERGUNTAS, COM AS ALTERNATIVAS E O IMPACTO DE CADA UMA
 
-| # | pergunta | o que trava | 🟡 minha recomendação |
+> 🔵 Formato pedido por ele: *"proponha em perguntas com respostas então e com
+> o impacto nas alternativas"*.
+>
+> 🚨 **Os números abaixo foram medidos em 29/10**, não estimados. O que não foi
+> medido está dito como não medido.
+
+**O retrato de hoje, que é o chão de todas as respostas:**
+
+| medida | número |
+|---|---|
+| cards no quadro | **10** abertos · **14** com as finalizadas |
+| colunas que têm card | **5 de 17** |
+| maior coluna | **3 cards** |
+| das 17 situações, quantas **já foram usadas** por alguma OS | **7** (38 · 15746 · 1316 · 15694 · 15696 · 890 · 677) — **10 nunca receberam uma OS** |
+| atendentes ativos | **9** · owners: **1** (ele) |
+| OS hoje em `15694` | **19**, das quais **16 com oficina** e **18 com técnico** |
+
+---
+
+### D-a — Como se move o card?
+
+| | **1. Menu "Mover para…"** 🟡 *recomendo* | **2. Arrastar** | **3. Os dois** |
 |---|---|---|---|
-| **D-a** | **menu "Mover para…"** no card, ou **arrastar**? | é o gesto inteiro | **menu**, e arrastar depois como adição (§8.2, peça 1) |
-| **D-b** | ordem **livre** ou com caminho proibido? | ele já disse que monta as regras depois | **livre e registrada** nesta volta (peça 2) |
-| **D-c** | **quem** pode mover? | hoje a `PNL_1.1` é **só do owner**, então "quem tem a aba" = ele | **quem tem a aba**, sem permissão nova — e quando ele conceder a aba, reavaliar |
-| **D-d** | a tela **avisa** que a 15694 é lida pelo fechamento do FPSL? | §8.3 | **sim, uma linha de texto** — e nada além disso |
+| **teclado** | ✅ alcança | ❌ **não alcança** | ✅ |
+| **toque** | ✅ | ⚠️ 17 colunas com rolagem horizontal e colunas de **3 cards**: o alvo é pequeno e a rolagem disputa com o arrasto | ✅ |
+| **erro acidental** | baixo — exige abrir e escolher | 🚨 **alto**: o dedo escorrega e a escrita vai **direto ao ERP**, sem desfazer | baixo pelo menu, alto pelo arrasto |
+| **custo** | ~20 linhas, sem biblioteca | biblioteca ou ~200 linhas de evento | a soma dos dois |
+| **a trava que já existe** | não mexe nela | 🚨 **tem de ser trocada**: há teste que **procura a palavra do atributo de arrastar** no HTML para garantir que o gesto não existe | tem de ser trocada |
+| **quando compensa** | sempre que há poucos cards por coluna — que é hoje | quando houver **dezenas** de cards e mover em série for o trabalho | depois, nunca junto |
+
+🟡 **Recomendo a 1.** O argumento decisivo não é custo, é que **o arrasto é a
+única forma de escrever no ERP sem querer**, e esta tela escreve no ERP. Com
+colunas de 3 cards, arrastar não economiza nada hoje.
+⚠️ **A 2 não é "melhor depois", é outra coisa:** quando entrar, entra **somada**
+ao menu, nunca no lugar dele — senão o painel perde o teclado.
+
+---
+
+### D-b — A ordem das etapas é livre?
+
+| | **1. Livre** 🟡 *recomendo* | **2. Mapa de caminhos permitidos** | **3. Livre, com aviso quando pular etapas** |
+|---|---|---|---|
+| **o ERP concorda?** | ✅ é o que ele faz — **não recusa transição nenhuma** (medido) | ⚠️ a regra seria **só nossa**: o ERP continua aceitando tudo por outros caminhos (FPSL, à mão) | ✅ |
+| **em quantas situações o mapa seria chute** | — | 🚨 **10 das 17 nunca receberam uma OS**: o mapa seria desenhado para etapas que ninguém percorreu | — |
+| **quantos caminhos haveria para decidir** | 0 | **272** pares (17×16), um a um | 0 |
+| **erro de quem move** | corrige movendo de novo | ⚠️ aparece como *"o sistema não deixa"*, e **bloqueia trabalho real** | corrige movendo de novo |
+| **custo de mudar de ideia** | nenhum | alto: mapa errado vira pedido de exceção | nenhum |
+| **o que se perde** | nada hoje; se houver caminho proibido de verdade, ele passa | — | ⚠️ **um aviso que ninguém pediu** é ruído, e ruído treina a ignorar aviso |
+
+🟡 **Recomendo a 1**, e ela é coerente com o que ele já disse (*"depois vou
+montar as regras entre eles"*). 🚨 **O ponto é o momento:** regra escrita antes
+de o fluxo ser percorrido uma vez é regra imaginária — e com **10 colunas
+virgens** ela seria imaginária em 10 dos casos.
+⚠️ **E a 1 não é "sem registro":** o carimbo da peça 4 grava **de onde para
+onde**, então os caminhos reais aparecem no dado — e **é dali** que o mapa dele
+sai, quando ele quiser, medido em vez de suposto.
+
+---
+
+### D-c — Quem pode mover?
+
+| | **1. Quem tem a aba** 🟡 *recomendo* | **2. Permissão nova (`mover_os`)** | **3. Só o owner** |
+|---|---|---|---|
+| **quem alcança hoje** | **1 pessoa** (ele) — a `PNL_1.1` é de permissão `owner` | **1 pessoa**, até ele conceder | **1 pessoa** |
+| **o que muda quando ele abrir a aba** | quem recebe a aba **já move** | ⚠️ ele concede **duas** coisas e pode errar a segunda | quem recebe a aba **vê e não move** |
+| **custo** | zero | permissão nova: migração, tela de perfil, lista de concedíveis | zero |
+| **o risco** | ⚠️ quem ganhar a aba ganha escrita no ERP **sem passo a mais** | nenhum novo | 🚨 **painel que a operação lê e não usa** — e ele disse que o painel existe *para* atualizar a situação |
+| **reversível?** | ✅ virar permissão depois é barato | — | ✅ |
+
+🟡 **Recomendo a 1**, porque hoje as três dão exatamente o **mesmo alcance: ele**
+— então o único efeito real é o custo. ⚠️ **A reavaliação tem data:** no dia em
+que ele conceder a `PNL_1.1` a alguém, esta pergunta volta, e aí a 2 passa a ter
+conteúdo. 🚨 A 3 contradiz o motivo que ele deu para o painel existir.
+
+---
+
+### D-d — A tela diz que a `15694` é lida pelo fechamento do FPSL?
+
+🚨 **O fato, medido hoje:** `fechamento.py` monta o **pagamento dos técnicos**
+(`FIN_2.1`) com as OS do período **em 15694**, e a rotina de conferência roda a
+cada 1 h, está **ligada** e rodou às **19:43**. Das 19 OS em 15694, **16 têm
+oficina** e **18 têm técnico** — são elas que as duas portas pegam.
+
+🔵 **E o limite dele:** *"ainda não desenhamos o pipeline do financeiro, não se
+prenda a regras imaginárias"*.
+
+| | **1. Uma linha de texto** 🟡 *recomendo* | **2. Nada** | **3. Confirmação própria ("tem certeza?")** |
+|---|---|---|---|
+| **o que a pessoa sabe** | que aquela situação alimenta o fechamento | nada — **descobre pelo efeito**, no pagamento | sabe, e é interrompida |
+| **cria regra nova?** | ❌ não: é texto, não porta | ❌ | 🚨 **sim** — um passo que ninguém pediu, em cima de um pipeline **não desenhado** |
+| **custo** | 1 linha | 0 | modal + decisão de quando aparece |
+| **o risco** | ⚠️ o texto pode envelhecer se o financeiro mudar (`M12`) | 🚨 mover um card vira um **evento de pagamento** invisível | treina a clicar "sim" |
+| **reversível** | ✅ | ✅ | ⚠️ tirar confirmação depois parece perda de controle |
+
+🟡 **Recomendo a 1 e nada além.** 🚨 **Registro o que eu NÃO proponho**, para não
+voltar como boa ideia: porta de aprovação, confirmação dupla, trava por perfil,
+ou qualquer passo a mais por causa do financeiro.
+
+---
+
+### D-e — Dá para mover um card que está em situação `0`?
+
+⚠️ **Esta pergunta não existia antes do Bloco D.** Com o painel só lendo, a OS
+em `0` era contada em `fora_do_quadro` e pronto. Movendo, ela é **o caso que
+mais precisa ser movido** — e não tem coluna de onde sair.
+
+**Hoje: 129 OS com `situacao_id = 0`** na base; no quadro aberto, **1**.
+
+| | **1. `0` + *Nova* → primeira etapa · `0` + *Finalizado* → finalizado** 🟡 *recomendo* | **2. Uma coluna "sem situação"** | **3. Deixar fora, sem mover** |
+|---|---|---|---|
+| **o que ele já tinha proposto** | é exatamente a proposta aberta na pendência nº 2 dele | ⚠️ **existia e ELE a tirou** em 29/10: *"qualquer aba fora dessas não deve estar no painel"* | — |
+| **quantas OS entram no quadro** | as 129 ganham coluna | as 129, numa coluna a mais | **nenhuma** |
+| **escreve no ERP?** | ❌ não: é **leitura** — `0` é mostrado como se fosse a etapa, e só muda quando alguém mover | ❌ | ❌ |
+| **o risco** | ⚠️ a tela mostra uma etapa que o ERP **não** tem gravada | 🚨 contradiz uma decisão dele de ontem | 🚨 a OS que mais precisa de atenção é a que **não aparece** |
+| **reversível** | ✅ é regra de leitura, uma linha | ✅ | ✅ |
+
+🟡 **Recomendo a 1**, **com a ressalva escrita no card**: que aquela OS está em
+`0` no ERP e a coluna é interpretação nossa. Assim ela entra no fluxo sem a tela
+afirmar o que o ERP não diz.
+
+---
+
+### D-f — Existe "mover de volta"?
+
+⚠️ **O ERP não tem desfazer**, e a escrita é imediata. Mas o **carimbo** (peça 4)
+sabe de onde o card veio — então "voltar" é possível **como nova escrita**.
+
+| | **1. Sem botão de voltar** | **2. "Voltar para \<etapa\>" enquanto for a última passagem** 🟡 *recomendo* | **3. Desfazer com janela de tempo** |
+|---|---|---|---|
+| **como se corrige um erro** | movendo pelo menu, escolhendo a etapa na lista | **um clique**, e o card diz para onde volta | um clique, até expirar |
+| **o que grava no ERP** | 1 escrita | 1 escrita | 1 escrita |
+| **honestidade** | ✅ | ✅ é uma **nova passagem**, carimbada como as outras — não apaga a primeira | 🚨 **"desfazer" mente**: dá a entender que a primeira escrita não aconteceu, e ela aconteceu no ERP |
+| **custo** | zero | pequeno: o carimbo já tem o dado | relógio, expiração, estado |
+| **o que depende da D-b** | — | com ordem **livre** funciona sempre; com **mapa**, o caminho de volta pode ser proibido pelo próprio mapa | idem |
+
+🟡 **Recomendo a 2**, e com a palavra **"Voltar"** — nunca "desfazer". 🚨 É a
+diferença entre *"houve duas passagens e a segunda corrigiu"* e *"a primeira
+nunca existiu"*; a segunda frase seria falsa no ERP e no carimbo.
+
+---
+
+### O resumo das 6, para ele marcar
+
+| # | pergunta | 🟡 recomendação | o que muda se ele escolher outra |
+|---|---|---|---|
+| **D-a** | o gesto | **menu "Mover para…"** | arrastar: +1 biblioteca, troca a trava existente, e o painel **perde o teclado** |
+| **D-b** | a ordem | **livre e registrada** | mapa: **272** pares para decidir, **10 colunas** sem nenhum uso real |
+| **D-c** | quem move | **quem tem a aba** | permissão nova: migração + tela, e **o alcance de hoje é o mesmo (ele)** |
+| **D-d** | aviso da 15694 | **uma linha, e nada além** | confirmação: cria regra sobre um pipeline **não desenhado** |
+| **D-e** | a situação `0` | **traduzir na leitura, com ressalva no card** | deixar fora: **129 OS** sem coluna, e no quadro aberto a que mais precisa de atenção |
+| **D-f** | voltar | **"Voltar para \<etapa\>"**, nova passagem | "desfazer": a tela diz que a escrita no ERP não aconteceu, e ela aconteceu |
 
 ---
 
