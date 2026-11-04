@@ -6448,3 +6448,85 @@ Três coisas que o plano registra e que não estavam escritas em lugar nenhum:
    do tempo, mesmo minuto) — **mas** a frente do aviso prévio, que ele desenhou
    em 23/10, vai movê-la em +90 dias. Então ela serve de data de criação **hoje**
    e deixa de servir no dia em que aquela frente entrar.
+
+---
+
+## 03/11 — O CARD DA LISTA: o selo e a hora foram para a COLUNA DA DIREITA
+
+🔵 **Pedido dele, com a seta desenhada numa imagem do próprio card:** *"consegue puxar essas
+informações mais pra direita e aumentar os caracteres do nome do contato"*. E antes de mexer:
+*"valide certamente antes do ajuste"*.
+
+### O que estava errado, medido antes de tocar em nada
+
+O nome, o selo de não lidas e a hora dividiam **a mesma linha** dentro de `.conversa__topo`. A conta
+de caixa por caixa, com a coluna da lista em **348 px**:
+
+```
+348  coluna da lista
+−12  padding-right do item      −8  gap até o botão
+−84  botão "Entrar"             −4  borda esquerda do card
+−24  padding do card            −44 avatar      −12 gap do avatar
+=160  .conversa__corpo
+−8 gap  −22 selo  −8 gap  −33 hora   →  ~89 px para o NOME  ≈ 12 caracteres
+```
+
+🚨 **E a conta bate com o dado:** na imagem que ele mandou, *"Vitória Oliv…"* tem exatamente **12**
+caracteres. **O nome nunca teve teto** — ele era espremido pelos vizinhos de linha.
+
+| Medido na base em 03/11 (1.014 conversas) | |
+|---|---|
+| nomes que **cabem** hoje (≤12) | **323 · 31,9 %** |
+| 🚨 nomes **cortados** hoje | **691 · 68,1 %** |
+| mediana / média / p90 do tamanho | **14 / 15,8 / 26** |
+
+⚠️ **E havia um agravante que a imagem não mostra:** a largura do botão varia — *"Entrar"*,
+*"Assumir"*, *"Reabrir"* e **"Ir para a aberta"**, este último em **166 linhas (16,4 %)**. Como a
+coluna do botão era elástica, **o nome mudava de tamanho a cada linha**, sobrando ~5 caracteres nas
+linhas do botão comprido. Abaixo de 1.100 px (coluna de 300 px) isso vale para todas.
+
+### O que entrou
+
+**Uma coluna à direita do card** (`.conversas__direita`), com o selo de não lidas, o selo de nota e a
+hora **empilhados acima do botão** — que é exatamente o espaço vazio que a seta dele apontava: o
+botão é centralizado na vertical e o nome fica no topo, então aquela faixa não era usada por nada.
+
+🚨 **A largura da coluna é FIXA (`flex: 0 0 100px`), e é ela que cumpre o pedido inteiro.** Com a
+coluna travada, **toda** linha dá ao nome a mesma largura — **~144 px, cerca de 18-19 caracteres**.
+O rótulo comprido quebra em duas linhas (`white-space: normal`) em vez de alargar a coluna.
+
+| | antes | depois |
+|---|---|---|
+| largura do nome | ~89 px (e ~33 px nas 166 do botão comprido) | **~144 px, igual em toda linha** |
+| caracteres | ~12 | **~18-19** |
+| nomes inteiros na tela | 323 · **31,9 %** | **~748-773 · 73,8-76,2 %** |
+
+🔵 **E a bolinha voltou à convenção:** na borda direita é onde o WhatsApp a põe. Não foi invenção
+nova.
+
+### O que se perde, dito
+
+⚠️ **O selo e a hora deixam de ser área de clique da conversa.** Eles estavam dentro do
+`<button class="conversa">` e agora estão fora — **botão dentro de botão é HTML inválido**, e o
+próprio arquivo já avisava disso (o navegador desfaz o aninhamento e o clique de dentro passa a
+abrir a conversa). O resto do card — avatar, nome, prévia, etiquetas — continua abrindo.
+
+### O que a mudança não podia quebrar, e não quebrou
+
+- 🚨 **A regra de reticências continua presa à LISTA** (`.conversa__topo .conversa__quem,`). Solta,
+  ela recortava o botão "Ficha" do cabeçalho da conversa — o defeito de 14/10.
+- 🚨 **O selo da nota viaja junto com o verde.** Separados na tela, a distinção de cor criada em
+  28/10 (um é o cliente, outro é colega) fica ilegível.
+- ⚠️ **O comentário do Notificador voltou.** Ele explica por que o número da nota **não** sai da
+  consulta da lista — que é a mais quente do painel e tem ordem posicional de parâmetro. Eu o perdi
+  ao mover o bloco; o teste agora prende o texto para não se perder de novo.
+
+### Provas
+
+**`frontend/src/card_direita_0311.teste.js` — 11 verificações.** Suíte JS inteira: **631 passaram,
+0 falhas** (eram 620). Suíte Python inteira: **1.972 passaram, 1 pulado, 0 falhas** (rodada como `claude`, não root). Build feito (`M16`), e o bundle no ar traz
+`.conversas__direita{flex:0 0 100px;…}`.
+
+🚨 **O que nenhuma das 631 vê é a tela.** O jsdom não calcula largura nem recorte — é literalmente o
+que falhou aqui antes. 🔴 **Falta dele: abrir a Caixa no computador e no celular.** Abaixo de 860 px
+a lista ocupa a tela toda e a coluna nova não foi exercitada em aparelho nenhum.

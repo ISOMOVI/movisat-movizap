@@ -3136,32 +3136,6 @@ function carregarMidiasDaConversa(c) {
               <span class="conversa__corpo">
               <div class="conversa__topo">
                 <strong class="conversa__quem">{{ quem(c) }}</strong>
-                <!-- 🟢 Erika (15/09): a bolinha de quantidade, como no
-                     WhatsApp e no Bitrix. Conta só mensagem DO CLIENTE que
-                     esta pessoa ainda não viu -- abrir a conversa zera. -->
-                <span v-if="c.nao_lidas > 0" class="conversa__selo"
-                      :title="`${c.nao_lidas} mensagem(ns) que você ainda não viu`">
-                  {{ c.nao_lidas > 99 ? '99+' : c.nao_lidas }}
-                </span>
-                <!-- 🔵 28/10: o selo da NOTA INTERNA, SEPARADO do de mensagem.
-                     🚨 Não soma nos dois: o número de cima responde "o cliente
-                     falou comigo", e nota é um colega. Somar faria a tela dizer
-                     que o cliente falou quando não falou. Vem do estado que o
-                     Notificador preenche de 8 em 8 s, e não da lista -- a
-                     consulta da lista é a mais quente do painel e tem ordem
-                     posicional de parâmetro; mexer nela por um selo seria
-                     trocar risco alto por ganho nenhum. -->
-                <span v-if="notasDaConversa(c.id) > 0" class="conversa__selo conversa__selo--nota"
-                      :title="`${notasDaConversa(c.id)} nota(s) interna(s) que você ainda não viu`">
-                  <svg viewBox="0 0 16 16" width="10" height="10" aria-hidden="true"
-                       style="vertical-align:-1px">
-                    <path fill="currentColor" d="M3 2h10a1 1 0 0 1 1 1v8l-3 3H3a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1zm2 3h6V4H5v1zm0 3h6V7H5v1zm0 3h4v-1H5v1z"/>
-                  </svg>
-                  {{ notasDaConversa(c.id) > 99 ? '99+' : notasDaConversa(c.id) }}
-                </span>
-                <span class="apagado pequeno conversa__hora">
-                  {{ quando(c.ultima_atividade_em) }}
-                </span>
               </div>
               <!-- ⚠️ Fui CHAMADO para esta, não sou o dono. Sem a marca, ela
                    fica igual às minhas na lista — e só o dono responde por ela. -->
@@ -3227,6 +3201,61 @@ function carregarMidiasDaConversa(c) {
               </span>
             </button>
 
+            <!-- 🆕 03/11 (pedido dele, com a seta desenhada na imagem): A
+                 COLUNA DA DIREITA. O selo de não lidas e a hora saíram da linha
+                 do NOME e vieram para cá, acima do botão -- que é o espaço que
+                 já estava vazio, porque o botão é centralizado na vertical e o
+                 nome fica no topo.
+
+                 🚨 O GANHO É MEDIDO, não estético: o nome tinha ~89 px
+                 (~12 caracteres) e passa a ter a linha inteira. Medido em
+                 03/11 na base: **68,1% dos 1.014 nomes eram cortados**,
+                 mediana 14 caracteres.
+
+                 🚨 LARGURA FIXA, E ISTO NÃO É DETALHE: o botão varia de
+                 "Entrar" a "Ir para a aberta" (166 linhas, 16,4%), e sem
+                 largura fixa o nome mudaria de tamanho a cada linha -- lista
+                 que muda de ritmo é mais difícil de varrer do que lista com
+                 nome curto. É a mesma razão que fez a prévia ter uma linha só.
+
+                 ⚠️ O QUE SE PERDE, DITO: o selo e a hora deixam de ser área de
+                 clique da conversa (eram, dentro do `<button class="conversa">`).
+                 Botão dentro de botão é HTML inválido -- o aviso logo acima --,
+                 então eles ficam fora. O resto do card continua abrindo. -->
+            <div class="conversas__direita">
+              <div class="conversas__meta">
+                <!-- 🟢 Erika (15/09): a bolinha de quantidade, como no
+                     WhatsApp e no Bitrix. Conta só mensagem DO CLIENTE que
+                     esta pessoa ainda não viu -- abrir a conversa zera.
+                     ⚠️ Na borda direita desde 03/11, que é onde o WhatsApp a
+                     põe -- não foi invenção nova, foi voltar à convenção. -->
+                <span v-if="c.nao_lidas > 0" class="conversa__selo"
+                      :title="`${c.nao_lidas} mensagem(ns) que você ainda não viu`">
+                  {{ c.nao_lidas > 99 ? '99+' : c.nao_lidas }}
+                </span>
+                <!-- 🔵 28/10: o selo da NOTA INTERNA, SEPARADO do de mensagem.
+                     🚨 Não soma nos dois: o número de cima responde "o cliente
+                     falou comigo", e nota é um colega. Somar faria a tela dizer
+                     que o cliente falou quando não falou. 🚨 E ele VIAJA JUNTO
+                     com o verde: separados na tela, a distinção de cor que a
+                     regra de 28/10 criou fica ilegível.
+                     ⚠️ Vem do estado que o Notificador preenche de 8 em 8 s, e
+                     NÃO da lista -- a consulta da lista é a mais quente do
+                     painel e tem ordem posicional de parâmetro; mexer nela por
+                     um selo seria trocar risco alto por ganho nenhum. -->
+                <span v-if="notasDaConversa(c.id) > 0" class="conversa__selo conversa__selo--nota"
+                      :title="`${notasDaConversa(c.id)} nota(s) interna(s) que você ainda não viu`">
+                  <svg viewBox="0 0 16 16" width="10" height="10" aria-hidden="true"
+                       style="vertical-align:-1px">
+                    <path fill="currentColor" d="M3 2h10a1 1 0 0 1 1 1v8l-3 3H3a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1zm2 3h6V4H5v1zm0 3h6V7H5v1zm0 3h4v-1H5v1z"/>
+                  </svg>
+                  {{ notasDaConversa(c.id) > 99 ? '99+' : notasDaConversa(c.id) }}
+                </span>
+                <span class="apagado pequeno conversa__hora">
+                  {{ quando(c.ultima_atividade_em) }}
+                </span>
+              </div>
+
             <!-- 🔵 30/09: ENCERRADA que tem uma viva do mesmo grupo/número não
                  oferece reabrir -- o índice `ux_conversa_aberta` recusaria.
                  Leva à conversa aberta, que é onde a resposta chega, e mata o
@@ -3270,6 +3299,7 @@ function carregarMidiasDaConversa(c) {
               <i class="bi bi-box-arrow-in-right" aria-hidden="true"></i>
               Entrar
             </button>
+            </div>
           </li>
         </ul>
       </section>
@@ -5768,6 +5798,43 @@ function carregarMidiasDaConversa(c) {
 .conversas__item:hover { background: rgba(128, 128, 128, .08); }
 .conversas__assumir { flex: none; }
 
+/* 🆕 03/11: A COLUNA DA DIREITA do item da lista -- o selo, a hora e o
+   botão, empilhados. Pedido dele com a seta na imagem: *"consegue puxar essas
+   informações mais pra direita e aumentar os caracteres do nome do contato"*.
+
+   🚨 LARGURA FIXA, E É ELA QUE RESOLVE O PEDIDO INTEIRO. Antes, o selo e a
+   hora dividiam a linha do nome e comiam ~71 px dela; e a largura do botão
+   variava de "Entrar" a "Ir para a aberta" (**166 das 1.014 linhas, 16,4%**),
+   então o nome mudava de tamanho a cada linha -- em algumas sobravam ~5
+   caracteres. Com a coluna travada, **toda** linha dá ao nome a mesma largura.
+
+   ⚠️ 100 px é medida, não chute: cabe "Assumir" com ícone (o mais largo dos
+   rótulos curtos) sem apertar, e "Ir para a aberta" quebra em duas linhas em
+   vez de empurrar o nome. */
+.conversas__direita {
+  flex: 0 0 100px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--e-1);
+  padding: var(--e-2) 0;
+}
+/* O botão ocupa a coluna inteira e PODE quebrar -- é o que deixa o rótulo
+   comprido caber sem alargar a coluna. */
+.conversas__direita .conversas__assumir {
+  width: 100%;
+  white-space: normal;
+  line-height: 1.25;
+}
+/* O selo e a hora na mesma linha, encostados à direita. */
+.conversas__meta {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--e-1);
+  min-height: 18px;
+}
+
 /* 🚨 A MARGEM CARREGA UM SIGNIFICADO SÓ: conversa direta × grupo.
    É o fichário que o usuário pediu em 25/08 -- "para sabermos qual é".
    Duas leituras na mesma faixa é a faixa não querer dizer nada, e por isso
@@ -5906,7 +5973,14 @@ function carregarMidiasDaConversa(c) {
   color: var(--acento);
 }
 
-.conversa__topo { display: flex; justify-content: space-between; gap: var(--e-2); }
+/* 🆕 03/11: o topo passou a ter UM filho só, o nome -- o selo e a hora
+   foram para `.conversas__direita`. `min-width: 0` é o que permite o nome
+   truncar dentro do flex; sem ele o item cresce e empurra a coluna da direita.
+   ⚠️ O seletor `.conversa__topo .conversa__quem` logo abaixo CONTINUA preso à
+   lista -- `teste_contrato_sidebar`/`ficha_visivel_1410` prendem isso, e foi o
+   conserto de 14/10 (nome comprido escondia o botão "Ficha" no cabeçalho). */
+.conversa__topo { display: flex; align-items: baseline; gap: var(--e-2); min-width: 0; }
+.conversa__topo .conversa__quem { flex: 1 1 auto; min-width: 0; }
 
 /* ---- o cabeçalho da conversa: o nome tem TETO, o botão não encolhe --------
    🚨 A PRIORIDADE É O BOTÃO NÃO SUMIR (decisão dele, 14/10): *"proponha limite
