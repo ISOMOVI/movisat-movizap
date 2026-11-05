@@ -388,3 +388,74 @@ describe('os recados em modal (Área D)', () => {
     expect(botao.attributes('disabled')).toBeDefined()
   })
 })
+
+/*
+ * ÁREA E (05/11) — O TERMO NO CARD E A BUSCA POR TERMO
+ *
+ * 🔵 *"termo no card e busca"*.
+ *
+ * ⚠️ VIVE NESTE ARQUIVO, e não no `painel_2210.teste.js`: o mock daqui já é o
+ * do card e do modal, e o de lá tem 1152 linhas guardando outras 60 regras.
+ *
+ * 🚨 O QUE A SUÍTE NÃO ALCANÇA (`M9`): se o termo está no cache. A extração é
+ * medida no FPSL (`tests/teste_termo_da_os.py`) e o preenchimento das 603 OS
+ * do cache é script à mão. O que se mede aqui é a TELA, dado o campo.
+ */
+describe('o termo no card (Área E)', () => {
+  it('🔵 escreve TERMO ao lado da OS', async () => {
+    estado.quadro = quadro({ 251: [card({ termo: '8937' })] })
+    const tela = await montar()
+    expect(tela.text()).toContain('OS 17056')
+    expect(tela.text()).toContain('TERMO 8937')
+  })
+
+  it('🚨 card SEM termo não escreve "sem termo" nenhum', async () => {
+    // ⚠️ É 1 de cada 7 cards (medido em 05/11: 27 de 200 OS). Uma linha
+    // dizendo "sem termo" seria ruído repetido em 85 cards para dizer o que
+    // não tem o que dizer.
+    estado.quadro = quadro({ 251: [card({ termo: null })] })
+    const tela = await montar()
+    // ⚠️ A asserção é no CARD, não na tela: a caixa de busca diz "ou termo"
+    // de propósito, e um `not.toMatch` na tela inteira reprovaria por causa
+    // dela — era o teste errado, não a tela.
+    const umCard = tela.find('.card')
+    expect(umCard.text()).toContain('OS 17056')
+    expect(umCard.text()).not.toMatch(/termo/i)
+    expect(tela.find('.card__termo').exists()).toBe(false)
+  })
+
+  it('o termo aparece também no card ABERTO', async () => {
+    estado.quadro = quadro({ 251: [card({ termo: '8937' })] })
+    const tela = await montar()
+    await tela.find('.card__os').trigger('click')
+    await flushPromises()
+    expect(tela.find('.modal__sub').text()).toContain('TERMO 8937')
+  })
+
+  it('⚠️ o número da OS continua sendo o BOTÃO, não o termo', async () => {
+    // 🚨 A OS é a identidade com que se AGE (abre o card); o termo é
+    // referência de papel. Se o termo virasse alvo de clique, o card teria
+    // dois jeitos de abrir e um deles não é o que a pessoa aprendeu.
+    estado.quadro = quadro({ 251: [card({ termo: '8937' })] })
+    const tela = await montar()
+    expect(tela.find('.card__termo').element.tagName).not.toBe('BUTTON')
+    expect(tela.find('.card__os').element.tagName).toBe('BUTTON')
+  })
+
+  it('🔵 a caixa de busca diz que procura por termo', async () => {
+    const tela = await montar()
+    const caixa = tela.find('.painel__busca input')
+    expect(caixa.attributes('placeholder')).toContain('termo')
+    expect(tela.find('.painel__busca').text()).toContain('termo')
+  })
+
+  it('🚨 a tela diz quando casou por TERMO', async () => {
+    // Sem isto, quem procura 8937 não sabe se achou a OS 8937 ou as 6 OS do
+    // termo 8937 — os dois são números de 4-5 dígitos no mesmo card.
+    estado.quadro = quadro({ 251: [card({ termo: '8937' })] })
+    estado.quadro.busca = '8937'
+    estado.quadro.filtro_casou_por = ['termo']
+    const tela = await montar()
+    expect(tela.text()).toContain('casou por termo')
+  })
+})

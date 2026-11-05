@@ -426,3 +426,100 @@ def teste_definir_data_matriz_grava_e_rele():
         assert paineis.data_matriz() == "2026-10-20"
     finally:
         paineis.definir_data_matriz(anterior)
+
+
+# ============================================================================
+# ÁREA E — O TERMO NO CARD E A BUSCA POR TERMO (05/11)
+# ============================================================================
+# 🔵 *"termo no card e busca"*.
+#
+# 🚨 O TERMO NÃO É CAMPO DA OS NO HARMONIT. Ele vive dentro do texto da
+# `descricao`, e a ponte o extrai e o guarda no cache
+# (`fpsl_weso/termo_da_os.py`, com a medição que desenhou a extração: 200 OS
+# lidas ao vivo em 05/11, 173 com termo e 0 ambíguas). Daqui para cima ele é
+# só mais um campo que a ponte devolve.
+#
+# ⚠️ OS SEM TERMO É O CASO NORMAL EM 1 DE CADA 7 — venda, cartão RFID e
+# manutenção não nascem de termo. Nada na tela escreve "sem termo".
+def _o_card(quadro: dict, numero):
+    """O card de uma OS, de qualquer coluna. ⚠️ Estoura se não existir — card
+    que desapareceu do quadro é o defeito, não um `None` a comparar."""
+    return next(c for col in quadro["colunas"] for c in col["cards"]
+                if c["numero_ordem"] == numero)
+
+
+class TestOTermoNoCard:
+
+    def teste_o_termo_da_ponte_chega_no_card(self, ponte_de_os):
+        ponte_de_os(_duble_de_os(termo="8937"))
+        q = paineis.quadro("operacao")
+        card = _o_card(q, 17099)
+        assert card["termo"] == "8937"
+
+    def teste_os_sem_termo_tem_card_com_termo_nulo(self, ponte_de_os):
+        """⚠️ O card EXISTE e entra na coluna: a OS de venda é trabalho da
+        operação como qualquer outra. O que falta é a referência do papel."""
+        ponte_de_os(_duble_de_os())
+        card = _o_card(paineis.quadro("operacao"), 17099)
+        assert card["termo"] is None
+
+    def teste_o_card_de_solicitacao_sem_os_na_ponte_tem_termo_nulo(
+            self, formulario_de_operacao):
+        """🚨 NULO DE PROPÓSITO, como os vizinhos `tipo_nome` e `placas`: o
+        termo mora na OS, e esta OS não veio na lista da ponte. Preencher com
+        o que o nosso banco "acha" seria inventar estado do ERP."""
+        # ⚠️ Com uma situação DAS 17, senão o card não tem coluna nenhuma.
+        ident = solicitar(formulario_de_operacao, os_id=927001,
+                          numero_ordem="17901", situacao_id=15746)
+        q = paineis.quadro("operacao")
+        card = next(c for col in q["colunas"] for c in col["cards"]
+                    if c["id"] == ident)
+        assert card["origem"] == "formulario"
+        assert card["termo"] is None
+
+
+class TestABuscaPorTermo:
+
+    def teste_a_busca_acha_pelo_termo_e_diz_que_casou_por_termo(self,
+                                                               ponte_de_os):
+        """🚨 O `casou_por` pesa mais aqui que em qualquer outro campo: termo e
+        número de OS são os dois números de 4-5 dígitos do card, e sem dizer
+        qual casou quem procura `8937` não sabe se achou a OS 8937 ou as 6 OS
+        do termo 8937."""
+        ponte_de_os(_duble_de_os(termo="8937"))
+        q = paineis.quadro("operacao", busca="8937")
+        assert q["total"] == 1
+        assert q["filtro_casou_por"] == ["termo"]
+
+    def teste_as_varias_os_do_mesmo_termo_vem_juntas(self, ponte_de_os):
+        """🔵 É PARA ISTO QUE A BUSCA POR TERMO SERVE: um termo gera a OS
+        financeira e uma OS por placa — 6 OS do termo 8937 na medição de
+        05/11. Procurar o termo tem de trazer o conjunto, não uma delas."""
+        ponte_de_os(
+            _duble_de_os(numero_os=17082, os_id=1, termo="8937"),
+            _duble_de_os(numero_os=17081, os_id=2, termo="8937"),
+            _duble_de_os(numero_os=17076, os_id=3, termo="8940"),
+        )
+        q = paineis.quadro("operacao", busca="8937")
+        assert {c["numero_ordem"] for col in q["colunas"]
+                for c in col["cards"]} == {17082, 17081}
+
+    def teste_card_sem_termo_nao_casa_por_termo(self, ponte_de_os):
+        """⚠️ Nulo não é "casa com tudo" — e é 1 de cada 7 cards."""
+        ponte_de_os(_duble_de_os(termo=None))
+        assert paineis.quadro("operacao", busca="8937")["total"] == 0
+
+    def teste_a_busca_pelo_numero_da_os_continua_dizendo_OS(self, ponte_de_os):
+        """🚨 NÃO REGRESSÃO: o campo novo não pode roubar o rótulo do antigo.
+        Procurar o número da OS tem de continuar dizendo *casou por OS*."""
+        ponte_de_os(_duble_de_os(numero_os=17099, termo="8937"))
+        q = paineis.quadro("operacao", busca="17099")
+        assert q["filtro_casou_por"] == ["OS"]
+
+    def teste_quando_casa_nos_dois_os_dois_sao_ditos(self, ponte_de_os):
+        """⚠️ O caso que existe de verdade: a OS 8937 e o termo 8937 são
+        números iguais em papéis diferentes. A tela diz *"casou por OS,
+        termo"* em vez de escolher um."""
+        ponte_de_os(_duble_de_os(numero_os=8937, termo="8937"))
+        q = paineis.quadro("operacao", busca="8937")
+        assert q["filtro_casou_por"] == ["OS", "termo"]

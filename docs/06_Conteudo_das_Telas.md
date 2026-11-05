@@ -7036,3 +7036,133 @@ ficou o comentário com as três regras que ela guardava.
 *"Não **vai** para a OS"* virou *"Não **vão**"*. O teste passou a aceitar as
 duas formas — a regra medida (a tela diz que não vai para a OS) continua
 inteira.
+
+## 05/11 — O TERMO no card e a busca por termo (área E do painel da Operação)
+
+🔵 Pedido dele, área **E** do plano de 04/11: *"termo no card e busca"*.
+📘 O plano das 8 áreas vive em `C:\Users\Lenovo\Desktop\Painel_Operacao_Checklists_PLANO.md`.
+
+### 🚨 O obstáculo, e por que ele decidiu o desenho
+
+**O termo não é campo da OS no Harmonit.** Ele existe **dentro do texto** da
+`descricao`, e a `descricao` **não está no cache** do FPSL — vem ao vivo, uma
+chamada por OS. Buscar por termo lendo ficha a ficha custaria **uma leitura do
+ERP por card**, e o quadro tem até 600.
+
+Então o termo passou a ser **extraído na varredura** e guardado no cache:
+coluna `os_historico.termo` no FPSL, extração em `fpsl_weso/termo_da_os.py`,
+e a rota `GET /api/os/por-situacao` devolvendo `termo` em cada OS. A varredura
+**já lia a OS inteira** — tinha a `descricao` na mão e não gravava nada dela.
+É a mesma porta por onde a `prioridade` entrou em 29/10.
+
+⚠️ **Nenhuma migração do MoviZap.** O dado vive no cache do FPSL; deste lado é
+mais um campo que a ponte devolve. 📘 Detalhe em `docs/fpsl/34_Ponte_MoviZap.md`,
+seção 5-B.
+
+### 📏 A medição que desenhou a extração (200 OS lidas ao vivo em 05/11)
+
+**173 com termo · 27 sem · 0 descrições com mais de um termo distinto · 0 com a
+palavra `TERMO` sem número ao lado.** Os quatro formatos reais:
+
+```
+FINANCEIRO — TERMO 8937 | placas: DMD 0324, ...
+Retirada: BUS 0168 | ... | TERMO 8937 | O.S: 17081
+SUBSTITUIÇÃO INSTALAÇÃO: A_DEFINIR_2_8927 | TERMO:8927 | ... | TERMO 8927
+RESSARCIMENTO: TERMO 8924 | placas: TKZ 6A06 | O.S: 17025
+```
+
+🚨 **O `TERMO:8927` e o `TERMO 8927` na mesma descrição são o MESMO termo**, e
+tratá-los como ambiguidade deixaria um padrão inteiro de OS (a substituição)
+sem termo. O que devolve nulo é termo **diferente**.
+
+### ⚠️ OS SEM TERMO É O CASO NORMAL EM 1 DE CADA 7, e a tela não diz nada
+
+Venda, compra de cartão RFID, entrega de chaveiro e manutenção não nascem de
+termo. **O card escreve só o número da OS.** Não existe *"sem termo"* escrito
+em lugar nenhum — seria uma linha repetida em 85 cards para dizer o que não tem
+o que dizer.
+
+### O que ficou na tela
+
+- **No card fechado:** `OS 17081` e, ao lado, `TERMO 8937`. Os dois no mesmo
+  grupo à esquerda; o *"há N dias"* continua na direita, pelo `space-between`.
+  ⚠️ O termo é **mais fraco** que o número da OS de propósito: a OS é a
+  identidade com que se **age** (é o botão que abre o card) e o termo é a
+  referência de papel. Com o mesmo peso, o operador hesitaria sobre qual é
+  qual — e há teste provando que o termo **não** é um `<button>`.
+- **No card aberto:** o termo entra na linha de subtítulo, antes das placas.
+- **Na busca:** quarto campo, na mesma caixa única (`cliente, OS, placa ou
+  termo`). 🚨 **E é o campo que mais precisa do *"casou por"***: termo e número
+  de OS são os dois números de 4-5 dígitos do card, e sem dizer qual casou quem
+  procura `8937` não sabe se achou a OS 8937 ou as 6 OS do termo 8937. Quando
+  casa nos dois, a tela diz *"casou por OS, termo"* em vez de escolher.
+
+### ✅ A prova ao vivo (05/11, pelo quadro de verdade, não pela suíte)
+
+| medida | resultado |
+|---|---|
+| a rota da ponte, por HTTP | 45 OS, **41 com termo**, 4 sem — campo presente em todas |
+| o quadro do MoviZap | 43 cards, **41 com termo** |
+| busca por `8913` | **8 cards**, `casou_por = ['termo']` — as 8 OS do mesmo termo juntas |
+| busca sem resultado | 0 cards, `casou_por = None` |
+
+🔵 **É para isto que a busca por termo serve:** um termo gera a OS financeira
+mais uma OS por placa. O termo **8802** tem **71 OS**.
+
+### A carga inicial, que é à mão e uma vez
+
+`fpsl_weso/scripts/termo_das_os.py` — por padrão **só relata**; `--um` grava
+uma; `--aplicar` o lote. **Só toca linha com `termo IS NULL`**, então a segunda
+rodada não muda nada. Validei 1 (a OS 17084, termo 8941) antes do lote, que é a
+régua da casa.
+
+**Resultado medido:** das **603** OS do cache, **493 com termo** · **109 sem
+termo nenhum** (o caso normal) · **1** que o ERP já não encontra.
+
+🚨 **A OS 16576 é um achado de dado, e NÃO foi tocada:** o Harmonit responde
+*"Ordem de Serviço não encontrada"*, mas ela está no cache como **não
+excluída**. O `resync` não a alcança porque a janela dele é recente. 🔴 Marcar
+exclusão a partir de um script de carga seria escrita que ninguém pediu —
+**fica para ele decidir**.
+
+### As travas
+
+| onde | o que mede | quantas |
+|---|---|---|
+| `fpsl_weso/tests/teste_termo_da_os.py` | a extração (os 4 formatos reais, os 3 sem termo, os 2 termos distintos) e a coluna no cache | **17** |
+| `fpsl_weso/tests/teste_ponte_rotas_http.py` | o `termo` vindo pela rota, e OS sem termo devolvendo nulo sem sair do quadro | **+2** |
+| `tests/teste_paineis.py` | o campo no card, nulo no card de solicitação, e as 5 regras da busca | **+8** |
+| `frontend/src/painel_checklist_0411.teste.js` | o card, o card aberto, a caixa de busca, o *"casou por termo"*, e o termo **não** ser botão | **+6** |
+
+🚨 **UM DEFEITO MEU, ACHADO PELA PRÓPRIA SUÍTE:** o teste *"card sem termo não
+escreve 'sem termo'"* nasceu asseverando sobre a **tela inteira**, e reprovou —
+porque a **caixa de busca** diz *"ou termo"*, de propósito. O teste estava
+errado, não a tela; a asserção passou a ser no elemento `.card`. ⚠️ Varredura
+de texto em tela inteira acha o texto certo no lugar errado.
+
+🚨 **E UM SEGUNDO, do mesmo tipo:** o `teste_termo_da_os.py` nasceu apontando
+`storage.DB_PATH` **no import do módulo** — e isso derrubou **10 testes do
+`teste_ponte_rotas_http`**, que passavam sozinhos. O `pytest` importa todos os
+arquivos antes de rodar qualquer um, e o último import ganha. O conserto é
+trocar o caminho **na fixture**, com `monkeypatch`, e devolvê-lo depois. A casa
+já tem um `teste_colisao_de_globais` por esta mesma razão, e eu repeti o erro
+que ele nomeia.
+
+### 🔴 O achado que é do INSTRUMENTO de medida, e é dele decidir
+
+O critério oficial de verde do FPSL (`docs/fpsl/18_Testes.md`) é rodar cada
+arquivo **como script**:
+
+```bash
+for t in tests/teste_*.py; do venv/bin/python "$t"; ... done
+```
+
+🚨 **Arquivo só-de-pytest executado assim não roda NADA e sai com 0** — o laço
+o conta como verde sem ter verificado uma linha. Medido em 05/11:
+`teste_ponte_rotas_http.py` e `teste_criar_os_ponte.py` estão nesse estado
+**desde 29/10**, embora a doc afirme que *"os dois da ponte rodam nos dois
+modos"*. São **60 verificações** que o placar conta e ninguém executa.
+
+⚠️ O `teste_termo_da_os.py` já nasce com `__main__` e roda nos dois modos.
+🔴 **Consertar os outros dois é decisão dele**, porque mexe no placar do
+projeto — e é defeito de `M12`: a doc diz uma coisa e o comando faz outra.

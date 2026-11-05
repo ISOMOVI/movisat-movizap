@@ -721,8 +721,9 @@ function duracao(iso) {
    do quadro é 600. Filtrar no navegador esconderia o que o teto já cortou, e a
    pessoa procuraria uma OS que o servidor nem mandou.
 
-   ⚠️ UMA CAIXA SÓ para os três campos: quem procura tem um número ou um nome na
-   mão e não quer decidir em qual caixa ele vai. A tela diz ONDE casou.
+   ⚠️ UMA CAIXA SÓ para os QUATRO campos (o termo entrou em 05/11, área E):
+   quem procura tem um número ou um nome na mão e não quer decidir em qual
+   caixa ele vai. A tela diz ONDE casou.
    ============================================================================ */
 const busca = ref('')
 /* 🔵 O PADRAO, por decisao dele: *"o ordenador padrão deve ser por 'Prazo de
@@ -812,11 +813,16 @@ onMounted(carregar)
       <div class="cabecalho__controles">
         <!-- 🔵 *"filtros para os cards, por cliente, OS, placa"* — UMA caixa
              para os três: quem procura tem um número ou um nome na mão e não
-             quer decidir em qual caixa ele vai. -->
+             quer decidir em qual caixa ele vai.
+             🔵 ÁREA E (05/11): e por TERMO, que é o quarto campo. 🚨 Ele é o
+             que mais precisa do *"casou por"* logo abaixo: termo e número de
+             OS são os dois números de 4-5 dígitos do card, e sem dizer qual
+             casou quem procura `8937` não sabe se achou a OS 8937 ou as 6 OS
+             do termo 8937. -->
         <label class="painel__busca">
-          <span class="so-leitor">Procurar por cliente, número da OS ou placa</span>
+          <span class="so-leitor">Procurar por cliente, número da OS, placa ou termo</span>
           <input type="search" v-model="busca" @input="buscarComCalma"
-                 placeholder="cliente, OS ou placa">
+                 placeholder="cliente, OS, placa ou termo">
         </label>
 
         <!-- 🔵 *"ordenadores tbm"*. ⚠️ "parado há mais tempo" usa o Bloco C, e
@@ -980,8 +986,20 @@ onMounted(carregar)
                    :style="{ borderLeftColor: corDaEtapa(indice) }"
                    @click="cliqueNoCard(card)">
                 <span class="card__topo">
-                  <button class="card__os" type="button"
-                          @click.stop="cliqueNoCard(card)">OS {{ card.numero_ordem || card.os_id }}</button>
+                  <!-- 🔵 ÁREA E (05/11): *"termo no card"*. O termo vem AO LADO
+                       da OS, no mesmo grupo, porque são as duas identidades do
+                       mesmo papel — e quem procura pelo termo quer vê-lo onde
+                       procura pela OS.
+                       ⚠️ ELE NÃO APARECE EM 1 DE CADA 7 CARDS, e isso é
+                       normal: venda, cartão RFID e manutenção não nascem de
+                       termo (medido em 05/11: 27 de 200 OS). 🚨 E não existe
+                       "sem termo" escrito aqui — seria ruído repetido em 85
+                       cards para dizer o que não tem o que dizer. -->
+                  <span class="card__ident">
+                    <button class="card__os" type="button"
+                            @click.stop="cliqueNoCard(card)">OS {{ card.numero_ordem || card.os_id }}</button>
+                    <span v-if="card.termo" class="card__termo">TERMO {{ card.termo }}</span>
+                  </span>
                   <span v-if="ha(card.criada_em)" class="card__ha">
                     {{ ha(card.criada_em) }}
                   </span>
@@ -1200,6 +1218,11 @@ onMounted(carregar)
               </p>
               <p class="modal__sub">
                 {{ cardAberto.tipo_nome || 'tipo não lido' }}
+                <!-- 🔵 ÁREA E: o termo também no aberto, onde quem vai agir
+                     precisa dele para achar o papel. -->
+                <template v-if="cardAberto.termo">
+                  · TERMO {{ cardAberto.termo }}
+                </template>
                 <template v-if="cardAberto.placas && cardAberto.placas.length">
                   · {{ cardAberto.placas.map((p) => p.placa).join(' · ') }}
                 </template>
@@ -1618,6 +1641,18 @@ onMounted(carregar)
   color: var(--texto); cursor: pointer; text-align: left;
 }
 .card__os:focus-visible { outline: 2px solid var(--acento); outline-offset: 2px; }
+/* 🔵 ÁREA E — a OS e o termo no mesmo grupo, à esquerda; o "há N dias" fica
+   na direita pelo `space-between` do `.card__topo`.
+   ⚠️ `min-width: 0` e `flex-wrap`: termo de 5 dígitos em coluna estreita
+   quebra para a linha de baixo em vez de empurrar o "há N dias" para fora. */
+.card__ident {
+  display: flex; align-items: baseline; gap: var(--e-1);
+  min-width: 0; flex-wrap: wrap;
+}
+/* ⚠️ MAIS FRACO QUE O NÚMERO DA OS de propósito: a OS é a identidade com que
+   se age (é o botão que abre o card), e o termo é a referência de papel. Os
+   dois com o mesmo peso fariam o operador hesitar sobre qual é qual. */
+.card__termo { font-size: var(--txt-xs); color: var(--texto-fraco); white-space: nowrap; }
 
 .modal {
   position: fixed; inset: 0; z-index: 50;

@@ -478,6 +478,16 @@ def quadro(painel: str, so_abertas: bool = True,
             # excecao, e excecao precisa estar visivel sem abrir"*.
             "prioridade": o.get("prioridade"),
             "prioridade_nome": passagem.PRIORIDADES.get(o.get("prioridade")),
+            # 🔵 ÁREA E (05/11) — O TERMO NO CARD. *"termo no card e busca por
+            # termo"*. 🚨 Ele NÃO é campo da OS no Harmonit: vive dentro do
+            # texto da `descricao`, e a ponte o extrai e o guarda no cache
+            # (`fpsl_weso/termo_da_os.py`). Sem isso, procurar uma OS pelo
+            # termo custaria uma leitura do ERP por card.
+            # ⚠️ NULO É O CASO NORMAL em 1 de cada 7: venda, cartão RFID e
+            # manutenção não nascem de termo (medido: 27 de 200 OS em 05/11).
+            # A tela escreve só o número da OS -- não existe "sem termo"
+            # escrito no card, que seria ruído em 85 cards.
+            "termo": o.get("termo"),
         }, o.get("situacao_id"))
 
     # ---- os cards das nossas solicitações que a ponte não trouxe ---------
@@ -526,6 +536,9 @@ def quadro(painel: str, so_abertas: bool = True,
             "observacoes": 0,
             "prioridade": None,
             "prioridade_nome": None,
+            # ⚠️ Nulo pelo mesmo motivo dos vizinhos: o termo mora na OS, e
+            # esta OS não veio na lista da ponte.
+            "termo": None,
         }, linha["situacao_id"])
 
     # ----------------------------------------------------------------------
@@ -536,7 +549,8 @@ def quadro(painel: str, so_abertas: bool = True,
     # é 50 e o do quadro é 600. Filtrar no navegador esconderia o que o teto já
     # cortou, e a pessoa procuraria uma OS que o servidor nem mandou.
     #
-    # ⚠️ UMA CAIXA SÓ para os três campos, e não três caixas: quem procura tem
+    # ⚠️ UMA CAIXA SÓ para os QUATRO campos, e não quatro caixas (o termo
+    # entrou em 05/11, área E): quem procura tem
     # um número ou um nome na mão e não quer decidir em qual caixa ele vai. O
     # que casa é dito em `filtro_casou_por`, para a tela poder mostrar.
     casou_por = set()
@@ -688,11 +702,16 @@ def _normalizar(texto: str) -> str:
 
 
 def _onde_casa(card: dict, alvo: str) -> set:
-    """Em quais dos três campos a busca casou. Vazio = o card sai.
+    """Em quais dos quatro campos a busca casou. Vazio = o card sai.
 
     ⚠️ Devolve ONDE casou, e não só sim/não, porque a tela diz *"casou por
     placa"* -- sem isso, quem procura um número e acha um card não sabe se
     achou a OS ou o cliente.
+
+    🔵 ÁREA E (05/11): o **termo** é o quarto campo. 🚨 E ele é o que mais
+    precisa do `casou_por`: termo e número de OS são os dois números de 4-5
+    dígitos do card, e sem dizer qual casou quem procura `8937` não sabe se
+    achou a OS 8937 ou as 6 OS do termo 8937.
     """
     onde = set()
     if not alvo:
@@ -709,6 +728,10 @@ def _onde_casa(card: dict, alvo: str) -> set:
         if alvo in _normalizar(p.get("placa")):
             onde.add("placa")
             break
+    # 🔵 ÁREA E — o termo. ⚠️ Card sem termo simplesmente não casa por aqui:
+    # é 1 de cada 7, e nulo não é "casa com tudo".
+    if card.get("termo") and alvo in _normalizar(card["termo"]):
+        onde.add("termo")
     return onde
 
 
