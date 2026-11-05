@@ -41,6 +41,7 @@ import FichaDoTecnico from '../telas/FichaDoTecnico.vue'
 import ChatInterno from '../telas/ChatInterno.vue'
 import Solicitacoes from '../telas/Solicitacoes.vue'
 import PainelOperacao from '../telas/PainelOperacao.vue'
+import PainelAba from '../telas/PainelAba.vue'
 import Atendentes from '../telas/Atendentes.vue'
 import Times from '../telas/Times.vue'
 import Automacao from '../telas/Automacao.vue'
@@ -198,13 +199,43 @@ const rotas = [
 
   // 🔵 22/10: o PRIMEIRO painel, o da Operacao (opcao A, kanban pelas
   // situacoes da OS). Escolha dele entre tres mockups: "vamos de A somente
-  // para a Operacao por enquanto". Os outros tres entram como PNL_1.2/1.3/1.4
-  // quando ele decidir -- cada um com tela propria, nao com um filtro aqui.
+  // para a Operacao por enquanto".
+  // 🔵 05/11: a PNL_1.2 e a PNL_1.3 entraram (as duas abas do Pos-venda),
+  // por pedido dele. ⚠️ E O *"cada um com tela propria"* desta nota NAO
+  // valeu: elas dividem a `PainelAba`, porque as colunas estao no banco e a
+  // tela e a mesma. O que e proprio de cada uma e a ENTRADA no `telas.py`,
+  // por causa da permissao. A PNL_1.4 (Contratual/Financeiro) espera as
+  // colunas dele.
   {
     path: '/paineis/operacao',
     name: 'PNL_1.1',
     component: PainelOperacao,
     meta: { codigo: 'PNL_1.1', titulo: 'Operação', largo: true },
+  },
+
+  // 🔵 05/11: as DUAS abas do Pos-venda, com as colunas que ele escreveu.
+  // 🚨 UMA TELA, DUAS ROTAS: as colunas vivem no BANCO (`pipeline_etapa`,
+  // migracao 094), nao no codigo -- entao a tela e a mesma e o que muda e o
+  // `meta.aba`. Uma tela por aba seria copiar o mesmo kanban por aba.
+  // ⚠️ Ja a ENTRADA no `telas.py` e uma por aba, e isso nao e redundancia:
+  // `permissao` e campo da entrada, e ele quer *"a Erika, apenas a aba 3"*.
+  // 🔵 05/11: *"so aba principal no menu. As demais sao dentro dela ja"*.
+  // A `PNL_1.2` e a rota do item de menu; a `PNL_1.3` tem `aba_de` no
+  // `telas.py` e por isso nao desenha item -- mas precisa de rota propria,
+  // porque e por ela que a aba de dentro navega e que o link direto abre.
+  {
+    path: '/paineis/pos-venda',
+    name: 'PNL_1.2',
+    component: PainelAba,
+    meta: { codigo: 'PNL_1.2', aba: 'PNL_1.2',
+            titulo: 'Pós-venda', largo: true },
+  },
+  {
+    path: '/paineis/pos-venda/realizado',
+    name: 'PNL_1.3',
+    component: PainelAba,
+    meta: { codigo: 'PNL_1.3', aba: 'PNL_1.3',
+            titulo: 'Pós-venda', largo: true },
   },
 
   // 🔵 22/10: a FRM_1.1, o que chega pelos formularios proprios.

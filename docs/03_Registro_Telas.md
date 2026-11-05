@@ -276,6 +276,8 @@ O campo **`icone`** deste registro é o que o menu desenha, e ele é **a fonte
 | `ATD_3.1` Informativos | `bi-megaphone` | menu |
 | `FRM_1.1` Solicitações | `bi-ui-checks` | menu |
 | `PNL_1.1` Operação | `bi-kanban` | menu (grupo Painéis) |
+| `PNL_1.2` Pós-venda | `bi-clipboard-check` | menu (grupo Painéis) |
+| `PNL_1.3` Pós-venda | `bi-clipboard-check` | **sem item** — tem `aba_de` |
 | `CAD_1.1` Clientes | `bi-building` | menu |
 | `CAD_1.2` Contatos | `bi-person-lines-fill` | menu |
 | `CAD_2.1` Atendentes | `bi-people` | menu |
@@ -607,3 +609,39 @@ O `name` da rota (`tecnico-ficha`) de propósito **não** segue o padrão
 coisas (Times/Atendentes, Fila/Histórico/Solicitações e agora preço de
 técnico). Hoje é o mesmo conjunto de pessoas; separar é decisão dele, e aí nasce
 permissão própria.
+
+### 🔵 05/11 — `PNL_1.2` e `PNL_1.3`: as duas abas do Pós-venda
+
+| código | título | rota | permissão | fase |
+|---|---|---|---|---|
+| `PNL_1.2` | Pós-venda | `/paineis/pos-venda` | `owner` | 1 |
+| `PNL_1.3` | Pós-venda | `/paineis/pos-venda/realizado` | `owner` | 1 |
+
+🔵 Pedido dele: *"a aba 'Operação' do Movizap é a mesma lógica para os demais:
+Pós-venda - Abas - Permissão por abas / Aba 1: Treinamentos / Solicitação:
+Agenda* / Treinamento 1: / Treinamento 2: / Entregue: / Aba 2: Pós-venda"*, com
+as colunas da segunda logo depois: *"Solicitação: Testes: Realizar Pós-venda:
+Pós-venda Realizado:"*.
+
+🚨 **UM ITEM DE MENU, DUAS ABAS DENTRO DELE** — correção dele no mesmo dia:
+*"Aba no Menu Pós-venda = abas de pipeline: Treinamento / Pós venda"* · *"Ou
+seja, só aba principal no menu. As demais são dentro dela já."* A `PNL_1.3`
+leva **`aba_de: "PNL_1.2"`**, que é a convenção da casa para tela que fica no
+registro e **não desenha item de menu** — a mesma das seis `CFG_*`.
+
+🚨 **POR QUE DUAS ENTRADAS, SE É UM ITEM SÓ:** porque a **permissão é por aba**
+— *"será por abas (…) a Karla terá permissão para ver o 'Financeiro' e todas as
+abas. A Erika, apenas a aba 3 do financeiro"*. `permissao` é campo da entrada,
+então duas abas com permissões diferentes não cabem numa entrada.
+
+⚠️ **AS COLUNAS NÃO MORAM NO `telas.py`**, e sim no banco (`pipeline_etapa`,
+migração 094). A entrada é a **porta**: código, rota e quem entra. É o que
+permite **uma tela** (`PainelAba.vue`) servir as duas abas — e as do Financeiro,
+quando ele der as colunas.
+
+🔴 **A PORTA TRANCADA, escrita antes de acontecer:** se ele conceder **só** a
+`PNL_1.3` a alguém, essa pessoa fica **sem item de menu**, porque o item é da
+`PNL_1.2`. É a mesma armadilha que a casa já catalogou (`aba_de` + permissão
+apertada). O conserto é o `MenuLateral` desenhar o item quando a pessoa alcança
+**qualquer** aba do conjunto — frente própria. Hoje as duas são `owner`, que vê
+tudo, então o defeito não tem como aparecer ainda.

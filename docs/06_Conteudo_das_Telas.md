@@ -7664,3 +7664,57 @@ chamado fala com o Harmonit, e é por isso que **Reabrir** é seguro.
 Card de OS não entra na `Chamados`; card de chamado não entra numa das 17. A
 tela **recusa e diz por quê**, em vez de deixar a rota devolver 422 sem
 explicação.
+
+## Pós-venda — as abas de pipeline `PNL_1.2` e `PNL_1.3` (05/11)
+
+🔵 Ele: *"a aba 'Operação' do Movizap é a mesma lógica para os demais: Pós-venda
+- Abas - Permissão por abas"*, com as colunas de cada uma escritas por ele. E a
+correção do menu, no mesmo dia: *"Aba no Menu Pós-venda = abas de pipeline:
+Treinamento / Pós venda"* · *"só aba principal no menu. As demais são dentro
+dela já."*
+
+**No menu há UM item, "Pós-venda".** Dentro da tela, duas abas:
+
+| aba | código | as colunas, na ordem dele |
+|---|---|---|
+| **Treinamentos** | `PNL_1.2` | Solicitação · Treinamento 1 · Treinamento 2 · **Entregue** |
+| **Pós-venda** | `PNL_1.3` | Solicitação · Testes · Realizar Pós-venda · **Pós-venda Realizado** |
+
+⚠️ **O `Agenda*` da primeira coluna é LIGAÇÃO, não nome**: ele respondeu *"Liga
+na Agenda do MoviZap"*. As tabelas `agendamento` e `agendamento_os` já existem
+(migrações 072/073), e o elo é frente própria. O título da coluna é só
+*"Solicitação"*.
+
+🚨 **NENHUMA DESTAS COLUNAS EXISTE NO HARMONIT**, e é a diferença inteira em
+relação ao painel da Operação: lá as 17 colunas são situações da OS e **mover
+escreve no ERP**; aqui mover escreve **só no nosso banco**. É o mesmo motor da
+coluna `Chamados` (`movizap/pipeline.py`), que **não importa a ponte** — e há
+trava provando.
+
+### O que a tela tem
+
+- **as abas**, só as que a pessoa pode abrir — a lista sai da permissão da
+  sessão, a mesma fonte da guarda de rota. ⚠️ Com **uma** aba visível a barra
+  **não aparece**: uma aba sozinha não é escolha.
+- **as colunas**, com contagem, colapsáveis, 360px (3 por scroll em 1366px — a
+  medida que ele aprovou na Operação).
+- **o card**, arrastável entre as colunas. ⚠️ Card **finalizado não se move**:
+  reabrir primeiro é o gesto, e oferecer os dois ao mesmo tempo deixaria o
+  estado ambíguo.
+- **o card aberto**, no mesmo diálogo da coluna `Chamados`
+  (`DialogoDeChamado.vue`): as respostas do formulário por rótulo, as
+  observações em bolhas com anexo, o histórico de etapas lendo o retrato, o
+  seletor de etapa, **Finalizar**, **Abrir conversa** e **Reabrir**.
+
+🚨 **O DIÁLOGO É COMPONENTE, e não uma segunda cópia:** duplicar o markup faria
+a correção seguinte ter de ser lembrada em dois lugares — e é assim que uma das
+duas apodrece. A extração está provada pelas **22 travas** da coluna
+`Chamados`, que o exercitam pela tela da Operação.
+
+### 🔴 As abas nascem vazias, e isso é estado — não defeito
+
+A **origem dos cards** ficou em aberto por decisão dele (*"deixe em aberto,
+depois veremos"*). Hoje `pos_venda` só recebe NPS e CES, e **nenhum formulário
+alimenta Treinamentos**. A tela **diz** que não há card — quadro vazio que não
+explica por que está vazio é `M12`. Quando ele disser de onde vêm, é
+**configuração**, não código.

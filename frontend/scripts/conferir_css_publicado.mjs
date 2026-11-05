@@ -80,14 +80,37 @@ function oDialogoDoPainelNaoHerdaOTeto(css) {
 
 /* ------------------------------------------------------------------ 2 */
 function oPainelVemDepoisDasRegrasAntigas(css) {
-  const painel = regra(css, '.modal__painel')
-  const recados = css.search(/\.modal__recados(\[data-v-[0-9a-f]+\])? h3/)
-  if (!painel) return falhar('.modal__painel não existe no CSS publicado.')
-  if (recados < 0) return falhar('.modal__recados h3 não existe no CSS publicado.')
-  if (painel.pos < recados) {
-    falhar('.modal__painel está ANTES de .modal__recados h3 no CSS publicado. '
-           + 'Mesma especificidade: a de baixo ganha, e o cabeçalho do painel '
-           + 'volta a cair para --txt-sm.')
+  /* 🚨 COMPARA DENTRO DO MESMO `data-v`, e isto mudou em 05/11: depois de o
+     diálogo virar componente, há DUAS regras `.modal__painel` no bundle, uma
+     por componente. Comparar a primeira com o `h3` do OUTRO componente acusa
+     conflito que não existe -- `scoped` com hashes diferentes não se cruzam --
+     e, pior, podia ficar VERDE por sorte lendo metades de componentes
+     distintos.
+     ⚠️ A regra que esta conferência guarda continua valendo dentro de um
+     componente: mesma especificidade, a de baixo ganha. */
+  /* ⚠️ O `data-v` VAI NO ULTIMO SELETOR SIMPLES, e nao no primeiro: o
+     `scoped` do Vue publica `.modal__recados h3[data-v-xxx]`. Procurar
+     `.modal__recados[data-v-xxx] h3` nao acha nada -- e o "nao existe no CSS
+     publicado" seria um verde disfarcado de vermelho. */
+  const h3 = [...css.matchAll(
+    /\.modal__recados\s+h3\[data-v-([0-9a-f]+)\]/g)]
+  if (!h3.length) {
+    return falhar('.modal__recados h3 não existe no CSS publicado.')
+  }
+  for (const m of h3) {
+    const hash = m[1]
+    const painel = css.search(
+      new RegExp('\\.modal__painel\\[data-v-' + hash + '\\]'))
+    if (painel < 0) {
+      /* ⚠️ O componente pode não ter `.modal__painel` -- aí não há empate
+         para desempatar, e a conferência não tem o que dizer. */
+      continue
+    }
+    if (painel < m.index) {
+      falhar(`.modal__painel está ANTES de .modal__recados h3 no escopo `
+             + `data-v-${hash}. Mesma especificidade: a de baixo ganha, e o `
+             + 'cabeçalho do painel volta a cair para --txt-sm.')
+    }
   }
 }
 

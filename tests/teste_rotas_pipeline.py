@@ -39,7 +39,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 
 import carregar_formularios as carregador  # noqa: E402
 from movizap import (auth, banco, chamado_os, formularios, main,  # noqa: E402
-                     paineis, passagem)
+                     paineis, passagem, pipeline)
 from movizap.config import settings  # noqa: E402
 
 # 🚨 O CLIENTE DOS TESTES E A VELASCO (998063), E SO ELA. Regra dele, 29/10:
@@ -324,10 +324,20 @@ class TestOQuadro:
 
 
 # ============================================================================
-# POST /api/publico/formulario/{slug} — o envio ABRE A OS (Bloco A)
+# POST /api/publico/formulario/{slug} — o envio CRIA O CARD, e NAO a OS
 # ============================================================================
 class TestOEnvioAbreAOS:
-    """🚨 O CORAÇÃO DO BLOCO A, e não tinha nenhum teste de ponta a ponta."""
+    """🚨 O CORAÇÃO DO BLOCO A, e não tinha nenhum teste de ponta a ponta.
+
+    🔵 05/11, DECISAO DELE: a D4 de 29/10 (*"todo chamado de suporte abrira
+    uma OS"*) foi INVERTIDA -- *"O chamado e para analisar e decidir se
+    realmente sera aberta OS."* O envio passa a criar um CARD na coluna
+    `Chamados`, e a OS vira gesto de gente.
+
+    ⚠️ O NOME DA CLASSE FICA, e isto e deliberado: ela guarda *o que o
+    envio faz*, e o que mudou foi a resposta, nao a pergunta. Renomear
+    perderia o rastro de que esta foi a trava que provou os dois desenhos.
+    """
 
     def _enviar(self, cliente, d, valores, monkeypatch):
         # ⚠️ A isca, o tempo minimo e o teto por IP sao as camadas entre a
@@ -342,6 +352,14 @@ class TestOEnvioAbreAOS:
 
     def test_o_envio_cria_a_os_e_a_linha(self, cliente, formulario,
                                          monkeypatch):
+        """🚨 ESTA TRAVA AFIRMAVA O CONTRARIO ATE 05/11, e estava certa: a
+        D4 de 29/10 mandava abrir OS no envio. Agora o envio cria o CARD, e a
+        OS e decisao de gente.
+
+        ⚠️ O DUBLE CONTA CHAMADAS, e nao estoura: provar que algo NAO
+        acontece com um duble que explode so prova que o `try` segurou. Com
+        contador, a afirmacao e `== 0`.
+        """
         chamadas = []
 
         def criar(**kwargs):
@@ -357,20 +375,33 @@ class TestOEnvioAbreAOS:
         r = self._enviar(cliente, d, _valores_bons(d), monkeypatch)
         # 🚨 SEM `skip`: se a validacao recusar, e defeito e tem de ser vermelho.
         assert r.status_code == 201, r.text
-
         sid = r.json()["id"]
-        linhas = chamado_os.da_solicitacao(sid)
-        assert len(linhas) == 1
-        assert linhas[0]["numero_ordem"] == 17200
-        assert len(chamadas) == 1
-        # 🔵 3.1: o `tipoId` vem da ORIGEM -- link livre é Demanda Interna.
-        assert chamadas[0]["tipo_id"] == 1782
+
+        # 🚨 NENHUMA OS, e nenhuma ida ao ERP.
+        assert chamado_os.da_solicitacao(sid) == []
+        assert chamadas == []
+
+        # 🔵 E o chamado CAI NA COLUNA `Chamados`, que e o que ele pediu no
+        # lugar: *"aqui vao ser gerados os cards que virao do forms de
+        # suporte, nao mais em OS"*.
+        card = pipeline.da_solicitacao(sid)
+        assert card is not None
+        etapa = pipeline.etapa(card["etapa_id"])
+        assert etapa["titulo"] == "Chamados"
+        # ⚠️ E NASCE SEM DESFECHO: finalizar e gesto de quem analisa.
+        assert card["desfecho"] is None
 
     def test_erp_fora_do_ar_NAO_derruba_o_envio(self, cliente, formulario,
                                                 monkeypatch):
         """🚨 A TRAVA MAIS IMPORTANTE DO BLOCO A: o cliente já leu "recebemos",
-        e um ERP fora do ar não pode virar chamado perdido. O chamado fica
-        gravado, a falha fica ESCRITA e o painel a conta."""
+        e um ERP fora do ar não pode virar chamado perdido.
+
+        🔵 05/11 ELA FICOU MAIS FORTE: antes provava que o envio SOBREVIVIA
+        ao ERP fora do ar; agora prova que ele **nem fala com o ERP**. O duble
+        que estoura continua armado de proposito -- se alguem religar a
+        abertura automatica, esta trava fica vermelha em vez de passar
+        caladamente pelo `try`.
+        """
         def estourar(**kwargs):
             raise RuntimeError("o FPSL caiu no meio")
 
@@ -386,6 +417,9 @@ class TestOEnvioAbreAOS:
         assert "Recebemos" in r.json()["mensagem"]
         assert banco.um("SELECT id FROM formulario_solicitacao WHERE id = %s",
                         (r.json()["id"],)) is not None
+        # 🚨 E O CARD ESTA LA, apesar de o ERP estar fora do ar: a coluna
+        # `Chamados` nao depende de terceiro nenhum.
+        assert pipeline.da_solicitacao(r.json()["id"]) is not None
 
 
 # ============================================================================

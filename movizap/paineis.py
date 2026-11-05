@@ -705,20 +705,13 @@ def quadro(painel: str, so_abertas: bool = True,
 
 
 def _etapa_dos_chamados() -> dict | None:
-    """A etapa `Chamados` da aba da Operacao, ou `None` se ela nao existir.
+    """A etapa `Chamados`, pelo motor.
 
-    ⚠️ DEVOLVE `None` EM VEZ DE ESTOURAR: a migracao 092 a semeia, mas um
-    banco sem ela (um ambiente novo, um restore antigo) tem de montar o quadro
-    com as 17 e seguir -- e nao derrubar a tela da operacao inteira por falta de
-    uma coluna.
+    ⚠️ SUBIU PARA O `pipeline.py` em 05/11 porque o ENVIO do formulario
+    tambem precisa dela, e o `main` nao ia chamar um `_privado` do painel.
+    Fica aqui o nome curto, que o resto deste modulo ja usa.
     """
-    aba = pipeline.aba_por_codigo(ABA_DA_OPERACAO)
-    if not aba:
-        return None
-    for e in pipeline.etapas(aba["id"]):
-        if e["titulo"] == "Chamados":
-            return {"id": e["id"], "aba_id": aba["id"]}
-    return None
+    return pipeline.etapa_dos_chamados()
 
 
 def _card_do_chamado(c: dict, nomes: dict) -> dict:
@@ -739,6 +732,11 @@ def _card_do_chamado(c: dict, nomes: dict) -> dict:
         # ele que a tela move, finaliza e reabre.
         "id": c["id"],
         "origem": "chamado",
+        # ⚠️ A ETAPA VEM NO CARD desde 05/11: a tela das abas compara
+        # `card.etapa_id` com `coluna.etapa_id` para nao chamar a rota quando o
+        # card e solto na propria coluna. Sem ela a comparacao era
+        # `undefined === 1`, e todo solto ia a rota.
+        "etapa_id": c["etapa_id"],
         "solicitacao_id": c["solicitacao_id"],
         "formulario": c.get("formulario"),
         "slug": c.get("slug"),
@@ -797,6 +795,56 @@ def _telefone_do_chamado(valores: dict) -> str | None:
     """
     v = (valores or {}).get("CONTACT_PHONE")
     return v.strip() if isinstance(v, str) and v.strip() else None
+
+
+def quadro_da_aba(codigo_tela: str) -> dict | None:
+    """O quadro de uma aba de pipeline -- as colunas sao as etapas DELA.
+
+    🔵 05/11: *"a aba 'Operacao' do Movizap e a mesma logica para os
+    demais"*, com as colunas que ele escreveu para Treinamentos e Pos-venda.
+
+    🚨 NENHUMA IDA AO HARMONIT AQUI, e e a diferenca inteira em relacao ao
+    `quadro()`: as colunas sao nossas, entao nao ha situacao de OS para
+    pedir a ponte. Este quadro nao pode ficar vazio porque um terceiro caiu.
+
+    ⚠️ O CONTRATO E O MESMO do quadro da Operacao, de proposito: a tela
+    desenha um card so. O que muda e que `situacao_id` e nulo em TODAS as
+    colunas -- aqui nao existe coluna do ERP.
+    """
+    aba = pipeline.aba_por_codigo(codigo_tela)
+    if not aba:
+        return None
+    etapas = pipeline.etapas(aba['id'])
+    colunas = [{'chave': f"e{e['id']}", 'titulo': e['titulo'],
+                'situacao_id': None, 'etapa_id': e['id'],
+                'final': e['final'], 'nota': None, 'cards': []}
+               for e in etapas]
+    por_etapa = {c['etapa_id']: c for c in colunas}
+
+    cards = pipeline.cards_da_aba(aba['id'], teto=TETO_CARDS_POR_COLUNA * 4)
+    nomes = _nomes_de_cliente({c.get('cliente_id') for c in cards
+                              if c.get('cliente_id')})
+    for c in cards:
+        destino = por_etapa.get(c['etapa_id'])
+        # ⚠️ CARD EM ETAPA DESLIGADA NAO SOME EM SILENCIO: ele fica fora do
+        # quadro e CONTADO, que e a regua do `fora_do_quadro` (M12).
+        if destino is not None:
+            destino['cards'].append(_card_do_chamado(c, nomes))
+    for col in colunas:
+        col['total'] = len(col['cards'])
+
+    desenhados = sum(c['total'] for c in colunas)
+    return {
+        'painel': aba['painel'],
+        'aba': aba['codigo_tela'],
+        'titulo': aba['titulo'],
+        'colunas': colunas,
+        'total': desenhados,
+        'pode_mover': True,
+        'fora_do_quadro': len(cards) - desenhados,
+        'etapas': etapas,
+        'desfechos': pipeline.DESFECHOS,
+    }
 
 
 def _mapa_de_painel() -> dict:

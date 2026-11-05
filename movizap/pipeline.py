@@ -48,6 +48,29 @@ DESFECHOS = {
 # ----------------------------------------------------------------------------
 # As abas e as etapas — o catálogo
 # ----------------------------------------------------------------------------
+# 🔵 A aba da Operacao reusa o codigo da tela que ja existe: a
+# coluna `Chamados` e parte do quadro da Operacao, nao uma tela nova.
+ABA_DA_OPERACAO = "PNL_1.1"
+ETAPA_DOS_CHAMADOS = "Chamados"
+
+
+def etapa_dos_chamados() -> dict | None:
+    """A etapa `Chamados` da aba da Operacao, ou `None` se nao existir.
+
+    ⚠️ DEVOLVE `None` EM VEZ DE ESTOURAR: a migracao 092 a semeia, mas
+    um banco sem ela (ambiente novo, restore antigo) tem de montar o quadro
+    com as 17 e seguir -- e nao derrubar a tela da operacao inteira, nem o
+    envio do formulario, por falta de uma coluna.
+    """
+    aba = aba_por_codigo(ABA_DA_OPERACAO)
+    if not aba:
+        return None
+    for e in etapas(aba['id']):
+        if e['titulo'] == ETAPA_DOS_CHAMADOS:
+            return {'id': e['id'], 'aba_id': aba['id']}
+    return None
+
+
 def abas(painel: str | None = None, incluir_inativas: bool = False) -> list[dict]:
     """As abas de um painel, na ordem dele.
 
@@ -246,6 +269,31 @@ def reabrir(card_id: int, atendente_id: int | None) -> dict:
             WHERE id = %s""", (int(card_id),))
     log.info("pipeline: card %s reaberto por %s", card_id, atendente_id)
     return {"ok": True, "mudou": True}
+
+
+def aba_do_card(card_id: int) -> dict | None:
+    """A aba a que o card pertence -- e, com ela, o `codigo_tela`.
+
+    🚨 E ISTO QUE TORNA A PERMISSAO DO CARD CORRETA quando ha mais de uma
+    aba: ate 05/11 as rotas de card exigiam `PNL_1.1` fixo, e um card do
+    Pos-venda cairia em 403 pedido pela tela certa. A permissao sai do
+    CARD, nao da rota.
+    """
+    return banco.um(
+        """SELECT a.id, a.painel, a.codigo_tela, a.titulo, a.ordem, a.ativo
+             FROM pipeline_card c
+             JOIN painel_aba a ON a.id = c.aba_id
+            WHERE c.id = %s""", (int(card_id),))
+
+
+def aba_da_solicitacao(solicitacao_id: int) -> dict | None:
+    """A aba do card daquela solicitacao, para a rota de observacao."""
+    return banco.um(
+        """SELECT a.id, a.painel, a.codigo_tela, a.titulo, a.ordem, a.ativo
+             FROM pipeline_card c
+             JOIN painel_aba a ON a.id = c.aba_id
+            WHERE c.solicitacao_id = %s
+            ORDER BY c.id LIMIT 1""", (int(solicitacao_id),))
 
 
 def historico(card_id: int) -> list[dict]:

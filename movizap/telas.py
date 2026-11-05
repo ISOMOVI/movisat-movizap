@@ -140,6 +140,60 @@ TELAS = [
         "fase": 1,
     },
     {
+        # 🔵 05/11: a primeira das DUAS abas do Pos-venda, com as colunas
+        # que ele escreveu: *"Aba 1: Treinamentos / Solicitacao: Agenda* /
+        # Treinamento 1: / Treinamento 2: / Entregue:"*.
+        #
+        # 🚨 UMA ENTRADA POR ABA, E NAO UMA PARA O PAINEL, porque a permissao
+        # e por aba -- decisao dele: *"sera por abas. entao tera mais de uma
+        # pipeline, mas todas dentro de 'Pos-Venda'"* e *"a Karla tera
+        # permissao para ver o 'Financeiro' e todas as abas. A Erika, apenas
+        # a aba 3 do financeiro"*. `permissao` e campo DESTA entrada, entao
+        # duas abas com permissoes diferentes sao duas entradas.
+        #
+        # ⚠️ AS COLUNAS NAO MORAM AQUI, moram no banco (`pipeline_etapa`,
+        # migracao 094). Esta entrada e a PORTA: codigo, rota e quem entra.
+        # 🔵 05/11, CORRECAO DELE: *"so aba principal no menu. As demais
+        # sao dentro dela ja"*. Esta e a entrada que VIRA ITEM DE MENU, e o
+        # titulo e o do painel -- *"Aba no Menu Pos-venda = abas de
+        # pipeline: Treinamento / Pos venda"*.
+        "codigo": "PNL_1.2",
+        "titulo": "Pós-venda",
+        "rota": "/paineis/pos-venda",
+        "icone": "bi-clipboard-check",
+        "descricao": "Pós-venda: Treinamentos e Pós-venda, em abas.",
+        "grupo": "Painéis",
+        # 🔵 *"todas hoje nascem somente para o owner"*. Conceder e gesto
+        # dele, na CFG -- e nao muda a trava de abas concediveis.
+        "permissao": "owner",
+        "fase": 1,
+    },
+    {
+        # 🔵 A segunda aba: *"Aba 2: Pos-venda / Solicitacao: Testes:
+        # Realizar Pos-venda: Pos-venda Realizado:"*.
+        #
+        # ⚠️ `aba_de` -> NAO VIRA ITEM DE MENU, e e a correcao dele de 05/11:
+        # *"so aba principal no menu. As demais sao dentro dela ja"*. A tela
+        # continua no registro, entao a permissao vale e a guarda de rota do
+        # front a conhece -- quem nao desenha item e o `MenuLateral`.
+        #
+        # 🚨 A PORTA TRANCADA: se ele conceder SO esta aba a alguem (*"a
+        # Erika, apenas a aba 3"*), essa pessoa fica sem item de menu, porque
+        # o item e da `PNL_1.2`. O conserto e o `MenuLateral` desenhar o item
+        # quando a pessoa alcanca QUALQUER aba -- frente propria, e esta
+        # escrito nos Proximos Passos. Hoje as duas sao do owner, que ve
+        # tudo.
+        "codigo": "PNL_1.3",
+        "titulo": "Pós-venda",
+        "rota": "/paineis/pos-venda/realizado",
+        "icone": "bi-clipboard-check",
+        "descricao": "Pós-venda, da solicitação ao realizado.",
+        "grupo": "Painéis",
+        "permissao": "owner",
+        "fase": 1,
+        "aba_de": "PNL_1.2",
+    },
+    {
         # 🔵 22/10: a tela que recebe o que chega pelos formularios proprios
         # (`forms.movisat.com.br`). Modulo `FRM`, nao ATD: formulario nao e
         # conversa -- tem definicao, tem campo obrigatorio e tem anexo, e

@@ -5594,48 +5594,94 @@ class ObservacaoDoChamado(BaseModel):
     texto: str
 
 
+def _exigir_aba(codigo_tela: str | None, usuario: dict) -> None:
+    """403 se o usuario nao tem a tela daquela aba.
+
+    🚨 A PERMISSAO SAI DO CARD, e nao da rota: ate 05/11 estas rotas
+    exigiam `PNL_1.1` fixo, e com as abas de Pos-venda um card da `PNL_1.2`
+    cairia em 403 pedido por quem tem a tela certa. ⚠️ Para os chamados
+    nada muda -- a aba deles E a `PNL_1.1`.
+
+    ⚠️ ABA DESCONHECIDA E 403, E NAO 404: dizer *"este card nao existe"*
+    para quem nao pode ve-lo ja vazaria que ele existe.
+    """
+    if not codigo_tela or not registro_telas.pode_acessar(usuario,
+                                                          codigo_tela):
+        raise HTTPException(status_code=403,
+                            detail="Sem permissão para este card.")
+
+
+@app.get("/api/paineis/aba/{codigo_tela}")
+def ver_aba(codigo_tela: str,
+            usuario: dict = Depends(auth.get_usuario)):
+    """O quadro de uma aba de pipeline (Pos-venda, e os proximos).
+
+    🔵 05/11: *"a aba 'Operacao' do Movizap e a mesma logica para os
+    demais"* -- `PNL_1.2` Treinamentos e `PNL_1.3` Pos-venda, com as colunas
+    que ele escreveu.
+
+    🚨 A PERMISSAO E POR ABA, e por isso o codigo vem no caminho e e
+    conferido aqui: `requer_tela` valida o codigo no IMPORT, e um codigo
+    dinamico nao cabe nela. ⚠️ Confere ANTES de ler o banco.
+    """
+    _exigir_aba(codigo_tela, usuario)
+    quadro = paineis_mod.quadro_da_aba(codigo_tela)
+    if quadro is None:
+        raise HTTPException(status_code=404,
+                            detail="Esta aba não existe.")
+    return quadro
+
+
 @app.post("/api/paineis/operacao/chamado/{card_id}/mover")
 def mover_chamado(card_id: int, dados: MoverChamado,
-                  usuario: dict = Depends(auth.requer_tela("PNL_1.1"))):
+                  usuario: dict = Depends(auth.get_usuario)):
     """Move o card de chamado entre as etapas NOSSAS.
 
     ⚠️ Rota separada da de OS de proposito: a `/mover` escreve a situacao no
     ERP, e esta nao tem o que escrever la. Duas rotas e o que impede um card de
     chamado de cair no caminho que fala com o Harmonit.
     """
+    _exigir_aba((pipeline.aba_do_card(card_id) or {}).get("codigo_tela"),
+                usuario)
     return pipeline.mover(card_id, dados.para_etapa,
                           atendente_id=usuario.get("id"))
 
 
 @app.post("/api/paineis/operacao/chamado/{card_id}/finalizar")
 def finalizar_chamado(card_id: int, dados: FinalizarChamado,
-                      usuario: dict = Depends(auth.requer_tela("PNL_1.1"))):
+                      usuario: dict = Depends(auth.get_usuario)):
     """Arquiva o chamado com um desfecho.
 
     🚨 *"Virou OS"* SO MARCA -- decisao dele: *"so marca; a OS e pelo
     Operacao"*. Nada aqui escreve no ERP, e e isso que torna o botao
     reversivel.
     """
+    _exigir_aba((pipeline.aba_do_card(card_id) or {}).get("codigo_tela"),
+                usuario)
     return pipeline.finalizar(card_id, dados.desfecho,
                               atendente_id=usuario.get("id"))
 
 
 @app.post("/api/paineis/operacao/chamado/{card_id}/reabrir")
 def reabrir_chamado(card_id: int,
-                    usuario: dict = Depends(auth.requer_tela("PNL_1.1"))):
+                    usuario: dict = Depends(auth.get_usuario)):
     """Desfaz o arquivamento. ⚠️ A passagem NAO e apagada."""
+    _exigir_aba((pipeline.aba_do_card(card_id) or {}).get("codigo_tela"),
+                usuario)
     return pipeline.reabrir(card_id, atendente_id=usuario.get("id"))
 
 
 @app.get("/api/paineis/operacao/chamado/{card_id}")
 def ficha_do_chamado(card_id: int,
-                     usuario: dict = Depends(auth.requer_tela("PNL_1.1"))):
+                     usuario: dict = Depends(auth.get_usuario)):
     """O card aberto de um chamado: as respostas do formulario, os recados e o
     historico de etapas.
 
     ⚠️ NAO HA ida ao ERP aqui -- e por isso que esta rota nao pode devolver
     502 por falha de terceiro, ao contrario da `/ficha` da OS.
     """
+    _exigir_aba((pipeline.aba_do_card(card_id) or {}).get("codigo_tela"),
+                usuario)
     card = banco.um(
         """SELECT c.id, c.aba_id, c.etapa_id, c.solicitacao_id, c.cliente_id,
                   c.criado_em, c.desfecho, c.desfecho_em,
@@ -5691,12 +5737,15 @@ def _recados_do_chamado(solicitacao_id: int | None) -> list:
 
 @app.post("/api/paineis/operacao/chamado/observacao")
 def observar_chamado(dados: ObservacaoDoChamado,
-                     usuario: dict = Depends(auth.requer_tela("PNL_1.1"))):
+                     usuario: dict = Depends(auth.get_usuario)):
     """Grava um recado no chamado.
 
     🚨 O CHECK `os_observacao_tem_um_dono` (migracao 092) e o que garante
     que o recado tem dono: OS **ou** chamado, nunca nenhum.
     """
+    _exigir_aba(
+        (pipeline.aba_da_solicitacao(dados.solicitacao_id) or {}).get(
+            "codigo_tela"), usuario)
     texto = (dados.texto or "").strip()
     if not texto:
         raise HTTPException(status_code=422,
@@ -6031,29 +6080,40 @@ async def enviar_formulario_publico(
                                   placas_conferidas=conferidas)
     formularios_mod.registrar_envio(ip)
 
-    # 🔵 D4 dele (29/10): *"todo chamado de suporte abrirá uma OS"* — uma por
-    # placa (D3), automático no envio.
+    # 🔵 05/11, DECISAO DELE: o envio NAO ABRE MAIS OS. A D4 de 29/10
+    # (*"todo chamado de suporte abrira uma OS"*) foi invertida por ele no
+    # mesmo dia em que pediu a coluna: *"O chamado e o cliente dizendo algo,
+    # como: 'rastreador parou de pegar'. O chamado e para analisar e decidir
+    # se realmente sera aberta OS."* O que nasce aqui e um CARD na coluna
+    # `Chamados`, e a OS passa a ser gesto de gente, pelo botao Operacao.
     #
-    # 🚨 A ORDEM É DELIBERADA E O CHAMADO VEM PRIMEIRO: o `registrar` acima já
-    # gravou, e só então a OS é tentada. O pior caso desta frente é o cliente
-    # ler "recebemos" e ninguém abrir OS -- e com esta ordem a falha fica
-    # ESCRITA na linha de `solicitacao_os` e contada no painel, em vez de o
-    # chamado se perder porque o ERP estava fora do ar.
+    # 🚨 A MAQUINARIA DE ABRIR OS CONTINUA VIVA E TESTADA (`chamado_os`, 27
+    # travas): o que saiu foi a CHAMADA automatica. Tirar o `suporte` do
+    # `PROBLEMA_POR_FORMULARIO` derrubaria ~23 dessas travas e levaria junto
+    # o que o botao Operacao vai precisar.
     #
-    # 🚨 E NUNCA DERRUBA O ENVIO: `chamado_os.abrir` não estoura, por desenho.
-    # Mas o `try` fica, porque "não estoura" é promessa de código e o cliente
-    # do outro lado já leu que foi recebido -- um erro meu aqui não pode virar
-    # HTTP 500 num chamado que está no banco.
+    # 🚨 A ORDEM E DELIBERADA E O CHAMADO VEM PRIMEIRO: o `registrar` acima
+    # ja gravou, e so entao o card e criado. O pior caso vira 'o chamado esta
+    # no banco e nao aparece na coluna' -- e nunca 'o cliente leu recebemos e
+    # nada foi gravado'.
+    #
+    # 🚨 E NUNCA DERRUBA O ENVIO: o cliente do outro lado ja leu que foi
+    # recebido, entao um erro meu aqui nao pode virar HTTP 500 num chamado
+    # que esta no banco.
     try:
-        aberto = chamado_os.abrir(
-            r["id"], d, limpo,
-            cliente_id=chamado_os.cliente_do_chamado(d, limpo),
-            origem="link")
-        if aberto.get("falhas"):
-            log.warning("chamado %s: %s OS nao abriram", r["id"],
-                        aberto["falhas"])
+        etapa = pipeline.etapa_dos_chamados()
+        if etapa and d["slug"] in chamado_os.PROBLEMA_POR_FORMULARIO:
+            # ⚠️ O MESMO PORTAO DE ANTES, e de proposito: so entra na
+            # coluna o formulario que ele mapeou. Os outros 8 continuam
+            # parando na Caixa de Solicitacoes -- abrir chamado para eles
+            # e decisao dele.
+            pipeline.criar(etapa["aba_id"], etapa["id"],
+                           solicitacao_id=r["id"],
+                           cliente_id=chamado_os.cliente_do_chamado(d, limpo),
+                           atendente_id=None)
     except Exception:  # noqa: BLE001 -- ver a advertência acima
-        log.exception("chamado %s gravado e a abertura de OS estourou", r["id"])
+        log.exception("chamado %s gravado e o card da coluna estourou",
+                      r["id"])
 
     return {"ok": True, "id": r["id"], "mensagem": r["mensagem"]}
 

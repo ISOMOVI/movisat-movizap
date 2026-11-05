@@ -98,7 +98,16 @@ class TestDeclaracaoDosGrupos:
         """
         assert telas.GRUPOS["Painéis"] == []
         dentro = [t["codigo"] for t in telas.TELAS if telas.grupo_da(t) == "Painéis"]
-        assert dentro == ["PNL_1.1"]
+        # 🔵 05/11: entraram as duas abas do Pos-venda.
+        assert dentro == ["PNL_1.1", "PNL_1.2", "PNL_1.3"]
+        # 🚨 MAS O MENU DESENHA DOIS ITENS, E NAO TRES, e e correcao dele no
+        # mesmo dia: *"so aba principal no menu. As demais sao dentro dela
+        # ja"*. A `PNL_1.3` leva `aba_de`, e o `MenuLateral` pula toda tela
+        # que tem esse campo -- a mesma convencao das seis `CFG_*`.
+        itens = [t for t in telas.TELAS
+                 if telas.grupo_da(t) == "Painéis" and not t.get("aba_de")]
+        assert [t["codigo"] for t in itens] == ["PNL_1.1", "PNL_1.2"]
+        assert [t["titulo"] for t in itens] == ["Operação", "Pós-venda"]
 
 
 class TestGrupoNaoMexeEmPermissao:

@@ -299,7 +299,16 @@ def teste_o_grupo_paineis_deixou_de_nascer_vazio():
     """
     assert telas.GRUPOS["Painéis"] == []
     dentro = [t["codigo"] for t in telas.TELAS if telas.grupo_da(t) == "Painéis"]
-    assert dentro == ["PNL_1.1"]
+    # 🔵 05/11: entraram as DUAS abas do Pos-venda, e a ordem e a dele.
+    # 🚨 UMA ENTRADA POR ABA porque a permissao e por aba -- *"a Karla tera
+    # permissao para ver o 'Financeiro' e todas as abas. A Erika, apenas a
+    # aba 3 do financeiro"*. `permissao` e campo da entrada, entao duas abas
+    # com permissoes diferentes nao cabem numa so.
+    assert dentro == ["PNL_1.1", "PNL_1.2", "PNL_1.3"]
+    # ⚠️ E AS DUAS NASCEM SO DO OWNER: *"todas hoje nascem somente para o
+    # owner"*. Conceder e gesto dele.
+    for codigo in ("PNL_1.2", "PNL_1.3"):
+        assert telas.por_codigo(codigo)["permissao"] == "owner"
 
 # ============================================================================
 # BLOCO B — o card é a OS, de qualquer origem (D8)
