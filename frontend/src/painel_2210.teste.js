@@ -393,18 +393,39 @@ describe('o card', () => {
     expect(texto).toContain('Suporte')
     expect(texto).toContain('Cliente de exemplo')
     expect(texto).toContain('OS 17042')
-    /* 🔵 Ele: *"o card esta aparecendo como 'situacao n' - obviamente deve ser
-       o texto da situacao real"*. 🚨 Eu havia invertido a regua da casa: o
-       valor cru e a EXCECAO, para a situacao fora das 17. */
-    expect(texto).toContain('Novo Solicitação 1ª')
+    /* 🚨 05/11, VARIANTE C: o card NAO repete mais o nome da situacao.
+       ⚠️ A asserção anterior era `toContain('Novo Solicitação 1ª')`, e ela
+       pinava uma repeticao: `nomeDaSituacao(card.situacao_id)` devolve
+       EXATAMENTE o titulo da coluna em que o card esta -- e era a pilula mais
+       comprida do card (em 248px, *"Configurar equipamentos e Sistemas"*
+       ocupava 3 linhas). 🔵 Ele escolheu a variante C, que a tira.
+       ⚠️ O valor cru continua sendo a excecao, e continua testado: quem o
+       mostra agora e o aviso de *fora do quadro*, com o numero da OS. */
+    expect(texto).not.toContain('Novo Solicitação 1ª')
     expect(texto).not.toContain('situação 38')
+    /* ⚠️ E *"Harmonit"* saiu pelo mesmo motivo: aparecia em quase todo card,
+       porque a origem ERP e a maioria. O que distingue e ter vindo de
+       formulario -- e isso continua escrito (o `Suporte` acima). */
+    expect(texto).not.toContain('Harmonit ')
   })
 
-  it('OS sem situação lida diz isso, e não finge um número', async () => {
+  it('🚨 card em coluna NUNCA mostra rótulo de situação, nem cru nem por nome',
+     async () => {
+    /* ⚠️ ESTE TESTE MUDOU DE ALVO EM 05/11, e nao de regra. Antes ele
+       exigia a frase *"situacao nunca lida"* DENTRO do card -- e isso pinava um
+       caso que **nao acontece em producao**: medido no `paineis.quadro`, o
+       `_colocar` manda para `fora_do_quadro` toda OS cuja situacao nao esta nas
+       17, e `null` nao esta. Card em coluna sempre tem situacao conhecida, que
+       e o titulo da propria coluna.
+       🚨 A regra que importa continua de pe e e esta: o card nao gasta espaco
+       repetindo onde ele esta. Quem diz o valor cru e o aviso de fora do
+       quadro, testado em *"a OS fora das 17 sai com numero e situacao"*. */
     const tela = await abrir(quadro({
       cards: { s38: [card({ id: 13, situacao_id: null })] },
     }))
-    expect(tela.find('.card__abrir').text()).toContain('situação nunca lida')
+    const texto = tela.find('.card__abrir').text()
+    expect(texto).not.toContain('situação nunca lida')
+    expect(texto).not.toContain('situação 38')
   })
 
   it('o estado vem escrito, não só na cor', async () => {
@@ -1029,7 +1050,11 @@ describe('os dois tempos no card fechado', () => {
     const tela = await abrir(quadro({
       cards: { s38: [card({ numero_ordem: 17099, etapa_desde: null })] },
     }))
-    expect(tela.find('.card__tempos').text()).toContain('não medido')
+    /* ⚠️ A CLASSE MUDOU EM 05/11 (`card__tempos` -> `card__etapa`), porque os
+       dois tempos deixaram de ser um paragrafo e passaram a ser duas pontas da
+       mesma linha: *"nesta etapa"* a esquerda e *"total"* na borda direita, que
+       e o realinhamento que ele pediu. A regra medida e a mesma. */
+    expect(tela.find('.card__etapa').text()).toContain('não medido')
   })
 
   it('mostra o tempo da etapa quando houve passagem', async () => {
@@ -1037,7 +1062,7 @@ describe('os dois tempos no card fechado', () => {
     const tela = await abrir(quadro({
       cards: { s38: [card({ numero_ordem: 17099, etapa_desde: ontem })] },
     }))
-    expect(tela.find('.card__tempos').text()).toContain('1d')
+    expect(tela.find('.card__etapa').text()).toContain('1d')
   })
 
   it('a prioridade diferente de Normal fica MARCADA', async () => {
@@ -1049,7 +1074,22 @@ describe('os dois tempos no card fechado', () => {
     }))
     const pil = tela.findAll('.pilula').find((p) => p.text() === 'Alta')
     expect(pil).toBeTruthy()
-    expect(pil.classes()).toContain('pilula--forte')
+    /* ⚠️ `pilula--forte` virou `pilula--alerta` em 05/11, e nao e so nome: a
+       antiga marcava com BORDA, e num card de 248px com cinco selos possiveis
+       borda sozinha nao distingue nada. A nova tem fundo, e o tom do texto
+       passa dos 4,5:1 que a norma pede. */
+    expect(pil.classes()).toContain('pilula--alerta')
+  })
+
+  it('🚨 prioridade NORMAL não aparece no card', async () => {
+    /* 🔵 Variante C, 05/11: *"mudar e excecao"* -- e por isso o que NAO e
+       excecao nao ocupa a linha dos selos. Ate 04/11 *"Normal"* aparecia em
+       todo card, e um selo presente em todo card nao distingue nada. */
+    const tela = await abrir(quadro({
+      cards: { s38: [card({ numero_ordem: 17099, prioridade: 382,
+                            prioridade_nome: 'Normal' })] },
+    }))
+    expect(tela.find('.card__abrir').text()).not.toContain('Normal')
   })
 
   it('prioridade NAO LIDA nao aparece, em vez de fingir Normal', async () => {

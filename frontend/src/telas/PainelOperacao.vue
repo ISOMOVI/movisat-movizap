@@ -29,7 +29,7 @@
    etiqueta, e a situação vem escrita no card. É a regra do quadro de demandas
    do FPSL -- *"o estado continua legível pela etiqueta"*.
    ============================================================================ */
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 
 import { api, ErroDeApi } from '../api/cliente.js'
@@ -140,7 +140,10 @@ const erroDaFicha = ref('')
 const temaAberto = ref('descricao')
 
 async function abrirCard(card) {
+  /* 🔵 De onde o foco veio -- para ele voltar exatamente ali ao fechar. */
+  guardarFoco()
   cardAberto.value = card
+  focarCaixa(caixaDoCard)
   passagens.value = []
   ficha.value = null
   erroDaFicha.value = ''
@@ -291,6 +294,7 @@ const temas = computed(() => {
 function fecharCard() {
   cardAberto.value = null
   passagens.value = []
+  devolverFoco()
 }
 
 function nomeDaSituacao(sid) {
@@ -420,10 +424,15 @@ const recadosAbertos = ref(false)
 const anexoEscolhido = ref(null)
 const enviandoRecado = ref(false)
 
-function abrirRecados() { recadosAbertos.value = true }
+function abrirRecados() {
+  guardarFoco()
+  recadosAbertos.value = true
+  focarCaixa(caixaDosRecados)
+}
 function fecharRecados() {
   recadosAbertos.value = false
   anexoEscolhido.value = null
+  devolverFoco()
 }
 
 function escolherAnexo(evento) {
@@ -501,12 +510,15 @@ function talvezAvisarDaEtapa(situacaoId) {
      aqui basta um card da coluna para saber que a etapa tem lista. */
   const temLista = (coluna?.cards || []).some((c) => c.tem_checklist)
   if (!temLista || avisoEstaSilenciado(situacaoId)) return
+  guardarFoco()
   avisoDaEtapa.value = { situacao_id: situacaoId, titulo: coluna?.titulo || '' }
+  focarCaixa(caixaDoAviso)
 }
 
 function fecharAvisoDaEtapa() {
   const id = avisoDaEtapa.value?.situacao_id
   avisoDaEtapa.value = null
+  devolverFoco()
   if (!id) return
   try {
     localStorage.setItem(chaveDoAviso(id), String(Date.now()))
@@ -756,6 +768,57 @@ const CORES_DA_ETAPA = [
   '#8CC63F', '#FFC20E', '#F07F13', '#C4203F', '#1B75BB', '#41BFE8',
 ]
 
+/* ============================================================================
+   A EXCECAO DO CARD -- variante C, escolhida por ele em 05/11
+   ----------------------------------------------------------------------------
+   🔵 *"vamos de C"*, olhando o mockup em que a cor do card fica reservada ao
+   que muda o comportamento de quem olha a coluna.
+
+   🚨 O CARD NORMAL NAO TEM COR NENHUMA. Ate 05/11 todo card tinha uma borda
+   esquerda de 3px com a cor da etapa -- tirada de `corDaEtapa(indice)`, o
+   indice da COLUNA. Mas o card ja esta naquela coluna: dentro dela todos os
+   cards tinham a mesma cor, e o acento mais forte do card codificava a unica
+   coisa que a posicao ja dizia. A cor da etapa ficou na COLUNA, onde nao se
+   repete.
+
+   Sao excecao duas coisas, e as duas mudam o que a pessoa faz:
+     1. prioridade diferente de Normal (382) -- dado que ja existe;
+     2. parado na etapa alem do limite.
+
+   ⚠️ O LIMITE DE 3 DIAS E SUGESTAO MINHA, NAO NUMERO DELE. Esta escrito em
+   `Painel_Operacao_Card_e_Modal_DESIGN.md` como decisao 5, aberta, e ele
+   mandou seguir sem responde-la. Trocar o limite e trocar ESTA constante.
+   🚨 Teto e regra, e regra e dele: se o numero estiver errado, o erro e meu
+   por ter escolhido um.
+   ============================================================================ */
+const PARADO_DEMAIS_DIAS = 3
+const PRIORIDADE_NORMAL = 382
+
+function diasNaEtapa(card) {
+  /* ⚠️ `etapa_desde` NULO quer dizer "nao medido" (a `os_passagem` comecou em
+     29/10), e nao-medido NUNCA acende alerta: seria afirmar um atraso que
+     ninguem mediu. */
+  if (!card || !card.etapa_desde) return null
+  const t = new Date(card.etapa_desde).getTime()
+  if (Number.isNaN(t)) return null
+  return (Date.now() - t) / 86400000
+}
+
+function paradoDemais(card) {
+  const d = diasNaEtapa(card)
+  return d !== null && d >= PARADO_DEMAIS_DIAS
+}
+
+function prioridadeDeExcecao(card) {
+  /* ⚠️ Prioridade NULA = a varredura ainda nao releu esta OS. Nulo nao e
+     excecao, e ausencia de medida. */
+  return !!(card && card.prioridade) && card.prioridade !== PRIORIDADE_NORMAL
+}
+
+function cardEhExcecao(card) {
+  return paradoDemais(card) || prioridadeDeExcecao(card)
+}
+
 function corDaEtapa(i) {
   return CORES_DA_ETAPA[i % CORES_DA_ETAPA.length]
 }
@@ -779,11 +842,80 @@ const ROTULO_ESTADO = {
   nova: 'Nova', em_andamento: 'Em andamento', concluida: 'Concluída',
 }
 
-onMounted(carregar)
+/* ============================================================================
+   ESC, FOCO E DEVOLUCAO DO FOCO -- o que o `aria-modal` ja prometia
+   ----------------------------------------------------------------------------
+   🚨 ACHADO EM 05/11, medindo a propria tela: os tres dialogos declaram
+   `role="dialog" aria-modal="true"` e nao havia **nenhum** tratamento de
+   teclado. `aria-modal="true"` diz ao leitor de tela que o resto da pagina
+   esta inerte -- e nao estava: `Escape` nao fechava, o foco nao entrava no
+   dialogo, e ao fechar ele ia para o inicio da pagina em vez de voltar ao card.
+
+   ⚠️ A ORDEM DO `Escape` E DELIBERADA: o aviso de etapa primeiro (e o mais
+   raso), depois os recados, depois o card. Fechar o card por baixo de um modal
+   aberto em cima dele deixaria o de cima orfao.
+
+   ⚠️ E NAO HA TRAVA DE FOCO CIRCULAR: o `Tab` no ultimo elemento sai do
+   dialogo. Prender o ciclo exige varrer os focaveis a cada `Tab`, e com tres
+   dialogos aninhados e um `<select>` que escreve no ERP o risco de prender o
+   foco num dialogo que falhou e maior que o ganho. O que esta resolvido e o
+   que se media: entrar, sair pelo teclado, e voltar.
+   ============================================================================ */
+const caixaDoCard = ref(null)
+const caixaDosRecados = ref(null)
+const caixaDoAviso = ref(null)
+
+/* 🚨 UMA PILHA, NAO UM SLOT, e a razao e a tela: os recados abrem DE DENTRO
+   do card aberto, e o aviso de etapa abre por cima dos dois. Com um slot so,
+   abrir os recados sobrescreveria a origem do card -- e fechar o card depois
+   devolveria o foco a um botao que ja nao existe no DOM. */
+const pilhaDeFoco = []
+
+function aoTeclar(evento) {
+  if (evento.key !== 'Escape') return
+  if (avisoDaEtapa.value) { fecharAvisoDaEtapa(); return }
+  if (recadosAbertos.value) { fecharRecados(); return }
+  if (cardAberto.value) { fecharCard() }
+}
+
+/* 🚨 `requestAnimationFrame` e nao `nextTick`: o `nextTick` do Vue resolve
+   antes de o navegador pintar, e `focus()` num elemento ainda nao pintado nao
+   move o foco. */
+function focarCaixa(alvoRef) {
+  requestAnimationFrame(() => {
+    const el = alvoRef && alvoRef.value
+    if (el && typeof el.focus === 'function') el.focus()
+  })
+}
+
+function guardarFoco() {
+  pilhaDeFoco.push(document.activeElement)
+}
+
+function devolverFoco() {
+  const alvo = pilhaDeFoco.pop()
+  if (!alvo || typeof alvo.focus !== 'function') return
+  /* ⚠️ Se o card saiu do DOM (foi movido de coluna), nao ha onde devolver --
+     e ai nao se faz nada, em vez de jogar o foco no `body`. */
+  if (!document.body.contains(alvo)) return
+  requestAnimationFrame(() => alvo.focus())
+}
+
+onMounted(() => {
+  carregar()
+  window.addEventListener('keydown', aoTeclar)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('keydown', aoTeclar)
+  clearTimeout(relogioDaBusca)
+})
 </script>
 
 <template>
-  <div class="tela">
+  <!-- 🔵 `escala-operacao` sobe as fontes desta tela em +2px, por decisao dele
+       em 05/11. A escala vive em `estilo/tokens.css`; aqui nao ha pixel. -->
+  <div class="tela escala-operacao">
     <!-- 🔵 *"o cabeçalho esta porco, organize de forma profissional"*.
          🚨 O QUE ESTAVA PORCO: título, botão e quatro controles eram IRMÃOS num
          `space-between`, então o navegador espalhava tudo numa linha sem grupo
@@ -858,7 +990,7 @@ onMounted(carregar)
     <p v-if="erroDeMover" class="aviso aviso--erro" role="alert">
       {{ erroDeMover }}
     </p>
-    <p v-if="carregando" class="apagado">Lendo…</p>
+    <p v-if="carregando" class="nota">Lendo…</p>
 
     <template v-if="quadro">
       <!-- 🚨 A PONTE CAÍDA É O PRIMEIRO AVISO, acima de todos os outros, e
@@ -959,8 +1091,8 @@ onMounted(carregar)
           </h2>
 
           <div v-if="abertas[coluna.chave]" class="coluna__corpo">
-            <p v-if="coluna.nota" class="apagado pequeno">{{ coluna.nota }}</p>
-            <p v-if="coluna.situacao_id" class="apagado pequeno">
+            <p v-if="coluna.nota" class="nota pequeno">{{ coluna.nota }}</p>
+            <p v-if="coluna.situacao_id" class="nota pequeno">
               situação {{ coluna.situacao_id }} no Harmonit
             </p>
 
@@ -983,124 +1115,137 @@ onMounted(carregar)
                    ⚠️ O teclado continua alcançando: o NÚMERO DA OS é o botão
                    (alvo pequeno), e o resto do card arrasta. -->
               <div class="card__abrir"
-                   :style="{ borderLeftColor: corDaEtapa(indice) }"
+                   :class="{ 'card__abrir--excecao': cardEhExcecao(card) }"
                    @click="cliqueNoCard(card)">
-                <span class="card__topo">
-                  <!-- 🔵 ÁREA E (05/11): *"termo no card"*. O termo vem AO LADO
-                       da OS, no mesmo grupo, porque são as duas identidades do
-                       mesmo papel — e quem procura pelo termo quer vê-lo onde
-                       procura pela OS.
-                       ⚠️ ELE NÃO APARECE EM 1 DE CADA 7 CARDS, e isso é
-                       normal: venda, cartão RFID e manutenção não nascem de
-                       termo (medido em 05/11: 27 de 200 OS). 🚨 E não existe
-                       "sem termo" escrito aqui — seria ruído repetido em 85
-                       cards para dizer o que não tem o que dizer. -->
-                  <span class="card__ident">
-                    <button class="card__os" type="button"
-                            @click.stop="cliqueNoCard(card)">OS {{ card.numero_ordem || card.os_id }}</button>
-                    <span v-if="card.termo" class="card__termo">TERMO {{ card.termo }}</span>
+
+                <!-- LINHA 1 -- O CLIENTE, e nao a OS. 🔵 Variante C, escolhida por
+                     ele em 05/11. Isto muda a ordem de 29/10 (*"A OS VEM NA
+                     FRENTE"*), e mudou com a palavra dele.
+                     🚨 CORTA EM DUAS LINHAS, com o nome inteiro no `title`:
+                     medido em 05/11, **11 dos 15** nomes de cliente do quadro
+                     passam de 24 caracteres (mediana 28, o maior 56), e numa
+                     coluna de 248px com a fonte +2 cabem ~24 por linha. Sem
+                     corte, um card comia quatro linhas so de razao social. -->
+                <span class="card__linha">
+                  <span v-if="card.cliente" class="card__cliente"
+                        :title="card.cliente">{{ card.cliente }}</span>
+                  <!-- ⚠️ Cliente sem nome e DITO, nao deixado em branco: o
+                       `harmonit_id` da OS pode nao estar no nosso cadastro. -->
+                  <span v-else class="card__cliente card__cliente--sem">
+                    cliente {{ card.cliente_id || '?' }}, fora do nosso cadastro
                   </span>
-                  <span v-if="ha(card.criada_em)" class="card__ha">
+                  <span v-if="ha(card.criada_em)" class="card__direita">
                     {{ ha(card.criada_em) }}
                   </span>
                 </span>
 
-                <span v-if="card.cliente" class="card__cliente">{{ card.cliente }}</span>
-                <!-- ⚠️ Cliente sem nome é DITO, não deixado em branco: o
-                     `harmonit_id` da OS pode não estar no nosso cadastro. Hoje
-                     os 9 clientes das OS estão todos lá, e por isso esta linha
-                     não aparece -- mas basta uma OS de cliente novo. -->
-                <span v-else class="card__cliente card__cliente--sem">
-                  cliente {{ card.cliente_id || '?' }}, fora do nosso cadastro
+                <!-- LINHA 2 -- os identificadores com que se cruza papel.
+                     ⚠️ A OS continua sendo o BOTAO (o alvo de teclado) e o unico
+                     em cor de acento; o TERMO e referencia, nao acao. -->
+                <span class="card__ident">
+                  <button class="card__os" type="button"
+                          @click.stop="cliqueNoCard(card)">OS {{ card.numero_ordem || card.os_id }}</button>
+                  <!-- ⚠️ OS SEM TERMO E 1 DE CADA 7, e a tela nao diz nada: venda,
+                       cartao RFID e manutencao nao nascem de termo. -->
+                  <span v-if="card.termo" class="card__termo">TERMO {{ card.termo }}</span>
                 </span>
 
-                <span v-if="card.tipo_nome" class="card__tipo">{{ card.tipo_nome }}</span>
-
-                <!-- As placas da OS, que só a ponte sabe. -->
-                <span v-if="card.placas && card.placas.length" class="card__dado">
-                  {{ card.placas.map((p) => p.placa).join(' · ') }}
+                <!-- LINHA 3 -- o que a OS e, e sobre o que. -->
+                <span v-if="card.tipo_nome || (card.placas && card.placas.length)"
+                      class="card__dado">
+                  <template v-if="card.tipo_nome">{{ card.tipo_nome }}</template>
+                  <template v-if="card.tipo_nome && card.placas && card.placas.length"> &middot; </template>
+                  <template v-if="card.placas && card.placas.length">{{ card.placas.map((p) => p.placa).join(' &middot; ') }}</template>
                 </span>
 
-                <span class="card__pistas">
-                  <!-- 🔵 O NOME da situação, não o número: *"obviamente deve
-                       ser o texto da situacao real"*. 🚨 Eu havia invertido a
-                       régua da casa -- o valor cru é a EXCEÇÃO, para a situação
-                       que não está nas 17 (como o `0`, que existe em 129 OS), e
-                       o `nomeDaSituacao` devolve o cru só nesse caso. -->
-                  <span class="pilula">{{ nomeDaSituacao(card.situacao_id) }}</span>
-
-                  <span v-if="card.origem === 'erp'" class="pilula">Harmonit</span>
-                  <span v-else-if="card.formulario" class="pilula">{{ card.formulario }}</span>
-
-                  <span v-if="card.estado" class="etiqueta"
-                        :class="`etiqueta--${card.estado}`">
-                    {{ ROTULO_ESTADO[card.estado] || card.estado }}
+                <!-- LINHA 4 -- 🔵 BLOCO C, os dois tempos, agora numa linha com o
+                     total alinhado a direita. ⚠️ "nao medido" quando nao ha
+                     passagem: a `os_passagem` comecou em 29/10, e a OS pode
+                     estar na etapa desde setembro -- mostrar "0h" seria afirmar
+                     o que ninguem mediu. -->
+                <span class="card__linha card__dado">
+                  <span class="card__etapa"
+                        :class="{ 'card__etapa--parado': paradoDemais(card) }">
+                    nesta etapa
+                    <strong>{{ duracao(card.etapa_desde) || 'não medido' }}</strong>
                   </span>
-
-                  <span v-if="card.anexos" class="pilula">
-                    {{ card.anexos }} anexo(s)
-                  </span>
-
-                  <!-- 🔵 *"a prioridade vem escrita porque ela nasce Normal e
-                       mudar é exceção, e exceção precisa estar visível sem
-                       abrir"*. ⚠️ Nula = a varredura ainda não releu esta OS
-                       desde 29/10, e aí a pílula não aparece — em vez de
-                       inventar "Normal". -->
-                  <span v-if="card.prioridade_nome" class="pilula"
-                        :class="{ 'pilula--forte': card.prioridade !== 382 }">
-                    {{ card.prioridade_nome }}
-                  </span>
-
-                  <!-- 🔵 Bloco F: só o NÚMERO de recados; o texto é no card
-                       aberto, senão a coluna cresce sem limite. -->
-                  <!-- 🔵 04/11: o selo do checklist. ⚠️ `tem_checklist` e
-                 `checklist` são coisas diferentes: a etapa pode TER lista e o
-                 card ainda não a ter aberto -- aí o selo diz "0 de N" só
-                 depois que alguém abre. Sem lista na etapa, nada aparece. -->
-            <span v-if="card.checklist" class="pilula"
-                  :class="{ 'pilula--forte': card.checklist.feitos < card.checklist.total }">
-              {{ card.checklist.feitos }} de {{ card.checklist.total }}
-            </span>
-            <span v-else-if="card.tem_checklist" class="pilula">checklist</span>
-            <span v-if="card.observacoes" class="pilula">
-                    {{ card.observacoes }} observação(ões)
+                  <span v-if="duracao(card.criada_em)" class="card__direita">
+                    total {{ duracao(card.criada_em) }}
                   </span>
                 </span>
 
-                <!-- 🔵 BLOCO C — OS DOIS TEMPOS. ⚠️ "não medido" quando não há
-                     passagem: a `os_passagem` começou em 29/10, e a OS pode
-                     estar na etapa desde setembro. -->
-                <!-- 🔵 Ele: *"os cards tem informação da data dos prazos da
-                     OS, não?"*. 🚨 MEDIDO: a OS do Harmonit tem UM campo de
-                     data, `dataPrevisao`, e NÃO existe campo de prazo -- na
-                     17055, criada em 29/10, a previsão é 29/10 11:40:19, o
-                     mesmo minuto. Então a data entra com o nome que o ERP lhe
-                     dá, e chamá-la de "prazo" seria a tela afirmando o que o
-                     ERP não diz. 🔵 Isso muda quando a frente do aviso prévio
-                     entrar: ela vai mover a previsão em +90 dias. -->
-                <span v-if="card.criada_em" class="card__data">
-                  prazo {{ dataCurta(card.criada_em) }}
+                <!-- LINHA 5 -- os selos a esquerda, a data a direita.
+                     🚨 SAIRAM DAQUI, em 05/11, duas pilulas que nao informavam:
+                     o NOME DA SITUACAO (que e o titulo da coluna em que o card
+                     ja esta, e era a pilula mais comprida de todas -- em 248px
+                     *"Configurar equipamentos e Sistemas"* ocupava 3 linhas) e
+                     *"Harmonit"* (que aparecia em quase todo card, porque a
+                     origem ERP e a maioria; o que distingue e ter vindo de
+                     FORMULARIO, e so esse caso aparece agora). -->
+                <span class="card__linha">
+                  <span class="card__pistas">
+                    <span v-if="card.origem !== 'erp' && card.formulario"
+                          class="pilula pilula--origem">{{ card.formulario }}</span>
+
+                    <span v-if="card.estado" class="etiqueta"
+                          :class="`etiqueta--${card.estado}`">
+                      {{ ROTULO_ESTADO[card.estado] || card.estado }}
+                    </span>
+
+                    <span v-if="card.anexos" class="pilula">
+                      {{ card.anexos }} anexo(s)
+                    </span>
+
+                    <!-- 🔵 *"a prioridade vem escrita porque ela nasce Normal e
+                         mudar e excecao, e excecao precisa estar visivel sem
+                         abrir"*. 🚨 E AGORA SO A EXCECAO APARECE: *Normal* em
+                         todo card nao distinguia nada e gastava a linha dos
+                         selos. Nula tambem nao aparece -- nulo e "a varredura
+                         nao releu", nao "sem prioridade". -->
+                    <span v-if="prioridadeDeExcecao(card)" class="pilula pilula--alerta">
+                      {{ card.prioridade_nome }}
+                    </span>
+
+                    <!-- 🔵 04/11: o selo do checklist. ⚠️ `tem_checklist` e
+                         `checklist` sao coisas diferentes: a etapa pode TER lista
+                         e o card ainda nao a ter aberto. 🚨 Completo fica VERDE,
+                         incompleto fica ambar -- a cor acompanha o que FALTA. -->
+                    <span v-if="card.checklist" class="pilula"
+                          :class="card.checklist.feitos >= card.checklist.total
+                                  ? 'pilula--pronto' : 'pilula--alerta'">
+                      {{ card.checklist.feitos }} de {{ card.checklist.total }}
+                    </span>
+                    <span v-else-if="card.tem_checklist" class="pilula">checklist</span>
+
+                    <span v-if="card.observacoes" class="pilula">
+                      {{ card.observacoes }} obs
+                    </span>
+
+                    <!-- 🚨 FINALIZADA E AVISO, nao decoracao: ela so aparece com
+                         o interruptor desligado, e sem esta marca ficaria
+                         indistinguivel de uma OS viva na mesma coluna. -->
+                    <span v-if="card.finalizada" class="card__alerta">finalizada</span>
+                  </span>
+
+                  <!-- 🚨 *"PREVISAO"*, E NAO *"PRAZO"* -- e isto era um defeito meu
+                       de 29/10, achado em 05/11: o comentario que acompanhava
+                       esta linha dizia, com a medicao, que *"chamar de prazo
+                       seria a tela afirmando o que o ERP nao diz"*, e a linha
+                       escrevia `prazo`. O modal ja usava *"Previsao de
+                       entrega"*, o nome do campo no ERP: as duas telas do mesmo
+                       painel se contradiziam.
+                       ⚠️ MEDIDO: a OS do Harmonit tem UM campo de data,
+                       `dataPrevisao`, e NAO existe campo de prazo -- na 17055,
+                       criada em 29/10, a previsao e 29/10 11:40:19, o mesmo
+                       minuto. 🔵 Isso muda quando a frente do aviso previo
+                       entrar: ela vai mover a previsao em +90 dias. -->
+                  <span v-if="card.criada_em" class="card__direita">
+                    previsão {{ dataCurta(card.criada_em) }}
+                  </span>
                 </span>
 
-                <span class="card__tempos">
-                  <template v-if="duracao(card.etapa_desde)">
-                    nesta etapa <strong>{{ duracao(card.etapa_desde) }}</strong>
-                  </template>
-                  <template v-else>
-                    nesta etapa <strong>não medido</strong>
-                  </template>
-                  <template v-if="duracao(card.criada_em)">
-                    · total {{ duracao(card.criada_em) }}
-                  </template>
-
-                  <!-- 🚨 FINALIZADA É AVISO, não decoração: ela só aparece com
-                       o interruptor desligado, e sem esta marca ficaria
-                       indistinguível de uma OS viva na mesma coluna. -->
-                  <span v-if="card.finalizada" class="card__alerta">finalizada</span>
-                </span>
-
-                <!-- ⚠️ Quando este dado foi lido do ERP. A varredura roda a
-                     cada 5 min, e a tela não pode deixar supor que é agora. -->
+                <!-- ⚠️ Quando este dado foi lido do ERP. A varredura roda a cada
+                     5 min, e a tela nao pode deixar supor que e agora. -->
                 <span v-if="card.visto_em" class="card__visto">
                   lido do Harmonit {{ quando(card.visto_em) }}
                 </span>
@@ -1133,7 +1278,7 @@ onMounted(carregar)
       <div v-if="recadosAbertos && cardAberto" class="modal" role="dialog"
            aria-modal="true" aria-label="Observações do card"
            @click.self="fecharRecados">
-        <div class="modal__caixa">
+        <div ref="caixaDosRecados" tabindex="-1" class="modal__caixa">
           <header class="modal__topo">
             <strong>Observações — OS {{ cardAberto.numero_ordem }}</strong>
             <button class="modal__fechar" type="button" aria-label="Fechar"
@@ -1141,7 +1286,7 @@ onMounted(carregar)
           </header>
 
           <div class="modal__corpo">
-            <p class="apagado pequeno">
+            <p class="nota pequeno">
               Ficam no MoviZap, com autor e hora. <strong>Não vão para a OS</strong>
               do Harmonit, e não se apagam.
             </p>
@@ -1151,7 +1296,7 @@ onMounted(carregar)
               <BalaoDeRecado v-for="o in [...ficha.observacoes].reverse()"
                              :key="o.id" :recado="o" :quando="quando" />
             </ul>
-            <p v-else class="apagado pequeno">Nenhuma observação ainda.</p>
+            <p v-else class="nota pequeno">Nenhuma observação ainda.</p>
           </div>
 
           <div class="modal__rodape modal__rodape--escrever">
@@ -1170,7 +1315,7 @@ onMounted(carregar)
                 {{ enviandoRecado ? 'Salvando…' : 'Salvar' }}
               </button>
             </div>
-            <p class="apagado pequeno">
+            <p class="nota pequeno">
               O arquivo fica no servidor do MoviZap e <strong>não tem
               backup</strong> — não substitui o documento guardado no lugar certo.
             </p>
@@ -1184,7 +1329,7 @@ onMounted(carregar)
       <!-- ============ O AVISO AO ENTRAR NA ETAPA (Área B) ============ -->
     <div v-if="avisoDaEtapa" class="modal" role="dialog" aria-modal="true"
          aria-label="Aviso da etapa">
-      <div class="modal__caixa modal__caixa--curta">
+      <div ref="caixaDoAviso" tabindex="-1" class="modal__caixa modal__caixa--curta">
         <header class="modal__topo">
           <strong>{{ avisoDaEtapa.titulo }}</strong>
         </header>
@@ -1193,7 +1338,7 @@ onMounted(carregar)
             Esta etapa tem <strong>checklist</strong>. Ele fica
             <strong>dentro do card</strong> — abra o card para ver o que fazer.
           </p>
-          <p class="apagado pequeno">
+          <p class="nota pequeno">
             Não aviso de novo nesta etapa pelos próximos 10 minutos.
           </p>
         </div>
@@ -1208,34 +1353,50 @@ onMounted(carregar)
       <div v-if="cardAberto" class="modal" role="dialog" aria-modal="true"
            :aria-label="`OS ${cardAberto.numero_ordem}`"
            @click.self="fecharCard">
-        <div class="modal__caixa">
-          <!-- 1. O TOPO: quem é esta OS, e o fechar. -->
+        <div ref="caixaDoCard" tabindex="-1" class="modal__caixa">
+          <!-- ============ 1. O TOPO: quem e esta OS, e o fechar ============
+               🔵 05/11, proposta A: o CLIENTE e a primeira coisa, em corpo de
+               titulo, e os identificadores descem para a linha de baixo. O
+               modal tem 1000px, entao aqui o nome vem INTEIRO -- e e o lugar
+               onde ele vem inteiro, porque no card de 248px ele corta em duas
+               linhas (11 dos 15 nomes do quadro passam de 24 caracteres). -->
           <header class="modal__topo">
             <div class="modal__quem">
-              <strong class="modal__os">OS {{ cardAberto.numero_ordem }}</strong>
-              <p class="modal__cliente">
+              <h2 class="modal__cliente">
                 {{ cardAberto.cliente || `cliente ${cardAberto.cliente_id || '?'}, fora do nosso cadastro` }}
-              </p>
-              <p class="modal__sub">
-                {{ cardAberto.tipo_nome || 'tipo não lido' }}
-                <!-- 🔵 ÁREA E: o termo também no aberto, onde quem vai agir
-                     precisa dele para achar o papel. -->
-                <template v-if="cardAberto.termo">
-                  · TERMO {{ cardAberto.termo }}
-                </template>
+              </h2>
+              <p class="modal__ident">
+                <strong class="modal__os">OS {{ cardAberto.numero_ordem }}</strong>
+                <!-- 🔵 AREA E: o termo tambem no aberto, onde quem vai agir
+                     precisa dele para achar o papel. ⚠️ Nulo em 1 de cada 7, e
+                     ai nao aparece nada. -->
+                <span v-if="cardAberto.termo" class="modal__termo">TERMO {{ cardAberto.termo }}</span>
+                <span class="modal__risco" aria-hidden="true"></span>
+                <span>{{ cardAberto.tipo_nome || 'tipo não lido' }}</span>
                 <template v-if="cardAberto.placas && cardAberto.placas.length">
-                  · {{ cardAberto.placas.map((p) => p.placa).join(' · ') }}
+                  <span class="modal__risco" aria-hidden="true"></span>
+                  <span>{{ cardAberto.placas.map((p) => p.placa).join(' · ') }}</span>
                 </template>
-                · aberta {{ quando(cardAberto.criada_em) }}
               </p>
             </div>
             <button class="modal__fechar" type="button"
                     aria-label="Fechar" @click="fecharCard">✕</button>
           </header>
 
-          <!-- 2. A FAIXA: o que responde "o que está parado e há quanto
-               tempo", mais as duas ações de estado. É a hierarquia do mockup —
-               esta faixa tem fundo e o resto não. -->
+          <!-- ============ 2. A FAIXA: SO LEITURA ============
+               🚨 OS DOIS CONTROLES QUE ESCREVEM NO ERP SAIRAM DAQUI em 05/11, e
+               foi o defeito de desenho que ele apontou: a faixa punha cinco
+               medidas de leitura e dois `<select>` de ESCRITA com o mesmo
+               rotulo em caixa-alta e o mesmo peso -- e a frase que avisa da
+               escrita estava no PE, a uma tela de distancia dos controles que
+               ela descreve. Agora a faixa so informa, e os dois descem para o
+               pe, ao lado do aviso.
+
+               ⚠️ E *"Previsao de entrega"* saiu da faixa: ela gastava um slot de
+               medida para dizer, numa nota, que a medida nao vale (*"hoje igual
+               a abertura"*). No lugar entrou *"Aberta"*, que e o que o dado e.
+               🔵 A previsao volta quando a frente do aviso previo a mover em
+               +90 dias -- e ai ela sera uma medida de verdade. -->
           <div class="modal__faixa">
             <div class="faixa__medida">
               <span class="faixa__rotulo">Etapa agora</span>
@@ -1243,9 +1404,12 @@ onMounted(carregar)
             </div>
             <div class="faixa__medida">
               <span class="faixa__rotulo">Nesta etapa</span>
-              <!-- 🔵 Bloco C. ⚠️ "não medido" quando não há passagem: a
-                   `os_passagem` começou em 29/10. -->
-              <strong>{{ duracao(cardAberto.etapa_desde) || 'não medido' }}</strong>
+              <!-- 🔵 Bloco C. ⚠️ "nao medido" quando nao ha passagem: a
+                   `os_passagem` comecou em 29/10. 🔵 E o ambar da variante C
+                   aparece aqui tambem, pela mesma regua do card. -->
+              <strong :class="{ 'faixa__parado': paradoDemais(cardAberto) }">
+                {{ duracao(cardAberto.etapa_desde) || 'não medido' }}
+              </strong>
             </div>
             <div class="faixa__medida">
               <span class="faixa__rotulo">Total da OS</span>
@@ -1255,196 +1419,232 @@ onMounted(carregar)
               <span class="faixa__rotulo">Status no ERP</span>
               <strong>{{ cardAberto.status_str || '—' }}</strong>
             </div>
-            <!-- 🚨 "Previsão" é o nome do campo no ERP, e hoje ela É a data de
-                 criação -- a ressalva está escrita para ninguém a tomar por
-                 prazo de entrega. -->
             <div class="faixa__medida">
-              <span class="faixa__rotulo">Previsão de entrega</span>
-              <strong>{{ quando(cardAberto.criada_em) }}</strong>
-              <span class="faixa__nota">hoje igual à abertura</span>
-            </div>
-
-            <label v-if="quadro.pode_mover && cardAberto.numero_ordem"
-                   class="faixa__campo">
-              <span class="faixa__rotulo">Mover para</span>
-              <select :value="cardAberto.situacao_id"
-                      :disabled="movendo === cardAberto.numero_ordem"
-                      @change="moverDoModal(Number($event.target.value))">
-                <option v-for="c in quadro.colunas" :key="c.chave"
-                        :value="c.situacao_id">{{ c.titulo }}</option>
-              </select>
-            </label>
-
-            <!-- 🚨 Mudar a prioridade ESCREVE A OS INTEIRA no Harmonit. -->
-            <label v-if="ficha && ficha.prioridades" class="faixa__campo">
               <span class="faixa__rotulo">Prioridade</span>
-              <select :value="ficha.prioridade" :disabled="salvando"
-                      @change="mudarPrioridade(Number($event.target.value))">
-                <option v-for="(rot, id) in ficha.prioridades" :key="id"
-                        :value="Number(id)">{{ rot }}</option>
-              </select>
-            </label>
+              <!-- ⚠️ LEITURA: quem muda e o `<select>` do pe. O valor vem da
+                   ficha lida ao vivo; antes dela chegar, vale o que o card
+                   trouxe do cache. -->
+              <strong :class="{ 'faixa__parado': prioridadeDeExcecao(cardAberto) }">
+                {{ (ficha && ficha.prioridades && ficha.prioridades[ficha.prioridade])
+                   || cardAberto.prioridade_nome || '—' }}
+              </strong>
+            </div>
+            <div class="faixa__medida">
+              <span class="faixa__rotulo">Aberta</span>
+              <strong>{{ quando(cardAberto.criada_em) }}</strong>
+            </div>
           </div>
 
-          <!-- ============ O CHECKLIST DA ETAPA (04/11) ============ -->
-          <section v-if="checklist.length || carregandoCheck" class="modal__recados">
-            <h3>
-              Checklist desta etapa
-              <span class="pilula">{{ feitosDoCheck }} de {{ checklist.length }}</span>
-            </h3>
-            <p class="apagado pequeno">
-              O que fazer nesta etapa. Ao mover o card para outra, isto vira uma
-              <strong>observação</strong> aqui no painel — e também
-              <strong>não vai para a OS</strong> do Harmonit.
-            </p>
+          <!-- ============ 3. O CORPO: duas colunas, UMA rolagem ============
+               🚨 TRES COISAS QUE ESTAVAM ERRADAS AQUI, as tres medidas em 05/11:
 
-            <p v-if="carregandoCheck" class="apagado pequeno">lendo…</p>
+               1. O checklist, as observacoes e as passagens eram filhos DIRETOS
+                  da `.modal__caixa`, que tem `padding: 0` de proposito -- e
+                  nenhuma das tres definia padding. O miolo util do modal ficava
+                  rente as bordas enquanto o topo, o pe e os temas respiravam.
+               2. O teto de rolagem (`max-height: 60vh`) estava no
+                  `.modal__corpo`, que continha SO os temas. As tres secoes que
+                  crescem de verdade estavam fora dele, sem teto -- o comentario
+                  dizia que o teto existia *"para o pe nao fugir da tela"*, e ele
+                  guardava justo o bloco de tamanho previsivel.
+               3. Duas rolagens empilhadas: a do `.modal` e a do `.modal__corpo`.
 
-            <ul v-else class="modal__passagens">
-              <li v-for="i in checklist" :key="i.id">
-                <label class="check__linha">
-                  <input type="checkbox" :checked="i.feito"
-                         @change="marcarItem(i)" />
-                  <span :class="{ 'check__feito': i.feito }">{{ i.texto }}</span>
-                </label>
-                <span v-if="i.feito" class="apagado pequeno">
-                  {{ i.feito_por || 'sem autor' }}<span v-if="i.feito_em">, {{ quando(i.feito_em) }}</span>
-                </span>
-                <!-- 🚨 Só o item AVULSO sai. O da lista da etapa se tira no
-                     modelo, e a recusa do servidor diz isso por extenso. -->
-                <button v-if="i.avulso" class="botao botao--pequeno botao--fantasma"
-                        type="button" title="Remover este item"
-                        @click="removerItem(i)">✕</button>
-              </li>
-            </ul>
+               Agora: a caixa tem altura fixa, topo e pe sao `flex: none`, e SO
+               este corpo rola. ⚠️ `min-height: 0` e o que faz isso funcionar
+               em flex -- sem ele o corpo se recusa a encolher e o pe sai da tela.
 
-            <div class="modal__pe">
-              <input v-model="itemNovo" class="campo__entrada"
-                     placeholder="+ Adicionar item"
-                     aria-label="Acrescentar item ao checklist deste card"
-                     @keyup.enter="acrescentarItem" />
-              <button class="botao" type="button" :disabled="!itemNovo.trim()"
-                      @click="acrescentarItem">Adicionar</button>
+               🔵 E duas colunas: a ESQUERDA e o que se FAZ, a DIREITA e o que se
+               LE. Empilhadas, as duas metades mais altas do modal somavam; lado
+               a lado, a altura cai quase a metade. -->
+          <div class="modal__corpo modal__corpo--duas">
+            <div class="modal__coluna modal__coluna--fazer">
+              <p class="modal__secao">O trabalho</p>
+<section v-if="checklist.length || carregandoCheck"
+                     class="modal__recados modal__painel">
+              <h3>
+                Checklist desta etapa
+                <span class="pilula">{{ feitosDoCheck }} de {{ checklist.length }}</span>
+              </h3>
+              <p class="nota pequeno">
+                O que fazer nesta etapa. Ao mover o card para outra, isto vira uma
+                <strong>observação</strong> aqui no painel — e também
+                <strong>não vai para a OS</strong> do Harmonit.
+              </p>
+
+              <p v-if="carregandoCheck" class="nota pequeno">lendo…</p>
+
+              <ul v-else class="modal__passagens">
+                <li v-for="i in checklist" :key="i.id">
+                  <label class="check__linha">
+                    <input type="checkbox" :checked="i.feito"
+                           @change="marcarItem(i)" />
+                    <span :class="{ 'check__feito': i.feito }">{{ i.texto }}</span>
+                  </label>
+                  <span v-if="i.feito" class="nota pequeno">
+                    {{ i.feito_por || 'sem autor' }}<span v-if="i.feito_em">, {{ quando(i.feito_em) }}</span>
+                  </span>
+                  <!-- 🚨 Só o item AVULSO sai. O da lista da etapa se tira no
+                       modelo, e a recusa do servidor diz isso por extenso. -->
+                  <button v-if="i.avulso" class="botao botao--pequeno botao--fantasma"
+                          type="button" title="Remover este item"
+                          @click="removerItem(i)">✕</button>
+                </li>
+              </ul>
+
+              <div class="modal__pe">
+                <input v-model="itemNovo" class="campo__entrada"
+                       placeholder="+ Adicionar item"
+                       aria-label="Acrescentar item ao checklist deste card"
+                       @keyup.enter="acrescentarItem" />
+                <button class="botao" type="button" :disabled="!itemNovo.trim()"
+                        @click="acrescentarItem">Adicionar</button>
+              </div>
+
+              <p v-if="erroDoCheck" class="aviso aviso--erro" role="alert">
+                {{ erroDoCheck }}
+              </p>
+            </section>
+<section class="modal__recados modal__painel">
+              <h3>
+                Observações
+                <span class="pilula">{{ ((ficha && ficha.observacoes) || []).length }}</span>
+              </h3>
+              <p class="nota pequeno">
+                Ficam no MoviZap, com autor e hora. <strong>Não vão para a OS</strong>
+                do Harmonit, e não se apagam.
+              </p>
+              <div class="modal__pe">
+                <button class="botao" type="button" @click="abrirRecados">
+                  Abrir observações
+                </button>
+              </div>
+            </section>
             </div>
 
-            <p v-if="erroDoCheck" class="aviso aviso--erro" role="alert">
-              {{ erroDoCheck }}
-            </p>
-          </section>
+            <div class="modal__coluna modal__coluna--ler">
+              <p class="modal__secao">A OS no Harmonit</p>
+<section class="modal__temas modal__painel">
+              <p v-if="lendoFicha" class="nota pequeno">Lendo a OS no Harmonit…</p>
+              <!-- 🚨 ERRO, NÃO FICHA VAZIA: ficha vazia é indistinguível de OS
+                   sem dados, e o operador concluiria que não há o que ver. -->
+              <p v-else-if="erroDaFicha" class="aviso aviso--erro" role="alert">
+                {{ erroDaFicha }}
+              </p>
 
-          <!-- ============ A OBSERVAÇÃO (Bloco F) ============ -->
-          <!-- 🔵 04/11: o conteúdo foi para um MODAL próprio (área D) — aqui
-               ficou a porta, com a contagem. O texto do que ela NÃO é continua
-               aqui **e** lá: é a frase que impede alguém de escrever pensando
-               que o técnico vai ler. -->
-          <section class="modal__recados">
-            <h3>
-              Observações
-              <span class="pilula">{{ ((ficha && ficha.observacoes) || []).length }}</span>
-            </h3>
-            <p class="apagado pequeno">
-              Ficam no MoviZap, com autor e hora. <strong>Não vão para a OS</strong>
-              do Harmonit, e não se apagam.
-            </p>
-            <div class="modal__pe">
-              <button class="botao" type="button" @click="abrirRecados">
-                Abrir observações
-              </button>
+              <div class="temas__abas" role="tablist">
+                <button v-for="t in temas" :key="t.chave" type="button"
+                        role="tab" class="temas__aba"
+                        :class="{ 'temas__aba--ativa': temaAberto === t.chave,
+                                  'temas__aba--apagada': !t.ligado }"
+                        :aria-selected="temaAberto === t.chave"
+                        :disabled="!t.ligado"
+                        @click="temaAberto = t.chave">
+                  <strong>{{ t.titulo }}</strong>
+                  <span class="temas__resumo">{{ t.resumo }}</span>
+                </button>
+              </div>
+
+              <div v-for="t in temas" :key="`c-${t.chave}`" class="temas__corpo">
+                <template v-if="temaAberto === t.chave">
+                  <!-- ⚠️ VAZIO É DITO, não deixado em branco: a solução técnica é
+                       nula na maioria das OS, e uma caixa branca parece defeito. -->
+                  <p v-if="t.vazio" class="nota pequeno">{{ t.resumo }}</p>
+
+                  <pre v-else-if="t.texto" class="temas__texto">{{ t.texto }}</pre>
+
+                  <!-- os dados do chamado, com RÓTULO e nunca a chave do Bitrix -->
+                  <dl v-else-if="t.respostas && t.respostas.length"
+                      class="temas__respostas">
+                    <template v-for="r in t.respostas" :key="r.nome">
+                      <dt>{{ r.rotulo }}</dt>
+                      <dd>{{ Array.isArray(r.valor) ? r.valor.join(' · ') : r.valor }}</dd>
+                    </template>
+                  </dl>
+
+                  <ul v-else-if="t.agendamentos && t.agendamentos.length"
+                      class="temas__respostas">
+                    <li v-for="a in t.agendamentos" :key="a.agendamento_id">
+                      {{ a.nome || `usuário ${a.usuario_id}` }} —
+                      compromisso {{ a.agendamento_id }}
+                    </li>
+                  </ul>
+
+                  <p v-else class="nota pequeno">{{ t.resumo }}</p>
+                </template>
+              </div>
+            </section>
+              <p class="modal__secao">O histórico</p>
+<section class="modal__log modal__painel">
+              <h3>Passagens de etapa</h3>
+              <p v-if="lendoPassagens" class="nota pequeno">Lendo…</p>
+              <!-- 🚨 O HARMONIT NÃO REGISTRA SITUAÇÃO na linha do tempo: este log
+                   é nosso, e começou a existir em 29/10. Dizer isso é o que
+                   impede a tela de parecer que a OS nunca se moveu. -->
+              <p v-else-if="!passagens.length" class="nota pequeno">
+                Nenhuma passagem registrada. O Harmonit não guarda a situação na
+                linha do tempo — este log é nosso e começou em 29/10, então OS
+                movida antes disso não aparece aqui.
+              </p>
+              <ul v-else class="modal__passagens">
+                <li v-for="p in passagens" :key="p.id">
+                  <span class="nota pequeno">{{ quando(p.em) }}</span>
+                  <span>
+                    {{ nomeDaSituacao(p.de_situacao) }} →
+                    <strong>{{ nomeDaSituacao(p.para_situacao) }}</strong>
+                  </span>
+                  <span class="pilula">{{ p.quem || 'sem autor' }}</span>
+                  <span v-if="!p.ok" class="card__alerta">
+                    recusada: {{ p.erro }}
+                  </span>
+                </li>
+              </ul>
+            </section>
             </div>
-          </section>
+          </div>
 
-          <!-- 🔵 *"deve ter o log de quem faz o que SEMPRE"* -- e aqui ele é
-               LIDO. Um log que ninguém consegue ler não cumpre o pedido. -->
-          <section class="modal__log">
-            <h3>Passagens de etapa</h3>
-            <p v-if="lendoPassagens" class="apagado pequeno">Lendo…</p>
-            <!-- 🚨 O HARMONIT NÃO REGISTRA SITUAÇÃO na linha do tempo: este log
-                 é nosso, e começou a existir em 29/10. Dizer isso é o que
-                 impede a tela de parecer que a OS nunca se moveu. -->
-            <p v-else-if="!passagens.length" class="apagado pequeno">
-              Nenhuma passagem registrada. O Harmonit não guarda a situação na
-              linha do tempo — este log é nosso e começou em 29/10, então OS
-              movida antes disso não aparece aqui.
-            </p>
-            <ul v-else class="modal__passagens">
-              <li v-for="p in passagens" :key="p.id">
-                <span class="apagado pequeno">{{ quando(p.em) }}</span>
-                <span>
-                  {{ nomeDaSituacao(p.de_situacao) }} →
-                  <strong>{{ nomeDaSituacao(p.para_situacao) }}</strong>
-                </span>
-                <span class="pilula">{{ p.quem || 'sem autor' }}</span>
-                <span v-if="!p.ok" class="card__alerta">
-                  recusada: {{ p.erro }}
-                </span>
-              </li>
-            </ul>
-          </section>
-
-          <!-- ================= OS QUATRO TEMAS (Bloco E) ================= -->
-          <!-- 🔵 Ele: *"onde estão os temas do card, após clicar?"*. São os
-               quatro do mockup, e vêm da OS LIDA AO VIVO no ERP -- `descricao`
-               e `solucaoTecnica` não existem no cache. -->
-          <!-- 3. O CORPO. -->
-          <div class="modal__corpo">
-          <section class="modal__temas">
-            <p v-if="lendoFicha" class="apagado pequeno">Lendo a OS no Harmonit…</p>
-            <!-- 🚨 ERRO, NÃO FICHA VAZIA: ficha vazia é indistinguível de OS
-                 sem dados, e o operador concluiria que não há o que ver. -->
-            <p v-else-if="erroDaFicha" class="aviso aviso--erro" role="alert">
-              {{ erroDaFicha }}
-            </p>
-
-            <div class="temas__abas" role="tablist">
-              <button v-for="t in temas" :key="t.chave" type="button"
-                      role="tab" class="temas__aba"
-                      :class="{ 'temas__aba--ativa': temaAberto === t.chave,
-                                'temas__aba--apagada': !t.ligado }"
-                      :aria-selected="temaAberto === t.chave"
-                      :disabled="!t.ligado"
-                      @click="temaAberto = t.chave">
-                <strong>{{ t.titulo }}</strong>
-                <span class="temas__resumo">{{ t.resumo }}</span>
-              </button>
-            </div>
-
-            <div v-for="t in temas" :key="`c-${t.chave}`" class="temas__corpo">
-              <template v-if="temaAberto === t.chave">
-                <!-- ⚠️ VAZIO É DITO, não deixado em branco: a solução técnica é
-                     nula na maioria das OS, e uma caixa branca parece defeito. -->
-                <p v-if="t.vazio" class="apagado pequeno">{{ t.resumo }}</p>
-
-                <pre v-else-if="t.texto" class="temas__texto">{{ t.texto }}</pre>
-
-                <!-- os dados do chamado, com RÓTULO e nunca a chave do Bitrix -->
-                <dl v-else-if="t.respostas && t.respostas.length"
-                    class="temas__respostas">
-                  <template v-for="r in t.respostas" :key="r.nome">
-                    <dt>{{ r.rotulo }}</dt>
-                    <dd>{{ Array.isArray(r.valor) ? r.valor.join(' · ') : r.valor }}</dd>
-                  </template>
-                </dl>
-
-                <ul v-else-if="t.agendamentos && t.agendamentos.length"
-                    class="temas__respostas">
-                  <li v-for="a in t.agendamentos" :key="a.agendamento_id">
-                    {{ a.nome || `usuário ${a.usuario_id}` }} —
-                    compromisso {{ a.agendamento_id }}
-                  </li>
-                </ul>
-
-                <p v-else class="apagado pequeno">{{ t.resumo }}</p>
-              </template>
-            </div>
-          </section>
-
-          </div><!-- /modal__corpo -->
-
-          <!-- 4. O PÉ, com fundo como no mockup. -->
+          <!-- ============ 4. O PE: onde se AGE ============
+               🚨 O AVISO FICA JUNTO DO GESTO QUE ELE DESCREVE. Antes a frase
+               vivia aqui e os dois `<select>` viviam na faixa, no alto. E a
+               frase estava em `.apagado` (#94A3B8, **2,56:1** sobre branco),
+               que e justamente a classe que falha a norma -- o aviso de escrita
+               no ERP era o texto menos legivel do modal. -->
           <footer class="modal__rodape">
-            <span class="apagado pequeno">
-              Mover de etapa escreve a situação na OS do Harmonit.
-            </span>
+            <div class="modal__agir">
+              <label v-if="quadro.pode_mover && cardAberto.numero_ordem"
+                     class="faixa__campo">
+                <span class="faixa__rotulo">Mover para</span>
+                <select :value="cardAberto.situacao_id"
+                        :disabled="movendo === cardAberto.numero_ordem"
+                        @change="moverDoModal(Number($event.target.value))">
+                  <option v-for="c in quadro.colunas" :key="c.chave"
+                          :value="c.situacao_id">{{ c.titulo }}</option>
+                </select>
+              </label>
+
+              <!-- 🚨 Mudar a prioridade ESCREVE A OS INTEIRA no Harmonit. -->
+              <label v-if="ficha && ficha.prioridades" class="faixa__campo">
+                <span class="faixa__rotulo">Prioridade</span>
+                <select :value="ficha.prioridade" :disabled="salvando"
+                        @change="mudarPrioridade(Number($event.target.value))">
+                  <option v-for="(rot, id) in ficha.prioridades" :key="id"
+                          :value="Number(id)">{{ rot }}</option>
+                </select>
+              </label>
+
+              <!-- 🚨 A FRASE DIZ O QUE CADA UM ESCREVE, e nao so que escrevem.
+                   ⚠️ Eu a havia encurtado para *"Os dois escrevem na OS do
+                   Harmonit"* ao mover os controles para ca, e com isso perdi
+                   duas informacoes que a frase antiga tinha: que o mover grava
+                   **a situacao**, e -- medido no `os_ponte.gravar_prioridade` --
+                   que mudar a prioridade reescreve **a OS inteira**, porque a
+                   unica rota de escrita do Harmonit e a `SalvarOrdemServico`.
+                   Um teste pegou: ele prendia a frase antiga. -->
+              <p class="modal__perigo">
+                Mover de etapa <strong>escreve a situação na OS do Harmonit</strong>.
+                Mudar a prioridade <strong>reescreve a OS inteira</strong>.
+              </p>
+            </div>
+
             <div class="modal__acoes">
               <button v-if="cardAberto.id" class="botao botao--contorno"
                       type="button" @click="verNaFRM(cardAberto)">
@@ -1482,18 +1682,26 @@ onMounted(carregar)
 
 /* 🔵 A BORDA DE CIMA É A COR DA ETAPA — do mockup. A cor vem do `:style`,
    porque são 17 colunas ciclando 6 cores e isso é dado, não folha de estilo. */
+/* 🚨 A COLUNA TEM FUNDO, E O CARD E BRANCO -- e isto era um defeito medido
+   em 05/11: a `.coluna` e o `.card__abrir` usavam os DOIS `var(--superficie)`,
+   que e `#FFFFFF`. Card branco dentro de coluna branca, e a unica separacao
+   era uma borda de 1px no tom mais claro da paleta. 🔵 Ele: *"pode dar uma
+   elaborada para evidenciar as limitacoes das caixas, talvez espessura ou
+   sombreamento"*. O conserto e nos dois lados: a coluna recua para o fundo da
+   pagina, e o card ganha borda mais forte e sombra. */
 .coluna {
   flex: 0 0 248px;
-  background: var(--superficie);
-  border: var(--borda-fina) solid var(--borda);
+  background: var(--fundo);
+  border: var(--borda-fina) solid var(--borda-forte);
   border-top: 3px solid var(--borda-forte);
   border-radius: var(--r-md);
+  box-shadow: var(--sombra-1);
   transition: box-shadow .15s ease;
 }
 .coluna:hover { box-shadow: var(--sombra-1); }
 /* ⚠️ Coluna sem card fica mais apagada, mas NUNCA escondida: o contador é a
    informação dela. */
-.coluna--vazia { background: var(--superficie-2); }
+.coluna--vazia { background: var(--superficie-2); box-shadow: none; }
 /* 🚨 O ALVO ACESO: sem retorno visual não há como saber se a coluna aceita o
    solto. ⚠️ E não é só cor -- a borda engrossa, para quem não distingue cor
    também ver. */
@@ -1603,19 +1811,55 @@ onMounted(carregar)
   color: var(--texto-fraco);
   font-size: var(--txt-xs);
 }
+/* 🚨 O CARD E UMA CAIXA, E AGORA SE VE QUE E. Antes: branco dentro de
+   coluna branca, com borda no tom mais claro da paleta -- e por isso ele
+   pediu *"evidenciar as limitacoes das caixas, talvez espessura ou
+   sombreamento"*. Agora sao tres coisas juntas, e nenhuma delas e cor:
+   a coluna recuou para `--fundo`, a borda subiu para `--borda-forte`, e
+   entrou `--sombra-1`. ⚠️ A BORDA ESQUERDA DE 3px SAIU do card normal: ela
+   trazia a cor da etapa, que e a cor da coluna em que o card ja esta. */
 .card__abrir {
   width: 100%;
   min-height: var(--altura-toque);
-  display: flex; flex-direction: column; gap: 2px;
+  display: flex; flex-direction: column; gap: var(--e-2);
   padding: var(--e-3);
   text-align: left;
   background: var(--superficie);
-  border: var(--borda-fina) solid var(--borda);
-  border-left: 3px solid var(--acento);
+  border: var(--borda-fina) solid var(--borda-forte);
   border-radius: var(--r-md);
+  box-shadow: var(--sombra-1);
   color: var(--texto);
   cursor: pointer;
 }
+
+/* 🔵 A EXCECAO, variante C: a unica cor do card, e ela nunca esta sozinha --
+   o tempo da etapa fica ambar e o selo da prioridade vira solido. Quem nao
+   distingue a cor le o numero. */
+.card__abrir--excecao {
+  border-left: 3px solid var(--aviso);
+}
+
+/* ⚠️ AS TRES MEDIDAS SECUNDARIAS CAEM NA MESMA BORDA DIREITA ("ha N", "total
+   N", "previsao dd/mm"), e e o que ele chamou de realinhar: o olho desce UMA
+   coluna em vez de varrer cinco linhas soltas. */
+.card__linha {
+  display: flex; align-items: baseline; justify-content: space-between;
+  gap: var(--e-2); min-width: 0;
+}
+.card__direita {
+  flex: none; white-space: nowrap;
+  font-size: var(--txt-xs); color: var(--texto-fraco);
+}
+.card__ident { display: flex; align-items: baseline; gap: var(--e-2); flex-wrap: wrap; min-width: 0; }
+.card__etapa { min-width: 0; }
+/* 🚨 `--aviso` (#D97706) da 3,18:1 sobre branco e NAO passa para texto
+   pequeno; `--aviso-texto` (#B45309) da 5,02:1. O tom forte fica para a borda,
+   texto. */
+.card__etapa--parado { color: var(--aviso-texto); font-weight: var(--peso-forte); }
+
+/* 🚨 DUAS LINHAS, e o nome inteiro no `title`: 11 dos 15 nomes do quadro
+   passam de 24 caracteres (o maior tem 56). Sem o corte, a razao social comia
+   quatro linhas de um card de 248px. */
 /* 🔵 O EFEITO QUE ELE PEDIU: o card levanta e ganha sombra na passagem.
    ⚠️ `prefers-reduced-motion` desliga o movimento e mantém a sombra -- quem
    pediu menos movimento no sistema continua vendo que o card responde. */
@@ -1654,36 +1898,76 @@ onMounted(carregar)
    dois com o mesmo peso fariam o operador hesitar sobre qual é qual. */
 .card__termo { font-size: var(--txt-xs); color: var(--texto-fraco); white-space: nowrap; }
 
+/* 🚨 UMA ROLAGEM, NAO DUAS. Ate 05/11 o `.modal` rolava a pagina inteira
+   (`align-items: flex-start` + `overflow-y: auto`) e o `.modal__corpo` rolava
+   por dentro: com a roda do mouse sobre o corpo, qual das duas se movia
+   dependia de onde o cursor estava. Agora o palco CENTRALIZA e nao rola; quem
+   rola e so o corpo. */
 .modal {
-  position: fixed; inset: 0; z-index: 50;
+  position: fixed; inset: 0; z-index: var(--z-modal, 50);
   background: rgba(2, 21, 41, .45);
-  display: flex; align-items: flex-start; justify-content: center;
-  padding: var(--e-4); overflow-y: auto;
+  display: flex; align-items: center; justify-content: center;
+  padding: var(--e-4);
 }
 /* 🚨 A CAIXA NAO TEM `padding`, e e o que da a hierarquia: cada faixa tem o
    seu, e e isso que faz o topo e o pe terem fundo proprio sem buraco branco nas
    beiradas. Era o que estava feio -- seis secoes soltas com o mesmo peso. */
+/* 🚨 ALTURA COM TETO, E O TETO E DA CAIXA -- nao de uma secao de dentro.
+   O defeito anterior: `max-height: 60vh` estava no `.modal__corpo`, que
+   continha SO a secao dos temas; o checklist, as observacoes e as passagens
+   ficavam fora e cresciam sem limite. O comentario dizia que o teto existia
+   *"para o pe nao fugir da tela num card com muita observacao"*, e ele
+   guardava justo o bloco de tamanho previsivel.
+   🔵 1000px (era 820) porque o corpo passou a ter duas colunas. ⚠️ E `100%`
+   no `min()` segura a tela estreita. */
 .modal__caixa {
-  width: min(820px, 100%);
+  width: min(1000px, 100%);
+  max-height: min(900px, 92vh);
   background: var(--superficie);
-  border: var(--borda-fina) solid var(--borda-forte);
+  /* 🔵 *"evidenciar as limitacoes das caixas, talvez espessura ou
+     sombreamento"*: a borda sobe de `--borda` para um tom mais forte e a
+     sombra e a de elevacao. */
+  border: var(--borda-fina) solid var(--texto-apagado);
   border-radius: var(--r-md);
   box-shadow: var(--sombra-2);
   overflow: hidden;
   display: flex; flex-direction: column;
 }
+/* ⚠️ O `tabindex="-1"` existe para o foco PODER entrar na caixa ao abrir; ele
+   nao deve desenhar um anel quando o foco chega por programa. */
+.modal__caixa:focus { outline: none; }
+.modal__caixa:focus-visible { outline: 2px solid var(--acento); outline-offset: -2px; }
 
 /* 1. o topo */
+/* 🚨 AS TRES FAIXAS DA CAIXA (topo, faixa, pe) TEM BORDA DE 2px, e e o que
+   as separa do miolo: com 1px no tom claro, as sete secoes do modal tinham
+   todas o mesmo limite e a caixa parecia uma lista. */
 .modal__topo {
+  flex: none;
   display: flex; align-items: flex-start; justify-content: space-between;
   gap: var(--e-3);
-  padding: var(--e-3) var(--e-4);
-  border-bottom: var(--borda-fina) solid var(--borda);
+  padding: var(--e-4) var(--e-5);
+  border-bottom: 2px solid var(--borda-forte);
 }
-.modal__quem { min-width: 0; }
-.modal__os { font-size: var(--txt-lg, 18px); }
-.modal__cliente { margin: 2px 0 0; font-size: var(--txt-md); font-weight: var(--peso-forte); }
-.modal__sub { margin: 2px 0 0; font-size: var(--txt-xs); color: var(--texto-fraco); }
+.modal__quem { min-width: 0; display: flex; flex-direction: column; gap: var(--e-1); }
+/* 🔵 O CLIENTE E O TITULO DO MODAL, e vem INTEIRO: e o unico lugar com
+   largura para os nomes de 56 caracteres que a base tem. */
+.modal__cliente {
+  margin: 0; font-size: var(--txt-xl); font-weight: var(--peso-forte);
+  line-height: 1.25; letter-spacing: -0.01em;
+}
+.modal__ident {
+  margin: 0; display: flex; align-items: baseline; flex-wrap: wrap;
+  gap: var(--e-2);
+  font-size: var(--txt-sm); color: var(--texto-fraco);
+}
+.modal__os { font-size: var(--txt-md); color: var(--acento); }
+.modal__termo { color: var(--texto-fraco); }
+/* O risco vertical que separa os identificadores -- decoracao, e por isso
+   `aria-hidden` no markup. */
+.modal__risco {
+  width: 1px; height: 13px; background: var(--borda-forte); display: inline-block;
+}
 .modal__fechar {
   flex: none;
   min-width: var(--altura-toque); min-height: var(--altura-toque);
@@ -1694,12 +1978,16 @@ onMounted(carregar)
 
 /* 2. a faixa das medidas -- a unica com fundo no meio da caixa, de proposito */
 .modal__faixa {
-  display: flex; flex-wrap: wrap; gap: var(--e-4);
+  flex: none;
+  display: flex; flex-wrap: wrap; gap: var(--e-6);
   align-items: flex-end;
-  padding: var(--e-3) var(--e-4);
+  padding: var(--e-3) var(--e-5);
   background: var(--superficie-2);
-  border-bottom: var(--borda-fina) solid var(--borda);
+  border-bottom: 2px solid var(--borda-forte);
 }
+/* 🚨 `--aviso` (#D97706) da 3,18:1 sobre o fundo claro e nao passa em texto;
+   #B45309 da 5,02:1. */
+.faixa__parado { color: var(--aviso-texto); }
 .faixa__medida, .faixa__campo { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .faixa__rotulo {
   font-size: var(--txt-xs); color: var(--texto-fraco);
@@ -1715,21 +2003,74 @@ onMounted(carregar)
 }
 
 /* 3. o corpo */
+/* 🚨 O UNICO QUE ROLA, e o `min-height: 0` e o que faz isso funcionar:
+   sem ele um filho de flex se recusa a encolher abaixo do conteudo, o corpo
+   empurra a caixa, e o pe sai da tela -- que era o sintoma que o
+   `max-height: 60vh` tentava remediar no lugar errado. */
 .modal__corpo {
-  padding: var(--e-4);
+  flex-grow: 1; min-height: 0; overflow-y: auto;
+  padding: var(--e-5);
+  background: var(--fundo);
   display: flex; flex-direction: column; gap: var(--e-4);
-  /* ⚠️ A caixa inteira rola na pagina; o corpo tem teto para o pe nao fugir
-     da tela num card com muita observacao. */
-  max-height: 60vh; overflow-y: auto;
 }
+/* 🔵 DUAS COLUNAS: a esquerda e o que se FAZ, a direita e o que se LE.
+   ⚠️ `flex-wrap` com base de 320px: em tela estreita elas EMPILHAM, e o
+   modal continua usavel -- nao ha largura minima que force rolagem lateral. */
+.modal__corpo--duas {
+  flex-direction: row; flex-wrap: wrap; align-items: flex-start;
+  gap: var(--e-5);
+}
+.modal__coluna {
+  min-width: 0; display: flex; flex-direction: column; gap: var(--e-3);
+}
+.modal__coluna--fazer { flex: 3 1 320px; }
+.modal__coluna--ler { flex: 2 1 280px; }
+
+/* O rotulo que agrupa os paineis de uma coluna. */
+.modal__secao {
+  margin: 0; font-size: var(--txt-xs); font-weight: var(--peso-forte);
+  letter-spacing: .08em; text-transform: uppercase; color: var(--texto-fraco);
+}
+
+/* 🚨 CADA BLOCO E UM PAINEL COM BORDA, e isto conserta de uma vez os dois
+   defeitos do miolo: o padding (as tres secoes eram filhas diretas da caixa,
+   que tem `padding: 0`, e nenhuma definia o seu -- o miolo util ficava rente
+   as bordas) e a hierarquia (o proprio CSS admitia por escrito que eram
+   *"seis secoes soltas com o mesmo peso"*).
+   🔵 *"espessura ou sombreamento"*: borda forte + sombra de 1px, e o
+   cabecalho do painel com fundo. */
+.modal__painel {
+  background: var(--superficie);
+  border: var(--borda-fina) solid var(--borda-forte);
+  border-radius: var(--r-md);
+  box-shadow: var(--sombra-1);
+  padding: var(--e-4);
+  gap: var(--e-3);
+}
+.modal__painel h3 { font-size: var(--txt-md); }
 
 /* 4. o pe */
 .modal__rodape {
-  display: flex; flex-wrap: wrap; gap: var(--e-3);
-  align-items: center; justify-content: space-between;
-  padding: var(--e-3) var(--e-4);
+  flex: none;
+  display: flex; flex-wrap: wrap; gap: var(--e-4);
+  align-items: flex-end; justify-content: space-between;
+  padding: var(--e-4) var(--e-5);
   background: var(--superficie-2);
-  border-top: var(--borda-fina) solid var(--borda);
+  border-top: 2px solid var(--borda-forte);
+}
+/* 🔵 ONDE SE AGE: os dois controles que escrevem no ERP e o aviso que os
+   descreve, no MESMO bloco. Antes a frase estava aqui e os controles la em
+   cima, na faixa das medidas. */
+.modal__agir {
+  display: flex; flex-wrap: wrap; align-items: flex-end; gap: var(--e-4);
+  min-width: 0;
+}
+/* 🚨 O AVISO DE ESCRITA SAIU DE `.apagado`: #94A3B8 da **2,56:1** sobre
+   branco, e a norma pede 4,5:1 -- o texto menos legivel do modal era
+   justamente o que avisa que o gesto chega ao ERP. #B45309 da 5,02:1. */
+.modal__perigo {
+  margin: 0 0 var(--e-2); max-width: 30ch;
+  font-size: var(--txt-sm); color: var(--aviso-texto); line-height: 1.45;
 }
 .modal__acoes { display: flex; gap: var(--e-2); flex-wrap: wrap; }
 .painel__busca input, .painel__ordem select {
@@ -1752,6 +2093,23 @@ onMounted(carregar)
 .pilula--forte {
   border-color: var(--aviso, var(--borda-forte));
   color: var(--texto); font-weight: var(--peso-forte);
+}
+/* 🚨 OS TRES SELOS COM SIGNIFICADO, e cada um tem FUNDO alem da cor: num
+   card de 248px com cinco selos possiveis, borda sozinha nao distingue nada a
+   um metro de distancia.
+   ⚠️ E os dois que alertam diferem em LUMINOSIDADE, nao so em matiz -- ambar
+   e verde, nunca vermelho e verde. */
+.pilula--alerta {
+  color: var(--aviso-texto); background: var(--aviso-suave);
+  border-color: var(--aviso); font-weight: var(--peso-forte);
+}
+.pilula--pronto {
+  color: var(--ok-texto); background: var(--ok-suave);
+  border-color: var(--ok); font-weight: var(--peso-forte);
+}
+.pilula--origem {
+  color: var(--acento-hover); background: var(--acento-suave);
+  border-color: var(--acento-borda);
 }
 .recados { list-style: none; margin: 0; padding: 0; }
 .modal__rodape--escrever { display: grid; gap: var(--e-2); }
@@ -1806,22 +2164,62 @@ onMounted(carregar)
 .modal__pe { display: flex; gap: var(--e-2); justify-content: flex-end; flex-wrap: wrap; }
 /* ⚠️ A caixa agora rola no `modal__corpo`, então o modal alinha ao topo e
    a sombra do mockup fica visível na beirada. */
-.modal { align-items: flex-start; padding: var(--e-4) var(--e-3); }
+/* 🚨 A REGRA QUE ALINHAVA O MODAL AO TOPO SAIU EM 05/11. Ela existia porque
+   a caixa nao tinha teto de altura e precisava crescer para baixo, deixando a
+   pagina rolar. Agora a caixa tem `max-height` e so o corpo rola, entao o
+   dialogo e centralizado e o pe esta sempre visivel.
+   ⚠️ O que fica e so o respiro lateral em tela estreita. */
+.modal { padding: var(--e-4) var(--e-3); }
 .card__ha { font-size: var(--txt-xs); color: var(--texto-fraco); }
-.card__cliente { font-size: var(--txt-sm); font-weight: var(--peso-forte); }
-.card__cliente--sem { font-weight: var(--peso-normal); color: var(--texto-fraco); font-style: italic; }
+/* 🔵 O CLIENTE E A PRIMEIRA LINHA e o maior texto do card (variante C):
+   e por ele que a operacao pensa, e os identificadores vem depois.
+   🚨 CORTA EM DUAS LINHAS: medido em 05/11, **11 dos 15** nomes do quadro
+   passam de 24 caracteres (mediana 28, o maior 56 -- *"TGS RIO ALUGUEL DE
+   CACAMBAS E RECICLAGEM DE ENTULHO LTDA"*). O nome inteiro fica no `title` e
+   no modal, que tem 1000px para ele. */
+.card__cliente {
+  font-size: var(--txt-md);
+  font-weight: var(--peso-forte);
+  line-height: 1.3;
+  min-width: 0;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.card__cliente--sem {
+  font-size: var(--txt-sm);
+  font-weight: var(--peso-normal);
+  /* ⚠️ Isto nao e apoio, e uma falta de cadastro: fica em ambar legivel, nao
+     em cinza de rodape. */
+  color: var(--aviso-texto); font-style: italic;
+  -webkit-line-clamp: 3;
+}
 .card__tipo { font-size: var(--txt-xs); color: var(--texto-fraco); }
+/* ⚠️ ERA UMA CAIXINHA CINZA, e virou texto: com a caixa, as linhas do tipo
+   e dos tempos competiam com os SELOS, que sao as caixinhas de verdade do
+   card. Dois niveis de caixa num card de 248px nao tem como se distinguir. */
 .card__dado {
-  align-self: flex-start;
-  font-size: var(--txt-xs);
-  background: var(--superficie-3, var(--superficie-2));
-  border-radius: var(--r-sm, 6px);
-  padding: 2px var(--e-1);
+  font-size: var(--txt-sm);
+  color: var(--texto-fraco);
+  min-width: 0;
 }
 .card__pistas { display: flex; flex-wrap: wrap; gap: var(--e-1); align-items: center; margin-top: var(--e-1); }
-.card__visto { font-size: var(--txt-xs); color: var(--texto-apagado); }
+/* 🚨 SAIU DE `--texto-apagado`: #94A3B8 sobre branco da **2,56:1**, e a
+   norma pede 4,5:1 para texto pequeno. `--texto-fraco` da 4,76:1. */
+.card__visto { font-size: var(--txt-xs); color: var(--texto-fraco); }
 /* 🚨 Aviso, não decoração: ver o comentário no `template`. */
 .card__alerta { font-size: var(--txt-xs); color: var(--erro); font-weight: var(--peso-forte); }
+
+/* 🚨 A `.nota` SUBSTITUI A `.apagado` NESTA TELA, e e conserto de norma, nao
+   de gosto: a `.apagado` global usa `--texto-apagado` (#94A3B8), que sobre
+   branco da **2,56:1** -- a norma pede 4,5:1 para texto pequeno, e a classe
+   carregava justamente as frases de REGRA do modal (*"Nao vai para a OS do
+   Harmonit"*, *"Mover de etapa escreve a situacao na OS"*), o autor e a hora
+   de cada item marcado, e os *"sem solucao tecnica escrita"*. `--texto-fraco`
+   (#64748B) da **4,76:1** e e o tom que a `.pilula` ja usava.
+   ⚠️ O TOKEN GLOBAL NAO FOI TOCADO: mexer nele mudaria ~30 telas que
+   ninguem auditou, e isso e decisao dele -- esta escrito como a decisao 7 do
+   `Painel_Operacao_Card_e_Modal_DESIGN.md`. */
+.nota { color: var(--texto-fraco); }
 
 .pilula {
   font-size: var(--txt-xs);
@@ -1833,6 +2231,10 @@ onMounted(carregar)
 
 .etiqueta { padding: 0 var(--e-2); border-radius: var(--r-full); font-size: var(--txt-xs); border: var(--borda-fina) solid var(--borda); }
 .etiqueta--nova { background: var(--acento-suave); border-color: var(--acento-borda); color: var(--acento); }
-.etiqueta--em_andamento { background: var(--aviso-suave); border-color: var(--aviso); color: var(--aviso); }
-.etiqueta--concluida { background: var(--ok-suave); border-color: var(--ok-borda); color: var(--ok); }
+/* 🚨 OS DOIS TONS FORTES NAO PASSAVAM EM TEXTO PEQUENO: `--aviso` (#D97706)
+   da 3,18:1 e `--ok` (#16A34A) da 2,78:1 sobre os respectivos fundos claros.
+   Os tons escuros da mesma familia passam, e a cor de borda continua a de
+   antes -- entao a aparencia muda pouco e a leitura muda muito. */
+.etiqueta--em_andamento { background: var(--aviso-suave); border-color: var(--aviso); color: var(--aviso-texto); }
+.etiqueta--concluida { background: var(--ok-suave); border-color: var(--ok-borda); color: var(--ok-texto); }
 </style>

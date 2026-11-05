@@ -429,7 +429,12 @@ describe('o termo no card (Área E)', () => {
     const tela = await montar()
     await tela.find('.card__os').trigger('click')
     await flushPromises()
-    expect(tela.find('.modal__sub').text()).toContain('TERMO 8937')
+    /* ⚠️ A CLASSE MUDOU EM 05/11 (`modal__sub` -> `modal__ident`), com a
+       proposta A: o cliente subiu para titulo do modal e os identificadores
+       (OS, TERMO, tipo, placa) passaram a ser uma linha propria, em vez de um
+       subtitulo de apoio. A regra medida e a mesma: o termo aparece no card
+       aberto. */
+    expect(tela.find('.modal__ident').text()).toContain('TERMO 8937')
   })
 
   it('⚠️ o número da OS continua sendo o BOTÃO, não o termo', async () => {

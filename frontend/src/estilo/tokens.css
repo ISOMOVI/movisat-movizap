@@ -107,10 +107,18 @@
   --ok:        #16A34A;      /* = --green */
   --ok-suave:  #F0FDF4;      /* = --green-dim */
   --ok-borda:  rgba(22, 163, 74, .35);
+  /* 🚨 Pela mesma razao: `--ok` (#16A34A) da **2,78:1** sobre o verde claro e
+     **3,37:1** sobre branco -- nenhum dos dois passa. #15803D da **4,91:1**. */
+  --ok-texto:  #15803D;
 
   --aviso:       #D97706;    /* = --yellow */
   --aviso-suave: #FFFBEB;    /* = --yellow-dim */
   --aviso-borda: rgba(217, 119, 6, .35);
+  /* 🚨 O TOM DE TEXTO DO AVISO, e ele existe por NORMA: `--aviso` (#D97706)
+     sobre branco da **3,18:1**, e a norma pede 4,5:1 para texto pequeno.
+     #B45309 da **5,02:1** e e a mesma familia. O `--aviso` continua valendo
+     para borda e fundo, que nao sao texto. Medido em 05/11. */
+  --aviso-texto: #B45309;
 
   --erro:        #DC2626;    /* = --red */
   --erro-suave:  #FEF2F2;    /* = --red-dim */
@@ -138,6 +146,34 @@
   --conversa-balao:      #FFFFFF;  /* o que o cliente escreveu */
   --conversa-saida:      #D9FDD3;  /* o que nós respondemos */
   --conversa-nota:       #FFF6D6;  /* nota interna: nunca sai para o cliente */
+}
+
+/* ==========================================================================
+   A ESCALA DO PAINEL DA OPERACAO -- +2px em cada degrau
+   --------------------------------------------------------------------------
+   🔵 Decisao dele em 05/11, olhando o mockup: *"pode aumentar um pouco mais
+   as fontes e realinhas, mais 2 esta ok"* -- para o card fechado E para o
+   modal.
+
+   🚨 POR QUE REDEFINIR OS TOKENS EM VEZ DE ESCREVER PIXEL NA TELA: a regra
+   desta casa e *"nenhuma tela escreve cor, tamanho de fonte, raio ou
+   espacamento na mao"*. Entao o +2 vive AQUI, uma vez, e a
+   `PainelOperacao.vue` continua usando `var(--txt-md)` como todas as outras.
+
+   ⚠️ SO O PAINEL DA OPERACAO. A escala global nao mudou: o resto do sistema
+   (Caixa, Chat, E-mail, /config) continua em 11/12,5/14/16/20. Subir a escala
+   global seria mexer em 30 telas que ninguem auditou.
+
+   ⚠️ `--txt-campo` (16px) e `--altura-toque` (44px) NAO entram: o 16px do
+   campo existe para o iOS nao dar zoom, e subi-lo nao melhora nada; o alvo de
+   toque ja esta no minimo da norma.
+   ========================================================================== */
+.escala-operacao {
+  --txt-xs:  13px;
+  --txt-sm:  14.5px;
+  --txt-md:  16px;
+  --txt-lg:  18px;
+  --txt-xl:  22px;
   --conversa-nota-texto: #7A5A00;
   --conversa-lida:       #53BDEB;  /* o segundo tique */
   --conversa-raio:       8px;      /* 🚨 substitui o `--raio` que nunca existiu */
