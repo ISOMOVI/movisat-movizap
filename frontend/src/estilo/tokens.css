@@ -146,6 +146,51 @@
   --conversa-balao:      #FFFFFF;  /* o que o cliente escreveu */
   --conversa-saida:      #D9FDD3;  /* o que nós respondemos */
   --conversa-nota:       #FFF6D6;  /* nota interna: nunca sai para o cliente */
+  --conversa-nota-texto: #7A5A00;
+  --conversa-lida:       #53BDEB;  /* o segundo tique */
+  --conversa-raio:       8px;      /* 🚨 substitui o `--raio` que nunca existiu */
+  --conversa-bico:       7px;      /* a ponta do balão */
+
+  /* ---- menu lateral: ESCURO mesmo no tema claro ----------------------- */
+  /* É a assinatura do MoviChat, e o que mais distingue os painéis à
+     primeira vista. Tokens próprios porque não seguem o tema.
+
+     🔵 05/11, decisao dele: *"vamos ajustar a cor para: #04034D e o texto
+     deixe um pouco mais escuro e com destaque para nao sumir na cor"*.
+
+     🚨 O TEXTO FOI PARA O MAIS CLARO, E NAO PARA O MAIS ESCURO, e a razao e
+     medida: o que ele via sumindo era `#94A3B8` sobre o fundo CLARO que o
+     defeito dos tokens deixou (**2,6:1**). Sobre `#04034D` o mesmo cinza da
+     **7,3:1** e ja passa a norma -- escurece-lo e que o faria desaparecer de
+     verdade. O *"destaque"* que ele pediu se consegue subindo o contraste.
+
+     ⚠️ `#04034D` e 28% mais escuro que o `#0F172A` de antes, e e um azul
+     SATURADO em vez de um quase-preto: por isso o `hover` e a `borda` sobem de
+     opacidade -- 6% de branco sobre azul saturado quase nao se ve. */
+  --menu-fundo:       #04034D;  /* era #0F172A */
+  --menu-texto:       #CBD5E1;  /* era #94A3B8 -- 7,3:1 -> 12,6:1 */
+  --menu-texto-forte: #FFFFFF;  /* 18,7:1 */
+  --menu-hover:       rgba(255, 255, 255, .10);  /* era .06 */
+  --menu-borda:       rgba(255, 255, 255, .16);  /* era .10 */
+  /* 🚨 O ROTULO DE GRUPO EXISTE COMO TOKEN PORQUE TRES LUGARES DO MENU
+     ESCREVIAM A COR A MAO, e as duas falhavam sobre o fundo novo:
+     `.menu__grupo-nome` e `.menu__vazio` com `rgba(148,163,184,.62)` davam
+     **3,3:1**, e `.menu__sub-nome` com `.5` dava **2,6:1** -- em texto de
+     13px. `#A8B2D8` da **8,9:1**. */
+  --menu-rotulo:      #A8B2D8;
+  /* 🔵 A marca do item ATIVO que nao depende de cor. O fundo do ativo e o
+     `--acento` (#2563EB), e o fundo do menu passou a ser TAMBEM azul: entre os
+     dois ha 3,6:1, e era o ponto onde um recurso sumia por conflito de matiz
+     -- achado que ele previu (*"podem ter recursos ocultos por conflito de
+     cor"*). ⚠️ Trocar o azul do ativo por um mais claro NAO resolve: com
+     #3B82F6 a separacao sobe para 5,1:1 mas o texto branco em cima cai para
+     3,7:1 e falha em 16px. */
+  --menu-ativo-barra: #FFFFFF;
+
+  --sombra-1: 0 1px 3px rgba(0, 0, 0, .08), 0 1px 2px rgba(0, 0, 0, .04);
+  --sombra-2: 0 8px 24px rgba(15, 23, 42, .12), 0 2px 6px rgba(15, 23, 42, .06);
+
+  --foco: 0 0 0 3px rgba(37, 99, 235, .28);
 }
 
 /* ==========================================================================
@@ -164,6 +209,20 @@
    (Caixa, Chat, E-mail, /config) continua em 11/12,5/14/16/20. Subir a escala
    global seria mexer em 30 telas que ninguem auditou.
 
+   🚨 ESTE BLOCO JA CUSTOU UM DEFEITO EM PRODUCAO, no mesmo dia em que nasceu:
+   eu o abri fechando o `:root` um `}` ANTES do lugar -- ancorado na ultima
+   linha que eu tinha IMPRESSO na tela, nao na ultima linha do bloco. As 12
+   declaracoes seguintes (`--menu-*`, `--sombra-1`/`-2`, `--foco` e os quatro
+   `--conversa-*`) cairam DENTRO desta classe, que vive na raiz do Painel da
+   Operacao -- e fora dele deixaram de existir. O menu perdeu o fundo escuro,
+   o sistema perdeu as sombras e o anel de foco, e os baloes da Caixa ficaram
+   quadrados e sem bico.
+   ⚠️ NADA PEGOU: CSS com `}` no lugar errado continua CSS valido, o build
+   passa, e nenhum teste de tela le valor computado de token. Quem pegou foi
+   ELE, olhando o menu. A regra do bloco 8 do `Proximos_Passos` --
+   *"validar ANTES de gravar"* -- vale para a ESTRUTURA do que o script
+   produz, e nao so para a sintaxe do script.
+
    ⚠️ `--txt-campo` (16px) e `--altura-toque` (44px) NAO entram: o 16px do
    campo existe para o iOS nao dar zoom, e subi-lo nao melhora nada; o alvo de
    toque ja esta no minimo da norma.
@@ -174,22 +233,4 @@
   --txt-md:  16px;
   --txt-lg:  18px;
   --txt-xl:  22px;
-  --conversa-nota-texto: #7A5A00;
-  --conversa-lida:       #53BDEB;  /* o segundo tique */
-  --conversa-raio:       8px;      /* 🚨 substitui o `--raio` que nunca existiu */
-  --conversa-bico:       7px;      /* a ponta do balão */
-
-  /* ---- menu lateral: ESCURO mesmo no tema claro ----------------------- */
-  /* É a assinatura do MoviChat, e o que mais distingue os painéis à
-     primeira vista. Tokens próprios porque não seguem o tema. */
-  --menu-fundo:       #0F172A;  /* = --sidebar-bg */
-  --menu-texto:       #94A3B8;  /* = --sidebar-tx */
-  --menu-texto-forte: #FFFFFF;
-  --menu-hover:       rgba(255, 255, 255, .06);
-  --menu-borda:       rgba(255, 255, 255, .10);
-
-  --sombra-1: 0 1px 3px rgba(0, 0, 0, .08), 0 1px 2px rgba(0, 0, 0, .04);
-  --sombra-2: 0 8px 24px rgba(15, 23, 42, .12), 0 2px 6px rgba(15, 23, 42, .06);
-
-  --foco: 0 0 0 3px rgba(37, 99, 235, .28);
 }

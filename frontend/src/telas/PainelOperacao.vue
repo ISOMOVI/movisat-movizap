@@ -1142,20 +1142,25 @@ onBeforeUnmount(() => {
                 <!-- LINHA 2 -- os identificadores com que se cruza papel.
                      ⚠️ A OS continua sendo o BOTAO (o alvo de teclado) e o unico
                      em cor de acento; o TERMO e referencia, nao acao. -->
-                <span class="card__ident">
-                  <button class="card__os" type="button"
-                          @click.stop="cliqueNoCard(card)">OS {{ card.numero_ordem || card.os_id }}</button>
-                  <!-- ⚠️ OS SEM TERMO E 1 DE CADA 7, e a tela nao diz nada: venda,
-                       cartao RFID e manutencao nao nascem de termo. -->
-                  <span v-if="card.termo" class="card__termo">TERMO {{ card.termo }}</span>
-                </span>
-
-                <!-- LINHA 3 -- o que a OS e, e sobre o que. -->
-                <span v-if="card.tipo_nome || (card.placas && card.placas.length)"
-                      class="card__dado">
-                  <template v-if="card.tipo_nome">{{ card.tipo_nome }}</template>
-                  <template v-if="card.tipo_nome && card.placas && card.placas.length"> &middot; </template>
-                  <template v-if="card.placas && card.placas.length">{{ card.placas.map((p) => p.placa).join(' &middot; ') }}</template>
+                <!-- LINHA 2 -- 🔵 DUAS FAIXAS VIRARAM UMA em 05/11: com 334px de
+                     largura util, os identificadores cabem a esquerda e o tipo
+                     com a placa na borda direita. Era o *"mais retangular
+                     horizontal do que vertical"* que ele pediu -- o card desce
+                     de 5 faixas para 3. -->
+                <span class="card__linha">
+                  <span class="card__ident">
+                    <button class="card__os" type="button"
+                            @click.stop="cliqueNoCard(card)">OS {{ card.numero_ordem || card.os_id }}</button>
+                    <!-- ⚠️ OS SEM TERMO E 1 DE CADA 7, e a tela nao diz nada: venda,
+                         cartao RFID e manutencao nao nascem de termo. -->
+                    <span v-if="card.termo" class="card__termo">TERMO {{ card.termo }}</span>
+                  </span>
+                  <span v-if="card.tipo_nome || (card.placas && card.placas.length)"
+                        class="card__direita card__direita--dado">
+                    <template v-if="card.tipo_nome">{{ card.tipo_nome }}</template>
+                    <template v-if="card.tipo_nome && card.placas && card.placas.length"> &middot; </template>
+                    <template v-if="card.placas && card.placas.length">{{ card.placas.map((p) => p.placa).join(' &middot; ') }}</template>
+                  </span>
                 </span>
 
                 <!-- LINHA 4 -- 🔵 BLOCO C, os dois tempos, agora numa linha com o
@@ -1163,14 +1168,19 @@ onBeforeUnmount(() => {
                      passagem: a `os_passagem` comecou em 29/10, e a OS pode
                      estar na etapa desde setembro -- mostrar "0h" seria afirmar
                      o que ninguem mediu. -->
+                <!-- LINHA 3 -- ⚠️ OS TEMPOS E OS SELOS NA MESMA FAIXA, pelo mesmo
+                     motivo: com 334px os dois cabem, e o card deixa de ter uma
+                     faixa so para dois numeros curtos. A borda direita continua
+                     alinhada com as de cima -- e o realinhamento que ele
+                     aprovou em 05/11, com uma faixa menos. -->
                 <span class="card__linha card__dado">
                   <span class="card__etapa"
                         :class="{ 'card__etapa--parado': paradoDemais(card) }">
                     nesta etapa
                     <strong>{{ duracao(card.etapa_desde) || 'não medido' }}</strong>
-                  </span>
-                  <span v-if="duracao(card.criada_em)" class="card__direita">
-                    total {{ duracao(card.criada_em) }}
+                    <template v-if="duracao(card.criada_em)">
+                      &middot; total {{ duracao(card.criada_em) }}
+                    </template>
                   </span>
                 </span>
 
@@ -1690,7 +1700,17 @@ onBeforeUnmount(() => {
    sombreamento"*. O conserto e nos dois lados: a coluna recua para o fundo da
    pagina, e o card ganha borda mais forte e sombra. */
 .coluna {
-  flex: 0 0 248px;
+  /* 🔵 05/11: *"o layout dos cards com a fonte maior nao ficou bom, pode
+     deixar um pouco mais retangular horizontal do que vertical, vendo 3
+     colunas por scroll esta ok"*.
+     🚨 A CONTA DOS 3 POR SCROLL, em tela de 1366px: 1366 - 240 (menu) - 24
+     (o padding do `meta.largo`) = 1102, menos dois vaos de 12px = 1078 / 3 =
+     **359px**. Com 248px o conteudo util do card era 222px e a ~16px caberiam
+     ~24 caracteres por linha -- era isso que o deixava alto e estreito.
+     ⚠️ Com 360px o util vai a **334px**, e a mediana dos nomes de cliente do
+     quadro (28 caracteres) passa a caber em UMA linha. Os de 42 a 56 ainda
+     quebram, e por isso o corte em 2 linhas e o `title` continuam. */
+  flex: 0 0 360px;
   background: var(--fundo);
   border: var(--borda-fina) solid var(--borda-forte);
   border-top: 3px solid var(--borda-forte);
@@ -1727,7 +1747,9 @@ onBeforeUnmount(() => {
   cursor: pointer;
 }
 /* 🚨 Colapsada fica ESTREITA, não invisível: o contador continua à vista. */
-.coluna--fechada { flex: 0 0 210px; }
+/* ⚠️ A fechada acompanha, mas nao proporcionalmente: ela so mostra o nome
+   da etapa e o contador, e 280px ja sobra para o nome mais comprido das 17. */
+.coluna--fechada { flex: 0 0 280px; }
 
 .coluna__titulo { margin: 0; font-size: var(--txt-sm); }
 .coluna__botao {
@@ -1849,6 +1871,13 @@ onBeforeUnmount(() => {
 .card__direita {
   flex: none; white-space: nowrap;
   font-size: var(--txt-xs); color: var(--texto-fraco);
+}
+/* ⚠️ O tipo e a placa na borda direita podem ser compridos (*"Instalacao
+   rastreador"* + 7 placas): aqui a linha PODE cortar, porque o dado inteiro
+   esta no card aberto. O que nao pode e empurrar a OS para fora. */
+.card__direita--dado {
+  min-width: 0; overflow: hidden; text-overflow: ellipsis;
+  font-size: var(--txt-sm);
 }
 .card__ident { display: flex; align-items: baseline; gap: var(--e-2); flex-wrap: wrap; min-width: 0; }
 .card__etapa { min-width: 0; }

@@ -398,7 +398,7 @@ function encerrar() {
 
 .menu__topo {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: var(--e-2);
   padding: 0 var(--e-2);
@@ -421,27 +421,40 @@ function encerrar() {
 }
 .menu__colapsar:hover { background: var(--menu-hover); }
 
+/* 🔵 05/11: *"no topo alinha melhor o MOVIZAP"*.
+   🚨 O QUE ESTAVA DESALINHADO, medido: a marca era uma COLUNA (logo de 34px
+   em cima, `MOVIZAP` embaixo) e o botao de recolher e IRMAO dela dentro do
+   `.menu__topo`. O botao se alinhava pela logo, e o `MOVIZAP` sobrava
+   pendurado uma linha abaixo, sem alinhar com nada.
+   Agora a marca e uma LINHA: logo de 24px e o nome ao lado, e os dois dividem
+   a linha de base com o botao. O topo perde ~20px de altura morta.
+   ⚠️ O MODO COMPACTO E O CELULAR VOLTAM A SER COLUNA (as duas regras no fim
+   deste arquivo): numa faixa de 62px a logo em linha ficaria deslocada, e o
+   `.menu__nome` ja esta escondido nos dois. */
 .menu__marca {
   display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: var(--e-1);
-  padding: var(--e-2) 0 var(--e-5);
+  flex-direction: row;
+  align-items: center;
+  gap: var(--e-2);
+  padding: var(--e-1) 0 var(--e-4);
   min-width: 0;
 }
 .menu__logo {
-  height: 34px;
+  height: 24px;
   width: auto;
   max-width: 100%;
   /* A logo é escura; no fundo escuro do menu ela precisa inverter. */
   filter: brightness(0) invert(1);
 }
 .menu__nome {
-  font-size: var(--txt-sm);
+  font-size: var(--txt-md);
   font-weight: var(--peso-forte);
   letter-spacing: .08em;
   text-transform: uppercase;
-  color: var(--menu-texto);
+  /* ⚠️ O nome da marca e texto FORTE: em `--menu-texto` ele ficava com o
+     mesmo peso dos itens do menu, e a marca nao e um item. */
+  color: var(--menu-texto-forte);
+  white-space: nowrap;
 }
 
 .menu__nav { flex: 1 1 auto; overflow-y: auto; min-height: 0; }
@@ -464,7 +477,7 @@ function encerrar() {
   text-align: left;
   text-transform: uppercase;
   letter-spacing: .06em;
-  color: rgba(148, 163, 184, .62);
+  color: var(--menu-rotulo);
   cursor: pointer;
   border-radius: var(--r-sm);
   transition: color var(--tempo-rapido) var(--curva);
@@ -483,7 +496,7 @@ function encerrar() {
   margin: 0;
   font-size: var(--txt-xs);
   letter-spacing: .04em;
-  color: rgba(148, 163, 184, .5);
+  color: var(--menu-rotulo);
 }
 .menu__link--sub { padding-left: calc(var(--e-3) + 12px); }
 
@@ -505,10 +518,28 @@ function encerrar() {
   color: var(--menu-texto-forte);
   text-decoration: none;
 }
+/* 🚨 A BARRA NAO E ENFEITE: e o que faz o item ativo nao depender de cor.
+   O fundo do ativo e o `--acento` (#2563EB) e o fundo do menu passou a ser
+   TAMBEM azul (#04034D) -- entre os dois ha **3,6:1**, e era exatamente o
+   ponto onde um recurso sumia por conflito de matiz. 🔵 Ele previu:
+   *"perceba que podem ter recursos ocultos por conflito de cor"*.
+   ⚠️ Trocar o azul do ativo por um mais claro NAO resolve: com #3B82F6 a
+   separacao entre os fundos sobe para 5,1:1, mas o texto branco em cima dele
+   cai para **3,7:1** e falha a norma em 16px. A barra resolve sem cor, que e
+   a regua desta casa -- *"a cor nunca e o unico portador"*. */
 .menu__link--ativo {
+  position: relative;
   background: var(--acento);
-  color: #fff;
+  color: var(--menu-texto-forte);
   font-weight: var(--peso-forte);
+}
+.menu__link--ativo::before {
+  content: "";
+  position: absolute;
+  left: 0; top: 6px; bottom: 6px;
+  width: 3px;
+  border-radius: 0 var(--r-sm) var(--r-sm) 0;
+  background: var(--menu-ativo-barra);
 }
 .menu__link .bi { font-size: 15px; flex: none; width: 18px; text-align: center; }
 .menu__titulo { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -521,8 +552,8 @@ function encerrar() {
   padding: 0 5px;
   border-radius: 999px;
   background: var(--acento);
-  color: #fff;
-  font-size: 11px;
+  color: var(--menu-texto-forte);
+  font-size: var(--txt-xs);
   font-weight: var(--peso-forte);
   line-height: 18px;
   text-align: center;
@@ -539,7 +570,7 @@ function encerrar() {
 .menu__vazio {
   padding: var(--e-4) var(--e-3);
   font-size: var(--txt-sm);
-  color: rgba(148, 163, 184, .62);
+  color: var(--menu-rotulo);
 }
 
 .menu__rodape {
@@ -579,7 +610,7 @@ function encerrar() {
 .menu--compacto .menu__sub-nome,
 .menu--compacto .menu__acao-texto { display: none; }
 .menu--compacto .menu__topo { flex-direction: column; align-items: center; gap: var(--e-2); padding: 0; }
-.menu--compacto .menu__marca { align-items: center; padding: 0; }
+.menu--compacto .menu__marca { flex-direction: column; align-items: center; padding: 0; }
 .menu--compacto .menu__logo { height: 22px; }
 .menu--compacto .menu__link { justify-content: center; padding: 10px 0; position: relative; }
 .menu--compacto .menu__acao { justify-content: center; }
@@ -595,7 +626,7 @@ function encerrar() {
   .menu__sub-nome,
   .menu__acao-texto { display: none; }
   .menu__topo { flex-direction: column; align-items: center; gap: var(--e-2); padding: 0; }
-  .menu__marca { align-items: center; padding-left: 0; padding-right: 0; }
+  .menu__marca { flex-direction: column; align-items: center; padding-left: 0; padding-right: 0; }
   .menu__logo { height: 22px; }
   .menu__link { justify-content: center; padding: 10px 0; position: relative; }
   .menu__acao { justify-content: center; }

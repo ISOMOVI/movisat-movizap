@@ -204,7 +204,7 @@ const rotas = [
     path: '/paineis/operacao',
     name: 'PNL_1.1',
     component: PainelOperacao,
-    meta: { codigo: 'PNL_1.1', titulo: 'Operação' },
+    meta: { codigo: 'PNL_1.1', titulo: 'Operação', largo: true },
   },
 
   // 🔵 22/10: a FRM_1.1, o que chega pelos formularios proprios.

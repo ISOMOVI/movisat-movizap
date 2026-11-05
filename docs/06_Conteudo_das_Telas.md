@@ -7166,3 +7166,189 @@ modos"*. São **60 verificações** que o placar conta e ninguém executa.
 ⚠️ O `teste_termo_da_os.py` já nasce com `__main__` e roda nos dois modos.
 🔴 **Consertar os outros dois é decisão dele**, porque mexe no placar do
 projeto — e é defeito de `M12`: a doc diz uma coisa e o comando faz outra.
+
+## 05/11, segunda volta — O CARD, O MODAL, O MENU LATERAL E O ESPAÇO
+
+🔵 Pedidos dele em sequência, olhando a tela e os mockups:
+*"pode aumentar um pouco mais as fontes e realinhas, mais 2 está ok, vamos de C"* ·
+*"card aberto modal, mesma coisa (…) vamos de A, pode dar uma elaborada para evidências as
+limitações das caixas tbm, talvez espessura ou sombreamento"* ·
+*"vamos ajustar a cor para: #04034D e o texto deixe um pouco mais escuro e com destaque
+para não sumir na cor"* · *"no topo alinha melhor o MOVIZAP"* ·
+*"em algumas abas, como operação, existe uma margem entre o grid dos cards e o menu, isso é
+perca de espaço"* · *"o layout dos cards com a fonte maior não ficou bom, pode deixar um
+pouco mais retangular horizontal do que vertical, vendo 3 colunas por scroll esta ok"*.
+
+📘 O desenho, a medição e as alternativas descartadas estão em
+`C:\Users\Lenovo\Desktop\Painel_Operacao_Card_e_Modal_DESIGN.md` e
+`C:\Users\Lenovo\Desktop\Menu_Lateral_e_Espaco_PROPOSTA.md`.
+🖼️ Os mockups que ele validou: https://claude.ai/artifact/1tCkWmnqDwu9TKw6JKyQq9
+
+---
+
+### 🚨 O DEFEITO QUE ABRIU ESTA SEÇÃO, e ele é meu
+
+Para pôr a escala +2 em token eu abri um bloco novo no `tokens.css` **fechando o `:root` um
+`}` antes do lugar** — ancorei na última linha que eu tinha *impresso na tela*, não na
+última linha do bloco. As **doze declarações seguintes** caíram dentro do
+`.escala-operacao`, que vive na raiz do Painel da Operação. Fora dele, deixaram de existir:
+
+| token | o que pinta | arquivos |
+|---|---|---|
+| `--sombra-1` / `--sombra-2` | sombra de card, painel, dropdown, modal | **42 / 40** |
+| `--foco` | **o anel de foco do teclado** | **24** |
+| `--conversa-raio` · `--conversa-bico` · `--conversa-lida` · `--conversa-nota-texto` | o balão, o bico, o 2º tique, a nota interna | **19** |
+| `--menu-fundo` · `--menu-texto` · `--menu-texto-forte` · `--menu-hover` · `--menu-borda` | **o menu lateral inteiro** | 4 |
+
+**O efeito:** o menu perdeu o fundo escuro, o sistema perdeu as sombras e o anel de foco, e
+os balões da Caixa de Entrada e do Chat interno ficaram **de canto quadrado e sem bico**.
+
+🚨 **E NADA PEGOU.** CSS com um `}` no lugar errado continua CSS válido: o bloco fecha, o
+próximo abre, o `npm run build` passa em 1,6s. Nenhum dos 710 testes de tela lê valor
+computado de token. E a **única** tela que continuou certa foi a que eu estava olhando,
+porque a classe que engoliu os tokens está na raiz dela. Quem achou foi **ele**, abrindo o
+menu — *"você mudou o design total do movizap porque?"*.
+
+⚠️ **A regra do bloco 8 do `Proximos_Passos` — *"validar ANTES de gravar"* — vale para a
+ESTRUTURA do que o script produz, não só para a sintaxe do script.** Eu validei o patch com
+`py_compile` e não validei o CSS resultante. 🚨 E o comentário que eu mesmo escrevi nesse
+bloco afirmava *"SÓ O PAINEL DA OPERAÇÃO. A escala global não mudou"* — o texto dizia o
+oposto do que o arquivo fazia. `M12` no pior lugar: o comentário que devia me proteger foi o
+que me convenceu.
+
+✅ **Consertado**, com validação antes de gravar: contagem de chaves **ignorando
+comentários** (a minha própria prosa escreve `}`), os doze tokens conferidos um a um dentro
+do `:root` e fora da escala. 🚨 E a medida é por **delta** contra o arquivo original, porque
+o absoluto dá falso alarme — o `MenuLateral.vue` já tinha um `{` solto num comentário de
+linha antes de eu chegar.
+
+---
+
+### O MENU LATERAL
+
+| token | antes | agora | contraste sobre `#04034D` |
+|---|---|---|---|
+| `--menu-fundo` | `#0F172A` | **`#04034D`** | — |
+| `--menu-texto` | `#94A3B8` | **`#CBD5E1`** | 7,3:1 → **12,6:1** |
+| `--menu-texto-forte` | `#FFFFFF` | igual | **18,7:1** |
+| `--menu-hover` | `rgba(255,255,255,.06)` | **`.10`** | — |
+| `--menu-borda` | `rgba(255,255,255,.10)` | **`.16`** | — |
+| `--menu-rotulo` | *não existia* | **`#A8B2D8`** | **8,9:1** |
+| `--menu-ativo-barra` | *não existia* | **`#FFFFFF`** | — |
+
+🚨 **O TEXTO FOI PARA O MAIS CLARO, E NÃO PARA O MAIS ESCURO QUE ELE PEDIU**, e a razão é
+medida: o que ele via sumindo era `#94A3B8` sobre o **fundo claro que o defeito deixou** —
+**2,6:1**. Sobre `#04034D` o mesmo cinza dá **7,3:1** e já passa a norma; escurecê-lo é que
+o faria desaparecer. O *"destaque"* que ele pediu se consegue subindo o contraste, e isso
+está dito no comentário do token para quem ler depois não achar que eu ignorei o pedido.
+
+⚠️ **`#04034D` é 28% mais escuro que o `#0F172A` e é um azul SATURADO**, não um
+quase-preto — por isso o `hover` e a borda sobem de opacidade: 6% de branco sobre azul
+saturado quase não se vê.
+
+🚨 **O RECURSO QUE SUMIA POR CONFLITO DE COR — ele previu, e existia.** O item **ativo** do
+menu usa `--acento` (`#2563EB`) de fundo, e o fundo do menu passou a ser **também azul**:
+entre os dois há **3,6:1**. ⚠️ Trocar o azul do ativo por um mais claro **não resolve**: com
+`#3B82F6` a separação sobe para 5,1:1 mas o **texto branco em cima cai para 3,7:1** e falha
+a norma em 16px. O conserto é uma **barra branca de 3px à esquerda** do item ativo — resolve
+sem depender de cor, que é a régua da casa (*"a cor nunca é o único portador"*).
+
+✅ **Três cores escritas à mão no menu viraram `--menu-rotulo`**, e as duas falhavam sobre o
+fundo novo: `.menu__grupo-nome` e `.menu__vazio` davam **3,3:1** e `.menu__sub-nome` dava
+**2,6:1**, em texto de 13px.
+
+✅ **A logo voltou a aparecer sozinha.** `.menu__logo` tem `filter: brightness(0) invert(1)`
+— ela é pintada de **branco** para viver no fundo escuro, e com o fundo claro era branco
+sobre claro.
+
+#### O MOVIZAP no topo
+
+**O que estava desalinhado:** `.menu__marca` era uma **coluna** (logo de 34px em cima, o
+nome embaixo) e o botão de recolher é **irmão** dela no `.menu__topo` — o botão se alinhava
+pela logo e o `MOVIZAP` sobrava pendurado uma linha abaixo, sem alinhar com nada.
+
+✅ Agora a marca é uma **linha**: logo de **24px** e o nome ao lado, os dois na mesma linha
+de base do botão, e o nome em `--menu-texto-forte` (a marca não é um item do menu). O topo
+perdeu ~20px de altura morta.
+⚠️ **O modo compacto e o celular voltaram a ser `column` explicitamente** — numa faixa de
+62px a logo em linha ficaria deslocada, e o `.menu__nome` já está escondido nos dois. Era a
+quebra mais provável desta mudança.
+
+---
+
+### O ESPAÇO ENTRE O GRID E O MENU
+
+**Medido:** `App.vue` → `.painel__conteudo { padding: var(--e-6) var(--e-7) }` = 30px em
+cima/baixo e **40px de cada lado**, em todas as telas. Na Operação eram **80px
+horizontais** — cerca de **um terço de uma coluna**.
+
+✅ Entrou um `meta.largo` novo → `.painel__conteudo--largo { padding-left/right: var(--e-3) }`,
+e a rota `PNL_1.1` passou a usá-lo. **80px → 24px.**
+
+⚠️ **NÃO usei o `cheio: true` da Caixa**, de propósito: ele zera o padding **e o
+`overflow`**, e a Operação depende da rolagem vertical do casco. O `largo` mexe só no lado e
+não toca comportamento de ninguém. O respiro vertical ficou: cabeçalho colado no topo é pior
+que 40px perdidos.
+⚠️ No celular o `largo` devolve `var(--e-4)` em vez de `var(--e-3)`: lá não há menu ao lado,
+e o padding já era 16px — zerar deixaria o card colado na beira.
+
+---
+
+### A COLUNA E O CARD
+
+✅ **A coluna foi de 248px para 360px** (colapsada: 210px → 280px).
+**A conta dos 3 por scroll**, em 1366px: `1366 − 240 (menu) − 24 (o `largo`) = 1102`, menos
+dois vãos de 12px = `1078 / 3 ≈ 359px`.
+
+O conteúdo útil do card vai de **222px para 334px** — metade a mais. A mediana dos nomes de
+cliente do quadro é **28 caracteres**, e passa a caber em **uma linha**.
+⚠️ **Os maiores continuam quebrando:** há nomes de 42, 46, 52, 53 e 56 caracteres na base, e
+o corte em 2 linhas com o `title` continua necessário. **Quantos exatamente passam a caber
+numa linha só sai medindo no navegador** — depende da largura real do glifo da Inter, e eu
+não vou afirmar um número que não medi.
+
+✅ **O card desceu de CINCO faixas para QUATRO:**
+
+```
+Pastelaria Velasco                                    há 3h
+OS 17085  TERMO 8941                    Instalação · OQJ8A17
+nesta etapa 3h · total 3h
+[4 de 4]                                      previsão 05/11
+```
+
+⚠️ **PAREI EM QUATRO, E NÃO EM TRÊS, e a conta é a razão:** com 334px úteis,
+*"nesta etapa 3h · total 3h"* já ocupa ~170px e os selos mais a previsão pedem ~160px.
+Juntos transbordam, e **card que transborda é pior que card com uma faixa a mais**. O que
+encostou foi o tipo e a placa, que subiram para a linha da OS, na borda direita.
+⚠️ Essa borda direita **pode cortar com reticências** (o *"Instalação rastreador"* com 7
+placas é comprido): o dado inteiro está no card aberto, e o que não pode é empurrar o número
+da OS para fora.
+
+---
+
+### As travas
+
+| arquivo | o que mede | quantas |
+|---|---|---|
+| `frontend/src/painel_card_modal_0511.teste.js` | o card C, o modal A, o teclado, e agora as quatro faixas | **31** |
+| `painel_2210.teste.js` | 4 travas **retargetadas** (o card não repete a situação; `card__tempos` virou `card__etapa`; `pilula--forte` virou `pilula--alerta`) + 1 nova | 78 |
+| `painel_checklist_0411.teste.js` | 1 retargetada (`modal__sub` virou `modal__ident`) | 27 |
+
+🚨 **Nenhum teste lê cor computada de token** — é o buraco que deixou os doze tokens
+passarem, e ele continua aberto. Prender isso exigiria um teste que monte a tela com o CSS
+real, e o jsdom não aplica `<style scoped>`. 🔴 **Fica dito aqui como limite conhecido**, e
+o que o cobre hoje é ele abrir a tela.
+
+### 🚨 Quatro defeitos meus nesta sessão, e como cada um apareceu
+
+1. **Os doze tokens** — achado por ele, olhando o menu.
+2. **Encurtei a frase do aviso de escrita** ao movê-la para o pé do modal (*"Os dois
+   escrevem na OS do Harmonit"*) e perdi que mover grava **a situação** e que a prioridade
+   **reescreve a OS inteira**. Um teste prendia a frase antiga e pegou.
+3. **O resolvedor de escapes do meu patch estava errado** e o modal foi gravado com 30
+   sequências literais no lugar dos caracteres. Pego por asserção, num segundo passe.
+4. **Escrevi `#B45309` nove vezes e `#15803D` duas à mão**, quebrando a regra que está no
+   topo do próprio `tokens.css`. Viraram `--aviso-texto` e `--ok-texto`.
+
+⚠️ **Três dos quatro foram de montar texto por script sem validar a estrutura antes de
+gravar.** É o mesmo defeito em três formas.

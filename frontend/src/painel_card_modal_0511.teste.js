@@ -409,3 +409,68 @@ describe('o teclado no modal (D5)', () => {
     expect(document.body.contains(botao)).toBe(true)
   })
 })
+
+/* ==========================================================================
+   A SEGUNDA VOLTA DE 05/11 — a coluna larga e o card em três faixas
+   --------------------------------------------------------------------------
+   🔵 Ele: *"o layout dos cards com a fonte maior não ficou bom, pode deixar um
+   pouco mais retangular horizontal do que vertical, vendo 3 colunas por scroll
+   esta ok"* · *"em algumas abas, como operação, existe uma margem entre o grid
+   dos cards e o menu, isso é perca de espaço"*.
+   ========================================================================== */
+describe('o card em três faixas (segunda volta)', () => {
+  it('🔵 são QUATRO faixas, e eram cinco', async () => {
+    /* ⚠️ PAREI EM QUATRO, E NAO EM TRES, e a conta e a razao: com 334px de
+       largura util, *"nesta etapa 3h · total 3h"* ja ocupa ~170px e os selos
+       mais a previsão pedem ~160px. Juntos transbordam, e card que transborda
+       é pior que card com uma faixa a mais. O que encostou foi o tipo e a placa,
+       que subiram para a linha da OS. */
+    const tela = await montar()
+    const faixas = tela.findAll('.card__linha')
+    expect(faixas).toHaveLength(4)
+    expect(faixas[0].text()).toContain('Pastelaria Velasco')
+    expect(faixas[1].text()).toContain('OS 17081')
+    expect(faixas[2].text()).toContain('nesta etapa')
+    expect(faixas[3].text()).toContain('previsão')
+  })
+
+  it('o tipo e a placa vão para a borda direita, junto da OS', async () => {
+    const tela = await montar()
+    const faixa = tela.findAll('.card__linha')[1]
+    expect(faixa.find('.card__os').exists()).toBe(true)
+    expect(faixa.find('.card__direita--dado').text()).toContain('Retirada')
+    expect(faixa.find('.card__direita--dado').text()).toContain('BUS0168')
+  })
+
+  it('os dois tempos ficam na MESMA faixa', async () => {
+    const tela = await montar()
+    const texto = tela.find('.card__etapa').text()
+    expect(texto).toContain('nesta etapa')
+    expect(texto).toContain('total')
+  })
+
+  it('⚠️ "não medido" continua sem acender alerta na faixa nova', async () => {
+    const tela = await montar({ 251: [card({ etapa_desde: null })] })
+    expect(tela.find('.card__etapa').text()).toContain('não medido')
+    expect(tela.find('.card__etapa').classes()).not.toContain('card__etapa--parado')
+  })
+
+  it('o card sem tipo e sem placa não deixa a faixa vazia', async () => {
+    /* ⚠️ A OS aberta à mão pode não ter nenhum dos dois: a borda direita
+       simplesmente não existe, em vez de abrir um espaço em branco. */
+    const tela = await montar({
+      251: [card({ tipo_nome: null, placas: [] })],
+    })
+    const faixa = tela.findAll('.card__linha')[1]
+    expect(faixa.find('.card__os').exists()).toBe(true)
+    expect(faixa.find('.card__direita--dado').exists()).toBe(false)
+  })
+
+  it('🚨 a previsão continua escrita, e nunca como "prazo"', async () => {
+    /* A terceira faixa mudou de conteúdo; a regra do D4 não mudou. */
+    const tela = await montar()
+    const texto = tela.find('.card__abrir').text()
+    expect(texto).toContain('previsão')
+    expect(texto).not.toContain('prazo')
+  })
+})

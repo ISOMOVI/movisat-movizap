@@ -50,7 +50,8 @@ watch(autenticado, (agora) => {
          depende do padding do pai continuar exatamente o que e hoje, e quebra
          calada no dia em que ele mudar. -->
     <main class="painel__conteudo"
-          :class="{ 'painel__conteudo--cheio': rota.meta.cheio }">
+          :class="{ 'painel__conteudo--cheio': rota.meta.cheio,
+                    'painel__conteudo--largo': rota.meta.largo }">
       <RouterView />
     </main>
     <BarraStatus class="so-computador" />
@@ -84,8 +85,22 @@ watch(autenticado, (agora) => {
 /* Sem respiro e sem rolagem propria: quem rola e cada coluna da tela. */
 .painel__conteudo--cheio { padding: 0; overflow: hidden; }
 
+/* 🔵 05/11: *"em algumas abas, como operacao, existe uma margem entre o grid
+   dos cards e o menu, isso e perca de espaco"*.
+   🚨 MEDIDO: o padding era `var(--e-6) var(--e-7)` = 30px em cima e **40px de
+   cada lado**, em TODAS as telas -- so a Caixa escapava, pelo `cheio: true`.
+   Na Operacao isso sao **80px horizontais**, cerca de um terco de uma coluna.
+   ⚠️ E NAO USEI O `cheio: true` PARA ISTO, de proposito: ele zera o padding
+   **e o `overflow`**, e a Operacao depende da rolagem vertical do casco. O
+   `largo` mexe so no lado, e nao toca o comportamento de ninguem.
+   O respiro vertical fica: cabecalho colado no topo e pior que 40px perdidos. */
+.painel__conteudo--largo { padding-left: var(--e-3); padding-right: var(--e-3); }
+
 @media (max-width: 860px) {
   .painel__conteudo { padding: var(--e-4); }
+  /* ⚠️ No celular o padding ja e 16px e nao ha menu do lado: o `largo` nao
+     tem o que devolver, e zerar aqui deixaria o card colado na beira. */
+  .painel__conteudo--largo { padding-left: var(--e-4); padding-right: var(--e-4); }
   /* Celular: sem coluna de menu; o rodapé é a BarraCelular. */
   .painel {
     grid-template-areas:
