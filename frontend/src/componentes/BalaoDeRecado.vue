@@ -20,7 +20,8 @@
    desenhado diferente: ele não foi escrito por uma pessoa, e mostrá-lo igual
    a um recado humano faria parecer que alguém digitou aquilo.
    ============================================================================ */
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
+import { pedirBlob } from '../api/cliente.js'
 
 const props = defineProps({
   recado: { type: Object, required: true },
@@ -39,6 +40,40 @@ function tamanho(bytes) {
   if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`
 }
+
+/* 🚨 O ANEXO VEM POR `fetch` E VIRA `blob:`, nunca por `href`. Ver o
+   comentario no `template`. */
+const baixando = ref(null)
+const erroDoAnexo = ref('')
+
+async function baixar(anexo) {
+  baixando.value = anexo.id
+  erroDoAnexo.value = ''
+  let url = null
+  try {
+    const blob = await pedirBlob(`/api/paineis/operacao/anexo/${anexo.id}`)
+    url = URL.createObjectURL(blob)
+    /* ⚠️ `download` com o nome ORIGINAL: sem ele o navegador salvaria o
+       arquivo com o nome do `blob:`, que e um UUID. */
+    const l = document.createElement('a')
+    l.href = url
+    l.download = anexo.nome_original || 'anexo'
+    l.rel = 'noopener'
+    document.body.appendChild(l)
+    l.click()
+    l.remove()
+  } catch (e) {
+    /* 🚨 A FALHA E DITA. Antes o 401 era silencioso: o clique abria uma aba
+       com a mensagem de erro da API, ou nada. */
+    erroDoAnexo.value = e?.message || 'Nao consegui baixar o anexo.'
+  } finally {
+    baixando.value = null
+    /* ⚠️ Solta o `blob:` depois do clique -- cada download reservaria memoria
+       para sempre. O atraso existe porque revogar antes do navegador comecar a
+       baixar cancela o download. */
+    if (url) setTimeout(() => URL.revokeObjectURL(url), 10000)
+  }
+}
 </script>
 
 <template>
@@ -46,15 +81,27 @@ function tamanho(bytes) {
     <div class="recado__balao">
       <p v-for="(linha, i) in linhas" :key="i" class="recado__linha">{{ linha }}</p>
 
+      <p v-if="erroDoAnexo" class="recado__erro" role="alert">{{ erroDoAnexo }}</p>
+
       <ul v-if="recado.anexos && recado.anexos.length" class="recado__anexos">
         <li v-for="a in recado.anexos" :key="a.id">
-          <!-- ⚠️ O link leva o ID, nunca o caminho de disco. E abre em outra
-               aba: baixar não pode tirar quem opera do painel. -->
-          <a :href="`/api/paineis/operacao/anexo/${a.id}`" target="_blank"
-             rel="noopener">
+          <!-- ⚠️ O ID, nunca o caminho de disco. E abre em outra aba: baixar
+               nao pode tirar quem opera do painel.
+               🚨 MAS NAO POR `<a href>`, e isto era um defeito: a rota e
+               protegida por `Bearer` sem nenhum outro caminho, e **navegacao de
+               link nao manda cabecalho `Authorization`** -- todo clique era
+               **401**. O arquivo subia e nunca voltava.
+               ⚠️ Ninguem notou porque `os_observacao_arquivo` tinha ZERO linhas:
+               o furo estava no caminho de volta, que nunca foi percorrido.
+               🔵 O conserto reusa a `pedirBlob` do `api/cliente.js`, que existe
+               desde 27/08 pelo MESMO motivo -- o `<img src>` da midia tambem
+               voltava 401, *"e o atendente veria um icone quebrado sem
+               explicacao"*. -->
+          <button type="button" class="recado__anexo" :disabled="baixando === a.id"
+                  @click="baixar(a)">
             <i class="bi bi-paperclip" aria-hidden="true"></i>
             {{ a.nome_original }}
-          </a>
+          </button>
           <span class="apagado pequeno">{{ tamanho(a.bytes) }}</span>
         </li>
       </ul>
@@ -98,6 +145,34 @@ function tamanho(bytes) {
   gap: var(--e-1);
 }
 .recado__anexos li { display: flex; align-items: center; gap: var(--e-2); }
+
+/* 🚨 VIROU `<button>` e TEM DE PARECER O LINK QUE ERA: o gesto nao mudou para
+   quem opera -- clicar no nome do arquivo baixa. O que mudou e que agora
+   funciona (o `<a href>` levava 401, porque navegacao de link nao manda
+   `Authorization`).
+   ⚠️ `font: inherit` e o que impede o botao de herdar o visual de botao do
+   tema; `text-align: left` e para nome comprido nao centralizar. */
+.recado__anexo {
+  display: inline-flex; align-items: center; gap: var(--e-1);
+  min-height: var(--altura-toque);
+  padding: 0;
+  border: 0; background: none;
+  font: inherit; text-align: left;
+  color: var(--acento); text-decoration: underline;
+  cursor: pointer;
+}
+.recado__anexo:hover:not(:disabled) { color: var(--acento-hover); }
+/* ⚠️ Enquanto baixa, o botao diz que esta ocupado -- dois cliques seriam duas
+   idas ao servidor pelo mesmo arquivo. */
+.recado__anexo:disabled { color: var(--texto-fraco); cursor: progress; text-decoration: none; }
+
+/* 🚨 A FALHA DO ANEXO E DITA. Antes o 401 era silencioso: o clique abria uma
+   aba com a mensagem crua da API, ou nada. */
+.recado__erro {
+  margin: var(--e-1) 0 0;
+  font-size: var(--txt-sm);
+  color: var(--erro);
+}
 
 .recado__pe { margin: var(--e-1) 0 0; display: flex; gap: var(--e-1); }
 </style>

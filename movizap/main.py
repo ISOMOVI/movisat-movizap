@@ -5538,6 +5538,38 @@ def baixar_anexo_da_observacao(
                         media_type=achado["mime"] or "application/octet-stream")
 
 
+def _recados_com_anexos(numero_os: int) -> list:
+    """As observacoes de uma OS, cada uma com os seus anexos.
+
+    ⚠️ UMA consulta para os anexos da lista toda, e o `caminho` de disco NAO
+    sai daqui -- a tela baixa pelo id.
+    """
+    recados = passagem.observacoes(numero_os)
+    anexos = passagem.anexos_de([o["id"] for o in recados])
+    for o in recados:
+        o["anexos"] = anexos.get(o["id"], [])
+    return recados
+
+
+@app.get("/api/paineis/operacao/observacoes")
+def observacoes_do_card(numero_os: int = Query(..., ge=1),
+                        usuario: dict = Depends(auth.requer_tela("PNL_1.1"))):
+    """As observacoes do card, SEM passar pelo Harmonit.
+
+    🚨 ESTA ROTA EXISTE PORQUE AS OBSERVACOES DEPENDIAM DO ERP, e nao deviam.
+    Elas pegavam carona no `GET .../ficha`, que devolve **502** quando a ponte
+    cai -- e a tela entao dizia *"Nenhuma observacao ainda."* sobre dado que e
+    NOSSO e esta no nosso banco. Era a tela mentindo por falha de terceiro.
+
+    ⚠️ A ficha CONTINUA devolvendo `observacoes`, por dois motivos: o card
+    aberto ja faz uma ida ao ERP e ler junto nao custa nada quando da certo, e
+    nenhum chamador existente quebra. O que muda e haver um caminho que nao
+    depende do ERP -- a tela usa este quando a ficha falha.
+    """
+    return {"numero_os": numero_os,
+            "observacoes": _recados_com_anexos(numero_os)}
+
+
 @app.get("/api/paineis/operacao/ficha")
 def ficha_do_card(numero_os: int = Query(..., ge=1),
                   usuario: dict = Depends(auth.requer_tela("PNL_1.1"))):
@@ -5583,12 +5615,9 @@ def ficha_do_card(numero_os: int = Query(..., ge=1),
     # 🔵 As observacoes do painel (Bloco F) vao na mesma leitura: o card aberto
     # ja faz uma ida ao ERP, e uma segunda chamada para ler o nosso proprio
     # banco seria ida por nada.
-    ficha["observacoes"] = passagem.observacoes(numero_os)
-    # 🔵 04/11: cada recado leva os seus anexos. ⚠️ UMA consulta para a lista
-    # toda, e o `caminho` de disco NÃO sai daqui -- a tela baixa pelo id.
-    anexos = passagem.anexos_de([o["id"] for o in ficha["observacoes"]])
-    for o in ficha["observacoes"]:
-        o["anexos"] = anexos.get(o["id"], [])
+    # ⚠️ E a mesma funcao que a rota `/observacoes` usa -- duas leituras do
+    # mesmo dado em dois lugares divergiriam na primeira mudanca.
+    ficha["observacoes"] = _recados_com_anexos(numero_os)
     ficha["prioridades"] = passagem.PRIORIDADES
     ficha["chamado"] = None
     if linha:

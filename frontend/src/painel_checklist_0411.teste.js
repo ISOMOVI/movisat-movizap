@@ -348,12 +348,24 @@ describe('os recados em modal (Área D)', () => {
     expect(sistema.findAll('.recado__linha').length).toBe(3)
   })
 
-  it('🚨 o anexo vira link pelo ID, nunca pelo caminho de disco', async () => {
+  it('🚨 o anexo é pedido pelo ID, nunca pelo caminho de disco', async () => {
+    /* ⚠️ ESTA TRAVA MUDOU DE ALVO EM 05/11, e nao de regra. Ela exigia um
+       `<a href>` -- e o `<a href>` era o DEFEITO: a rota do anexo e protegida
+       por `Bearer` sem nenhum outro caminho, e navegacao de link **nao manda
+       cabecalho `Authorization`**. Todo clique era **401**: o arquivo subia e
+       nunca voltava. ⚠️ Ninguem notou porque `os_observacao_arquivo` tinha
+       ZERO linhas -- o furo estava no caminho de volta, nunca percorrido.
+       🚨 A REGRA QUE IMPORTA CONTINUA INTEIRA, e e esta: o que identifica o
+       anexo e o ID, e o `caminho` de disco nao aparece em lugar nenhum. */
     const tela = await montar()
     await abrirRecados(tela)
-    const link = tela.find('.recado__anexos a')
-    expect(link.attributes('href')).toBe('/api/paineis/operacao/anexo/5')
-    expect(link.text()).toContain('nota.pdf')
+    const botao = tela.find('.recado__anexos .recado__anexo')
+    expect(botao.exists()).toBe(true)
+    expect(botao.element.tagName).toBe('BUTTON')
+    expect(botao.text()).toContain('nota.pdf')
+    /* 🚨 e nada no DOM carrega o caminho de disco */
+    expect(tela.html()).not.toContain('/home/claude')
+    expect(tela.find('.recado__anexos a').exists()).toBe(false)
   })
 
   it('⚠️ diz que o anexo NÃO tem backup', async () => {

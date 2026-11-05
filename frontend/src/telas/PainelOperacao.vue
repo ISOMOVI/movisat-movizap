@@ -171,11 +171,24 @@ async function abrirCard(card) {
   const f = api.get(
     `/api/paineis/operacao/ficha?numero_os=${card.numero_ordem}`)
     .then((r) => { ficha.value = r })
-    .catch((e) => {
+    .catch(async (e) => {
       /* 🚨 FICHA VAZIA SERIA PIOR QUE ERRO: ela é indistinguível de uma OS sem
          dados, e o operador concluiria que não há o que ver. */
       erroDaFicha.value = e instanceof ErroDeApi
         ? e.message : 'Não deu para ler a OS no Harmonit agora.'
+      /* 🚨 MAS AS OBSERVACOES SAO NOSSAS, e nao podem sumir junto. Elas vinham
+         de carona nesta ficha, que vai ao ERP -- entao uma falha do Harmonit
+         fazia a tela dizer *"Nenhuma observacao ainda"* sobre recados que
+         estao no nosso banco. A rota `/observacoes` existe para isto e nao
+         depende da ponte. */
+      try {
+        const r = await api.get(
+          `/api/paineis/operacao/observacoes?numero_os=${card.numero_ordem}`)
+        ficha.value = { observacoes: r.observacoes || [], soNosso: true }
+      } catch {
+        /* ⚠️ Se nem o nosso banco responder, a ficha fica nula e o modal diz o
+           erro da ponte -- que e a verdade disponivel. */
+      }
     })
     .finally(() => { lendoFicha.value = false })
 
@@ -1224,7 +1237,8 @@ onBeforeUnmount(() => {
       </div>
 
       <!-- ============ OS RECADOS, EM MODAL (Área D) ============ -->
-      <div v-if="recadosAbertos && cardAberto" class="modal" role="dialog"
+      <div v-if="recadosAbertos && cardAberto"
+           class="modal modal--recados" role="dialog"
            aria-modal="true" aria-label="Observações do card"
            @click.self="fecharRecados">
         <div ref="caixaDosRecados" tabindex="-1" class="modal__caixa">
@@ -1276,7 +1290,8 @@ onBeforeUnmount(() => {
       </div>
 
       <!-- ============ O AVISO AO ENTRAR NA ETAPA (Área B) ============ -->
-    <div v-if="avisoDaEtapa" class="modal" role="dialog" aria-modal="true"
+    <div v-if="avisoDaEtapa" class="modal modal--aviso" role="dialog"
+         aria-modal="true"
          aria-label="Aviso da etapa">
       <div ref="caixaDoAviso" tabindex="-1" class="modal__caixa modal__caixa--curta">
         <header class="modal__topo">
@@ -1874,6 +1889,18 @@ onBeforeUnmount(() => {
    por dentro: com a roda do mouse sobre o corpo, qual das duas se movia
    dependia de onde o cursor estava. Agora o palco CENTRALIZA e nao rola; quem
    rola e so o corpo. */
+/* 🚨 O EMPILHAMENTO E EXPLICITO, e isto era o defeito que ele via como
+   *"as observacoes nao estao abrindo"*. Os tres dialogos sao IRMAOS no mesmo
+   contexto de empilhamento e usavam o MESMO `z-index` -- e com `z-index`
+   empatado o desempate e a ORDEM DO DOCUMENTO. O card aberto e o ultimo do
+   template, entao pintava por cima: o modal das observacoes abria de verdade,
+   ficava focado, recebia `Escape`, e era INVISIVEL atras do card.
+   ⚠️ Por que nao bastou reordenar o template: a ordem resolveria hoje e
+   voltaria a quebrar no dia em que alguem movesse um bloco. A ordem agora e
+   DECLARADA, e ela e a mesma que o `Escape` ja segue -- card, recados, aviso.
+   ⚠️ E nenhum teste de tela alcanca isto: o jsdom nao faz layout nem pintura,
+   e um modal 100% coberto passa como "aberto". Quem confere e o
+   `scripts/conferir_css_publicado.mjs`. */
 .modal {
   position: fixed; inset: 0; z-index: var(--z-modal, 50);
   background: rgba(2, 21, 41, .45);
@@ -2228,6 +2255,10 @@ onBeforeUnmount(() => {
    dialogo e centralizado e o pe esta sempre visivel.
    ⚠️ O que fica e so o respiro lateral em tela estreita. */
 .modal { padding: var(--e-4) var(--e-3); }
+/* Os recados abrem DE DENTRO do card aberto, e o aviso de etapa por cima dos
+   dois -- a mesma ordem da pilha de foco e do `Escape`. */
+.modal--recados { z-index: calc(var(--z-modal, 50) + 10); }
+.modal--aviso { z-index: calc(var(--z-modal, 50) + 20); }
 .card__ha { font-size: var(--txt-xs); color: var(--texto-fraco); }
 /* 🔵 O CLIENTE E A PRIMEIRA LINHA e o maior texto do card (variante C):
    e por ele que a operacao pensa, e os identificadores vem depois.

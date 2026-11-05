@@ -119,12 +119,44 @@ function osTokensDeSistemaEstaoNoRoot(css) {
   }
 }
 
+/* ------------------------------------------------------------------ 4 */
+function osTresDialogosNaoEmpatamNoZIndex(css) {
+  /* 🚨 O DEFEITO DE 05/11 que ele viu como "as observações não estão
+     abrindo": os três diálogos do painel são IRMÃOS no mesmo contexto de
+     empilhamento e usavam o MESMO `z-index`. Com empate, o desempate é a
+     ORDEM DO DOCUMENTO — e o card aberto é o último do template, então
+     pintava por cima. O modal das observações abria, ficava focado, recebia
+     `Escape`, e era INVISÍVEL.
+     ⚠️ E nenhum teste de tela alcança isto: o jsdom não faz layout nem
+     pintura, e um modal 100% coberto passa como "aberto". */
+  const base = regra(css, '.modal')
+  if (!base) return falhar('.modal não existe no CSS publicado.')
+  if (!prop(base.corpo, 'z-index')) {
+    falhar('.modal não declara z-index — os diálogos voltariam a empatar.')
+  }
+  for (const [sel, soma] of [['.modal--recados', 10], ['.modal--aviso', 20]]) {
+    const r = regra(css, sel)
+    if (!r) {
+      falhar(`${sel} não existe no CSS publicado. Sem ele o diálogo empata `
+             + 'com o card aberto e desaparece atrás dele.')
+      continue
+    }
+    const z = prop(r.corpo, 'z-index')
+    if (!z || !z.includes(`+ ${soma}`)) {
+      falhar(`${sel} z-index = ${z} — tem de somar ${soma} ao --z-modal, `
+             + 'senão a ordem de empilhamento volta a depender da ordem do '
+             + 'template.')
+    }
+  }
+}
+
 /* ------------------------------------------------------------------ */
 const css = cssPublicado()
 if (!erros.length) {
   oDialogoDoPainelNaoHerdaOTeto(css)
   oPainelVemDepoisDasRegrasAntigas(css)
   osTokensDeSistemaEstaoNoRoot(css)
+  osTresDialogosNaoEmpatamNoZIndex(css)
 }
 
 if (erros.length) {
@@ -132,5 +164,5 @@ if (erros.length) {
   erros.forEach((e, i) => console.error(`  ${i + 1}. ${e}\n`))
   process.exit(1)
 }
-console.log('CSS publicado: as 3 conferências passaram '
-            + '(teto do diálogo, ordem da cascata, tokens no :root)')
+console.log('CSS publicado: as 4 conferências passaram (teto do diálogo, '
+            + 'ordem da cascata, tokens no :root, empilhamento dos diálogos)')
