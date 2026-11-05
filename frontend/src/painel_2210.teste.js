@@ -348,42 +348,7 @@ describe('🚨 o que não tem coluna é DITO, não escondido (M12)', () => {
     expect(tela.find('.aviso--atencao').exists()).toBe(false)
   })
 
-  it('solicitação sem OS aparece como número, e sem acusar ninguém', async () => {
-    /* 🚨 ESTE TESTE GUARDAVA O DEFEITO. Ele exigia a palavra "Harmonit" na
-       frase -- isto é, exigia que a tela dissesse *"a escrita no Harmonit
-       falhou"* para toda solicitação sem OS. Ele leu isso na tela em 29/10 e
-       estava errado: a solicitação 544 nunca teve escrita tentada.
-       ⚠️ O número continua sendo dito, que é o que este teste nasceu para
-       guardar (`M12`). O que saiu é a CAUSA inventada. */
-    const tela = await abrir(quadro({
-      fora: { sem_os: 3, situacao_fora: 0, situacoes: [] },
-    }))
-    /* ⚠️ Sem `sem_tentativa` nem `os_falhou`, os 3 sem OS caem na SOBRA --
-       "sem motivo registrado" -- que e a frase honesta para o caso em que nao
-       se sabe por que o chamado nao tem OS. */
-    const aviso = tela.find('.aviso--fora')
-    expect(aviso.text()).toContain('3 sem OS e sem motivo registrado')
-    expect(aviso.text()).not.toContain('Harmonit')
-    expect(aviso.text()).toContain('Solicitações')
-  })
 
-  it('situação fora das 17 aparece com o NÚMERO CRU', async () => {
-    const tela = await abrir(quadro({
-      fora: {
-        sem_os: 0, situacao_fora: 2, situacoes: [0, 99999],
-        fora_quais: [{ numero_os: 17050, situacao_id: 0 },
-                     { numero_os: 17051, situacao_id: 99999 }],
-      },
-    }))
-    /* 🔵 Ele, 29/10: *"1 com situação fora das 17 (0)"* -> *"pq deu erro?"*.
-       A contagem nao dizia QUAL OS nem DE QUEM era a situacao. Agora nomeia a
-       OS e diz que o numero vem do Harmonit -- nao e defeito nosso. */
-    const aviso = tela.find('.aviso--fora')
-    expect(aviso.text()).toContain('a OS 17050 está em situação 0 no Harmonit')
-    expect(aviso.text()).toContain('a OS 17051 está em situação 99999')
-    // ⚠️ O número cru, nunca um rótulo inventado.
-    expect(aviso.text()).toContain('99999')
-  })
 })
 
 describe('o card', () => {
@@ -557,70 +522,9 @@ describe('a falha de abertura de OS', () => {
     expect(tela.text()).not.toContain('não abriram')
   })
 
-  it('diz quantas OS nao abriram e em quantos chamados', async () => {
-    const tela = await abrir(quadro({
-      fora: {
-        sem_os: 0, situacao_fora: 0, situacoes: [],
-        os_falhou: 3, os_falhou_chamados: 2,
-        os_falhou_em: '2026-10-29T15:40:00-03:00',
-      },
-    }))
-    const aviso = tela.find('.aviso--fora')
-    expect(aviso.text()).toContain('3 OS não abriram')
-    expect(aviso.text()).toContain('2 chamados')
-    expect(aviso.text()).toContain('última tentativa')
-  })
 
-  it('fala no singular quando e uma so', async () => {
-    const tela = await abrir(quadro({
-      fora: {
-        sem_os: 0, situacao_fora: 0, situacoes: [],
-        os_falhou: 1, os_falhou_chamados: 1, os_falhou_em: null,
-      },
-    }))
-    const aviso = tela.find('.aviso--fora')
-    expect(aviso.text()).toContain('1 OS não abriu')
-    expect(aviso.text()).toContain('1 chamado')
-    /* ⚠️ Sem hora, a tela não inventa uma. */
-    expect(aviso.text()).not.toContain('última tentativa')
-  })
 
-  it('convive com as outras contas, sem engolir nenhuma', async () => {
-    /* ⚠️ Aqui os 2 sem OS JÁ ESTÃO EXPLICADOS pelos 3 chamados com falha, e
-       por isso não ganham frase própria -- repeti-los seria contar o mesmo
-       chamado duas vezes na mesma linha. */
-    const tela = await abrir(quadro({
-      fora: {
-        sem_os: 2, situacao_fora: 1, situacoes: [99999],
-        os_falhou: 4, os_falhou_chamados: 3, os_falhou_em: null,
-        sem_tentativa: 0,
-      },
-    }))
-    const texto = tela.find('.aviso--fora').text()
-    expect(texto).toContain('4 OS não abriram')
-    expect(texto).toContain('1 com situação fora das 17')
-    expect(texto).toContain('99999')
-    expect(texto).not.toContain('sem motivo registrado')
-  })
 
-  it('a SOBRA ganha frase propria, em vez de desaparecer', async () => {
-    /* 🚨 O BURACO QUE ESTA FRASE TAPA: uma linha de `solicitacao_os` preparada
-       e nunca tentada (`os_id` nulo E `erro` nulo) não cai em "nunca se
-       tentou" nem em "falhou". Sem esta sobra, aquele chamado desapareceria
-       entre as duas frases -- o mesmo defeito que ele achou, mais fundo. */
-    const tela = await abrir(quadro({
-      fora: {
-        sem_os: 5, situacao_fora: 0, situacoes: [],
-        os_falhou: 1, os_falhou_chamados: 1, os_falhou_em: null,
-        sem_tentativa: 2,
-      },
-    }))
-    const texto = tela.find('.aviso--fora').text()
-    /* 5 sem OS - (2 nunca tentados + 1 com falha) = 2 sem explicação. */
-    expect(texto).toContain('2 sem OS e sem motivo registrado')
-    expect(texto).toContain('2 chamados ainda sem OS')
-    expect(texto).toContain('1 OS não abriu')
-  })
 })
 
 /* ============================================================================
@@ -639,39 +543,8 @@ describe('sem OS: aguardando nao e falha', () => {
   const vazio = { sem_os: 0, situacao_fora: 0, situacoes: [], os_falhou: 0,
                   os_falhou_chamados: 0, os_falhou_em: null, sem_tentativa: 0 }
 
-  it('nao acusa o Harmonit quando ninguem tentou escrever', async () => {
-    const tela = await abrir(quadro({
-      fora: { ...vazio, sem_os: 1, sem_tentativa: 1 },
-    }))
-    const aviso = tela.find('.aviso--fora')
-    /* 🚨 A frase do defeito NÃO pode voltar. */
-    expect(aviso.text()).not.toContain('falhou')
-    expect(aviso.text()).toContain('1 chamado ainda sem OS')
-    expect(aviso.text()).toContain('antes de a abertura automática entrar')
-    /* 🚨 E NEM A CARA DE ATENCAO: nada falhou, entao a linha e NOTA. Foi o
-       triangulo que fez ele perguntar *"pq deu erro?"*. */
-    expect(aviso.classes()).toContain('aviso--nota')
-    expect(aviso.classes()).not.toContain('aviso--atencao')
-  })
 
-  it('diz falha quando a escrita falhou de verdade', async () => {
-    const tela = await abrir(quadro({
-      fora: { ...vazio, os_falhou: 2, os_falhou_chamados: 1 },
-    }))
-    const aviso = tela.find('.aviso--atencao')
-    expect(aviso.text()).toContain('2 OS não abriram')
-    expect(aviso.text()).not.toContain('antes de a abertura')
-  })
 
-  it('separa os dois quando existem ao mesmo tempo', async () => {
-    const tela = await abrir(quadro({
-      fora: { ...vazio, sem_os: 1, sem_tentativa: 1,
-              os_falhou: 3, os_falhou_chamados: 2 },
-    }))
-    const texto = tela.find('.aviso--atencao').text()
-    expect(texto).toContain('1 chamado ainda sem OS')
-    expect(texto).toContain('3 OS não abriram')
-  })
 
   it('com zero nos dois, nao escreve nada', async () => {
     const tela = await abrir(quadro({ fora: { ...vazio } }))
@@ -707,14 +580,6 @@ describe('a ponte do FPSL', () => {
 })
 
 describe('a data matriz e o interruptor', () => {
-  it('a tela diz desde quando monta', async () => {
-    /* 🚨 "O painel está vazio" e "o painel começa em 24/10" são respostas
-       diferentes para a mesma tela vazia. */
-    const dados = quadro()
-    dados.desde = '2026-10-24'
-    const tela = await abrir(dados)
-    expect(tela.text()).toContain('desde 24/10/2026')
-  })
 
   it('o interruptor das finalizadas nasce LIGADO', async () => {
     const tela = await abrir(quadro())
@@ -1041,6 +906,23 @@ describe('o filtro e a ordem', () => {
     expect(tela.find('.painel__limpar').exists()).toBe(true)
   })
 })
+
+/* ============================================================================
+   🚨 AS NOVE TRAVAS DO `aviso--fora` E DO RESUMO SAIRAM EM 05/11, e nao por estarem erradas
+   ----------------------------------------------------------------------------
+   🔵 Ele tirou as duas linhas da tela: *"tire esses comentarios da tela"*. As
+   oito do `aviso--fora` prendiam a REDACAO daquela frase -- o plural de *"1 chamados"*, os tres casos
+   de *"sem OS"* (nunca tentado x falhou x sem solicitacao), e a sobra que nao
+   podia desaparecer entre as contas. Sem a frase, nao tinham assunto.
+   ⚠️ O DADO CONTINUA NA ROTA (`quadro.fora_do_quadro`), e o que se perdeu foi a
+   prova de que ele e REDIGIDO direito. Se a informacao voltar a aparecer em
+   algum lugar da tela, estas travas voltam com ela -- estao no git, no commit
+   anterior a este.
+   ⚠️ A nona era *"a tela diz desde quando monta"*, do resumo do cabecalho: ela
+   prendia a frase *"desde 24/10/2026"*, que saiu junto. A data matriz continua
+   sendo decisao dele e continua testada no backend -- o que saiu foi a tela
+   DIZE-LA.
+   ============================================================================ */
 
 /* ============================================================================
    OS DOIS TEMPOS NO CARD FECHADO — Bloco C

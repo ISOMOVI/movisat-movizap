@@ -314,66 +314,6 @@ function verNaFRM(card) {
   router.push({ path: '/solicitacoes', query: { solicitacao: card.id } })
 }
 
-/* 🚨 O QUE NÃO TEM COLUNA, DITO EM UMA LINHA -- e só quando existe.
-   Solicitação sem OS (a escrita no Harmonit falhou) ou com situação fora das
-   17 não cabe em coluna nenhuma, e sumir da tela é o defeito que esta casa
-   chama de `M12`. Com zero, esta linha não aparece: hoje o painel fica limpo,
-   que é o que ele pediu em 29/10. */
-const fora = computed(() => {
-  const f = quadro.value?.fora_do_quadro
-  if (!f || (!f.sem_os && !f.situacao_fora && !f.os_falhou
-             && !f.sem_tentativa)) return ''
-  const partes = []
-  /* 🚨 "SEM OS" SÃO TRÊS CASOS, E A TELA CHAMAVA TODOS DE FALHA -- achado por
-     ele em 29/10, na tela, minutos depois de o painel subir: a solicitação
-     544 nunca teve escrita tentada (é de 13:06, e o Bloco A subiu às 15:30),
-     e a frase a acusava de erro do Harmonit.
-
-     ⚠️ A ORDEM É DELIBERADA: o caso benigno primeiro, o que pede ação depois,
-     e a sobra no fim. E a sobra EXISTE de propósito -- uma linha preparada e
-     nunca tentada não cai em nenhuma das duas contas, e deixá-la desaparecer
-     entre as frases seria o mesmo defeito outra vez, mais fundo. */
-  if (f.sem_tentativa) {
-    /* 🔵 Ele, 29/10, lendo "1 chamado sem OS": *"pq deu erro? o que falta?"*.
-       NADA havia falhado -- era o chamado dele, enviado antes de a abertura
-       automática existir. A frase contava em vez de identificar, e contagem
-       sem número não responde "qual?". */
-    /* 🚨 O PLURAL NAO PODE DEPENDER DA LISTA DE NUMEROS, e foi o defeito que
-       a trava pegou: a frase dizia "1 chamados" quando o numero do chamado nao
-       vinha (acontece acima de 5 itens, ou se o servidor nao mandar a lista).
-       Um e singular com lista ou sem. */
-    const quais = (f.sem_tentativa_quais || []).join(', ')
-    const um = f.sem_tentativa === 1
-    partes.push(
-      (um ? (quais ? `o chamado ${quais} ainda não tem OS`
-                   : '1 chamado ainda sem OS')
-          : `${f.sem_tentativa} chamados ainda sem OS`
-            + (quais ? ` (${quais})` : ''))
-      + (um ? ' (foi enviado' : ', enviados')
-      + ' antes de a abertura automática entrar)'.slice(um ? 0 : 1))
-  }
-  if (f.os_falhou) {
-    partes.push(`${f.os_falhou} ${f.os_falhou === 1 ? 'OS não abriu' : 'OS não abriram'}`
-      + ` em ${f.os_falhou_chamados} ${f.os_falhou_chamados === 1 ? 'chamado' : 'chamados'}`
-      + (f.os_falhou_em ? ` (última tentativa ${quando(f.os_falhou_em)})` : ''))
-  }
-  const explicados = (f.sem_tentativa || 0) + (f.os_falhou_chamados || 0)
-  if (f.sem_os > explicados) {
-    partes.push(`${f.sem_os - explicados} sem OS e sem motivo registrado`)
-  }
-  if (f.situacao_fora) {
-    /* 🚨 A SITUAÇÃO VEM DO ERP, e dizer isso é o ponto: a OS está em `0` no
-       Harmonit, e `0` não é uma das 17. Não é defeito nosso, e a frase antiga
-       ("1 com situação fora das 17") fazia parecer que era. */
-    const quais = f.fora_quais || []
-    partes.push(quais.length
-      ? quais.map((o) => `a OS ${o.numero_os} está em situação `
-          + `${o.situacao_id} no Harmonit, que não é uma das 17`).join(' · ')
-      : `${f.situacao_fora} com situação fora das 17`
-        + (f.situacoes.length ? ` (${f.situacoes.join(', ')})` : ''))
-  }
-  return partes.join(' · ')
-})
 
 function quando(iso) {
   if (!iso) return '—'
@@ -924,15 +864,14 @@ onBeforeUnmount(() => {
     <header class="tela__cabecalho">
       <div class="cabecalho__identidade">
         <h1>Operação</h1>
-        <!-- ⚠️ UMA linha de resumo, com o número MEDIDO e desde quando -- como
-             no mockup. "O painel está vazio" e "o painel começa em 24/10" são
-             respostas diferentes para a mesma tela vazia. -->
-        <p v-if="quadro" class="cabecalho__resumo">
-          <strong>{{ quadro.total }}</strong>
-          {{ quadro.total === 1 ? 'OS' : 'OS' }} nas 17 situações do Harmonit,
-          desde {{ dia(quadro.desde) }}
-          <template v-if="!quadro.so_abertas"> · incluindo as finalizadas</template>
-        </p>
+        <!-- 🔵 05/11, ele: *"tire esses comentarios da tela"*. Saiu a linha de
+             resumo (*"40 OS nas 17 situacoes do Harmonit, desde 24/10/2026"*).
+             ⚠️ O DADO NAO SUMIU: `quadro.total` e `quadro.desde` continuam vindo
+             do servidor, e o numero por etapa continua escrito no cabecalho de
+             CADA coluna -- que e onde ele serve para decidir alguma coisa.
+             🚨 E e a segunda vez que ele tira texto explicativo desta tela: em
+             29/10 sairam outros tres. A regua e a dele --
+             *"atrapalha o profissionalismo"*. -->
         <AjudaDaTela>
           O card é a <strong>OS</strong>, de qualquer origem — formulário, FPSL,
           painel ou aberta à mão —, em colunas nas
@@ -1014,9 +953,6 @@ onBeforeUnmount(() => {
            situação 0. O triângulo e o estilo de atenção diziam "problema", e
            a pessoa vai procurar um erro que não existe. Falha de abertura de
            OS é problema; o resto é nota. -->
-      <!-- ⚠️ `aviso--fora` existe para quem TESTA poder apontar para ESTA
-           linha: a tela tem tres `.aviso` (erro de leitura, ponte caida, e
-           esta), e um seletor generico pega a primeira do DOM. -->
       <!-- 🚨 QUADRO FILTRADO QUE NÃO DIZ QUE ESTÁ FILTRADO é a mesma família
            do `M12`: alguém abre o painel, vê 1 card e conclui que a operação
            está vazia. -->
@@ -1033,14 +969,17 @@ onBeforeUnmount(() => {
         </span>
       </p>
 
-      <p v-if="fora" class="aviso aviso--fora"
-         :class="quadro.fora_do_quadro.os_falhou ? 'aviso--atencao' : 'aviso--nota'"
-         role="status">
-        <i class="aviso__icone" aria-hidden="true"
-           :class="quadro.fora_do_quadro.os_falhou
-                     ? 'bi bi-exclamation-triangle' : 'bi bi-info-circle'"></i>
-        <span>{{ fora }} — abra em <strong>Solicitações</strong>.</span>
-      </p>
+      <!-- 🔵 05/11, ele: *"tire esses comentarios da tela"*. Saiu a linha de
+           `fora_do_quadro` -- *"o chamado 544 ainda nao tem OS... a OS 17089
+           esta em situacao 0 no Harmonit... - abra em Solicitacoes"*.
+           🚨 O DADO CONTINUA NA ROTA: `quadro.fora_do_quadro` traz `sem_os`,
+           `situacao_fora`, `os_falhou`, `sem_tentativa`, `sem_tentativa_quais`
+           e `fora_quais`. Quem quiser a informacao de volta nao precisa de rota
+           nova -- precisa de um lugar que nao seja uma frase comprida no alto
+           do quadro.
+           ⚠️ Sairam junto o `fora` (computed, ficou sem chamador) e NOVE travas
+           do `painel_2210.teste.js`, que prendiam a REDACAO dessa frase.
+           Estao no git, no commit anterior. -->
 
       <!-- 🔵 29/10, ele: *"os comentários tbm devem sumir dali"*. Saíram os
            três textos que ficavam aqui -- o aviso de que mover não existe, a
@@ -1683,7 +1622,6 @@ onBeforeUnmount(() => {
   gap: var(--e-3); margin-bottom: var(--e-4);
 }
 .cabecalho__identidade { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-.cabecalho__resumo { margin: 0; font-size: var(--txt-sm); color: var(--texto-fraco); }
 .cabecalho__controles {
   display: flex; flex-wrap: wrap; align-items: center; gap: var(--e-2);
 }
