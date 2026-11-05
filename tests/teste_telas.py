@@ -142,8 +142,14 @@ class TestIntegridadeDoRegistro:
             # se gasta, valor e PDF, e que por regra não muda de conteúdo
             # depois de sair. Pendurá-lo em ATD misturaria "falou com o
             # técnico" e "emitiu documento para o técnico".
+            # TEC entrou em 04/11 com a ficha do técnico: técnico não é
+            # conversa (ATD), não é o cadastro de clientes e contatos (CAD) e
+            # não é documento emitido (ORC) -- é cadastro de PRESTADOR, com
+            # credenciamento, tabela de preço e um endereço fixo que a
+            # calculadora de KM consome. Pendurá-lo em CAD misturaria "quem
+            # compra" e "quem executa".
             assert modulo in {"INI", "EML", "ATD", "CAD", "CFG", "LIG", "REL",
-                              "FRM", "PNL", "ORC"}, t["codigo"]
+                              "FRM", "PNL", "ORC", "TEC"}, t["codigo"]
             assert numero, t["codigo"]
             for parte in numero.split("."):
                 assert parte.isdigit(), f"{t['codigo']}: parte não numérica"
@@ -324,7 +330,18 @@ class TestPortaDoConfig:
         # (CNPJ, endereço, valor) de quem ainda não é cliente. O admin a vê
         # porque tem `equipe`, e por isso vem nomeada aqui: o conjunto segue
         # FECHADO, e é esta linha que muda quando a decisão dele muda.
-        esperado = de_atendimento | {"ATD_1.3", "ATD_5.1", "FRM_1.1",
+        # 🔵 04/11: a TEC_1.2 nasceu `equipe` por decisão dele sobre a tela
+        # de técnicos -- *"Ler todo atendente, escrever owner e admin"*. Ela
+        # não é tela: é a CHAVE que as rotas de gravar ficha, preço e
+        # credenciamento exigem, e está aqui porque `equipe` é o que a torna
+        # de owner + admin. A TEC_1.1, que é a tela de verdade, entra sozinha
+        # por `de_atendimento`.
+        #
+        # ⚠️ EFEITO COLATERAL, ANOTADO ONDE SE VÊ: `equipe` agora significa
+        # três coisas (Times/Atendentes, Fila/Histórico/Solicitações e preço de
+        # técnico). Hoje é o mesmo conjunto de pessoas; separar é decisão dele,
+        # e aí nasce permissão própria.
+        esperado = de_atendimento | {"ATD_1.3", "ATD_5.1", "FRM_1.1", "TEC_1.2",
                                      "CAD_2.1", "CAD_2.2", "CFG_10.1", "CFG_11.1",
                                      "CFG_12.1"}
         assert vistas == esperado

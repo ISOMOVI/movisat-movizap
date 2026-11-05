@@ -39,7 +39,16 @@ LOGO = Path(__file__).parent.parent / "frontend" / "public" / "movisat-logo.png"
 # por `/Produto/ObterServicos` -- e os ids são os mesmos que o Painel
 # Financeiro do FPSL já usa (PAGAMENTO=653939, KM=6971). Ficam gravados aqui
 # de propósito: emitir orçamento não pode depender do Harmonit responder.
-CATALOGO = [
+#
+# 🚨 CHAMAVA-SE `CATALOGO` ATÉ 04/11, e o nome mudou porque ele deixou de ser o
+# catálogo todo: agora é a parte FIXA, e os serviços da ficha do técnico entram
+# por cima (ver `catalogo()`). Renomear foi deliberado -- um `CATALOGO` que não
+# é o catálogo seria a próxima pessoa lendo errado.
+#
+# ⚠️ ESTES DOIS NUNCA SAEM DA LISTA, e é decisão dele: *"os da ficha + as duas de
+# sempre"*. Quem não tem preço cadastrado continua emitindo exatamente como
+# emitia -- e em 04/11 isso valia para TODOS os técnicos (287 fichas, 0 preços).
+CATALOGO_FIXO = [
     {"servico": "KM DESLOCAMENTO", "harmonit_id": 6971, "unidade": "km"},
     {"servico": "PAGAMENTO DE TECNICO", "harmonit_id": 653939, "unidade": "un"},
 ]
@@ -50,9 +59,57 @@ class SemNumeracao(RuntimeError):
     """A chave da numeração sumiu do `config`. Não se inventa número."""
 
 
-def catalogo() -> list[dict]:
-    """Os serviços que o modal oferece. Lista fechada, por decisão dele."""
-    return [dict(i) for i in CATALOGO]
+def catalogo(tecnico_contato_id: int | None = None) -> list[dict]:
+    """Os serviços que o modal oferece: as duas fixas + os da ficha do técnico.
+
+    🔵 04/11. A premissa que destravou isto é dele: *"o orçamento não vai ao
+    cliente, somente ao técnico."* Então o papel é o acerto do que será pago, e o
+    custo cadastrado na ficha pode preencher a linha -- não há margem a proteger.
+
+    🚨 AS DUAS FIXAS VÊM PRIMEIRO, E SEMPRE. `linhaNova()` no modal usa
+    `catalogo[0]`, então a primeira linha continua nascendo `KM DESLOCAMENTO`
+    como antes. E é isto que garante que ninguém perca a capacidade de emitir:
+    técnico sem preço na ficha -- que em 04/11 eram todos -- recebe a mesma lista
+    de sempre.
+
+    ⚠️ SEM `tecnico_contato_id`, A RESPOSTA É IDÊNTICA À DE ANTES de 04/11. A
+    rota passa a conversa quando a tem; não ter conversa não é erro.
+
+    ⚠️ A FALHA DE LEITURA DA FICHA NÃO DERRUBA O CATÁLOGO. Se a consulta dos
+    preços estourar, o modal ainda abre com as duas fixas: perder o atalho é
+    aceitável, não poder emitir não é.
+    """
+    itens = [dict(i) for i in CATALOGO_FIXO]
+    if not tecnico_contato_id:
+        return itens
+
+    # Import tardio para não acoplar o módulo do documento ao da ficha no
+    # carregamento -- e porque só este caminho precisa dela.
+    from . import tecnico_ficha
+
+    try:
+        da_ficha = tecnico_ficha.precos_para_orcamento(tecnico_contato_id)
+    except Exception:
+        log.exception("catalogo: nao consegui ler os precos do tecnico %s",
+                      tecnico_contato_id)
+        return itens
+
+    fixos = {i["servico"] for i in itens}
+    for item in da_ficha:
+        # ⚠️ Serviço da ficha com o MESMO nome de uma linha fixa não duplica a
+        # opção: o `<select>` casa por nome, e dois iguais fariam a escolha
+        # depender da ordem. A fixa ganha, porque é a que tem procedência.
+        if item["servico"] in fixos:
+            continue
+        itens.append({"servico": item["servico"],
+                      "unidade": item["unidade"],
+                      "preco_unit_centavos": item["preco_unit_centavos"],
+                      # O valor já escrito, pela mesma régua da aba de
+                      # orçamentos: dividir por 100 na tela seria um segundo
+                      # lugar com outro arredondamento.
+                      "preco_unit": reais(item["preco_unit_centavos"]),
+                      "da_ficha": True})
+    return itens
 
 
 def proximo_numero() -> int:

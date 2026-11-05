@@ -113,9 +113,22 @@ const orcamentoEmitido = ref(null)
 
 function linhaNova() {
   const padrao = catalogo.value[0] || { servico: '', unidade: 'un' }
-  return { servico: padrao.servico, preco_unit: '', quantidade: '1',
-           unidade: padrao.unidade }
+  return { servico: padrao.servico, preco_unit: padrao.preco_unit || '',
+           quantidade: '1', unidade: padrao.unidade,
+           daFicha: padrao.da_ficha === true }
 }
+
+/* 🔵 04/11: o preço do serviço escolhido vem da FICHA do técnico, quando ele o
+   tem cadastrado. A premissa é dele: *"o orçamento não vai ao cliente, somente
+   ao técnico"* — então o papel é o acerto do que será pago, e o custo
+   cadastrado pode preencher a linha.
+
+   ⚠️ PREENCHE, NÃO PRENDE. O campo continua editável: quem monta corrige sem
+   pedir licença, e é o valor enviado que vale.
+
+   🚨 E A CONTA CONTINUA SENDO DO BACKEND. Isto só põe texto num input; quem
+   multiplica preço por quantidade é `orcamento.calcular()`, porque conta que
+   chega pronta do navegador é conta que alguém pode ter editado. */
 
 /* ---- A calculadora de KM (26/10) ------------------------------------------
    🔵 *"proponha no deslocamento uma calculadora km técnico que pode abrir
@@ -170,7 +183,15 @@ function trocarServico(linha) {
   const achado = catalogo.value.find((c) => c.servico === linha.servico)
   // A unidade acompanha o serviço: deslocamento é km, e é isso que faz o PDF
   // imprimir "77,7 km" em vez de "77.7 un".
-  if (achado) linha.unidade = achado.unidade
+  if (!achado) return
+  linha.unidade = achado.unidade
+  linha.daFicha = achado.da_ficha === true
+  /* ⚠️ SÓ PREENCHE O QUE ESTÁ VAZIO ou o que veio da ficha antes: trocar de
+     serviço não pode apagar um valor que a pessoa digitou à mão. Quem limpa o
+     campo e escolhe de novo recebe a sugestão outra vez. */
+  if (achado.preco_unit && !String(linha.preco_unit || '').trim()) {
+    linha.preco_unit = achado.preco_unit
+  }
 }
 
 const totalCentavos = computed(() => linhas.value.reduce((soma, l) => {
@@ -183,9 +204,26 @@ function emReais(centavos) {
   return (centavos / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2 })
 }
 
+/* 🔵 04/11, decisão dele: **preço zero pode ir ao orçamento**. Na ficha do
+   técnico, branco é *"não oferece"* e **zero é cobrar zero** (cortesia) — e essa
+   distinção foi deliberada. Recusar a linha de zero aqui faria a cortesia
+   cadastrada ficar impossível de pôr no papel.
+
+   ⚠️ A QUANTIDADE CONTINUA `> 0`, que é outra coisa: quantidade zero é linha sem
+   sentido, não um fato sobre o preço.
+
+   ⚠️ `Number('')` é 0, então o campo VAZIO passaria — daí o teste de vazio ser
+   explícito, antes da conversão. */
+function precoValido(valor) {
+  const texto = String(valor ?? '').trim()
+  if (!texto) return false
+  const n = Number(texto.replace(',', '.'))
+  return Number.isFinite(n) && n >= 0
+}
+
 const podeEmitir = computed(() =>
   linhas.value.length > 0 &&
-  linhas.value.every((l) => l.servico && Number(String(l.preco_unit).replace(',', '.')) > 0
+  linhas.value.every((l) => l.servico && precoValido(l.preco_unit)
                             && Number(String(l.quantidade).replace(',', '.')) > 0))
 
 async function emitirOrcamento() {
@@ -638,7 +676,11 @@ onBeforeUnmount(() => document.removeEventListener('keydown', aoTeclarNoModal))
 onMounted(() => {
   document.addEventListener('keydown', aoTeclarNoModal)
   if (ehTecnico.value) {
-    api.get('/api/orcamento/catalogo').then((r) => {
+    /* 🚨 A CONVERSA VAI NO PARÂMETRO, e o servidor descobre o técnico dela —
+       é a régua da calculadora de KM: de quem é o preço não vem do navegador.
+       Mandar o id do contato daqui deixaria qualquer um com a tela ler a tabela
+       de preço de outro técnico. */
+    api.get(`/api/orcamento/catalogo?conversa_id=${props.conversaId}`).then((r) => {
       catalogo.value = r.catalogo || []
       proximoNumero.value = r.proximo_numero
       if (!linhas.value.length) linhas.value = [linhaNova()]
@@ -818,8 +860,18 @@ onMounted(() => {
                       </option>
                     </select>
                   </td>
-                  <td><input v-model="l.preco_unit" class="campo__entrada agm__num"
-                             inputmode="decimal" placeholder="0,00" /></td>
+                  <td>
+                    <input v-model="l.preco_unit" class="campo__entrada agm__num"
+                           inputmode="decimal" placeholder="0,00" />
+                    <!-- 🔵 04/11: quem monta precisa saber que o valor é
+                         CADASTRO, não digitação de alguém — e que pode mudá-lo.
+                         Sem isto, um número que aparece sozinho no campo é um
+                         número de origem desconhecida. -->
+                    <span v-if="l.daFicha" class="agm__daficha"
+                          title="Veio da tabela de preço da ficha deste técnico. Pode ser alterado.">
+                      da ficha
+                    </span>
+                  </td>
                   <td>
                     <div class="agm__qtd">
                       <input v-model="l.quantidade" class="campo__entrada agm__num"
@@ -1321,6 +1373,13 @@ onMounted(() => {
 .agm__campo { display: flex; flex-direction: column; gap: var(--e-1); font-size: var(--txt-sm); }
 /* 16px: abaixo disso o iOS dá zoom ao focar (padrão dos quatro painéis). */
 .agm__campo .campo__entrada { font-size: 16px; }
+.agm__daficha {
+  display: block;
+  font-size: .7rem;
+  opacity: .65;
+  margin-top: 2px;
+}
+
 .agm__num { width: 110px; font-size: 16px; }
 .agm__dica { margin: 0; color: var(--texto-fraco); font-size: var(--txt-sm); }
 .agm__linha { display: flex; align-items: center; justify-content: space-between; gap: var(--e-3); }

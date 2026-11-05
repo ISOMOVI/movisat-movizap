@@ -16,8 +16,9 @@ O que estes testes guardam:
     pronto -- falha ao montar o documento não consome número;
   · 🔵 deslocamento é por km: 1,00 x 77,7 km = 77,70, e o PDF escreve
     "77,7 km" (o documento de hoje escreve "77.7 un");
-  · o catálogo é a lista fechada que ele decidiu: deslocamento e pagamento de
-    técnico, com os nomes do Harmonit;
+  · o catálogo tem SEMPRE as duas que ele decidiu em 21/10 (deslocamento e
+    pagamento de técnico, com os nomes do Harmonit) **na frente** -- e desde
+    04/11 ganha, atrás delas, os serviços com preço na ficha daquele técnico;
   · linha sem serviço, quantidade zero e unidade inventada são recusadas.
 """
 import sys
@@ -158,12 +159,30 @@ class TestAConta:
 
 
 class TestOCatalogo:
-    def test_e_a_lista_fechada_que_ele_decidiu(self):
-        """🔵 Decisão 12: só deslocamento e pagamento de técnico."""
+    """🚨 ATÉ 04/11 ESTA CLASSE DIZIA "lista fechada", e deixou de ser verdade.
+
+    🔵 Decisão dele: *"os da ficha + as duas de sempre"*. O que estes testes
+    guardam agora é a parte que **não** pode mudar — as duas fixas sempre lá, na
+    frente, com os ids que o FPSL usa do outro lado.
+    """
+
+    def test_sem_tecnico_sao_exatamente_as_duas(self):
+        """🚨 A GARANTIA DE QUE NINGUÉM PERDE A CAPACIDADE DE EMITIR. Em 04/11
+        havia 287 fichas e **0 preços**: se o catálogo passasse a ser só o da
+        ficha, o modal abriria vazio para todos os técnicos."""
         nomes = [i["servico"] for i in orcamento.catalogo()]
         assert nomes == ["KM DESLOCAMENTO", "PAGAMENTO DE TECNICO"]
 
+    def test_as_duas_fixas_vem_PRIMEIRO(self):
+        """⚠️ `linhaNova()` no modal usa `catalogo[0]`: a primeira linha tem de
+        continuar nascendo `KM DESLOCAMENTO`, como antes."""
+        nomes = [i["servico"] for i in orcamento.catalogo()]
+        assert nomes[0] == "KM DESLOCAMENTO"
+        assert nomes[1] == "PAGAMENTO DE TECNICO"
+
     def test_traz_o_id_do_harmonit_e_a_unidade(self):
+        """Continua valendo PARA AS DUAS FIXAS — é o único lugar do backend que
+        guarda esses dois ids, e o `fechamento.py` do FPSL os reconhece na OS."""
         por_nome = {i["servico"]: i for i in orcamento.catalogo()}
         assert por_nome["KM DESLOCAMENTO"]["harmonit_id"] == 6971
         assert por_nome["KM DESLOCAMENTO"]["unidade"] == "km"
@@ -173,6 +192,11 @@ class TestOCatalogo:
         copia = orcamento.catalogo()
         copia[0]["servico"] = "mexido"
         assert orcamento.catalogo()[0]["servico"] == "KM DESLOCAMENTO"
+
+    def test_tecnico_inexistente_devolve_as_duas_e_nao_estoura(self):
+        """⚠️ Perder o atalho é aceitável; não poder emitir não é."""
+        nomes = [i["servico"] for i in orcamento.catalogo(0)]
+        assert nomes == ["KM DESLOCAMENTO", "PAGAMENTO DE TECNICO"]
 
 
 class TestONumero:

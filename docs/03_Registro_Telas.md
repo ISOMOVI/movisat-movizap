@@ -206,6 +206,8 @@ e duplicá-los quebraria a tela quando o tema mudar.
 | `ORC_1.1` | Orçamentos | `/orcamentos` | `atendimento` | 1 |
 | `CFG_13.1` | Orçamento (numeração) | `/config/orcamento` | `owner` | 1 |
 | `CFG_14.1` | Vínculo dos técnicos | `/config/vinculo-tecnicos` | `owner` | 1 |
+| `TEC_1.1` | Técnicos | `/tecnicos` | `atendimento` | 1 |
+| `TEC_1.2` | Credenciamento de técnicos | `/tecnicos/credenciar` | `equipe` | 1 |
 | `REL_1.1` | Relatórios | `/relatorios` | `owner` | 3 |
 
 🚨 **AS SEIS TELAS `CFG_*` SÃO ABAS DA `CFG_0.1` DESDE 27/08** (decisão do
@@ -269,6 +271,8 @@ O campo **`icone`** deste registro é o que o menu desenha, e ele é **a fonte
 | `ORC_1.1` Orçamentos | `bi-receipt-cutoff` | menu |
 | `CFG_13.1` Orçamento | `bi-receipt` | aba |
 | `CFG_14.1` Vínculo dos técnicos | `bi-person-vcard` | aba |
+| `TEC_1.1` Técnicos | `bi-person-badge` | menu |
+| `TEC_1.2` Credenciamento de técnicos | `bi-patch-check` | aba (sem tela própria) |
 | `ATD_3.1` Informativos | `bi-megaphone` | menu |
 | `FRM_1.1` Solicitações | `bi-ui-checks` | menu |
 | `PNL_1.1` Operação | `bi-kanban` | menu (grupo Painéis) |
@@ -470,8 +474,8 @@ Fixa no rodapé de **toda** tela principal. Modelo mental: barra do Excel / bloc
 | Perfil | Permissões | Telas na prática |
 |---|---|---|
 | `owner` | todas | tudo, inclusive o que é exclusivo do owner |
-| `admin` | `atendimento` `equipe` | as de `atendimento` + `ATD_1.3` `ATD_5.1` `CAD_2.1` `CAD_2.2` `FRM_1.1` (as cinco de `equipe`); no `/config`, só `CFG_10.1`, `CFG_11.1` e `CFG_12.1` (25/09: *"Owner e admin criam"* os Padrões e Formulários) |
-| `atendimento` | `atendimento` | `INI_1.1` `ATD_1.*` `ATD_6.1` `ATD_7.1` `LIG_1.1` `ORC_1.1` `EML_1.1` `CFG_0.1` › `CFG_10.1` `CFG_11.1` `CFG_12.1` |
+| `admin` | `atendimento` `equipe` | as de `atendimento` + `ATD_1.3` `ATD_5.1` `CAD_2.1` `CAD_2.2` `FRM_1.1` `TEC_1.2` (as seis de `equipe`); no `/config`, só `CFG_10.1`, `CFG_11.1` e `CFG_12.1` (25/09: *"Owner e admin criam"* os Padrões e Formulários) |
+| `atendimento` | `atendimento` | `INI_1.1` `ATD_1.*` `ATD_6.1` `ATD_7.1` `LIG_1.1` `ORC_1.1` `TEC_1.1` `EML_1.1` `CFG_0.1` › `CFG_10.1` `CFG_11.1` `CFG_12.1` |
 | `cadastro` | `cadastro` | `CAD_1.1` `CAD_1.2` |
 
 Perfil é conjunto de **permissões**, e a permissão de cada tela vem do registro.
@@ -559,3 +563,47 @@ que o resto da aba usa. Um teste prende isso
 (`tests/teste_pasta_agente.py::test_a_rota_NAO_usa_a_permissao_da_aba`), porque
 trocar a guarda por `requer_tela` abriria a ação para todo atendente **sem
 mudar uma linha da tela**.
+
+## 04/11 — `TEC_1.1` e `TEC_1.2`: a ficha do técnico e a chave da escrita
+
+🔵 Pedido dele: *"no Movizap, abaixo de 'orçamentos' vamos propor uma tela CRUD
+dos tecnicos (...) mas vamos, nessa aba ter uma ficha de cada 1. como no
+formulario de credenciamento (...) Dai o cadastro do tecnico e validação dele
+passará por essa tela."*
+
+| o quê | onde |
+|---|---|
+| a tela | `TEC_1.1`, `/tecnicos`, permissão `atendimento`, grupo **Atendimento**, logo depois da `ORC_1.1` |
+| a chave da escrita | `TEC_1.2`, `aba_de: TEC_1.1`, permissão **`equipe`** — que é exatamente owner + admin |
+| módulo novo | `TEC`, registrado em `GRUPO_PELO_PREFIXO` e em `tests/teste_telas.py` |
+
+🚨 **DUAS TELAS PARA UMA, E O MOTIVO É A DECISÃO DELE:** *"Ler todo atendente,
+escrever owner e admin."* O registro tem um campo `permissao` por tela, então a
+leitura e a escrita precisam de dois códigos. A `TEC_1.2` não desenha tela
+nenhuma: o que ela faz é dar um código para as rotas de gravar ficha, preço e
+credenciamento exigirem.
+
+⚠️ **MAS ELA TEM ROTA NO FRONTEND**, `/tecnicos/credenciar`, que **redireciona**
+para `/tecnicos`. Isto foi achado pela suíte (`teste_router.py`) e não é
+formalidade: `aba_de` esconde do menu e **não** impede alguém de chegar pelo
+endereço, e tela do registro sem rota leva a *"não encontrada"* — o defeito que
+a `ATD_5.1` teve em 06/08.
+
+É a mesma régua da `CFG_4.1` (a LISTA de classificações é `ATD_1.2`, o cadastro
+é `CFG_4.1`), que existe porque, até 23/09, exigir a permissão de configuração
+para ler derrubava a tela de quem atende.
+
+⚠️ **E NÃO É UMA PORTA TRANCADA** (`M10`): a `TEC_1.1` é `atendimento` e abre
+para todos. O que falta a quem não tem a `TEC_1.2` são os **botões**, e a tela
+diz em texto o que acontece — não quem decidiu.
+
+⚠️ **E A FICHA TEM CAMINHO PRÓPRIO DESDE A SEGUNDA VOLTA DE 04/11:**
+`/tecnicos/ficha/:contatoId`, com `meta.codigo` = **`TEC_1.1`**. Não é tela
+nova, é a mesma em outro caminho — por isso não há entrada nova no registro.
+O `name` da rota (`tecnico-ficha`) de propósito **não** segue o padrão
+`XXX_N.N`, para não ser lido como código de tela por quem compara os dois lados.
+
+⚠️ **EFEITO COLATERAL, DITO ONDE SE VÊ:** `equipe` passa a significar três
+coisas (Times/Atendentes, Fila/Histórico/Solicitações e agora preço de
+técnico). Hoje é o mesmo conjunto de pessoas; separar é decisão dele, e aí nasce
+permissão própria.

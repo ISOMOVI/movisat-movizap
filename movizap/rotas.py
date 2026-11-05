@@ -257,38 +257,22 @@ def arredondar(km: float, *, ida_e_volta: bool = True) -> Decimal:
 
 
 # ---------------------------------------------------------------------------
-# A MEMÓRIA do endereço de origem (migração 077)
+# A ORIGEM NÃO MORA MAIS AQUI (04/11)
 # ---------------------------------------------------------------------------
-# 🔵 *"o endereço do tecnico sempre fica preenchido conforme o ultimo (...) se
-# for alterado, permanece alterado"* -- ou seja, UM SOBRESCREVER, não um
-# histórico. Daí uma linha por técnico.
+# 🔵 Até 04/11 este módulo tinha `CAMPOS_DE_ORIGEM`, `origem_do_tecnico` e
+# `lembrar_origem`: a MEMÓRIA da migração 077, uma linha por técnico, escrita
+# pelo uso da calculadora. A 077 avisava, por escrito, que aquilo *"NÃO É
+# CADASTRO"* -- e a razão era que ninguém mantinha.
 #
-# ⚠️ ISTO NÃO É CADASTRO: ninguém digita num formulário de cadastro, a linha é
-# escrita pelo USO da calculadora. Cadastro é coisa que alguém tem de manter, e
-# o projeto já tem 117 contatos de técnico sem cadastro no Harmonit para provar
-# o que acontece quando ninguém mantém.
-CAMPOS_DE_ORIGEM = ("cep", "logradouro", "numero", "bairro", "cidade", "uf",
-                    "complemento")
-
-
-def origem_do_tecnico(tecnico_contato_id: int) -> dict | None:
-    """O último endereço de origem daquele técnico, ou `None` na primeira vez."""
-    linha = banco.um(
-        f"SELECT {', '.join(CAMPOS_DE_ORIGEM)}, atualizado_em "
-        "  FROM tecnico_origem WHERE tecnico_contato_id = %s",
-        (int(tecnico_contato_id),))
-    return dict(linha) if linha else None
-
-
-def lembrar_origem(tecnico_contato_id: int, endereco: dict) -> None:
-    """Grava (ou sobrescreve) a origem daquele técnico."""
-    valores = [(endereco.get(c) or "").strip() or None for c in CAMPOS_DE_ORIGEM]
-    colunas = ", ".join(CAMPOS_DE_ORIGEM)
-    marcas = ", ".join(["%s"] * len(CAMPOS_DE_ORIGEM))
-    atribuicoes = ", ".join(f"{c} = EXCLUDED.{c}" for c in CAMPOS_DE_ORIGEM)
-    banco.executar(
-        f"""INSERT INTO tecnico_origem (tecnico_contato_id, {colunas})
-            VALUES (%s, {marcas})
-            ON CONFLICT (tecnico_contato_id)
-              DO UPDATE SET {atribuicoes}, atualizado_em = now()""",
-        (int(tecnico_contato_id), *valores))
+# 🔵 Em 04/11 ele pediu o cadastro e disse quem mantém: a ficha da `TEC_1.1`.
+# Decisão dele: *"o cadastro alimenta a memória, pode tirá-la. Caso mudem na
+# hora só servirá para aquele orçamento. Os demais ja vem com o do cad."*
+#
+# Então a origem agora é `tecnico_ficha.origem_do_tecnico`, que lê os sete
+# campos de endereço DA FICHA, e **o cálculo não grava nada de volta**: o que
+# foi usado naquele dia continua gravado em `agendamento.origem_endereco`, que
+# é o retrato e existe desde a mesma 077.
+#
+# ⚠️ A TABELA `tecnico_origem` CONTINUA NO BANCO, vazia e sem ninguém lendo,
+# até a migração que a derruba -- que espera o OK dele. Derrubá-la junto com
+# esta troca deixaria a calculadora em erro entre a migração e o deploy.

@@ -28,6 +28,7 @@ from . import bitrix
 from . import cadastro
 from . import canais as registro_canais
 from . import chamado_os
+from . import checklist
 from . import passagem
 from . import chat
 from . import conversas
@@ -55,6 +56,7 @@ from . import fpsl_ponte
 from . import orcamento as orcamento_mod
 from . import orcamento_consulta
 from . import rotas
+from . import tecnico_ficha
 from . import tecnico_vinculo
 from . import midia
 from . import operacao
@@ -885,9 +887,26 @@ class OrcamentoEntrada(BaseModel):
 
 
 @app.get("/api/orcamento/catalogo")
-def catalogo_do_orcamento(usuario: dict = Depends(auth.requer_tela("ATD_1.2"))):
-    """Os dois serviços do catálogo — 🔵 decisão 12 dele, lista fechada."""
-    return {"catalogo": orcamento_mod.catalogo(),
+def catalogo_do_orcamento(conversa_id: int | None = None,
+                          usuario: dict = Depends(auth.requer_tela("ATD_1.2"))):
+    """Os serviços que o modal oferece, e o próximo número.
+
+    🔵 04/11: deixou de ser lista fechada. São as duas de sempre (decisão 12,
+    21/10) **mais os serviços com preço na ficha daquele técnico** -- ele pediu
+    *"os da ficha + as duas de sempre"*.
+
+    🚨 DE QUEM É O PREÇO NÃO VEM DO NAVEGADOR. A rota recebe `conversa_id` e o
+    SERVIDOR descobre o técnico (`_tecnico_da_conversa`), que é a mesma régua da
+    calculadora de KM. Aceitar `tecnico_contato_id` no parâmetro deixaria
+    qualquer um com a tela ler a tabela de preço de outro técnico.
+
+    ⚠️ `conversa_id` é OPCIONAL: sem ele, a resposta é a de antes de 04/11. E
+    conversa que não é de técnico cai no mesmo lugar -- `_tecnico_da_conversa`
+    devolve `None`, e o catálogo volta a ser só as duas fixas.
+    """
+    tecnico_id = _tecnico_da_conversa(conversa_id) if conversa_id else None
+    return {"catalogo": orcamento_mod.catalogo(tecnico_id),
+            "tecnico_contato_id": tecnico_id,
             "proximo_numero": orcamento_mod.proximo_numero()}
 
 
@@ -1133,29 +1152,51 @@ def _tecnico_da_conversa(conversa_id: int | None) -> int | None:
 @app.get("/api/rotas/origem")
 def origem_do_tecnico(conversa_id: int | None = None,
                       usuario: dict = Depends(auth.requer_tela("ATD_1.2"))):
-    """A memória: o último endereço de origem daquele técnico.
+    """O ENDEREÇO FIXO da ficha daquele técnico (`TEC_1.1`).
+
+    🔵 04/11, decisão dele: *"o cadastro alimenta a memória, pode tirá-la. Caso
+    mudem na hora só servirá para aquele orçamento. Os demais ja vem com o do
+    cad."* Até então isto devolvia a MEMÓRIA da migração 077, escrita pelo uso
+    da própria calculadora; agora a fonte é o cadastro, e editar no modal não
+    grava mais nada.
 
     🚨 `disponivel` VEM JUNTO, e é o que permite a tela não mentir: sem chave
     da API de rotas o cálculo não existe, e a calculadora tem de dizer isso
     **antes** de oferecer o botão. Botão que abre e falha é pior que botão que
     não existe -- e a alternativa honesta aqui é o campo manual, que é como o
     km é preenchido desde 21/10.
+
+    🚨 `tem_ficha` TAMBÉM VEM JUNTO, e pelo mesmo motivo. "Este técnico não tem
+    endereço cadastrado" e "a ficha dele está em branco" são frases
+    diferentes, e sem este campo a tela só saberia dizer a segunda -- deixando
+    quem calcula sem saber que o conserto é abrir a ficha.
     """
     contato_id = _tecnico_da_conversa(conversa_id)
-    memoria = rotas.origem_do_tecnico(contato_id) if contato_id else None
-    return {"origem": memoria, "disponivel": rotas.disponivel()}
+    origem = tecnico_ficha.origem_do_tecnico(contato_id) if contato_id else None
+    ficha = banco.um(
+        "SELECT estado FROM tecnico_ficha WHERE contato_id = %s",
+        (contato_id,)) if contato_id else None
+    return {"origem": origem, "disponivel": rotas.disponivel(),
+            "tecnico_contato_id": contato_id,
+            "tem_ficha": ficha is not None,
+            "estado": ficha["estado"] if ficha else None}
 
 
 @app.post("/api/rotas/km")
 def calcular_km(entrada: KmEntrada,
                 usuario: dict = Depends(auth.requer_tela("ATD_1.2"))):
-    """A distância entre os dois endereços, e a memória da origem gravada.
+    """A distância entre os dois endereços. A origem NÃO é gravada (04/11).
 
-    🚨 **A MEMÓRIA É GRAVADA MESMO QUE O CÁLCULO FALHE**, e isto não é detalhe:
-    a origem é o que o atendente DIGITOU, e guardá-la não depende de a API
-    responder. É o que faz a metade *"fica salvo para proximas"* do pedido dele
-    funcionar **hoje**, sem chave nenhuma -- só o km continua manual até ela
-    existir.
+    🚨 **ESTA ROTA NÃO GRAVA MAIS A ORIGEM**, e a mudança é de 04/11. Até
+    então ela escrevia a memória da migração 077 a cada chamada, inclusive
+    quando o cálculo falhava -- era o que fazia *"fica salvo para proximas"*
+    funcionar sem chave nenhuma.
+    🔵 Agora a origem é o cadastro (`TEC_1.1`), e ele decidiu o que acontece
+    com quem edita no modal: *"Caso mudem na hora só servirá para aquele
+    orçamento. Os demais ja vem com o do cad."* Então o endereço digitado aqui
+    vale para este cálculo e para o retrato do compromisso
+    (`agendamento.origem_endereco`), e **não volta para a ficha** -- mudar o
+    cadastro de um técnico é ação da tela dele, com quem pode.
 
     Quatro respostas, e a tela precisa das quatro:
       · `{"km": ...}`                -> calculou;
@@ -1165,10 +1206,6 @@ def calcular_km(entrada: KmEntrada,
     """
     origem = entrada.origem.model_dump()
     destino = entrada.destino.model_dump()
-
-    contato_id = _tecnico_da_conversa(entrada.conversa_id)
-    if contato_id:
-        rotas.lembrar_origem(contato_id, origem)
 
     try:
         achado = rotas.distancia(origem, destino)
@@ -4307,6 +4344,29 @@ def ver_vinculo_do_tecnico(contato_id: int,
     if atual is None:
         raise HTTPException(status_code=404, detail="Contato não encontrado.")
     resposta = dict(atual)
+
+    # 🔵 04/11: a ficha da `TEC_1.1` mostra o **e-mail de acesso** do técnico no
+    # Harmonit -- o login dele de lá. Decisão dele, depois de eu não achar a
+    # senha em lugar nenhum: *"se não encontrar algo objetivamente, deixe só o
+    # e-mail de acesso mesmo"*.
+    #
+    # ⚠️ FALHA DA PONTE NÃO DERRUBA A FICHA. `email` volta `None` com motivo, e
+    # a tela diz "não consegui confirmar agora" -- diferente de "não tem".
+    # Juntar os dois faria a ficha afirmar que um técnico cadastrado lá não tem
+    # acesso, que é o oposto do fato.
+    if atual["harmonit_tecnico_id"]:
+        try:
+            lista = (fpsl_ponte.tecnicos_do_harmonit(ativos=False) or {}).get("tecnicos") or []
+            achado = next((t for t in lista
+                           if t["tecnico_id"] == atual["harmonit_tecnico_id"]), None)
+            resposta["email"] = (achado or {}).get("email")
+            if achado is None:
+                resposta["email_motivo"] = (
+                    "o cadastro vinculado não aparece mais na lista do Harmonit")
+        except fpsl_ponte.FpslIndisponivel as e:
+            resposta["email"] = None
+            resposta["email_motivo"] = str(e)
+
     if not atual["harmonit_tecnico_id"]:
         telefone = banco.um(
             "SELECT e164 FROM contato_telefone WHERE contato_id = %s "
@@ -4581,6 +4641,198 @@ def atualizar_classificacao(classificacao_id: int, dados: ClassificacaoEntrada,
     return operacao.atualizar_classificacao(
         classificacao_id, dados.nome, dados.exige_comentario, dados.ativo,
         dados.ordem)
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# TEC_1.1 — Técnicos: a ficha, os preços e o credenciamento (04/11)
+#
+# 🔵 Pedido dele: *"abaixo de 'orçamentos' vamos propor uma tela CRUD dos
+# tecnicos (...) nessa aba ter uma ficha de cada 1. como no formulario de
+# credenciamento (...) Dai o cadastro do tecnico e validação dele passará por
+# essa tela."*
+#
+# 🚨 LER É DE QUEM USA; ESCREVER É DE QUEM DECIDE — decisão dele no mesmo dia:
+# *"Ler todo atendente, escrever owner e admin."* Por isso há duas telas no
+# registro: a `TEC_1.1` (permissão `atendimento`, o item de menu) e a `TEC_1.2`
+# (permissão `equipe`, que é exatamente owner + admin em `telas.PERFIS`). A
+# segunda não desenha tela nenhuma: é a chave da escrita.
+#
+# É a mesma régua da `CFG_4.1`, onde a LISTA de classificações é `ATD_1.2` e o
+# cadastro é `CFG_4.1` -- e que existe porque, até 23/09, exigir a permissão de
+# configuração para ler derrubava a tela de quem atende.
+#
+# 🚨 A ORDEM DESTAS ROTAS IMPORTA. `/api/tecnicos/servicos` e
+# `/api/tecnicos/candidatos` vêm ANTES de `/api/tecnicos/{contato_id}`: o
+# FastAPI casa na ordem de declaração, e depois da paramétrica a palavra
+# "servicos" seria lida como id de contato e devolveria 422.
+#
+# ⚠️ Nenhuma rota daqui escreve no Harmonit. O vínculo com o cadastro de lá
+# continua sendo o de 21/10 (`/api/contatos/{id}/tecnico-harmonit`), que a tela
+# chama -- *"esses dados só vamos trazer mesmo"*.
+# ══════════════════════════════════════════════════════════════════════════
+
+
+class FichaDoTecnico(BaseModel):
+    """Todos os campos opcionais, de propósito.
+
+    🚨 FICHA DE CADASTRO SE PREENCHE AOS POUCOS. Exigir campo no corpo faria o
+    credenciamento parar na primeira informação que o candidato não mandou, e a
+    régua do que é obrigatório para CREDENCIAR vive em `definir_estado` -- onde
+    ela pode exigir endereço e preço, que é o que as outras telas precisam.
+    """
+    nome_fantasia: str | None = None
+    razao_social: str | None = None
+    cnpj: str | None = None
+    telefone_fixo: str | None = None
+    email_geral: str | None = None
+    responsavel_nome: str | None = None
+    responsavel_sobrenome: str | None = None
+    cpf: str | None = None
+    responsavel_celular: str | None = None
+    responsavel_email: str | None = None
+    cep: str | None = None
+    logradouro: str | None = None
+    numero: str | None = None
+    bairro: str | None = None
+    cidade: str | None = None
+    uf: str | None = None
+    complemento: str | None = None
+    banco: str | None = None
+    agencia: str | None = None
+    conta: str | None = None
+    titular_tipo: str | None = None
+    ponto_fixo: bool | None = None
+    vai_ao_cliente: bool | None = None
+    area_cobertura: str | None = None
+    cobra_deslocamento: bool | None = None
+    km_valor_centavos: int | None = None
+    observacao: str | None = None
+    solicitacao_id: int | None = None
+
+
+class PrecosDoTecnico(BaseModel):
+    """`{"3": 18000}` = R$ 180,00 no serviço 3. `{"3": null}` = não oferece.
+
+    ⚠️ Serviço que NÃO vem na chamada fica como está. Ver `definir_precos`.
+    """
+    precos: dict[str, int | None]
+
+
+class EstadoDoTecnico(BaseModel):
+    estado: str
+    nota: str | None = Field(default=None, max_length=1000)
+
+
+class TecnicoNovo(BaseModel):
+    nome: str = Field(min_length=2, max_length=120)
+    telefone: str | None = None
+
+
+class ServicoDoTecnico(BaseModel):
+    nome: str = Field(min_length=2, max_length=60)
+    ordem: int = 0
+    ativo: bool = True
+
+
+@app.get("/api/tecnicos/servicos")
+def listar_servicos_do_tecnico(
+        incluir_inativos: bool = False,
+        usuario: dict = Depends(auth.requer_tela("TEC_1.1"))):
+    """O catálogo. ⚠️ As INATIVAS são de quem configura — a mesma régua da
+    `CFG_4.1`: quem monta orçamento escolhe entre os serviços que valem, não
+    entre os aposentados."""
+    if incluir_inativos and not registro_telas.pode_acessar(usuario, "TEC_1.2"):
+        incluir_inativos = False
+    return {"servicos": tecnico_ficha.servicos(incluir_inativos)}
+
+
+@app.post("/api/tecnicos/servicos", status_code=201)
+def criar_servico_do_tecnico(
+        dados: ServicoDoTecnico,
+        usuario: dict = Depends(auth.requer_tela("TEC_1.2"))):
+    return tecnico_ficha.criar_servico(dados.nome, dados.ordem or None)
+
+
+@app.put("/api/tecnicos/servicos/{servico_id}")
+def atualizar_servico_do_tecnico(
+        servico_id: int, dados: ServicoDoTecnico,
+        usuario: dict = Depends(auth.requer_tela("TEC_1.2"))):
+    return tecnico_ficha.atualizar_servico(servico_id, dados.nome, dados.ordem,
+                                           dados.ativo)
+
+
+@app.get("/api/tecnicos/candidatos")
+def candidatos_a_credenciamento(
+        usuario: dict = Depends(auth.requer_tela("TEC_1.1"))):
+    """As solicitações do formulário de credenciamento que ainda não têm ficha.
+
+    🔵 D3 dele: o formulário alimenta a tela *"mas não de forma exclusiva.
+    Ainda é permitido fazer a mão."*
+    """
+    return tecnico_ficha.candidatos()
+
+
+@app.get("/api/tecnicos/da-solicitacao/{solicitacao_id}")
+def sugestao_do_credenciamento(
+        solicitacao_id: int,
+        usuario: dict = Depends(auth.requer_tela("TEC_1.1"))):
+    """O que aquela solicitação preencheria na ficha. 🚨 NÃO GRAVA NADA — é
+    GET justamente por isso. Quem credencia confere campo a campo e salva."""
+    return tecnico_ficha.sugestao_da_solicitacao(solicitacao_id)
+
+
+@app.get("/api/tecnicos")
+def listar_tecnicos(busca: str = "", estado: str | None = None,
+                    com_ficha: bool | None = None,
+                    pagina: int = 1,
+                    por_pagina: int = tecnico_ficha.POR_PAGINA,
+                    usuario: dict = Depends(auth.requer_tela("TEC_1.1"))):
+    """⚠️ Devolve TAMBÉM quem não tem ficha. Eram 303 contatos de técnico e 0
+    fichas em 04/11: listar só os fichados abriria a tela vazia."""
+    return tecnico_ficha.listar(busca, estado, com_ficha, pagina, por_pagina)
+
+
+@app.get("/api/tecnicos/{contato_id}")
+def ver_tecnico(contato_id: int,
+                usuario: dict = Depends(auth.requer_tela("TEC_1.1"))):
+    achado = tecnico_ficha.ficha(contato_id)
+    if achado is None:
+        raise HTTPException(status_code=404, detail="Contato não encontrado.")
+    return achado
+
+
+@app.post("/api/tecnicos", status_code=201)
+def criar_tecnico(dados: TecnicoNovo,
+                  usuario: dict = Depends(auth.requer_tela("TEC_1.2"))):
+    """Cadastro à mão. O telefone é opcional, mas é o que casa com o Harmonit —
+    lá o e-mail do técnico É o telefone dele."""
+    return tecnico_ficha.criar_tecnico(dados.nome, dados.telefone)
+
+
+@app.put("/api/tecnicos/{contato_id}")
+def salvar_ficha_do_tecnico(
+        contato_id: int, dados: FichaDoTecnico,
+        usuario: dict = Depends(auth.requer_tela("TEC_1.2"))):
+    return tecnico_ficha.salvar(contato_id, dados.model_dump(exclude_unset=True))
+
+
+@app.put("/api/tecnicos/{contato_id}/precos")
+def salvar_precos_do_tecnico(
+        contato_id: int, dados: PrecosDoTecnico,
+        usuario: dict = Depends(auth.requer_tela("TEC_1.2"))):
+    return tecnico_ficha.definir_precos(contato_id, dados.precos)
+
+
+@app.put("/api/tecnicos/{contato_id}/estado")
+def validar_tecnico(contato_id: int, dados: EstadoDoTecnico,
+                    usuario: dict = Depends(auth.requer_tela("TEC_1.2"))):
+    """Credenciar, recusar ou devolver para candidato.
+
+    ⚠️ Quem validou fica gravado (`estado_por`), como o `lida_por` da
+    solicitação: validação sem autor é afirmação sem responsável.
+    """
+    return tecnico_ficha.definir_estado(contato_id, dados.estado, dados.nota,
+                                        usuario.get("id"))
 
 
 # ------------------------------------------------------------- IA (CFG_2.1)
@@ -5115,6 +5367,112 @@ def observar_o_card(dados: ObservacaoDoCard,
             "observacoes": passagem.observacoes(dados.numero_os)}
 
 
+# ══════════════════════════════════════════════════════════════════════════
+# O CHECKLIST DA ETAPA — o mapa do operador no card (04/11)
+#
+# 🔵 *"são itens que vão ficar em um botão dentro do card, como mapa para o
+# operador saber o que fazer"*, com **"Modelo fixo + o operador pode
+# acrescentar"**.
+#
+# 🚨 NADA AQUI ESCREVE NO HARMONIT. Decisão dele quando mostrei que gravar
+# `solucaoTecnica` exigiria reescrever a OS inteira: *"Só no MoviZap, como
+# observação"*. Ao sair da etapa, o checklist vira recado do card — e quem faz
+# isso é a rota de mover, não estas.
+# ══════════════════════════════════════════════════════════════════════════
+
+
+class ItemDoChecklist(BaseModel):
+    numero_os: int
+    situacao_id: int
+    texto: str = Field(min_length=1, max_length=200)
+
+
+class MarcaDoChecklist(BaseModel):
+    feito: bool
+
+
+@app.get("/api/paineis/operacao/checklist")
+def checklist_do_card(numero_os: int = Query(..., ge=1),
+                      situacao_id: int = Query(..., ge=1),
+                      usuario: dict = Depends(auth.requer_tela("PNL_1.1"))):
+    """A lista daquele card naquela etapa, criada do modelo na primeira vez.
+
+    ⚠️ É um GET que ESCREVE na primeira abertura, e isso é consciente: a cópia
+    é idempotente (`UNIQUE` + `ON CONFLICT DO NOTHING`), então abrir dez vezes
+    — ou dois atendentes ao mesmo tempo — dá o mesmo resultado. A alternativa
+    seria um POST "preparar", que ninguém lembraria de chamar e deixaria o card
+    sem lista.
+    """
+    return {"numero_os": numero_os, "situacao_id": situacao_id,
+            "itens": checklist.do_card(numero_os, situacao_id,
+                                       usuario.get("id"))}
+
+
+@app.post("/api/paineis/operacao/checklist/item", status_code=201)
+def acrescentar_item_do_checklist(
+        dados: ItemDoChecklist,
+        usuario: dict = Depends(auth.requer_tela("PNL_1.1"))):
+    """O item avulso do operador naquele card."""
+    return checklist.acrescentar(dados.numero_os, dados.situacao_id,
+                                 dados.texto, usuario.get("id"))
+
+
+@app.put("/api/paineis/operacao/checklist/item/{item_id}")
+def marcar_item_do_checklist(
+        item_id: int, dados: MarcaDoChecklist,
+        usuario: dict = Depends(auth.requer_tela("PNL_1.1"))):
+    """🚨 Desmarcar NÃO apaga — vira `feito = false` com hora nova."""
+    return checklist.marcar(item_id, dados.feito, usuario.get("id"))
+
+
+@app.delete("/api/paineis/operacao/checklist/item/{item_id}")
+def remover_item_do_checklist(
+        item_id: int, usuario: dict = Depends(auth.requer_tela("PNL_1.1"))):
+    """Só item AVULSO sai. Item da lista da etapa se tira no MODELO."""
+    return checklist.remover(item_id)
+
+
+@app.get("/api/paineis/operacao/checklist/modelos")
+def modelos_do_checklist(
+        usuario: dict = Depends(auth.requer_tela("PNL_1.1"))):
+    """As listas de todas as etapas — a tela usa para saber **onde** há
+    checklist (o botão no card e o aviso ao entrar).
+
+    ⚠️ Ler é de quem usa o painel; MEXER é da configuração, e isso vive em
+    rotas próprias abaixo.
+    """
+    return {"modelos": checklist.modelos(),
+            "etapas": sorted(checklist.etapas_com_modelo())}
+
+
+class ModeloDoChecklist(BaseModel):
+    situacao_id: int
+    texto: str = Field(min_length=1, max_length=200)
+    ordem: int = 0
+    ativo: bool = True
+
+
+@app.post("/api/paineis/operacao/checklist/modelo", status_code=201)
+def criar_modelo_do_checklist(
+        dados: ModeloDoChecklist,
+        usuario: dict = Depends(auth.requer_tela("CFG_7.1"))):
+    """🚨 MEXER NA LISTA DA ETAPA É CONFIGURAÇÃO, e muda o card de todo mundo —
+    por isso a permissão é a da Geral (`CFG_7.1`), não a do painel. Ler
+    continua sendo de quem opera."""
+    return checklist.criar_modelo(dados.situacao_id, dados.texto,
+                                  dados.ordem or None)
+
+
+@app.put("/api/paineis/operacao/checklist/modelo/{modelo_id}")
+def atualizar_modelo_do_checklist(
+        modelo_id: int, dados: ModeloDoChecklist,
+        usuario: dict = Depends(auth.requer_tela("CFG_7.1"))):
+    """⚠️ Mexer aqui NÃO reescreve card nenhum: o item já copiado segue com o
+    texto que tinha. O card é registro, não espelho."""
+    return checklist.atualizar_modelo(modelo_id, dados.texto, dados.ordem,
+                                      dados.ativo)
+
+
 class PrioridadeDoCard(BaseModel):
     numero_os: int
     prioridade_id: int
@@ -5135,6 +5493,49 @@ def mudar_prioridade_do_card(
         dados.numero_os, dados.prioridade_id,
         atendente_id=usuario.get("id"),
         prioridade_esperada=dados.prioridade_esperada)
+
+
+@app.post("/api/paineis/operacao/observacao/{observacao_id}/anexo",
+          status_code=201)
+async def anexar_na_observacao(
+        observacao_id: int, arquivo: UploadFile = File(...),
+        usuario: dict = Depends(auth.requer_tela("PNL_1.1"))):
+    """Sobe um anexo para um recado do card.
+
+    🚨 A TELA RECEBE UM ID, NUNCA UM CAMINHO -- a mesma régua do anexo de
+    e-mail: caminho vindo da tela faria `../../.env` virar anexo.
+
+    ⚠️ O arquivo é lido inteiro na memória antes de ir ao disco, como o resto
+    do projeto: o teto é 10 MB, e streaming aqui só acrescentaria caminho de
+    erro sem resolver problema que exista.
+    """
+    dados = await arquivo.read()
+    return passagem.guardar_anexo(observacao_id, arquivo.filename, dados,
+                                  arquivo.content_type)
+
+
+@app.get("/api/paineis/operacao/anexo/{anexo_id}")
+def baixar_anexo_da_observacao(
+        anexo_id: int, usuario: dict = Depends(auth.requer_tela("PNL_1.1"))):
+    """O arquivo de um recado.
+
+    🚨 **410, NÃO 500, quando o arquivo sumiu do disco** -- e isso acontece:
+    esta pasta **não tem backup**, como as outras duas de anexo. A linha no
+    banco sobrevive ao que o disco perdeu, e a tela precisa dizer "o arquivo
+    não está mais aqui" em vez de estourar. É a régua do
+    `/api/solicitacoes/{id}/arquivo/{id}`.
+    """
+    achado = passagem.anexo(anexo_id)
+    if not achado:
+        raise HTTPException(status_code=404, detail="Anexo não encontrado.")
+    caminho = pathlib.Path(achado["caminho"])
+    if not caminho.is_file():
+        raise HTTPException(
+            status_code=410,
+            detail="O arquivo não está mais no disco. Esta pasta não tem "
+                   "backup -- o registro ficou, o arquivo não.")
+    return FileResponse(caminho, filename=achado["nome_original"],
+                        media_type=achado["mime"] or "application/octet-stream")
 
 
 @app.get("/api/paineis/operacao/ficha")
@@ -5183,6 +5584,11 @@ def ficha_do_card(numero_os: int = Query(..., ge=1),
     # ja faz uma ida ao ERP, e uma segunda chamada para ler o nosso proprio
     # banco seria ida por nada.
     ficha["observacoes"] = passagem.observacoes(numero_os)
+    # 🔵 04/11: cada recado leva os seus anexos. ⚠️ UMA consulta para a lista
+    # toda, e o `caminho` de disco NÃO sai daqui -- a tela baixa pelo id.
+    anexos = passagem.anexos_de([o["id"] for o in ficha["observacoes"]])
+    for o in ficha["observacoes"]:
+        o["anexos"] = anexos.get(o["id"], [])
     ficha["prioridades"] = passagem.PRIORIDADES
     ficha["chamado"] = None
     if linha:

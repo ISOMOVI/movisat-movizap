@@ -168,10 +168,14 @@ def criar(*, conversa_id: int, tecnico_contato_id: int, cliente_harmonit_id: str
         # formas, e duas fontes para o mesmo fato divergem na primeira edição.
         linha = linha_do_endereco(campos) or endereco
         # 🆕 Migração 077: a origem e o km são RETRATO deste compromisso --
-        # de onde o técnico saiu e quanto se cobrou naquele dia. A memória
-        # atual da origem vive em `tecnico_origem` (ver `movizap/rotas.py`);
-        # se o técnico mudar de endereço, a memória muda e esta linha
-        # continua dizendo de onde se cobrou. Mesmo desenho do `tipo_nome`.
+        # de onde o técnico saiu e quanto se cobrou naquele dia.
+        # ⚠️ 04/11: a origem ATUAL deixou de ser a memória `tecnico_origem` e
+        # passou a ser o ENDEREÇO FIXO da ficha (`tecnico_ficha`, tela
+        # `TEC_1.1`) -- `rotas.py` não lê mais aquela tabela. O desenho desta
+        # linha não mudou e é por isso que ela importa mais agora: se o técnico
+        # mudar de endereço na ficha, ou se alguém digitar outro só para aquele
+        # cálculo, esta linha continua dizendo de onde se cobrou naquele dia.
+        # Mesmo desenho do `tipo_nome`.
         cur.execute(
             "INSERT INTO agendamento (conversa_id, tecnico_contato_id, "
             "    cliente_harmonit_id, cliente_nome, inicio, fim, endereco, "

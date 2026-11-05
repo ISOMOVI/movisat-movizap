@@ -968,8 +968,11 @@ describe('o card aberto tem as quatro faixas', () => {
     /* ⚠️ Sem essa frase, alguém escreve ali pensando que o técnico vai ler. */
     const tela = await abrirOCard()
     const recados = tela.find('.modal__recados').text()
-    expect(recados).toContain('Não vai para a OS')
-    expect(recados).toContain('não se apaga')
+    /* 🔵 04/11: o plural entrou com o modal dos recados (área D) — a seção
+       deixou de ser "Observação do painel" e virou "Observações". A regra é a
+       mesma: a tela TEM de dizer que isto não vai para a OS. */
+    expect(recados).toMatch(/Não (vai|vão) para a OS/)
+    expect(recados).toMatch(/não se apaga/)
   })
 
   it('o pe diz que mover escreve no Harmonit', async () => {

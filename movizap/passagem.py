@@ -22,8 +22,10 @@ os dois tempos no card. Aqui é o **registro da passagem** — e é ele que faz 
 sair barato depois, porque o dado passa a ser colhido desde já.
 """
 import logging
+import pathlib
+import uuid
 
-from . import banco, fpsl_ponte, paineis
+from . import banco, checklist, fpsl_ponte, paineis
 from .operacao import DadoInvalido
 
 log = logging.getLogger("movizap.passagem")
@@ -89,6 +91,28 @@ def mover(numero_os: int, para_situacao: int, atendente_id: int | None,
                                              or "sem motivo informado"),
         fora=resposta.get("fora_da_situacao"),
     )
+
+    # 🔵 04/11, decisão dele (O4): ao SAIR de uma etapa que tinha checklist, o
+    # que foi feito vira **observação do card**. *"Só no MoviZap, como
+    # observação"* -- gravar na `solucaoTecnica` exigiria reescrever a OS
+    # inteira no Harmonit, e ele preferiu não tocar na OS.
+    #
+    # 🚨 SÓ QUANDO A MUDANÇA ACONTECEU DE VERDADE. Escrita recusada pelo ERP
+    # não é saída de etapa: o card não saiu do lugar, e registrar o checklist
+    # como encerrado afirmaria um fato que não houve.
+    #
+    # ⚠️ E A FALHA AQUI NÃO DERRUBA O MOVER. O card já mudou de situação no
+    # ERP; perder o recado é ruim, devolver erro a quem moveu com sucesso é
+    # pior -- e a passagem já está gravada de qualquer jeito.
+    de_onde = resposta.get("de")
+    if resposta.get("ok") and de_onde and de_onde != para_situacao:
+        try:
+            texto = checklist.como_texto(numero_os, de_onde)
+            if texto:
+                observar(numero_os, texto, atendente_id)
+        except Exception:
+            log.exception("OS %s: nao consegui guardar o checklist da etapa %s",
+                          numero_os, de_onde)
     log.info("OS %s: %s -> %s por %s (ok=%s, passagem %s)", numero_os,
              resposta.get("de"), para_situacao, atendente_id,
              resposta.get("ok"), passagem)
@@ -123,6 +147,95 @@ def ultima_passagem(numero_os: int) -> dict | None:
             WHERE numero_os = %s AND ok AND de_situacao IS NOT NULL
             ORDER BY em DESC, id DESC
             LIMIT 1""", (numero_os,))
+
+
+# ===========================================================================
+# O ANEXO DA OBSERVAÇÃO (migração 091, 04/11)
+#
+# 🔵 *"Card OBS anexos, texto, format conve -- exibir em modal"*.
+#
+# 🚨 NÃO USA A TABELA `midia`, e não é escolha de estilo: o banco proíbe. O
+# `CHECK midia_tem_um_dono` exige conversa **ou** sala, e observação de card não
+# é nenhuma das duas. Afrouxar o CHECK abriria caminho para mídia órfã -- que é
+# mídia que ninguém acha para apagar.
+#
+# ⚠️ O molde é o `formularios.py`: pasta própria fora do repositório, lista
+# BRANCA de extensão, nome original preservado só para exibir, e o arquivo
+# gravado com nome sorteado.
+# ===========================================================================
+
+PASTA_ANEXOS_OBS = pathlib.Path("/home/claude/movizap_observacao_anexos")
+TETO_ANEXO_OBS = 10 * 1024 * 1024        # o mesmo do formulário
+
+# 🚨 LISTA BRANCA, nunca lista negra: o que não está aqui não entra. Lista
+# negra é aposta de que alguém lembrou de todas as extensões perigosas.
+EXTENSOES_DA_OBS = {
+    ".pdf", ".jpg", ".jpeg", ".png", ".webp", ".heic",
+    ".doc", ".docx", ".xls", ".xlsx", ".csv", ".txt",
+}
+
+
+def guardar_anexo(observacao_id: int, nome: str, dados: bytes,
+                  mime: str | None = None) -> dict:
+    """Guarda um arquivo na observação, e devolve a linha gravada.
+
+    ⚠️ RECUSA ANTES DE ESCREVER NO DISCO: extensão e tamanho são conferidos
+    primeiro, para não deixar arquivo solto quando a linha não vai existir.
+    """
+    if not banco.um("SELECT id FROM os_observacao WHERE id = %s", (observacao_id,)):
+        raise DadoInvalido("Observação não encontrada.")
+
+    limpo = pathlib.Path(nome or "").name.strip() or "arquivo"
+    extensao = pathlib.Path(limpo).suffix.lower()
+    if extensao not in EXTENSOES_DA_OBS:
+        raise DadoInvalido(
+            f"{extensao or 'arquivo sem extensão'} não é um tipo aceito aqui. "
+            f"Aceito: {', '.join(sorted(EXTENSOES_DA_OBS))}.")
+    if len(dados) > TETO_ANEXO_OBS:
+        raise DadoInvalido(
+            f"O arquivo tem {len(dados) // 1024} KB e o limite é "
+            f"{TETO_ANEXO_OBS // 1024 // 1024} MB.")
+    if not dados:
+        raise DadoInvalido("O arquivo veio vazio.")
+
+    pasta = PASTA_ANEXOS_OBS / uuid.uuid4().hex
+    pasta.mkdir(parents=True, exist_ok=True)
+    destino = pasta / limpo
+    destino.write_bytes(dados)
+
+    linha = banco.um(
+        """INSERT INTO os_observacao_arquivo
+               (observacao_id, nome_original, caminho, bytes, mime)
+           VALUES (%s, %s, %s, %s, %s) RETURNING id""",
+        (observacao_id, limpo, str(destino), len(dados), mime))
+    log.info("observacao %s: anexo %s guardado (%s bytes)",
+             observacao_id, linha["id"], len(dados))
+    return anexo(linha["id"])
+
+
+def anexo(anexo_id: int) -> dict | None:
+    return banco.um(
+        """SELECT id, observacao_id, nome_original, caminho, bytes, mime,
+                  criado_em
+             FROM os_observacao_arquivo WHERE id = %s""", (anexo_id,))
+
+
+def anexos_de(observacao_ids: list[int]) -> dict:
+    """`{observacao_id: [anexos]}` — UMA consulta para a lista toda.
+
+    ⚠️ O `caminho` NÃO sai daqui para a tela: é caminho de disco, e a tela não
+    tem o que fazer com ele. Quem baixa usa o id.
+    """
+    if not observacao_ids:
+        return {}
+    por_obs: dict = {}
+    for r in banco.varios(
+            """SELECT id, observacao_id, nome_original, bytes, mime
+                 FROM os_observacao_arquivo
+                WHERE observacao_id = ANY(%s)
+                ORDER BY id""", (list(observacao_ids),)):
+        por_obs.setdefault(r["observacao_id"], []).append(r)
+    return por_obs
 
 
 def quem_mexeu(desde_dias: int = 7, teto: int = 200) -> list[dict]:

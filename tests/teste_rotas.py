@@ -5,7 +5,7 @@
 API **cobra por consulta**. Suíte que gasta dinheiro é suíte que alguém
 desliga.
 
-🚨 ESCREVE EM TABELAS DE PRODUÇÃO (`tecnico_origem`, `rota_cache`, `contato`) e
+🚨 ESCREVE EM TABELAS DE PRODUÇÃO (`tecnico_ficha`, `rota_cache`, `contato`) e
 apaga tudo no fim. Marca deste teste: contato `Zz Teste Rota`, e pares de
 endereço com a palavra `zzteste`.
 
@@ -19,8 +19,9 @@ O que estes testes guardam:
     `cep.py` ("cache que guarda erro para sempre");
   · o cache **respeita o prazo** e a segunda consulta **não paga de novo**;
   · a normalização faz "Rua X, 123" e "rua x 123" serem a MESMA consulta;
-  · a memória da origem **sobrescreve** ("se for alterado, permanece
-    alterado") e é gravada **mesmo quando o cálculo falha**;
+  · a origem vem da FICHA do técnico (`TEC_1.1`, 04/11) e o cálculo **não
+    grava nada de volta** -- até 04/11 era o contrário, e estes dois testes
+    trocaram de sinal junto com a decisão dele;
   · ida e volta é o padrão, e o arredondamento bate com os orçamentos reais.
 """
 import sys
@@ -35,6 +36,7 @@ pytest.importorskip("psycopg")
 from fastapi.testclient import TestClient  # noqa: E402
 
 from movizap import auth, banco, main, rotas  # noqa: E402
+from movizap import tecnico_ficha  # noqa: E402
 from movizap.config import settings  # noqa: E402
 
 ENV = Path("/home/claude/movizap_painel/.env")
@@ -54,7 +56,7 @@ DESTINO = {"cep": "19020000", "logradouro": "Rua Zzteste Destino", "numero": "2"
 
 def limpar():
     banco.executar(
-        "DELETE FROM tecnico_origem WHERE tecnico_contato_id IN "
+        "DELETE FROM tecnico_ficha WHERE contato_id IN "
         "  (SELECT id FROM contato WHERE nome = %s)", (CONTATO,))
     banco.executar(
         "DELETE FROM conversa WHERE contato_id IN "
@@ -228,37 +230,43 @@ class TestCache:
 
 
 # ---------------------------------------------------------------------------
-# [3] A MEMÓRIA DA ORIGEM
+# [3] A ORIGEM VEM DA FICHA (04/11)
+#
+# 🔵 Até 04/11 esta seção se chamava "A MEMÓRIA DA ORIGEM" e provava o
+# contrário do que prova agora: que a calculadora GRAVAVA o endereço digitado,
+# sobrescrevendo uma linha por técnico em `tecnico_origem`.
+#
+# A decisão dele mudou a fonte: *"o cadastro alimenta a memória, pode tirá-la.
+# Caso mudem na hora só servirá para aquele orçamento."* Os testes de
+# sobrescrever e de "grava mesmo falhando" não foram afrouxados -- eles
+# descreviam um comportamento que ele trocou, e o que ficou no lugar prova o
+# comportamento novo, inclusive o que NÃO acontece mais.
 # ---------------------------------------------------------------------------
-class TestMemoriaDaOrigem:
-    def test_na_primeira_vez_nao_ha_nada(self, base):
-        banco.executar("DELETE FROM tecnico_origem WHERE tecnico_contato_id = %s",
+class TestOrigemVemDaFicha:
+    def test_tecnico_sem_ficha_nao_tem_origem(self, base):
+        banco.executar("DELETE FROM tecnico_ficha WHERE contato_id = %s",
                        (base["contato_id"],))
-        assert rotas.origem_do_tecnico(base["contato_id"]) is None
+        assert tecnico_ficha.origem_do_tecnico(base["contato_id"]) is None
 
-    def test_grava_e_le(self, base):
-        rotas.lembrar_origem(base["contato_id"], ORIGEM)
-        lido = rotas.origem_do_tecnico(base["contato_id"])
+    def test_o_endereco_da_ficha_e_a_origem(self, base):
+        tecnico_ficha.salvar(base["contato_id"], ORIGEM)
+        lido = tecnico_ficha.origem_do_tecnico(base["contato_id"])
         assert lido["logradouro"] == ORIGEM["logradouro"]
         assert lido["cidade"] == ORIGEM["cidade"]
 
-    def test_SOBRESCREVE_e_nao_acumula(self, base):
-        """🔵 *"se for alterado, permanece alterado"* — um sobrescrever, não um
-        histórico. Daí a PK ser o técnico."""
-        rotas.lembrar_origem(base["contato_id"], ORIGEM)
-        rotas.lembrar_origem(base["contato_id"],
-                             {**ORIGEM, "logradouro": "Rua Zzteste Outra"})
-        assert banco.um("SELECT count(*) AS n FROM tecnico_origem "
-                        " WHERE tecnico_contato_id = %s",
-                        (base["contato_id"],))["n"] == 1
-        assert rotas.origem_do_tecnico(
-            base["contato_id"])["logradouro"] == "Rua Zzteste Outra"
+    def test_os_sete_campos_continuam_os_mesmos_do_compromisso(self):
+        """🚨 Duas réguas para o mesmo endereço é uma delas mentindo. Esta
+        comparação era contra `rotas.CAMPOS_DE_ORIGEM`, que saiu com a memória."""
+        from movizap import agendamento
+        assert tecnico_ficha.CAMPOS_DE_ENDERECO == agendamento.CAMPOS_DE_ENDERECO
 
-    def test_campo_vazio_vira_nulo_e_nao_string_vazia(self, base):
-        """`''` e `NULL` diferentes no banco viram duas formas do mesmo nada, e
-        a primeira consulta que comparar com `IS NULL` mente."""
-        rotas.lembrar_origem(base["contato_id"], {**ORIGEM, "complemento": "   "})
-        assert rotas.origem_do_tecnico(base["contato_id"])["complemento"] is None
+    def test_a_memoria_antiga_nao_e_mais_lida_por_ninguem(self):
+        """⚠️ `grep` virado em teste: as duas funções saíram de `rotas.py`, e
+        voltar a chamá-las faria a tela ler um endereço que ninguém mantém.
+        A TABELA continua no banco até a migração que a derruba, com o OK dele.
+        """
+        assert not hasattr(rotas, "lembrar_origem")
+        assert not hasattr(rotas, "origem_do_tecnico")
 
 
 # ---------------------------------------------------------------------------
@@ -317,24 +325,43 @@ class TestRotasHttp:
             "destino": DESTINO})
         assert r.status_code == 400
 
-    def test_a_MEMORIA_e_gravada_mesmo_com_o_calculo_FALHANDO(self, cliente, cab,
-                                                              base):
-        """🚨 O achado que muda o valor da entrega de hoje: a origem é o que o
-        atendente DIGITOU, e guardá-la não depende de a API responder. É o que
-        faz a metade *"fica salvo para proximas"* funcionar **sem chave**."""
-        banco.executar("DELETE FROM tecnico_origem WHERE tecnico_contato_id = %s",
-                       (base["contato_id"],))
-        r = cliente.post("/api/rotas/km", headers=cab, json={
-            "conversa_id": base["conversa_id"],
-            "origem": ORIGEM, "destino": DESTINO})
-        assert r.status_code == 503          # o cálculo não aconteceu
+    def test_a_rota_ABRE_com_o_endereco_da_ficha(self, cliente, cab, base):
+        """🚨 Quem acha o técnico é o SERVIDOR, pela conversa -- o corpo da
+        requisição nem menciona o contato. Era assim antes e continua: aceitar
+        o id no corpo deixaria qualquer um com a tela ler e sobrescrever a
+        origem de outro técnico."""
+        tecnico_ficha.salvar(base["contato_id"], ORIGEM)
         lido = cliente.get(f"/api/rotas/origem?conversa_id={base['conversa_id']}",
                            headers=cab).json()
         assert lido["origem"]["logradouro"] == ORIGEM["logradouro"]
-        # 🚨 E prova a outra metade: quem achou o técnico foi o SERVIDOR, pela
-        # conversa -- o corpo da requisição nem menciona o contato.
-        assert rotas.origem_do_tecnico(base["contato_id"])["logradouro"]             == ORIGEM["logradouro"]
+        assert lido["tem_ficha"] is True
+        assert lido["tecnico_contato_id"] == base["contato_id"]
 
+    def test_tecnico_SEM_ficha_e_dito_em_vez_de_vir_vazio(self, cliente, cab, base):
+        """⚠️ "Não tem endereço cadastrado" ≠ "a ficha está em branco". Sem
+        `tem_ficha`, a tela só saberia dizer a segunda frase, e quem calcula
+        não ficaria sabendo que o conserto é abrir a ficha."""
+        banco.executar("DELETE FROM tecnico_ficha WHERE contato_id = %s",
+                       (base["contato_id"],))
+        lido = cliente.get(f"/api/rotas/origem?conversa_id={base['conversa_id']}",
+                           headers=cab).json()
+        assert lido["origem"] is None
+        assert lido["tem_ficha"] is False
+
+    def test_o_CALCULO_nao_escreve_na_ficha(self, cliente, cab, base):
+        """🚨 A decisão dele, virada em teste: *"Caso mudem na hora só servirá
+        para aquele orçamento."* Editar a origem no modal e calcular não pode
+        mexer no cadastro de ninguém -- preço e endereço de técnico são da tela
+        dele, com quem pode."""
+        tecnico_ficha.salvar(base["contato_id"], ORIGEM)
+        outro = {**ORIGEM, "logradouro": "Rua Zzteste So Desta Vez"}
+        r = cliente.post("/api/rotas/km", headers=cab, json={
+            "conversa_id": base["conversa_id"],
+            "origem": outro, "destino": DESTINO})
+        assert r.status_code == 503          # sem chave, o cálculo não acontece
+        guardado = tecnico_ficha.origem_do_tecnico(base["contato_id"])
+        assert guardado["logradouro"] == ORIGEM["logradouro"], (
+            "o cálculo sobrescreveu a ficha — era o comportamento até 04/11")
     def test_com_chave_a_rota_devolve_ida_e_total(self, cliente, cab, base,
                                                   com_chave, monkeypatch):
         monkeypatch.setattr(rotas, "_perguntar", lambda o, d: (38_500, 2700))
@@ -354,14 +381,15 @@ class TestRotasHttp:
         assert "não achei" in corpo["motivo"]
 
 
-    def test_conversa_que_NAO_e_de_tecnico_nao_grava_memoria_de_ninguem(
+    def test_conversa_que_NAO_e_de_tecnico_nao_cria_ficha_de_ninguem(
             self, cliente, cab, base):
-        """⚠️ Conversa de cliente, ou sem contato, não tem origem a lembrar --
-        e inventar uma gravaria a origem errada em nome de alguém."""
-        antes = banco.um("SELECT count(*) AS n FROM tecnico_origem")["n"]
+        """⚠️ Conversa de cliente, ou sem contato, não tem origem -- e inventar
+        uma criaria cadastro de técnico em nome de alguém. Depois de 04/11 o
+        risco é maior do que era: o que se criaria agora é FICHA, não memória."""
+        antes = banco.um("SELECT count(*) AS n FROM tecnico_ficha")["n"]
         cliente.post("/api/rotas/km", headers=cab,
                      json={"conversa_id": 0, "origem": ORIGEM, "destino": DESTINO})
-        assert banco.um("SELECT count(*) AS n FROM tecnico_origem")["n"] == antes
+        assert banco.um("SELECT count(*) AS n FROM tecnico_ficha")["n"] == antes
 
     def test_sem_conversa_o_calculo_ainda_funciona(self, cliente, cab, base,
                                                    com_chave, monkeypatch):

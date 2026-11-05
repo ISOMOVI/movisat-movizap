@@ -2612,3 +2612,277 @@ quem faz o que"* respondido sem varrer a tabela).
 
 ⚠️ **O card fechado mostra só o NÚMERO de recados**, nunca um trecho: trecho na
 coluna faria o card crescer sem limite.
+
+## Migração 085 — a ficha do técnico, os serviços e o preço de cada um
+
+🔵 04/11, pedido dele: *"nessa aba ter uma ficha de cada 1. como no formulario
+de credenciamento (...) Dentro vamos colocar uma tabela de preço por serviços
+que ele oferece, padrão a todos (...) Dai o cadastro do tecnico e validação dele
+passará por essa tela."*
+
+🚨 **ESTA MIGRAÇÃO CONTRARIA, DE PROPÓSITO, O AVISO DA 077**, que diz da
+`tecnico_origem`: *"⚠️ NÃO É CADASTRO (...) o projeto já tem 117 contatos de
+técnico sem cadastro no Harmonit para provar o que acontece quando ninguém
+mantém."* O aviso continua verdadeiro — é por isso que a 077 não inventou
+cadastro sozinha. O que mudou é que **ele pediu o cadastro e disse quem
+mantém**: a validação do técnico passa pela `TEC_1.1`.
+
+⚠️ **A FICHA NÃO CRIA ENTIDADE NOVA.** A chave é o `contato` — o mesmo
+`contato_id` que `agendamento.tecnico_contato_id` e
+`orcamento.tecnico_contato_id` já apontam. Técnico virar uma segunda identidade
+faria o orçamento emitido e a ficha falarem de dois sujeitos diferentes.
+
+Medido antes de escrever: **303** contatos com `relacao = 'tecnico'`,
+`tecnico_origem` com **0 linhas**, formulário `CREDENCIAMENTO` **ativo** com
+**0 solicitações**.
+
+### `servico_tecnico` — o catálogo, igual para todos
+
+| coluna | tipo | o que é |
+|---|---|---|
+| `id` | bigserial | PK |
+| `nome` | varchar(60) UNIQUE | Instalação, Retirada, Manutenção Local, Manutenção Troca, Substituição Retirada, Substituição Instalação, Socorro, Laudo Técnico, Treinamento, Acompanhamento |
+| `ordem` | integer | a ordem na ficha; a dele |
+| `ativo` | boolean | desativa-se, **não se apaga** — `tecnico_preco` aponta para cá |
+| `criado_em` | timestamptz | |
+
+### `tecnico_ficha` — o cadastro do prestador
+
+Uma linha por técnico, PK `contato_id` → `contato(id)` `ON DELETE CASCADE`.
+**Contato sem linha é técnico sem ficha, e isso é estado válido.**
+
+| bloco | colunas |
+|---|---|
+| validação | `estado` (CHECK `candidato`/`credenciado`/`recusado`, default `candidato`), `estado_em`, `estado_por` → `atendente(id)`, `estado_nota` |
+| empresa | `nome_fantasia`, `razao_social`, `cnpj`, `telefone_fixo`, `email_geral` |
+| responsável | `responsavel_nome`, `responsavel_sobrenome`, `cpf`, `responsavel_celular`, `responsavel_email` |
+| endereço fixo | `cep`, `logradouro`, `numero`, `bairro`, `cidade`, `uf`, `complemento` |
+| banco | `banco`, `agencia`, `conta`, `titular_tipo` (CHECK `F`/`J`) |
+| deslocamento | `ponto_fixo`, `vai_ao_cliente`, `area_cobertura`, `cobra_deslocamento`, `km_valor_centavos` |
+| resto | `observacao`, `solicitacao_id` → `formulario_solicitacao(id)`, `criado_em`, `atualizado_em` |
+
+🚨 **OS SETE DO ENDEREÇO SÃO OS MESMOS DA 073 E DA 077, NOS MESMOS LIMITES** —
+duas réguas para o mesmo endereço é uma delas mentindo. E é **este** endereço
+que a calculadora de KM abre preenchida, desde 04/11.
+
+⚠️ `solicitacao_id` **NULL = ficha feita à mão** (D3: o formulário alimenta a
+tela, sem exclusividade).
+
+⚠️ Os três booleanos aceitam **NULL**, e isso é o ponto: *"não respondeu se tem
+ponto fixo"* e *"disse que não tem"* são fatos diferentes.
+
+### `tecnico_preco` — o que ele cobra de nós, por serviço
+
+| coluna | tipo | o que é |
+|---|---|---|
+| `contato_id` | bigint | PK composta, → `contato(id)` CASCADE |
+| `servico_id` | bigint | PK composta, → `servico_tecnico(id)` |
+| `custo_centavos` | integer | **CUSTO** (D2), em centavos. Nulo = não oferece |
+| `atualizado_em` | timestamptz | |
+
+🚨 **LINHA AUSENTE E VALOR NULO SIGNIFICAM A MESMA COISA:** ele não oferece
+aquele serviço. Não existe booleano "oferece" ao lado de propósito — dois
+campos para o mesmo fato acabam discordando. **Zero é zero**, e continua
+diferente de ausente.
+
+### E a memória da 077
+
+A migração copia `tecnico_origem` → `tecnico_ficha` (como **candidato**:
+endereço escrito pelo uso é exatamente o que ninguém conferiu), e **hoje isso
+move 0 linhas**. O `DROP TABLE tecnico_origem` fica numa migração separada,
+depois de ele validar a tela: `movizap/rotas.py` deixou de ler a tabela na
+mesma entrega, mas derrubá-la aqui deixaria a calculadora em erro entre a
+migração e o deploy.
+
+## Migração 086 — os dados de PAGAMENTO do técnico
+
+🔵 04/11, segunda volta da tela: *"Banco ajuste para dados de pagamento, pode
+ser TED, PIX, ou boleto, oopção por lista e campo com os dados"*. E sobre o
+formulário de credenciamento, que perguntava os quatro campos bancários:
+*"ajuste no formulario tbm, o mesmo formato. ai amarra eles"*.
+
+| coluna | tipo | o que é |
+|---|---|---|
+| `pagamento_forma` | varchar(10), CHECK `ted`/`pix`/`boleto` | como se paga este técnico |
+| `pagamento_dados` | text | para onde vai o dinheiro, como ele informou |
+
+**Saíram** `banco`, `agencia`, `conta` e `titular_tipo`, que a 085 havia criado.
+
+🚨 **POR QUE REMOVER FOI SEGURO**, medido antes: `tecnico_ficha` com **0
+linhas**, fichas com qualquer dado bancário **0**, solicitações do
+`CREDENCIAMENTO` **0**. Não havia dado a migrar porque não havia dado. Com
+conteúdo, a migração copiaria antes — e o que fazer com o conteúdo seria
+pergunta para ele, não decisão minha.
+
+⚠️ **DUAS COLUNAS, NÃO UMA POR FORMA.** PIX e TED não pedem tabelas diferentes:
+pedem a mesma pergunta ("para onde vai o dinheiro?") com conteúdo diferente. Uma
+coluna por forma criaria três sempre vazias menos uma, e a primeira consulta de
+"quem está sem dados de pagamento" teria de conhecer as três.
+
+⚠️ **`pagamento_dados` É TEXTO LIVRE, de propósito.** Chave PIX é CPF, CNPJ,
+telefone, e-mail ou chave aleatória; conta é banco + agência + conta + titular.
+Validar formato aqui recusaria o que o técnico mandou do jeito que ele tem — e
+quem confere é quem credencia.
+
+🚨 **OS TRÊS VALORES SÃO OS MESMOS DO FORMULÁRIO**, e é isso que "amarra eles":
+`tecnico_ficha.FORMAS_DE_PAGAMENTO` e as `opcoes` do campo do formulário têm de
+coincidir, e há um teste que compara os dois lados
+(`test_a_forma_do_formulario_bate_com_a_da_ficha`).
+
+## Migração 087 — sai a `tecnico_origem`
+
+🔵 04/11, decisão dele em duas partes: *"o cadastro alimenta alimenta a memória,
+pode tirá-la"* e, à proposta do fechamento, **"1 ok"**.
+
+A tabela da 077 — memória do último endereço de origem, escrita pelo uso da
+calculadora de KM — **não existe mais**. O que a substituiu é o endereço FIXO de
+`tecnico_ficha` (085), que é cadastro e tem quem mantenha: a tela `TEC_1.1`.
+
+🚨 **AS DUAS MEDIDAS FORAM REFEITAS NA HORA**, não copiadas da sessão da manhã:
+`select count(*) from tecnico_origem` → **0**, e `grep` por `tecnico_origem` em
+`movizap/*.py` e `frontend/src/` → **nenhuma ocorrência em código** (só
+comentários que contam a história). Há um teste que reprova se
+`rotas.lembrar_origem` ou `rotas.origem_do_tecnico` voltarem a existir.
+
+⚠️ **NÃO FORAM TOCADAS:** `rota_cache` (nasceu na mesma 077 e continua válida —
+é cache de consulta paga, não tem a ver com de quem é a origem) e
+`agendamento.origem_endereco` / `agendamento.km`, que são o **retrato** do que
+se cobrou em cada compromisso.
+
+⚠️ **Desfazer recria a tabela VAZIA, e isso não basta:** quem escrevia nela eram
+as duas funções que saíram do código. Desfazer de verdade é desfazer a decisão.
+
+## Migração 088 — a marca `preenche_os`
+
+🔵 04/11, no fechamento: *"crie um campo de flag, junto com os do deslocamento
+chamado 'Preenche OS'"*.
+
+`tecnico_ficha.preenche_os boolean`, anulável e **sem DEFAULT**.
+
+🚨 **TRÊS ESTADOS, como as outras três perguntas do bloco:** sim, não e **não
+respondido**. Nascer `false` diria, das 287 fichas que existem, que nenhum
+técnico preenche OS — afirmação que ninguém fez. É a régua do `ponto_fixo`, do
+`vai_ao_cliente` e do `cobra_deslocamento`, e a mesma lição do `0` ≠ `NULL` da
+situação da OS (076).
+
+⚠️ **Mora no bloco do deslocamento porque ele pediu ali**, não porque preencher
+OS seja deslocamento — anotado para ninguém "arrumar" de lugar depois achando
+que foi descuido.
+
+⚠️ **NÃO CONDICIONA NADA HOJE.** A tela grava e mostra. Fazer a criação de OS
+depender desta marca seria regra nova sobre o fluxo do Harmonit, e regra é
+decisão dele — quando quiser, o dado já está gravado e medível.
+
+## 04/11 — as 287 fichas com cidade e UF, derivadas do nome
+
+🔵 Decisão dele, à proposta P4: **"4 preencha e mantenha o nome"**.
+
+**Medido:** **287 dos 303** `contato.nome` de técnico (95%) trazem
+`Nome | Cidade - UF`; **286** terminam em ` - UF` e o resto usa barra
+(*"TÉC. Rogerio Marques | Araxá/MG"*). Os **16** que não têm o padrão são razões
+sociais sem cidade no nome (*"CIA DO RADIO"*, *"AUTOTECH RASTREADORES"*).
+
+Feito por `scripts/cidade_do_nome_do_tecnico.py`, que **por padrão só relata**;
+`--um` faz o primeiro e `--aplicar` faz o lote. Resultado: **287 fichas** com
+cidade e UF, todas em estado `candidato`.
+
+🚨 **ISTO É DERIVAÇÃO, NÃO CADASTRO CONFERIDO**, e o script diz isso de três
+maneiras: a ficha nasce **candidata**, a `observacao` registra a procedência
+(*"Cidade e UF derivadas do nome do cadastro do Harmonit (04/11). Confira antes
+de credenciar."*) e **nada já preenchido é sobrescrito** — rodar duas vezes não
+muda nada (provado: a segunda rodada diz "a preencher: 0").
+
+🚨 **O NOME NÃO FOI TOCADO**, e o script prova isso ao fim de cada rodada: os
+técnicos **sem** o ` | ` no nome continuam **16**, antes e depois.
+
+⚠️ **SÓ CIDADE E UF.** Rua, número, bairro e CEP seguem vazios — e credenciar
+continua exigindo **rua e cidade**, então nenhuma das 287 fica "pronta" por
+causa disto.
+
+## Migração 089 — a unidade de cada serviço do técnico
+
+🔵 04/11, parte da ligação entre a ficha e o orçamento. A premissa que
+destravou é dele: *"o orçamento não vai ao cliente, somente ao técnico."*
+
+`servico_tecnico.unidade varchar(4) NOT NULL DEFAULT 'un' CHECK (unidade IN
+('un','km'))`. Os 10 nascem `un`.
+
+🚨 **POR QUE UMA COLUNA, e não "assume `un` no código":** o botão da calculadora
+de KM no modal aparece por **`l.unidade === 'km'`**, não pelo nome do serviço —
+e isso está escrito no `ModalAgendar.vue` de propósito, *"para um serviço novo
+por km ganhar a calculadora sozinho"*. Assumir no código faria essa regra
+passar a depender de nome, que é exatamente o que ela evita.
+
+⚠️ **O MESMO PAR DE VALORES DO OUTRO LADO:** `orcamento_item.unidade` tem
+`CHECK (unidade IN ('un','km'))` desde a 069. Duas listas de unidade que não
+batem seriam uma delas recusando no `INSERT` o que a outra ofereceu na tela.
+
+⚠️ **Deslocamento não é um dos dez** — é `KM DESLOCAMENTO`, do catálogo fixo do
+orçamento, e o valor por km do técnico vive em `tecnico_ficha.km_valor_centavos`.
+
+## Migração 090 — o checklist de cada etapa do painel da Operação
+
+🔵 04/11, com um print do Bitrix como referência: *"são itens que vão ficar em
+um botão dentro do card, como mapa para o operador saber o que fazer"*, e
+**"Modelo fixo + o operador pode acrescentar"**.
+
+**`checklist_modelo`** — a lista da etapa: `id`, `situacao_id`, `texto`
+varchar(200), `ordem`, `ativo`, `criado_em`.
+**`checklist_item`** — o card: `id`, `numero_os`, `situacao_id`, `texto`,
+`ordem`, `de_modelo_id` → `checklist_modelo`, `feito`, `feito_por`, `feito_em`,
+`criado_por`, `criado_em`, e `UNIQUE (numero_os, situacao_id, de_modelo_id)`.
+
+🚨 **NÃO É O CHECKLIST DO HARMONIT.** O ERP tem o seu
+(`ObterCheckListOrdemServico`), que o app do técnico em campo mostra. Os itens
+daqui são de **escritório** — *"Verificar DataScope"*, *"Nota Fiscal (emitir e
+enviar)"* — e lá só fariam ruído. Decisão dele: nem um nem outro.
+
+🚨 **O ITEM DO CARD É CÓPIA, NÃO REFERÊNCIA.** O texto é gravado quando o card
+abre a etapa pela primeira vez; **editar o modelo depois não reescreve** o que
+já está marcado. O card é registro do que foi feito, não espelho da
+configuração — o mesmo desenho do `tipo_nome` (072) e do `origem_endereco`
+(077). Há teste prendendo os dois lados: o card antigo não muda, o card novo
+nasce com o texto novo.
+
+🚨 **O `UNIQUE` É O QUE TORNA A CÓPIA IDEMPOTENTE.** Com `ON CONFLICT DO
+NOTHING`, abrir o card dez vezes — ou dois atendentes ao mesmo tempo — dá o
+mesmo resultado. ⚠️ Ele **não** alcança item avulso (`de_modelo_id` nulo, e
+`NULL` não conflita com `NULL` em `UNIQUE`), e é o certo: o operador pode
+escrever dois avulsos iguais se quiser.
+
+⚠️ **`situacao_id` sem chave estrangeira**, de propósito: as 17 situações vivem
+em `movizap/paineis.py`, não em tabela. Criar uma tabela de situações aqui seria
+uma segunda fonte para a mesma lista.
+
+⚠️ **Desmarcar não apaga**: vira `feito = false` com `feito_em` novo. Quem
+marcou e desmarcou fez duas coisas, e as duas são informação.
+
+**Seed**: 251 → 3 itens · 16488 → 4 · 677 → 2, as três listas que ele escreveu.
+As outras seis etapas que ele citou ficaram **sem itens** — ele não os escreveu,
+e etapa sem modelo simplesmente não mostra o botão.
+
+## Migração 091 — anexo na observação do card
+
+🔵 04/11: *"Card OBS anexos, texto, format conve -- exibir em modal"*.
+
+`os_observacao_arquivo (id, observacao_id → os_observacao CASCADE,
+nome_original, caminho, bytes, mime, criado_em)`.
+
+🚨 **POR QUE NÃO A TABELA `midia`: o banco proíbe.** O
+`CHECK midia_tem_um_dono` (047) é `((conversa_id IS NULL) <> (sala_id IS NULL))`
+— ou-exclusivo, exatamente um dono. Observação de card não é conversa nem sala,
+então **não existe linha possível** ali. ⚠️ E o CHECK **não foi afrouxado**: ele
+é o que impede mídia órfã, e órfã é mídia que ninguém acha para apagar.
+
+O molde é o `formulario_arquivo` (074): pasta própria
+(`/home/claude/movizap_observacao_anexos`), caminho no banco, nome original só
+para exibir, arquivo gravado em pasta sorteada (`uuid4().hex`), **lista branca**
+de extensão no código e teto de 10 MB.
+
+🚨 **ESTA PASTA NÃO TEM BACKUP**, como as outras duas de anexo: o
+`scripts/backup_db.py` leva o **banco**, então a linha sobrevive e o arquivo
+não. Por isso `GET /api/paineis/operacao/anexo/{id}` devolve **410** (não 500)
+quando o arquivo sumiu — e **a tela diz isso a quem anexa**, antes de anexar.
+
+⚠️ Recusa **antes** de escrever no disco: extensão, tamanho e vazio são
+conferidos primeiro, para não deixar arquivo solto sem linha no banco.

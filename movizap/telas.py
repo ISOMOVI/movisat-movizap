@@ -540,6 +540,76 @@ TELAS = [
         "grupo": "Atendimento",
         "fase": 1,
     },
+    # ---- TEC_1.1 e TEC_1.2: os técnicos (04/11) ----
+    {
+        # 🔵 04/11: *"no Movizap, abaixo de 'orçamentos' vamos propor uma tela
+        # CRUD dos tecnicos (...) mas vamos, nessa aba ter uma ficha de cada 1.
+        # como no formulario de credenciamento (...) Dai o cadastro do tecnico e
+        # validação dele passará por essa tela."*
+        #
+        # ⚠️ "abaixo de Orçamentos" é LITERAL: a ordem do menu é a ordem desta
+        # lista, e esta entrada vem logo depois da ORC_1.1 de propósito.
+        #
+        # 🔵 Permissão decidida por ele no mesmo dia: *"Ler todo atendente,
+        # escrever owner e admin."* Esta é a metade que LÊ -- quem monta
+        # orçamento precisa ver o preço e o endereço do técnico, e um 403 aqui
+        # derrubaria a tela de quem atende, que é exatamente o que aconteceu
+        # com a lista de classificações até 23/09.
+        #
+        # ⚠️ Módulo novo (TEC). Técnico não é conversa (ATD), não é o cadastro
+        # de clientes e contatos (CAD) e não é documento emitido (ORC): é
+        # CADASTRO DE PRESTADOR, com credenciamento, tabela de preço e um
+        # endereço que outra tela consome. Prefixo novo se registra também em
+        # `tests/teste_telas.py`.
+        "codigo": "TEC_1.1",
+        "titulo": "Técnicos",
+        "rota": "/tecnicos",
+        # ⚠️ NÃO é `bi-person-vcard`: aquele já é o da `CFG_14.1` (Vínculo dos
+        # técnicos), e duas telas de técnico com o mesmo desenho no menu é o
+        # tipo de detalhe que faz alguém clicar na errada.
+        "icone": "bi-person-badge",
+        "descricao": "A ficha de cada técnico: endereço fixo, tabela de preço e o credenciamento.",
+        "permissao": "atendimento",
+        "grupo": "Atendimento",
+        "fase": 1,
+    },
+    {
+        # 🚨 ESTA NÃO É UMA TELA: é a CHAVE DA ESCRITA. `aba_de` tira do menu,
+        # e o que ela faz é dar um código para as rotas de gravar ficha, preço
+        # e credenciamento exigirem.
+        # ⚠️ Ela TEM rota no frontend (`/tecnicos/credenciar`, que redireciona
+        # para `/tecnicos`), e não por capricho: `teste_router.py` cobra rota
+        # para toda tela do registro, porque `aba_de` esconde do menu mas não
+        # impede alguém de chegar pelo endereço -- e aí a tela seria "não
+        # encontrada", como a ATD_5.1 em 06/08. É a régua da CFG_4.1 (ler é de quem usa, escrever é de quem
+        # decide), com a diferença de que ali a casca é o /config e aqui a
+        # tela-mãe é a própria TEC_1.1.
+        #
+        # 🔵 `equipe` É EXATAMENTE "OWNER E ADMIN", que foi o que ele pediu:
+        # em `PERFIS`, `admin` concede {atendimento, equipe} e `atendimento`
+        # concede só {atendimento}. Não foi preciso inventar permissão nova nem
+        # mexer nos perfis -- mexer em PERFIS é decisão dele, não minha.
+        #
+        # ⚠️ EFEITO COLATERAL DECLARADO: `equipe` é a mesma permissão de Times
+        # e Atendentes. Quem puder administrar a equipe passa a poder editar
+        # preço de técnico. Hoje isso é o mesmo conjunto de pessoas (owner e
+        # admin); se um dia ele quiser separar, aí sim nasce uma permissão
+        # própria, com a palavra dele.
+        #
+        # 🚨 `aba_de` + PERMISSÃO APERTADA JÁ TRANCOU A PORTA DE 9 EM 10 (M10).
+        # Aqui não tranca: a TEC_1.1 é `atendimento` e abre para todos. O que
+        # falta a quem não tem esta chave são os BOTÕES, e a tela diz em texto
+        # o que acontece -- não quem decidiu.
+        "codigo": "TEC_1.2",
+        "titulo": "Credenciamento de técnicos",
+        "rota": "/tecnicos/credenciar",
+        "icone": "bi-patch-check",
+        "descricao": "Quem pode cadastrar técnico, mexer no valor dos serviços e credenciar.",
+        "permissao": "equipe",
+        "grupo": "Atendimento",
+        "fase": 1,
+        "aba_de": "TEC_1.1",
+    },
     # ---- CFG_13.1: a numeração do orçamento (21/10) ----
     {
         # 🔵 Decisão 9 dele: numeração própria do orçamento, com **aba de
@@ -662,6 +732,9 @@ GRUPO_PELO_PREFIXO = {
     # acrescentar uma tela ORC sem `grupo` e o menu desenharia "ORC" cru.
     "ORC": "Atendimento",
     "REL": "Relatórios",
+    # 04/11: idem para TEC -- a TEC_1.1 leva `grupo` explícito, e este fallback
+    # existe para o dia em que alguém acrescentar uma tela TEC sem ele.
+    "TEC": "Atendimento",
 }
 
 # Os grupos que EXISTEM, e os subgrupos de cada um.

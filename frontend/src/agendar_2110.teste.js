@@ -66,11 +66,30 @@ vi.mock('vue-router', () => ({
 import ModalAgendar from './componentes/ModalAgendar.vue'
 import Agendamentos from './telas/Agendamentos.vue'
 
+/* 🔵 04/11: o catálogo deixou de ser lista fechada. As duas fixas vêm sempre
+   primeiro, e os serviços COM PREÇO na ficha do técnico entram depois, já com o
+   valor escrito pelo backend (`preco_unit`) e marcados com `da_ficha`. */
 const CATALOGO = {
   catalogo: [
     { servico: 'KM DESLOCAMENTO', harmonit_id: 6971, unidade: 'km' },
     { servico: 'PAGAMENTO DE TECNICO', harmonit_id: 653939, unidade: 'un' },
   ],
+  tecnico_contato_id: null,
+  proximo_numero: 1668,
+}
+
+/* O mesmo técnico, com dois serviços precificados na ficha — e um deles em
+   R$ 0,00, que é cortesia e **pode** ir ao orçamento (decisão dele). */
+const CATALOGO_COM_FICHA = {
+  catalogo: [
+    { servico: 'KM DESLOCAMENTO', harmonit_id: 6971, unidade: 'km' },
+    { servico: 'PAGAMENTO DE TECNICO', harmonit_id: 653939, unidade: 'un' },
+    { servico: 'Instalação', unidade: 'un', preco_unit_centavos: 18000,
+      preco_unit: '180,00', da_ficha: true },
+    { servico: 'Treinamento', unidade: 'un', preco_unit_centavos: 0,
+      preco_unit: '0,00', da_ficha: true },
+  ],
+  tecnico_contato_id: 91041,
   proximo_numero: 1668,
 }
 
@@ -152,12 +171,76 @@ describe('qual aba abre', () => {
 })
 
 describe('aba Orçamento', () => {
-  it('traz o catálogo fechado e o próximo número', async () => {
+  it('técnico SEM preço na ficha: as duas de sempre, como antes', async () => {
+    /* 🚨 A GARANTIA DE QUE NINGUÉM PERDE A CAPACIDADE DE EMITIR. Em 04/11 havia
+       287 fichas e 0 preços: se o catálogo fosse só o da ficha, o modal abriria
+       sem opção para todos os técnicos. */
     const tela = montarModal()
     await flushPromises()
     const opcoes = tela.findAll('option').map((n) => n.text())
     expect(opcoes).toEqual(['KM DESLOCAMENTO', 'PAGAMENTO DE TECNICO'])
     expect(tela.text()).toContain('1668')
+  })
+
+  it('🚨 manda a CONVERSA no catálogo, nunca o id do técnico', async () => {
+    /* De quem é o preço não vem do navegador — a régua da calculadora de KM. */
+    montarModal()
+    await flushPromises()
+    const pedido = estado.pedidos.find((r) => r.startsWith('/api/orcamento/catalogo'))
+    expect(pedido).toContain('conversa_id=1')
+    expect(pedido).not.toContain('tecnico_contato_id')
+  })
+
+  it('🔵 os serviços da ficha aparecem, com o valor PREENCHIDO', async () => {
+    estado.respostas['/api/orcamento/catalogo'] = CATALOGO_COM_FICHA
+    const tela = montarModal()
+    await flushPromises()
+    const opcoes = tela.findAll('option').map((n) => n.text())
+    expect(opcoes.slice(0, 2)).toEqual(['KM DESLOCAMENTO', 'PAGAMENTO DE TECNICO'])
+    expect(opcoes).toContain('Instalação')
+    expect(opcoes).toContain('Treinamento')
+
+    /* Escolher o serviço da ficha preenche o preço e marca a origem. */
+    const linha = tela.find('tbody tr')
+    await linha.find('select').setValue('Instalação')
+    await flushPromises()
+    const preco = linha.findAll('input').find((i) => i.element.value === '180,00')
+    expect(preco).toBeTruthy()
+    expect(linha.text()).toContain('da ficha')
+  })
+
+  it('⚠️ trocar de serviço NÃO apaga valor digitado à mão', async () => {
+    estado.respostas['/api/orcamento/catalogo'] = CATALOGO_COM_FICHA
+    const tela = montarModal()
+    await flushPromises()
+    const linha = tela.find('tbody tr')
+    const preco = linha.findAll('input')[0]
+    await preco.setValue('99,00')
+    await linha.find('select').setValue('Instalação')
+    await flushPromises()
+    expect(linha.findAll('input')[0].element.value).toBe('99,00')
+  })
+
+  it('🔵 preço ZERO pode ser emitido (cortesia)', async () => {
+    estado.respostas['/api/orcamento/catalogo'] = CATALOGO_COM_FICHA
+    const tela = montarModal()
+    await flushPromises()
+    const linha = tela.find('tbody tr')
+    await linha.find('select').setValue('Treinamento')
+    await flushPromises()
+    const botao = tela.findAll('button').find((b) => b.text().includes('Gerar e anexar'))
+    expect(botao.attributes('disabled')).toBeUndefined()
+  })
+
+  it('⚠️ mas preço VAZIO continua recusado', async () => {
+    estado.respostas['/api/orcamento/catalogo'] = CATALOGO_COM_FICHA
+    const tela = montarModal()
+    await flushPromises()
+    const linha = tela.find('tbody tr')
+    await linha.findAll('input')[0].setValue('')
+    await flushPromises()
+    const botao = tela.findAll('button').find((b) => b.text().includes('Gerar e anexar'))
+    expect(botao.attributes('disabled')).toBeDefined()
   })
 
   it('a unidade acompanha o serviço escolhido (km no deslocamento)', async () => {

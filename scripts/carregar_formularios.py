@@ -116,6 +116,52 @@ ETAPAS = {
 # ⚠️ `fora` TIRA o campo (ele deixa de existir, nao fica escondido). O resto
 # muda o campo que fica.
 AJUSTES = {
+    # 🔵 04/11: o bloco BANCO virou DADOS DE PAGAMENTO -- *"pode ser TED, PIX,
+    # ou boleto, oopção por lista e campo com os dados"*, e *"ajuste no
+    # formulario tbm, o mesmo formato. ai amarra eles"*.
+    #
+    # 🚨 NENHUM CAMPO NOVO FOI INVENTADO, e não é limitação: `gravar_definicao`
+    # lê a definição do Bitrix, e campo que não existe lá não tem como nascer
+    # por ajuste. O que se fez foi REAPROVEITAR os dois campos que já
+    # perguntavam sobre pagamento -- a lista e um texto --, e tirar os outros
+    # dois. Resultado: a mesma dupla (forma + dados) que a ficha da `TEC_1.1`
+    # tem, com os MESMOS três valores.
+    #
+    # ⚠️ O QUE ISSO CUSTA, DITO: a pergunta "titular é pessoa física ou
+    # jurídica?" deixou de existir, e as de agência e conta saíram. Quem paga
+    # por TED vai escrever banco, agência e conta no campo de dados. O custo é
+    # aceitável porque CNPJ e CPF já são perguntados antes, no formulário, e
+    # porque **nenhuma solicitação havia sido recebida** (medido: 0 em 04/11) --
+    # não há resposta antiga para ficar sem lugar.
+    "CREDENCIAMENTO": {
+        "fora": ["agencia", "conta"],
+        "campos": {
+            # O TÍTULO DA SEÇÃO. 🚨 `banco` é a PÁGINA e `banco-2` é o campo de
+            # texto -- dois campos, dois nomes, e foi justamente a confusão
+            # entre eles que recusou a primeira carga desta volta. Sem este
+            # ajuste, a seção continuaria anunciando "BANCO" para quem escolhe
+            # PIX.
+            "banco": {"rotulo": "DADOS DE PAGAMENTO"},
+            # A lista que perguntava o titular passa a perguntar a FORMA.
+            # 🚨 Os `value` são NOSSOS, em slug, e batem com o CHECK da coluna
+            # `tecnico_ficha.pagamento_forma` (migração 086). Os ids do Bitrix
+            # (5846, 5848) não significavam nada aqui.
+            "titular-da-conta-e-pessoa-fisica-ou-juri": {
+                "rotulo": "Forma de pagamento",
+                "opcoes": [
+                    {"value": "pix", "label": "PIX"},
+                    {"value": "ted", "label": "TED / depósito em conta"},
+                    {"value": "boleto", "label": "Boleto"},
+                ],
+            },
+            # O campo "Banco" passa a ser o campo dos DADOS. O `nosso_nome`
+            # continua `banco-2` -- ele vem do rótulo ORIGINAL e é a chave
+            # estável do de-para; o que muda é o que a pessoa lê.
+            "banco-2": {
+                "rotulo": "Dados para pagamento (chave PIX, ou banco, agência e conta)",
+            },
+        },
+    },
     "SUPORTE": {
         # 🔵 *"na aba 2, somente 1 caixa para o nome ja serve"* e *"o assunto
         # ja e o proprio tipo de solicitacao"*.

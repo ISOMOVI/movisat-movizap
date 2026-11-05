@@ -36,6 +36,8 @@ import Historico from '../telas/Historico.vue'
 import Ligacoes from '../telas/Ligacoes.vue'
 import Agendamentos from '../telas/Agendamentos.vue'
 import Orcamentos from '../telas/Orcamentos.vue'
+import Tecnicos from '../telas/Tecnicos.vue'
+import FichaDoTecnico from '../telas/FichaDoTecnico.vue'
 import ChatInterno from '../telas/ChatInterno.vue'
 import Solicitacoes from '../telas/Solicitacoes.vue'
 import PainelOperacao from '../telas/PainelOperacao.vue'
@@ -113,6 +115,51 @@ const rotas = [
     name: 'ORC_1.1',
     component: Orcamentos,
     meta: { codigo: 'ORC_1.1', titulo: 'Orçamentos' },
+  },
+  {
+    // 🔵 04/11: a ficha do técnico, *"abaixo de 'orçamentos'"* -- e o caminho
+    // segue a mesma régua da ORC_1.1 e do /agendamentos: não é conversa, é
+    // cadastro de quem executa o serviço.
+    //
+    // ⚠️ NÃO EXISTE ROTA PARA A `TEC_1.2`, e isso é de propósito: ela não é
+    // tela, é a chave que as rotas de escrita exigem. A guarda de rota usa
+    // `sessao.telas`, que continua trazendo as telas-aba -- e é de lá que esta
+    // tela lê se desenha os botões.
+    path: '/tecnicos',
+    name: 'TEC_1.1',
+    component: Tecnicos,
+    meta: { codigo: 'TEC_1.1', titulo: 'Técnicos' },
+  },
+  {
+    // 🚨 A `TEC_1.2` NÃO DESENHA TELA: ela é a permissão de escrever (criar
+    // técnico, mexer no valor, credenciar), e quem a lê é a própria TEC_1.1
+    // para decidir se mostra os botões.
+    //
+    // ⚠️ MESMO ASSIM ELA PRECISA DE ROTA, e isto foi achado pela suíte
+    // (`teste_router.py`): toda tela do registro tem de existir aqui, porque
+    // `aba_de` tira do menu mas não impede alguém de chegar pelo endereço --
+    // e aí a tela certa seria "não encontrada". Daí o redirecionamento: cai
+    // em /tecnicos, que é onde se credencia de verdade.
+    path: '/tecnicos/credenciar',
+    name: 'TEC_1.2',
+    redirect: { name: 'TEC_1.1' },
+    meta: { codigo: 'TEC_1.2', titulo: 'Credenciamento de técnicos' },
+  },
+  {
+    // 🔵 04/11: a ficha saiu de dentro da lista e virou tela, com seta de
+    // voltar -- *"não gosto desse modelo de quando clico em 'abrir ficha', ele
+    // cria uma pagina em cima da atual. fica feio"*.
+    //
+    // ⚠️ Vem DEPOIS de `/tecnicos/credenciar` e com o segmento `ficha` no
+    // caminho: `/tecnicos/:id` casaria "credenciar" como id.
+    //
+    // ⚠️ `meta.codigo` é a própria TEC_1.1 -- é a mesma tela, em outro
+    // caminho. Quem pode abrir a lista pode abrir a ficha; gravar é que
+    // depende da TEC_1.2.
+    path: '/tecnicos/ficha/:contatoId',
+    name: 'tecnico-ficha',
+    component: FichaDoTecnico,
+    meta: { codigo: 'TEC_1.1', titulo: 'Ficha do técnico' },
   },
   {
     // Fora de /atendimento: ligação do MicroSIP não é conversa de WhatsApp, e

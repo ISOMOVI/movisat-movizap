@@ -6530,3 +6530,509 @@ abrir a conversa). O resto do card — avatar, nome, prévia, etiquetas — cont
 🚨 **O que nenhuma das 631 vê é a tela.** O jsdom não calcula largura nem recorte — é literalmente o
 que falhou aqui antes. 🔴 **Falta dele: abrir a Caixa no computador e no celular.** Abaixo de 860 px
 a lista ocupa a tela toda e a coluna nova não foi exercitada em aparelho nenhum.
+
+## 04/11 — TÉCNICOS: a ficha, a tabela de preço e o credenciamento (`TEC_1.1`)
+
+🔵 Pedido dele, inteiro: *"no Movizap, abaixo de 'orçamentos' vamos propor uma
+tela CRUD dos tecnicos. Sabemos que o acesso de fato deles ao harmonit é feito
+como usuario do sistema, então esses dados só vamos trazer mesmo. mas vamos,
+nessa aba ter uma ficha de cada 1. como no formulario de credenciamento, veja
+se ainda tem acesso ao link dele e proponha. Também ali que iremos colocar o
+endereço fixo que aparecerá na tela de calculo de KM para cobrar dele ao fazer o
+orçamento. Dentro vamos colocar uma tabela de preço por serviços que ele
+oferece, padrão a todos (...) com campo de valor por serviço que será
+atualizado na ficha de cada 1 manualmente. Dai o cadastro do tecnico e
+validação dele passará por essa tela. Na ficha dele, quando o tipo for tecnico,
+vamos poder vincular o cad do tecnico no cadastro dele igual fazemos das
+empresas."*
+
+### O formulário de credenciamento existe, e o link é este
+
+`https://forms.movisat.com.br/f/credenciamento-tecnico` — código
+`CREDENCIAMENTO`, procedência Bitrix **164**, **34 campos** (4 são página, logo
+**30 perguntas**), em 5 blocos: Empresa · Responsável · Banco · Tabela de
+serviços · Deslocamento. Medido em 04/11: **ativo**, com **0 solicitações
+recebidas** — ninguém se credenciou ainda.
+
+A ficha espelha esses blocos, com uma diferença medida e duas decisões dele.
+
+### As cinco decisões dele (04/11)
+
+| # | decisão |
+|---|---|
+| D1 | a lista de serviços é a **dele**, com `Substituição R.` = **Substituição Retirada** e `Substituição I.` = **Substituição Instalação**. São **10** |
+| D2 | o valor por serviço é **CUSTO**: *"o que ele nos cobra"* |
+| D3 | o formulário alimenta a tela, *"mas não de forma exclusiva. Ainda é permitido fazer a mão"* |
+| D4 | *"Ler todo atendente, escrever owner e admin"* |
+| D5 | *"o cadastro alimenta a memória, pode tirá-la. Caso mudem na hora só servirá para aquele orçamento. Os demais ja vem com o do cad"* |
+
+### Os dez serviços, iguais para todos
+
+Instalação · Retirada · Manutenção Local · Manutenção Troca · Substituição
+Retirada · Substituição Instalação · Socorro · Laudo Técnico · Treinamento ·
+Acompanhamento.
+
+🚨 **O CATÁLOGO É DADO, NÃO CONSTANTE** (`servico_tecnico`): serviço novo entra
+sem deploy, e desativar nunca apaga preço — o preço antigo continua explicando
+os orçamentos antigos.
+
+🚨 **VALOR NULO = NÃO OFERECE, E A FICHA ESCREVE ISSO.** `—` não pode parecer
+zero, e **zero continua diferente de ausente**: serviço de cortesia é um fato.
+
+🚨 **AS SEIS PERGUNTAS DE PREÇO DO FORMULÁRIO NÃO SÃO ESTES DEZ.** Ele pergunta
+Instalação simples · Instalação com bloqueio · Manutenção/Correção ·
+Substituição no mesmo veículo · Substituição entre veículos · Remoção. Ele
+decidiu que os dez mandam, então o que chega **não vira preço sozinho**:
+aparece na ficha como *"o que ele respondeu"*, para quem credencia digitar.
+Reescrever o formulário para os dez é etapa à parte.
+
+### O endereço fixo, e o que mudou no KM
+
+🔵 D5. Até 04/11 a origem do cálculo era `tecnico_origem` (migração 077) —
+**memória escrita pelo uso da calculadora**, e a própria migração avisava que
+*"NÃO É CADASTRO"*. Agora:
+
+- a origem vem da **ficha** (`tecnico_ficha.origem_do_tecnico`);
+- editar no modal vale **só para aquele cálculo** — o cálculo **não grava** mais
+  nada de volta;
+- o retrato do que foi cobrado continua em `agendamento.origem_endereco` e
+  `agendamento.km`, que existem desde a mesma 077;
+- `rotas.origem_do_tecnico` e `rotas.lembrar_origem` **saíram**; a tabela
+  `tecnico_origem` fica no banco, vazia e sem leitor, até a migração que a
+  derruba — **com o OK dele**.
+
+⚠️ `GET /api/rotas/origem` passou a devolver `tem_ficha` e `estado`: *"não tem
+endereço cadastrado"* e *"a ficha está em branco"* são frases diferentes, e sem
+isso a tela só saberia dizer a segunda.
+
+### O vínculo com o Harmonit: nada novo foi escrito
+
+*"esses dados só vamos trazer mesmo"* — e já existia desde 21/10. A ficha chama
+`GET/PUT /api/contatos/{id}/tecnico-harmonit` e `GET /api/tecnicos-harmonit`,
+as mesmas da gaveta da conversa. O que entra ali vira `manual`, e a varredura
+diária nunca mais encosta. **Nenhuma rota desta tela escreve no Harmonit.**
+
+### A validação
+
+Três estados: `candidato` → `credenciado` ou `recusado`, com autor
+(`estado_por`) e nota.
+
+🚨 **CREDENCIAR EXIGE O MÍNIMO PARA SER USADO DEPOIS:** rua, cidade e pelo menos
+um preço. Sem endereço não há cálculo de KM; sem preço não há orçamento — e
+marcado como pronto assim, o técnico apareceria em dia numa tela e falharia na
+outra. Não é régua sobre o negócio dele: é a recusa de dizer "pronto" sobre o
+que as outras duas telas não conseguem usar.
+
+⚠️ **RECUSAR NÃO APAGA A FICHA.** Mesmo CNPJ volta amanhã, e sem o registro
+ninguém lembra por que saiu.
+
+### A tela
+
+Lista no molde da `Orcamentos.vue`, e a ficha é formulário **inline** (o padrão
+da `Classificacoes.vue`), em oito blocos: Empresa · Responsável · Endereço fixo
+· Banco · **Tabela de preço (os dez)** · Deslocamento · Técnico no Harmonit ·
+Observação. No topo, os **credenciamentos recebidos** — e abrir um deles **não
+grava nada**: preenche a ficha para conferir, e quem credencia salva.
+
+⚠️ **TÉCNICO SEM FICHA APARECE NA LISTA.** Eram **303** contatos de técnico e
+**0** fichas em 04/11: listar só os fichados abriria a tela vazia e pareceria
+quebrada. Quem não tem ficha vem marcado, e é assim que se vê o trabalho que
+falta.
+
+### Onde está
+
+| arquivo | o que |
+|---|---|
+| `migracoes/085_ficha_do_tecnico.sql` | `servico_tecnico` (os 10), `tecnico_ficha`, `tecnico_preco` |
+| `movizap/tecnico_ficha.py` | a ficha, o catálogo, os preços, a validação e o de-para do formulário |
+| `movizap/main.py` | as 9 rotas: ler sob `TEC_1.1`, escrever sob `TEC_1.2` |
+| `movizap/telas.py` | a `TEC_1.1` e a `TEC_1.2` + o fallback `TEC` em `GRUPO_PELO_PREFIXO` |
+| `movizap/rotas.py` | a memória da origem **saiu** daqui |
+| `frontend/src/telas/Tecnicos.vue` | a tela |
+| `tests/teste_tecnico_ficha.py` | 56 testes |
+
+### O que falta — e é dele
+
+1. **Abrir `/tecnicos` no navegador** e conferir os oito blocos da ficha.
+2. **Credenciar o primeiro técnico de verdade** (hoje são 303 contatos e 0
+   fichas) — é o uso que valida, não a suíte.
+3. **Decidir se o custo entra no orçamento**: a linha `PAGAMENTO DE TECNICO`
+   (`harmonit_id` 653939) já existe e poderia nascer com o valor da ficha,
+   editável. É mudança numa tela que ele validou em 26/10, então vai separada.
+4. **Decidir o `DROP TABLE tecnico_origem`** (migração seguinte).
+5. **Decidir se o formulário de credenciamento passa a perguntar os dez
+   serviços** em vez das seis perguntas atuais.
+
+## 04/11, segunda volta — TÉCNICOS: a ficha saiu de dentro da lista
+
+🔵 Os seis apontamentos dele, depois de ver a primeira versão:
+
+1. *"não gosto desse modelo de quando clico em 'abrir ficha', ele cria uma
+   pagina em cima da atual. fica feio, por isso indico o uso de modais para
+   abrir um novo quadro, ou ir para outra tela objetiva só para isso. Com seta
+   de voltar."*
+2. *"o botão pode chamar 'Ficha' pois as vezes é só uma consulta aos dados dele"*
+3. *"endereço puxando pelo CEP"*
+4. *"Banco ajuste para dados de pagamento, pode ser TED, PIX, ou boleto, oopção
+   por lista e campo com os dados"*
+5. *"o campo de deslocamento ficou legal, mas layout está quebrado, da para
+   aprimorar"*
+6. *"o campo 'tecnico no hamronit não tem uso dentro da ficha do tecnico...' no
+   lugar, exiba o usuario e a senha criada (...) de forma esttica, pois não ha
+   edição, mas é bom saber"*
+
+### 1 e 2 — a ficha é outra tela
+
+`frontend/src/telas/FichaDoTecnico.vue`, rota **`/tecnicos/ficha/:contatoId`**,
+com **seta de voltar** no topo. O botão da lista chama **Ficha** em todas as
+linhas, com ficha ou sem.
+
+**Escolhida a tela própria, não o modal:** a ficha tem oito blocos, e num modal
+ela rolaria dentro de uma caixa, com duas barras de rolagem. A tela própria
+também dá link direto para uma ficha.
+
+⚠️ **A seta usa `router.back()` quando há história**, e cai em `/tecnicos` para
+quem chegou por link direto: voltar para a primeira página de uma lista filtrada
+seria perder o lugar de quem estava trabalhando.
+
+🚨 **O CAMINHO TEM O SEGMENTO `ficha` de propósito.** `/tecnicos/:id` casaria a
+palavra *"credenciar"* (a rota da `TEC_1.2`) como se fosse um id — o roteador
+aceita, não reclama e escolhe sozinho.
+
+⚠️ **A rota NÃO tem código de tela próprio:** `meta.codigo` é a própria
+`TEC_1.1`, porque é a mesma tela em outro caminho. Código novo faria o
+`teste_router` cobrar uma entrada em `telas.py` para algo que não é tela.
+
+### 3 — o CEP, com as três respostas separadas
+
+O campo de CEP preenche **rua, bairro, cidade e UF** no `blur` e também por um
+botão **Buscar**. 🚨 E a tela distingue as **três** respostas que o backend já
+dava: achou · *"este CEP não existe"* · *"não deu para conferir agora — preencha
+à mão"*. Tratar as duas últimas como uma só faria a tela acusar de errado um CEP
+certo que ela não conseguiu conferir.
+
+⚠️ **O número nunca é preenchido** — o ViaCEP não sabe o número. É a mesma régua
+do `ModalAgendar`.
+
+### 4 — dados de pagamento, nos dois lados
+
+Na ficha: **lista** (PIX · TED/depósito em conta · Boleto) e um **campo de
+dados**. No banco, migração **086** (ver `docs/02`).
+
+🚨 **E O FORMULÁRIO DE CREDENCIAMENTO MUDOU JUNTO** — *"ai amarra eles"*. Pelos
+`AJUSTES` de `scripts/carregar_formularios.py`:
+
+| campo | antes | agora |
+|---|---|---|
+| a página | `BANCO` | `DADOS DE PAGAMENTO` |
+| a lista | "Titular da conta é pessoa Física ou Jurídica?", opções 5846/5848 | **"Forma de pagamento"**, opções `pix`/`ted`/`boleto` |
+| o texto | "Banco" | **"Dados para pagamento (chave PIX, ou banco, agência e conta)"** |
+| `agencia`, `conta` | perguntados | **fora** |
+
+O formulário foi de **34 para 32 campos**. ⚠️ **O que isso custa, dito:** a
+pergunta do titular PF/PJ deixou de existir e agência/conta saíram — quem paga
+por TED escreve banco, agência e conta no campo de dados. Aceitável porque CNPJ
+e CPF já são perguntados antes, e porque **nenhuma solicitação havia sido
+recebida** (0 em 04/11): não há resposta antiga sem lugar.
+
+🚨 **UM DEFEITO LATENTE ACHADO AO TROPEÇAR NELE.** O laço dos ajustes
+(`movizap/formularios.py`) derivava o nome do campo com acumulador **vazio**,
+enquanto a gravação deriva com o acumulador de verdade. Resultado: o campo que o
+registro grava como `banco-2` só podia ser citado num ajuste como `banco` — que
+é o nome da **página** "BANCO". Um ajuste de rótulo caía nos dois campos, e
+citar o nome verdadeiro (o que `conferir_formularios.py --nomes` imprime) parava
+a carga com *"ajuste citando campo que nao existe"*. Agora o ajuste casa pelos
+**dois** nomes, o curto e o final, e o mais específico ganha. A trava que
+acusou continua: ajuste que não casa para a carga.
+
+### 5 — o deslocamento, consertado
+
+⚠️ **A causa do layout quebrado, medida:** as três perguntas de sim/não eram
+`label.linha` dentro da **mesma `.grade`** dos campos de texto, com
+`align-items: end`. A caixa de seleção assentava na linha de base de um campo
+que tem rótulo em cima, e cada uma parava numa altura diferente. Agora as
+perguntas têm lista própria (`.perguntas`) e os campos têm a sua, com
+`align-items: start` — campo com texto de ajuda embaixo deixou de empurrar o
+vizinho.
+
+### 6 — o acesso, no lugar do bloco do Harmonit
+
+O bloco "Técnico no Harmonit" **saiu**: a busca e o vínculo continuam onde
+sempre estiveram, na ficha da conversa. No lugar, um bloco **estático**
+(`<dl>`, sem campo de edição) com **e-mail de acesso**, nome e código no
+Harmonit.
+
+🚨 **A SENHA NÃO É EXIBIDA PORQUE NÃO EXISTE EM LUGAR NENHUM QUE EU ALCANCE.**
+Varri scripts, módulos e docs dos dois projetos, os docs do Harmonit, os planos
+de sessões anteriores, o `Proximos_Passos`, as duas bases e os arquivos locais:
+o único gerador de senha do projeto é o do **alistamento de ligações**, e ele
+deriva do **ramal**. A API do Harmonit não devolve senha — e não deveria.
+🔵 Decisão dele: *"é para estar na documentação que cadastrou eles no harmonit
+(...) se não encontrar algo objetivamente, deixe só o e-mail de acesso mesmo"*.
+A tela diz, em texto, que a senha não fica guardada aqui.
+
+⚠️ **O e-mail vem da ponte do FPSL, e falha da ponte NÃO é "sem acesso".** A
+rota devolve `email: null` com `email_motivo`, e a tela escreve *"não quer dizer
+que ele esteja sem acesso"* — juntar os dois faria a ficha afirmar que um
+técnico cadastrado lá não tem acesso.
+
+### O que está no ar depois desta volta
+
+| arquivo | o que |
+|---|---|
+| `migracoes/086_pagamento_do_tecnico.sql` | forma + dados, no lugar dos 4 bancários |
+| `frontend/src/telas/Tecnicos.vue` | só a lista, os candidatos e o cadastro à mão |
+| `frontend/src/telas/FichaDoTecnico.vue` | a ficha, 8 blocos, seta de voltar |
+| `movizap/formularios.py` | o ajuste passa a casar pelo nome com sufixo |
+| `scripts/carregar_formularios.py` | os `AJUSTES` do `CREDENCIAMENTO` |
+| `movizap/main.py` | o e-mail de acesso junto do vínculo |
+| `tests/teste_tecnico_ficha.py` | 60 testes |
+| `frontend/src/tecnicos_0411.teste.js` | 20 testes |
+
+### 04/11, fechamento — o que ele decidiu sobre as quatro propostas
+
+🔵 *"1 ok; 2 o formulario é nosso e o que precisar fazer deve ser feito para
+ajustar o uso para o Movizap, por isso que ja temos ele replicado -- apenas
+proponha pois é demanda de formulario e não de tenicos; 3 apague entao; 4
+preencha e mantenha o nome"*.
+
+| # | o quê | desfecho |
+|---|---|---|
+| P1 | `DROP TABLE tecnico_origem` | ✅ migração **087** |
+| P2 | os 10 serviços no formulário | 🔵 **só proposta** — é demanda da frente de Formulários; `Desktop\Formularios_Campos_Proprios_P2.md` |
+| P3 | a frase que mente na `Classificacoes.vue` | ✅ apagada |
+| P4 | cidade/UF pelo nome | ✅ **287 fichas**, nome mantido |
+
+E mais um pedido, no mesmo fechamento: *"crie um campo de flag, junto com os do
+deslocamento chamado 'Preenche OS'"* → ✅ migração **088**, quarta pergunta do
+bloco Deslocamento.
+
+🔵 **P2, o princípio que ele fixou:** *"o formulario é nosso e o que precisar
+fazer deve ser feito para ajustar o uso para o Movizap, por isso que ja temos
+ele replicado"*. Então o limite que eu encontrei — `AJUSTES` sabe trocar
+rótulo/opções/obrigatório e **tirar** campo, mas **não acrescentar** campo que
+não exista no mapa do Bitrix — **não é para ser contornado, é para ser
+removido**. A proposta está escrita à parte porque mexe no carregador dos **15**
+formulários, e isso não é entrega da tela de técnicos.
+
+### O que a `Classificacoes.vue` deixou de dizer
+
+🚨 Ela terminava com *"A última ativa não pode ser desativada"*, e **essa regra
+saiu em 11/08** — o `operacao.py` registra o motivo (*"guardar o sistema contra
+um problema que não existe mais só impede o usuário de limpar a própria base"*).
+`M12` na forma mais comum: o texto era verdadeiro quando escrito e a entrega
+seguinte não voltou para matá-lo. Achado por mim ao usar a tela como molde, e
+apagado com a palavra dele. **Nada entrou no lugar:** o que precisava ser dito
+já está no bloco vazio da própria tela (*"Sem nenhuma ativa, o atendente não
+consegue encerrar conversa"*), e esse continua verdadeiro.
+
+### A ficha, depois do fechamento
+
+O bloco **Deslocamento** tem agora **quatro** perguntas de sim/não — ponto fixo,
+vai ao cliente, cobra deslocamento à parte e **Preenche OS** — mais área de
+cobertura e valor do km. As quatro vivem na mesma lista, fora da grade dos
+campos de texto: foi a mistura das duas coisas que quebrou o layout na primeira
+versão.
+
+⚠️ **E as 287 fichas mudam o que a tela mostra ao abrir:** a lista deixa de ter
+303 técnicos "sem ficha" e passa a ter 287 **candidatos** com cidade, 16 sem
+ficha. Nenhum credenciado — credenciar exige rua e um preço, e é ato dele.
+
+## 04/11 — O PREÇO DA FICHA ENTRA NA LINHA DO ORÇAMENTO
+
+🔵 Pergunta dele: *"os campos de orçamento ja trazem os dados dos produtos do
+tecnico?"* — **não traziam**, e a medição mostrou o tamanho da desconexão:
+`grep` por `tecnico_preco`/`servico_tecnico` em `movizap/` e `frontend/src/` não
+achava nada fora da própria ficha; nos 3 orçamentos emitidos o valor do técnico
+foi **digitado** (R$ 180 · R$ 120 · R$ 80).
+
+🔵 **A premissa que destravou o desenho é dele:** *"o orçamento não vai ao
+cliente, somente ao técnico."* Confirmado no dado — os 3 orçamentos estão na
+conversa 12845, de contato `relacao = 'tecnico'`, e o PDF é enviado nessa mesma
+conversa. **O papel é o acerto do que será pago**, então preencher a linha com o
+custo cadastrado não expõe margem a ninguém.
+
+🚨 **E ISSO DERRUBOU UMA OBJEÇÃO MINHA**, feita no mesmo dia: eu disse que
+preencher a linha com o custo "expõe o custo ao cliente" e propus um campo à
+parte só para conferência. Com o papel indo só ao técnico, o campo à parte não
+precisa existir. Registrado porque a objeção estava escrita.
+
+🚨 **E UMA CORREÇÃO DE FATO:** eu afirmei que faltava levantar o `harmonit_id` de
+cada serviço. **Não faltava nada disso — o `harmonit_id` é morto.** Medido: ele
+viaja do backend até o `<select>` e é **descartado** por `linhaNova()` (que copia
+só `servico` e `unidade`); `ItemDeOrcamento` não tem o campo; `orcamento_item`
+não tem coluna para ele; o PDF não o imprime. **O MoviZap nunca lança item em OS
+no Harmonit** (`fpsl_ponte` é só leitura). Aqueles dois ids são usados pelo
+**FPSL**, na direção inversa: `services/fechamento.py` lê os materiais que uma
+pessoa já lançou na OS e os reconhece por `idProduto`.
+
+### As duas decisões dele
+
+| # | decisão |
+|---|---|
+| E1 | o `<select>` oferece **os serviços com preço da ficha + as duas de sempre** |
+| E2 | **preço R$ 0,00 pode ir ao orçamento** — na ficha, zero é cortesia e é diferente de ausente |
+
+🚨 **E1 NÃO É CONSERVADORISMO, É O QUE EVITA UM APAGÃO.** Havia **287 fichas e 0
+preços**: catálogo só-da-ficha abriria o modal **sem nenhuma opção** para todos
+os técnicos, e ninguém emitiria orçamento.
+
+### O que mudou
+
+| peça | o quê |
+|---|---|
+| `movizap/orcamento.py` | `CATALOGO` → **`CATALOGO_FIXO`**; `catalogo(tecnico_contato_id=None)` junta as duas fixas com os da ficha |
+| `movizap/tecnico_ficha.py` | `precos_para_orcamento()` — só o que tem preço, no formato do catálogo, **sem `harmonit_id`** |
+| `movizap/main.py` | `GET /api/orcamento/catalogo?conversa_id=` |
+| `ModalAgendar.vue` | preço nasce preenchido e editável, rótulo **"da ficha"**, `podeEmitir` aceita zero |
+| migração **089** | `servico_tecnico.unidade` |
+
+🚨 **DE QUEM É O PREÇO NÃO VEM DO NAVEGADOR.** A rota recebe `conversa_id` e o
+**servidor** descobre o técnico (`_tecnico_da_conversa`) — a mesma régua da
+calculadora de KM, onde aceitar o id no corpo deixava qualquer um sobrescrever a
+origem de outro técnico. Aqui o risco seria ler a tabela de preço de um técnico
+pela tela de outro. Há teste provando que o parâmetro `tecnico_contato_id` é
+**ignorado**.
+
+⚠️ **Renomear `CATALOGO` foi deliberado:** um `CATALOGO` que não é o catálogo
+todo seria a próxima pessoa lendo errado.
+
+⚠️ **O NOME IGUAL NÃO DUPLICA A OPÇÃO.** O `<select>` casa por **nome**; duas
+opções iguais fariam a escolha depender da ordem. A fixa ganha, porque é a que
+tem procedência — e o teste disso dubla a **fonte**, não a regra, para não criar
+no catálogo de produção um serviço chamado `PAGAMENTO DE TECNICO`.
+
+⚠️ **TROCAR DE SERVIÇO NÃO APAGA VALOR DIGITADO.** A sugestão só preenche campo
+vazio: quem digitou à mão e trocou o serviço não perde o número.
+
+⚠️ **PERDER O ATALHO É ACEITÁVEL; NÃO PODER EMITIR NÃO É.** Se a leitura dos
+preços estourar, `catalogo()` registra no log e devolve as duas fixas.
+
+### O que NÃO mudou, de propósito
+
+- **`orcamento_item.servico` continua `text` retrato**, sem FK para
+  `servico_tecnico`: mudar o preço na ficha amanhã **não pode** reescrever
+  orçamento já emitido — e há teste provando.
+- **a conta continua sendo do backend** (`calcular()`), o PDF, a numeração
+  (`FOR UPDATE`, o número só se gasta com PDF pronto), o envio e o reenvio.
+- **o `km_valor_centavos` da ficha** ainda **não** vira o preço unitário da
+  linha de KM, que segue R$ 1,00 fixo — proposta à parte.
+
+## 04/11 — O CHECKLIST DA ETAPA no painel da Operação (áreas A, B e C)
+
+📘 **O plano das 8 áreas desta frente vive em
+`C:\Users\Lenovo\Desktop\Painel_Operacao_Checklists_PLANO.md`**, e o estado de
+cada uma é mantido lá, num bloco no topo.
+
+🔵 Pedido dele, com print: *"são itens que vão ficar em um botão dentro do card,
+como mapa para o operador saber o que fazer"*.
+
+### O que está no ar
+
+| área | o quê |
+|---|---|
+| **A** | o checklist no card: selo *"2 de 3"* fechado, lista aberta, marcar, item avulso |
+| **B** | o aviso ao entrar na etapa, com Ok e silêncio de 10 minutos |
+| **C** | ao sair, o checklist vira **observação do card** |
+
+🚨 **NADA DISSO ESCREVE NO HARMONIT**, e é decisão dele. Quando mostrei que
+gravar na `solucaoTecnica` exigiria reescrever a **OS inteira**
+(`SalvarOrdemServico`, a mesma armadilha do endereço de 21/10), ele respondeu
+*"Só no MoviZap, como observação"*. Isso derrubou sozinho o maior risco do
+pedido, e a tela continua dizendo em texto que não vai para a OS.
+
+### O aviso ao entrar (área B)
+
+🔵 Palavras dele: *"ao mover 1 ticket para etapa, ele da o aviso e clica 'Ok',
+se mover outro card, não há necessidade de avisar por 10min"*. Então o silêncio
+é **por etapa**, não por card.
+
+- 🚨 **o aviso vem DEPOIS do mover, nunca antes** — não pode atrasar nem
+  bloquear a escrita no ERP;
+- ⚠️ o silêncio vive no `localStorage`, e **ele pode falhar** (janela anônima,
+  dados limpos): tudo em `try/catch`, e sem ele o aviso só reaparece — nunca
+  quebra o mover. Há teste que derruba o `localStorage` e prova isso.
+
+### A saída (área C)
+
+Ao mover **com sucesso** para outra etapa, o checklist da etapa de origem vira
+uma observação como esta:
+
+```
+[checklist] Configurar equipamentos e Sistemas — 2 de 4
+✓ Informação do contrato sobre os equipamentos (Iago, 04/11 15:02)
+✓ Cadastrar cliente e veículos (Iago, 04/11 15:10)
+✗ Registrar posicionamento e dados
+✗ Conferir com o cliente (avulso)
+```
+
+- 🚨 **só quando a mudança aconteceu de verdade**: escrita recusada pelo ERP não
+  é saída de etapa, e registrar o checklist como encerrado afirmaria um fato que
+  não houve;
+- ⚠️ **a falha ao gravar o recado não derruba o mover** — o card já mudou no
+  ERP, e devolver erro a quem moveu com sucesso seria pior;
+- ⚠️ **etapa sem item não gera linha** — a mesma régua do conflito, que não vira
+  passagem.
+
+### Quem pode o quê
+
+Ler e marcar é de quem opera (`PNL_1.1`). 🚨 **Mexer no MODELO da etapa é
+configuração (`CFG_7.1`)**: a lista muda o card de todo mundo, e isso não é
+decisão de quem está movendo um card.
+
+### Três defeitos meus, todos achados por teste
+
+1. **Import circular** — `paineis` passou a ler `checklist`, que lia `paineis`.
+   Quebrado com import tardio nas duas funções que usam `SITUACOES`.
+2. **`numero_ordem` nem sempre é inteiro** — o card de solicitação pode trazer o
+   texto do legado, e a lista mista fez o Postgres recusar a consulta do selo
+   (`cannot dump lists of mixed types`). Agora o que não é número fica **sem
+   selo**, em vez de derrubar o quadro inteiro.
+3. 🚨 **Duas vezes usei como marca de "já aplicado" um texto que o próprio patch
+   insere em outro lugar** (`carregarChecklist(card)` e `modal__caixa--curta`).
+   Os passos foram dados como prontos **sem terem acontecido**, e só o `grep`
+   depois mostrou. A marca tem de ser um pedaço do texto novo **daquele** passo.
+
+### O que falta, e é dele
+
+**Os itens das 6 etapas que ele citou sem lista**: 15747 · 15797 · 890 · 16489 ·
+1316 (escreveu só *"Dados cadastrais"*) · 15696. Etapa sem modelo não mostra
+botão — nada quebra, o mapa fica pela metade.
+
+### 04/11 — a observação virou MODAL, com bolhas e anexo (área D)
+
+A observação era uma seção espremida dentro do card aberto. Agora:
+
+- no card aberto ficou a **porta**: *"Observações (N)"* e o botão **Abrir**;
+- o **modal** mostra os recados em **bolhas**, do mais antigo ao mais novo,
+  com um campo para escrever e um para anexar;
+- o recado do **sistema** (`[checklist] …`, `[sistema] prioridade: …`) é
+  desenhado **diferente** — barra na lateral **e** a frase *"registrado pelo
+  sistema"* no pé. 🚨 Mostrá-lo igual a um recado humano faria parecer que
+  alguém digitou aquilo.
+
+🚨 **O componente de bolha NÃO foi extraído da `CaixaDeEntrada.vue`**, e a
+escolha é declarada: o markup das bolhas vive numa tela de ~4 mil linhas, a
+mais usada do sistema, com modificadores próprios (mídia, citada, áudio,
+realce). Mexer nela para reaproveitar bolha de recado seria risco
+desproporcional. ⚠️ **O custo está dito: agora são TRÊS desenhos de bolha** no
+projeto (Caixa, Chat interno e este). Unificar é frente própria.
+
+⚠️ **O upload não passa pelo `api.post`**, que serializa JSON: vai por `fetch`
+com `FormData` e **sem** `Content-Type` na mão — o navegador precisa montar o
+boundary, e pôr o cabeçalho quebra o upload em silêncio, com o servidor
+recebendo corpo vazio. É a régua que a Caixa já documenta.
+
+⚠️ **O anexo pende de um recado**, então o recado vem primeiro. Sem texto, um é
+inventado com o nome do arquivo — anexo solto não se explica sozinho daqui a
+três meses.
+
+🚨 **A `salvarObservacao` foi REMOVIDA**: ficou sem chamador quando o modal
+entrou, e função sem chamador é código morto que **parece** vivo. No lugar dela
+ficou o comentário com as três regras que ela guardava.
+
+⚠️ **Um teste de 29/10 mudou de texto, não de regra:** a seção deixou de ser
+*"Observação do painel"* (uma) e virou *"Observações"* (a lista), então
+*"Não **vai** para a OS"* virou *"Não **vão**"*. O teste passou a aceitar as
+duas formas — a regra medida (a tela diz que não vai para a OS) continua
+inteira.

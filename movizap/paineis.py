@@ -37,7 +37,7 @@ aqui dentro.
 import logging
 from datetime import date, datetime
 
-from . import banco, chamado_os, fpsl_ponte, passagem
+from . import banco, chamado_os, checklist, fpsl_ponte, passagem
 from .operacao import DadoInvalido
 
 log = logging.getLogger("movizap.paineis")
@@ -559,6 +559,38 @@ def quadro(painel: str, so_abertas: bool = True,
         coluna["total"] = len(coluna["cards"])
         total += coluna["total"]
         coluna["cards"] = coluna["cards"][:TETO_CARDS_POR_COLUNA]
+
+    # 🔵 04/11: o selo do checklist no card fechado ("2 de 3"), para o operador
+    # ver sem precisar abrir. ⚠️ UMA consulta para todos os cards -- o quadro
+    # desenha até 50 por coluna, e uma por card seriam 850 (o molde é
+    # `passagem.quantas_observacoes`).
+    #
+    # ⚠️ Conta o checklist da etapa em que o card ESTÁ: o das anteriores já
+    # virou observação e não é mais tarefa.
+    # ⚠️ `numero_ordem` NÃO É SEMPRE INTEIRO: o card do ERP traz número e o da
+    # solicitação pode trazer o texto do legado. Misturar os dois no `= ANY`
+    # faz o Postgres recusar a consulta inteira (`cannot dump lists of mixed
+    # types`) -- achado pelo teste do painel, não por leitura.
+    numeros_de_card = []
+    for col in colunas:
+        for c in col["cards"]:
+            try:
+                numeros_de_card.append(int(c["numero_ordem"]))
+            except (TypeError, ValueError):
+                continue    # sem número de OS não há checklist a contar
+    marcas = checklist.resumo(numeros_de_card) if numeros_de_card else {}
+    etapas_com_lista = checklist.etapas_com_modelo()
+    for col in colunas:
+        for card in col["cards"]:
+            try:
+                chave = (int(card["numero_ordem"]), card.get("situacao_id"))
+            except (TypeError, ValueError):
+                chave = None
+            card["checklist"] = marcas.get(chave) if chave else None
+            # 🚨 "tem lista e ninguém abriu ainda" é diferente de "não tem
+            # lista nenhuma": o primeiro mostra "0 de N", o segundo não mostra
+            # nada. Sem este campo a tela não conseguiria dizer a diferença.
+            card["tem_checklist"] = card.get("situacao_id") in etapas_com_lista
 
     return {
         "painel": painel,

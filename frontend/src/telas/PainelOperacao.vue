@@ -34,6 +34,7 @@ import { useRouter } from 'vue-router'
 
 import { api, ErroDeApi } from '../api/cliente.js'
 import AjudaDaTela from '../componentes/AjudaDaTela.vue'
+import BalaoDeRecado from '../componentes/BalaoDeRecado.vue'
 
 const router = useRouter()
 const quadro = ref(null)
@@ -148,6 +149,10 @@ async function abrirCard(card) {
   erroDoRecado.value = ''
   if (!card.numero_ordem) return
 
+  /* O checklist da etapa em que o card ESTÁ. ⚠️ Sem `await`: ele é do nosso
+     banco e não pode fazer o card esperar as duas leituras que vão ao ERP. */
+  carregarChecklist(card)
+
   lendoPassagens.value = true
   lendoFicha.value = true
   /* ⚠️ As duas leituras em paralelo: o log é nosso (rápido) e a ficha vai ao
@@ -190,29 +195,14 @@ const recado = ref('')
 const salvando = ref(false)
 const erroDoRecado = ref('')
 
-async function salvarObservacao() {
-  const c = cardAberto.value
-  if (!c?.numero_ordem || !recado.value.trim()) return
-  salvando.value = true
-  erroDoRecado.value = ''
-  try {
-    const r = await api.post('/api/paineis/operacao/observacao', {
-      numero_os: c.numero_ordem,
-      texto: recado.value.trim(),
-    })
-    /* ⚠️ A lista volta do servidor, não é montada aqui: a hora e o autor são
-       dele, e inventá-los na tela criaria duas verdades. */
-    if (ficha.value) ficha.value.observacoes = r.observacoes || []
-    recado.value = ''
-    /* O contador do card fechado também muda. */
-    await carregar()
-  } catch (e) {
-    erroDoRecado.value = e instanceof ErroDeApi
-      ? e.message : 'Não consegui salvar a observação.'
-  } finally {
-    salvando.value = false
-  }
-}
+/* 🚨 A `salvarObservacao` VIVIA AQUI e saiu em 04/11, quando os recados
+   ganharam modal próprio (área D). Quem salva agora é a
+   `salvarRecadoComAnexo`, que faz o mesmo e ainda sobe o anexo. Deixá-la sem
+   chamador seria código morto que parece vivo — a próxima pessoa mexeria nela
+   sem efeito nenhum.
+   ⚠️ As três regras dela continuam valendo, e estão lá: a lista volta DO
+   SERVIDOR (autor e hora são dele), o recado não vai para a OS, e o contador
+   do card fechado é recarregado depois. */
 
 async function mudarPrioridade(novaId) {
   const c = cardAberto.value
@@ -400,6 +390,196 @@ function quando(iso) {
    otimista (o card pula de coluna na hora), e o `catch` recarrega o quadro.
    Card que fica na coluna nova com a OS na antiga é a tela mentindo.
    ============================================================================ */
+/* ---- O checklist da etapa (04/11) ---------------------------------------
+   🔵 *"são itens que vão ficar em um botão dentro do card, como mapa para o
+   operador saber o que fazer"*, com **modelo fixo + o operador pode
+   acrescentar**.
+
+   🚨 NADA DAQUI VAI PARA A OS. Ao sair da etapa, o servidor transforma o
+   checklist em OBSERVAÇÃO do card -- decisão dele, porque gravar na
+   `solucaoTecnica` exigiria reescrever a OS inteira no Harmonit. */
+/* ---- O aviso ao ENTRAR na etapa (Área B, 04/11) -------------------------
+   🔵 Palavras dele: *"ao mover 1 ticket para etapa, ele da o aviso e clica
+   'Ok', se mover outro card, não há necessidade de avisar por 10min"*.
+
+   Então o aviso é por ETAPA, não por card: confirmado uma vez, aquela etapa
+   fica em silêncio por 10 minutos.
+
+   🚨 O AVISO É DEPOIS DO MOVER, NUNCA ANTES. Ele não pode atrasar nem
+   bloquear a escrita no ERP -- o arrasto já grava a situação, e um diálogo no
+   meio faria o card parecer travado.
+
+   ⚠️ O silêncio vive no `localStorage`, como os grupos do menu. Ele pode vir
+   vazio (janela anônima, dados limpos) ou estourar: tudo em `try/catch`, e sem
+   ele o aviso só aparece de novo -- nunca quebra o mover. */
+/* ---- Os recados em MODAL (área D, 04/11) --------------------------------
+   🔵 *"Card OBS anexos, texto, format conve -- exibir em modal"*. A observação
+   era uma seção espremida dentro do card aberto; agora tem modal próprio, em
+   bolhas, e aceita arquivo. */
+const recadosAbertos = ref(false)
+const anexoEscolhido = ref(null)
+const enviandoRecado = ref(false)
+
+function abrirRecados() { recadosAbertos.value = true }
+function fecharRecados() {
+  recadosAbertos.value = false
+  anexoEscolhido.value = null
+}
+
+function escolherAnexo(evento) {
+  anexoEscolhido.value = evento.target.files?.[0] || null
+}
+
+async function subirAnexo(observacaoId, arquivo) {
+  /* ⚠️ `fetch` cru, não `api.post`: arquivo vai por `FormData`, e o navegador
+     precisa montar o `Content-Type` com o boundary. Definir o cabeçalho aqui
+     quebraria o upload em silêncio — a Caixa já documenta isso. */
+  const forma = new FormData()
+  forma.append('arquivo', arquivo)
+  const r = await fetch(
+    `/api/paineis/operacao/observacao/${observacaoId}/anexo`,
+    { method: 'POST',
+      headers: { Authorization: `Bearer ${localStorage.getItem('movizap.token')}` },
+      body: forma })
+  const texto = await r.text()
+  let corpo = null
+  try { corpo = JSON.parse(texto) } catch { corpo = null }
+  if (!r.ok) throw new Error((corpo && corpo.detail) || `Falha no anexo (${r.status}).`)
+  return corpo
+}
+
+async function salvarRecadoComAnexo() {
+  if (!cardAberto.value) return
+  const texto = recado.value.trim()
+  const arquivo = anexoEscolhido.value
+  if (!texto && !arquivo) return
+  enviandoRecado.value = true
+  erroDoRecado.value = ''
+  try {
+    /* ⚠️ O anexo pende de um recado, então o recado vem primeiro. Sem texto,
+       um é inventado com o nome do arquivo: anexo solto não se explica sozinho
+       daqui a três meses. */
+    const r = await api.post('/api/paineis/operacao/observacao', {
+      numero_os: cardAberto.value.numero_ordem,
+      texto: texto || `(anexo) ${arquivo.name}`,
+    })
+    const nova = (r.observacoes || [])[0]
+    if (arquivo && nova) await subirAnexo(nova.id, arquivo)
+    recado.value = ''
+    anexoEscolhido.value = null
+    /* 🚨 Relê do servidor — a lista com anexos vem da ficha, nunca remendada
+       aqui. */
+    await abrirCard(cardAberto.value)
+    await carregar()
+  } catch (e) {
+    erroDoRecado.value = e?.message || 'Não consegui salvar o recado.'
+  } finally {
+    enviandoRecado.value = false
+  }
+}
+
+const SILENCIO_MS = 10 * 60 * 1000
+const avisoDaEtapa = ref(null)
+
+function chaveDoAviso(situacaoId) {
+  return `painel_aviso_etapa_${situacaoId}`
+}
+
+function avisoEstaSilenciado(situacaoId) {
+  try {
+    const quando = Number(localStorage.getItem(chaveDoAviso(situacaoId)) || 0)
+    return Number.isFinite(quando) && (Date.now() - quando) < SILENCIO_MS
+  } catch {
+    return false      // sem localStorage, avisa — é o lado seguro
+  }
+}
+
+function talvezAvisarDaEtapa(situacaoId) {
+  const coluna = (quadro.value?.colunas || []).find(
+    (c) => c.situacao_id === situacaoId)
+  /* Só avisa onde HÁ checklist: `tem_checklist` vem do servidor por card, e
+     aqui basta um card da coluna para saber que a etapa tem lista. */
+  const temLista = (coluna?.cards || []).some((c) => c.tem_checklist)
+  if (!temLista || avisoEstaSilenciado(situacaoId)) return
+  avisoDaEtapa.value = { situacao_id: situacaoId, titulo: coluna?.titulo || '' }
+}
+
+function fecharAvisoDaEtapa() {
+  const id = avisoDaEtapa.value?.situacao_id
+  avisoDaEtapa.value = null
+  if (!id) return
+  try {
+    localStorage.setItem(chaveDoAviso(id), String(Date.now()))
+  } catch { /* sem localStorage o aviso volta na próxima — e tudo bem */ }
+}
+
+const checklist = ref([])
+const carregandoCheck = ref(false)
+const erroDoCheck = ref('')
+const itemNovo = ref('')
+
+const feitosDoCheck = computed(
+  () => checklist.value.filter((i) => i.feito).length)
+
+async function carregarChecklist(card) {
+  checklist.value = []
+  erroDoCheck.value = ''
+  if (!card?.numero_ordem || !card?.situacao_id) return
+  carregandoCheck.value = true
+  try {
+    const r = await api.get('/api/paineis/operacao/checklist'
+      + `?numero_os=${card.numero_ordem}&situacao_id=${card.situacao_id}`)
+    checklist.value = r.itens || []
+  } catch (e) {
+    erroDoCheck.value = e?.message || 'Não deu para ler o checklist.'
+  } finally {
+    carregandoCheck.value = false
+  }
+}
+
+async function marcarItem(item) {
+  erroDoCheck.value = ''
+  try {
+    /* ⚠️ A lista vem DO SERVIDOR depois de marcar -- nunca se remenda a tela
+       com o que ela achava que ia acontecer. É a régua da observação. */
+    const r = await api.put(`/api/paineis/operacao/checklist/item/${item.id}`,
+                            { feito: !item.feito })
+    checklist.value = r.itens || []
+    await carregar()          // o selo do card fechado muda junto
+  } catch (e) {
+    erroDoCheck.value = e?.message || 'Não consegui marcar.'
+  }
+}
+
+async function acrescentarItem() {
+  const texto = itemNovo.value.trim()
+  if (!texto || !cardAberto.value) return
+  erroDoCheck.value = ''
+  try {
+    const r = await api.post('/api/paineis/operacao/checklist/item', {
+      numero_os: cardAberto.value.numero_ordem,
+      situacao_id: cardAberto.value.situacao_id,
+      texto,
+    })
+    checklist.value = r.itens || []
+    itemNovo.value = ''
+    await carregar()
+  } catch (e) {
+    erroDoCheck.value = e?.message || 'Não consegui acrescentar.'
+  }
+}
+
+async function removerItem(item) {
+  erroDoCheck.value = ''
+  try {
+    const r = await api.del(`/api/paineis/operacao/checklist/item/${item.id}`)
+    checklist.value = r.itens || []
+    await carregar()
+  } catch (e) {
+    erroDoCheck.value = e?.message || 'Não consegui remover.'
+  }
+}
+
 const arrastando = ref(null)
 const movendo = ref(null)
 const erroDeMover = ref('')
@@ -496,6 +676,8 @@ async function mover(card, paraSituacao) {
       ? e.message : 'Não consegui mover este card.'
   } finally {
     movendo.value = null
+    /* Área B: o aviso vem DEPOIS, e só quando a etapa tem checklist. */
+    talvezAvisarDaEtapa(paraSituacao)
     /* 🚨 RECARREGA SEMPRE, deu certo ou não: a verdade é o que o ERP
        confirmou, nunca o que a tela achou que ia acontecer. */
     await carregar()
@@ -853,7 +1035,16 @@ onMounted(carregar)
 
                   <!-- 🔵 Bloco F: só o NÚMERO de recados; o texto é no card
                        aberto, senão a coluna cresce sem limite. -->
-                  <span v-if="card.observacoes" class="pilula">
+                  <!-- 🔵 04/11: o selo do checklist. ⚠️ `tem_checklist` e
+                 `checklist` são coisas diferentes: a etapa pode TER lista e o
+                 card ainda não a ter aberto -- aí o selo diz "0 de N" só
+                 depois que alguém abre. Sem lista na etapa, nada aparece. -->
+            <span v-if="card.checklist" class="pilula"
+                  :class="{ 'pilula--forte': card.checklist.feitos < card.checklist.total }">
+              {{ card.checklist.feitos }} de {{ card.checklist.total }}
+            </span>
+            <span v-else-if="card.tem_checklist" class="pilula">checklist</span>
+            <span v-if="card.observacoes" class="pilula">
                     {{ card.observacoes }} observação(ões)
                   </span>
                 </span>
@@ -919,6 +1110,81 @@ onMounted(carregar)
           </div>
         </section>
       </div>
+
+      <!-- ============ OS RECADOS, EM MODAL (Área D) ============ -->
+      <div v-if="recadosAbertos && cardAberto" class="modal" role="dialog"
+           aria-modal="true" aria-label="Observações do card"
+           @click.self="fecharRecados">
+        <div class="modal__caixa">
+          <header class="modal__topo">
+            <strong>Observações — OS {{ cardAberto.numero_ordem }}</strong>
+            <button class="modal__fechar" type="button" aria-label="Fechar"
+                    @click="fecharRecados">✕</button>
+          </header>
+
+          <div class="modal__corpo">
+            <p class="apagado pequeno">
+              Ficam no MoviZap, com autor e hora. <strong>Não vão para a OS</strong>
+              do Harmonit, e não se apagam.
+            </p>
+
+            <ul v-if="ficha && ficha.observacoes && ficha.observacoes.length"
+                class="recados">
+              <BalaoDeRecado v-for="o in [...ficha.observacoes].reverse()"
+                             :key="o.id" :recado="o" :quando="quando" />
+            </ul>
+            <p v-else class="apagado pequeno">Nenhuma observação ainda.</p>
+          </div>
+
+          <div class="modal__rodape modal__rodape--escrever">
+            <textarea v-model="recado" rows="2" :disabled="enviandoRecado"
+                      placeholder="o que a operação precisa saber sobre esta OS"
+                      aria-label="Escrever observação"></textarea>
+            <div class="linha">
+              <!-- ⚠️ A lista branca aparece para quem escolhe: recusar depois
+                   de subir desperdiça o tempo de quem opera. -->
+              <input type="file" aria-label="Anexar arquivo"
+                     accept=".pdf,.jpg,.jpeg,.png,.webp,.heic,.doc,.docx,.xls,.xlsx,.csv,.txt"
+                     @change="escolherAnexo" />
+              <button class="botao botao--primario" type="button"
+                      :disabled="enviandoRecado || (!recado.trim() && !anexoEscolhido)"
+                      @click="salvarRecadoComAnexo">
+                {{ enviandoRecado ? 'Salvando…' : 'Salvar' }}
+              </button>
+            </div>
+            <p class="apagado pequeno">
+              O arquivo fica no servidor do MoviZap e <strong>não tem
+              backup</strong> — não substitui o documento guardado no lugar certo.
+            </p>
+            <p v-if="erroDoRecado" class="aviso aviso--erro" role="alert">
+              {{ erroDoRecado }}
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <!-- ============ O AVISO AO ENTRAR NA ETAPA (Área B) ============ -->
+    <div v-if="avisoDaEtapa" class="modal" role="dialog" aria-modal="true"
+         aria-label="Aviso da etapa">
+      <div class="modal__caixa modal__caixa--curta">
+        <header class="modal__topo">
+          <strong>{{ avisoDaEtapa.titulo }}</strong>
+        </header>
+        <div class="modal__corpo">
+          <p>
+            Esta etapa tem <strong>checklist</strong>. Ele fica
+            <strong>dentro do card</strong> — abra o card para ver o que fazer.
+          </p>
+          <p class="apagado pequeno">
+            Não aviso de novo nesta etapa pelos próximos 10 minutos.
+          </p>
+        </div>
+        <div class="modal__rodape">
+          <button class="botao botao--primario" type="button"
+                  @click="fecharAvisoDaEtapa">Ok</button>
+        </div>
+      </div>
+    </div>
 
       <!-- ================= O CARD ABERTO ================= -->
       <div v-if="cardAberto" class="modal" role="dialog" aria-modal="true"
@@ -997,38 +1263,71 @@ onMounted(carregar)
             </label>
           </div>
 
-          <!-- ============ A OBSERVAÇÃO (Bloco F) ============ -->
-          <section class="modal__recados">
-            <h3>Observação do painel</h3>
-            <!-- 🚨 O que esta caixa NÃO é: ela não vai para a OS. Dizer isso
-                 evita que alguém escreva aqui pensando que o técnico vai ler. -->
+          <!-- ============ O CHECKLIST DA ETAPA (04/11) ============ -->
+          <section v-if="checklist.length || carregandoCheck" class="modal__recados">
+            <h3>
+              Checklist desta etapa
+              <span class="pilula">{{ feitosDoCheck }} de {{ checklist.length }}</span>
+            </h3>
             <p class="apagado pequeno">
-              Fica no MoviZap, com autor e hora. <strong>Não vai para a OS</strong>
-              do Harmonit, e não se apaga.
-            </p>
-            <textarea v-model="recado" rows="2" :disabled="salvando"
-                      placeholder="o que a operação precisa saber sobre esta OS"
-                      aria-label="Escrever observação do painel"></textarea>
-            <div class="modal__pe">
-              <button class="botao" type="button"
-                      :disabled="salvando || !recado.trim()"
-                      @click="salvarObservacao">Salvar observação</button>
-            </div>
-            <p v-if="erroDoRecado" class="aviso aviso--erro" role="alert">
-              {{ erroDoRecado }}
+              O que fazer nesta etapa. Ao mover o card para outra, isto vira uma
+              <strong>observação</strong> aqui no painel — e também
+              <strong>não vai para a OS</strong> do Harmonit.
             </p>
 
-            <ul v-if="ficha && ficha.observacoes && ficha.observacoes.length"
-                class="modal__passagens">
-              <li v-for="o in ficha.observacoes" :key="o.id">
-                <span class="apagado pequeno">{{ quando(o.em) }}</span>
-                <span>{{ o.texto }}</span>
-                <span class="pilula">{{ o.quem || 'sem autor' }}</span>
+            <p v-if="carregandoCheck" class="apagado pequeno">lendo…</p>
+
+            <ul v-else class="modal__passagens">
+              <li v-for="i in checklist" :key="i.id">
+                <label class="check__linha">
+                  <input type="checkbox" :checked="i.feito"
+                         @change="marcarItem(i)" />
+                  <span :class="{ 'check__feito': i.feito }">{{ i.texto }}</span>
+                </label>
+                <span v-if="i.feito" class="apagado pequeno">
+                  {{ i.feito_por || 'sem autor' }}<span v-if="i.feito_em">, {{ quando(i.feito_em) }}</span>
+                </span>
+                <!-- 🚨 Só o item AVULSO sai. O da lista da etapa se tira no
+                     modelo, e a recusa do servidor diz isso por extenso. -->
+                <button v-if="i.avulso" class="botao botao--pequeno botao--fantasma"
+                        type="button" title="Remover este item"
+                        @click="removerItem(i)">✕</button>
               </li>
             </ul>
-            <p v-else-if="ficha" class="apagado pequeno">
-              Nenhuma observação ainda.
+
+            <div class="modal__pe">
+              <input v-model="itemNovo" class="campo__entrada"
+                     placeholder="+ Adicionar item"
+                     aria-label="Acrescentar item ao checklist deste card"
+                     @keyup.enter="acrescentarItem" />
+              <button class="botao" type="button" :disabled="!itemNovo.trim()"
+                      @click="acrescentarItem">Adicionar</button>
+            </div>
+
+            <p v-if="erroDoCheck" class="aviso aviso--erro" role="alert">
+              {{ erroDoCheck }}
             </p>
+          </section>
+
+          <!-- ============ A OBSERVAÇÃO (Bloco F) ============ -->
+          <!-- 🔵 04/11: o conteúdo foi para um MODAL próprio (área D) — aqui
+               ficou a porta, com a contagem. O texto do que ela NÃO é continua
+               aqui **e** lá: é a frase que impede alguém de escrever pensando
+               que o técnico vai ler. -->
+          <section class="modal__recados">
+            <h3>
+              Observações
+              <span class="pilula">{{ ((ficha && ficha.observacoes) || []).length }}</span>
+            </h3>
+            <p class="apagado pequeno">
+              Ficam no MoviZap, com autor e hora. <strong>Não vão para a OS</strong>
+              do Harmonit, e não se apagam.
+            </p>
+            <div class="modal__pe">
+              <button class="botao" type="button" @click="abrirRecados">
+                Abrir observações
+              </button>
+            </div>
           </section>
 
           <!-- 🔵 *"deve ter o log de quem faz o que SEMPRE"* -- e aqui ele é
@@ -1419,6 +1718,22 @@ onMounted(carregar)
   border-color: var(--aviso, var(--borda-forte));
   color: var(--texto); font-weight: var(--peso-forte);
 }
+.recados { list-style: none; margin: 0; padding: 0; }
+.modal__rodape--escrever { display: grid; gap: var(--e-2); }
+
+/* O diálogo do aviso de etapa é curto: uma frase e o Ok. */
+.modal__caixa--curta { max-width: 26rem; }
+
+.check__linha {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--e-2);
+  cursor: pointer;
+}
+.check__linha input { margin: 0; flex: none; }
+/* ⚠️ Riscado E esmaecido: cor sozinha não é portador de informação. */
+.check__feito { text-decoration: line-through; opacity: .6; }
+
 .modal__recados { display: flex; flex-direction: column; gap: var(--e-2); }
 .modal__recados h3 { margin: 0; font-size: var(--txt-sm); }
 .modal__recados textarea {

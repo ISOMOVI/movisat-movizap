@@ -182,9 +182,16 @@ async function salvar() {
       </div>
     </section>
 
-    <p class="apagado pequeno">
-      A última ativa não pode ser desativada.
-    </p>
+    <!-- 🚨 04/11: AQUI HAVIA "A última ativa não pode ser desativada", E ERA
+         MENTIRA. A regra saiu em 11/08, e o `operacao.py` registra o
+         motivo: *"guardar o sistema contra um problema que não existe mais só
+         impede o usuário de limpar a própria base"*. O texto era verdadeiro
+         quando escrito e a entrega seguinte não voltou para matá-lo -- o `M12`
+         na forma mais comum. 🔵 Achado por mim em 04/11 e apagado com a palavra
+         dele (*"3 apague entao"*).
+         ⚠️ Nada entra no lugar: o que precisava ser dito já está no bloco
+         vazio acima (*"Sem nenhuma ativa, o atendente não consegue encerrar
+         conversa"*), e esse continua verdadeiro. -->
   </div>
 </template>
 

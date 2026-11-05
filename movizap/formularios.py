@@ -504,9 +504,32 @@ def gravar_definicao(bruto: dict, codigo: str, slug: str, setor: str,
     por_campo = ajustes.get("campos") or {}
     nao_casados = set(fora) | set(por_campo)
     sobraram = []
+    # 🚨 DUAS CHAVES POR CAMPO, e a razão é um defeito que custou uma carga
+    # recusada em 04/11. O `nosso_nome` do registro é derivado COM acumulador
+    # (`nome_legivel` põe `-2` em nome repetido), mas este laço derivava com o
+    # acumulador vazio -- então o campo gravado como `banco-2` só podia ser
+    # citado aqui como `banco`, que é o nome da PÁGINA "BANCO". Um ajuste de
+    # rótulo caía nos dois campos, e citar o nome verdadeiro parava a carga.
+    #
+    # Agora o ajuste pode citar os dois: o nome curto (que os ajustes do
+    # SUPORTE usam desde 29/10) e o nome FINAL, com sufixo, que é o que a
+    # tabela guarda e o que `conferir_formularios.py --nomes` imprime.
+    #
+    # ⚠️ O nome final só é previsível enquanto o campo que "tomou" o nome curto
+    # continua na definição. Tirar a página "BANCO" por `fora` faria o campo
+    # virar `banco` na gravação -- e aí é o nome curto que o ajuste deve citar.
+    # Quem mexer nos dois ao mesmo tempo roda `conferir_formularios.py --nomes`
+    # e confere, em vez de supor.
+    usados_do_ajuste: set = set()
     for campo in campos:
-        nosso = nome_legivel(campo.get("label") or "", campo["name"], set())
-        nao_casados.discard(nosso)
+        rotulo_original = campo.get("label") or ""
+        curto = nome_legivel(rotulo_original, campo["name"], set())
+        final = nome_legivel(rotulo_original, campo["name"], usados_do_ajuste)
+        nao_casados.discard(curto)
+        nao_casados.discard(final)
+        # O mais específico ganha: um ajuste em `banco-2` não deve respingar na
+        # página, e um em `banco` continua valendo para quem só tem nome curto.
+        nosso = final if (final in fora or final in por_campo) else curto
         if nosso in fora:
             # ⚠️ Campo TIRADO não é campo escondido: ele não existe, não vem na
             # definição e não entra no registro. Quem some por regra é outra
