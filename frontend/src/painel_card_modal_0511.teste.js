@@ -307,13 +307,20 @@ describe('o modal, proposta A', () => {
     expect(caixa.querySelectorAll('.modal__rodape select').length).toBe(2)
   })
 
-  it('🚨 e o aviso de escrita está no MESMO bloco que eles', async () => {
+  it('🚨 os dois controles de escrita ficam no MESMO bloco, no pé', async () => {
+    /* ⚠️ ESTA TRAVA FOI REESCRITA EM 05/11, e nao removida. Ela prendia duas
+       coisas: a POSICAO dos dois controles juntos no pe (a regra de separar ler
+       de agir, que e o que a entrega de 05/11 fez) e a FRASE ao lado deles, que
+       ele mandou tirar. A frase saiu; a posicao continua sendo o ponto.
+       🚨 E o motivo da posicao sobrevive a frase: os dois controles que
+       escrevem no ERP ficam fora da faixa de medidas, que e so leitura. */
     const tela = await abrirOCard(await montar())
-    const agir = tela.findAll('.modal__caixa').pop().element
-      .querySelector('.modal__agir')
+    const caixa = tela.findAll('.painel__dialogo').pop().element
+    const agir = caixa.querySelector('.modal__agir')
+    expect(agir).toBeTruthy()
     expect(agir.querySelectorAll('select').length).toBe(2)
-    expect(agir.querySelector('.modal__perigo').textContent)
-      .toContain('escreve a situação na OS do Harmonit')
+    /* e a faixa de medidas continua sem nenhum */
+    expect(caixa.querySelector('.modal__faixa select')).toBeNull()
   })
 
   it('⚠️ a faixa troca "Previsão de entrega" por "Aberta"', async () => {
@@ -343,13 +350,6 @@ describe('o modal, proposta A', () => {
     expect(tela.find('.modal__cliente').text()).toBe(nome)
   })
 
-  it('🔵 o modal continua dizendo que o checklist NÃO vai para a OS', async () => {
-    estado.checklist = [{ id: 1, texto: 'zz', feito: false, avulso: false }]
-    const tela = await abrirOCard(await montar({
-      251: [card({ tem_checklist: true })],
-    }))
-    expect(tela.find('.modal__caixa').text()).toMatch(/não (vai|vão) para a OS/i)
-  })
 })
 
 /* ==========================================================================
@@ -488,6 +488,12 @@ describe('o card em três faixas (segunda volta)', () => {
    tamanho computado — é o limite conhecido desta suíte. O que se mede é a
    ESTRUTURA que as faixas precisam para existir.
    ========================================================================== */
+/* 🚨 TRES TRAVAS DESTE BLOCO SAIRAM EM 05/11, e nao por estarem erradas: ele
+   tirou a faixa de baixo do painel (*"nao precisam mante-los no card"*), e elas
+   prendiam a POSICAO e a classe daquela frase. Sem a faixa, nao tinham assunto.
+   ⚠️ A regra que a frase dizia continua no codigo -- o checklist vira observacao
+   ao mover, e nada chega ao Harmonit. O que se perdeu foi a prova de que a TELA
+   dizia isso. Estao no git, no commit anterior. */
 describe('as três faixas do painel do modal', () => {
   it('🔵 o checklist e as observações são painéis', async () => {
     estado.checklist = [{ id: 1, texto: 'zz', feito: false, avulso: false }]
@@ -512,36 +518,6 @@ describe('as três faixas do painel do modal', () => {
     expect(h3.parentElement).toBe(painel)
   })
 
-  it('🔵 a frase de regra é o PÉ do painel, e não a abertura', async () => {
-    /* Antes ela era o segundo parágrafo, logo abaixo do título, e empurrava o
-       checklist para baixo. A lista é o assunto; a regra é nota de pé. */
-    estado.checklist = [{ id: 1, texto: 'zz', feito: false, avulso: false }]
-    const tela = await abrirOCard(await montar({
-      251: [card({ tem_checklist: true })],
-    }))
-    const painel = tela.findAll('.modal__painel')[0].element
-    const pe = painel.querySelector('.modal__painel-pe')
-    expect(pe).toBeTruthy()
-    expect(pe.textContent).toMatch(/não vai para a OS/i)
-    /* é o ÚLTIMO filho, não o segundo */
-    expect(painel.lastElementChild).toBe(pe)
-  })
 
-  it('🚨 a frase de regra NÃO usa a classe que falha contraste', async () => {
-    const tela = await abrirOCard(await montar({
-      251: [card({ tem_checklist: true })],
-    }))
-    tela.findAll('.modal__painel-pe').forEach((p) => {
-      expect(p.classes()).not.toContain('nota')
-      expect(p.classes()).not.toContain('apagado')
-    })
-  })
 
-  it('as observações também têm pé, e ele diz que não vão para a OS', async () => {
-    const tela = await abrirOCard(await montar())
-    const pes = tela.findAll('.modal__painel-pe')
-    expect(pes.length).toBeGreaterThanOrEqual(1)
-    const textos = pes.map((p) => p.text()).join(' ')
-    expect(textos).toMatch(/não vão para a OS/i)
-  })
 })

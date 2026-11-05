@@ -7529,3 +7529,83 @@ Conferência que só passa não vale nada. Forjei os dois defeitos no CSS constr
 `[data-v-]`. O `sed` não casou, o script passou, e eu quase registrei isso como prova.
 🚨 **Prova que não falha quando devia não é prova** — é a mesma família do falso verde que o
 script existe para pegar.
+
+### 05/11, quinta volta — saíram os textos explicativos do card aberto
+
+🔵 Ele, tela por tela: *"veja esses comentários (…) não precisam mantê-los no card"* ·
+*"esse tbm"* · *"isso"* · *"pode deixar do mesmo tamanho da informação da OS; Ex: OS 123456
+- TERMO 8899 - Instalação rastreador todos no mesmo tamanho"*.
+
+🚨 **É a terceira vez que ele tira texto explicativo desta tela** — 29/10 (três textos),
+05/11 de manhã (o resumo do cabeçalho e a linha de `fora_do_quadro`) e agora. A régua é
+dele e é a mesma: *"atrapalha o profissionalismo"*.
+
+### O que saiu
+
+| texto | onde estava |
+|---|---|
+| *"O Harmonit não guarda a situação na linha do tempo — este log é nosso e começou em 29/10, então OS movida antes disso não aparece aqui"* | estado vazio das **Passagens** |
+| *"Mover de etapa escreve a situação na OS do Harmonit. Mudar a prioridade reescreve a OS inteira"* | **pé do modal**, ao lado dos dois controles |
+| *"Ao mover o card, isto vira uma observação aqui. Não vai para a OS do Harmonit"* | **pé do painel do checklist** |
+| *"Com autor e hora, e não se apagam. Não vão para a OS do Harmonit"* | **pé do painel das observações** |
+
+⚠️ **O quarto ele não nomeou** — tirei porque é o **mesmo construto** (`modal__painel-pe`),
+nasceu junto com o outro hoje, e deixar um dos dois painéis explicado e o outro não seria
+pior que os dois jeitos. 🔴 Se ele quiser de volta, é uma linha.
+
+✅ **Ficou o ESTADO, sem a lição:** *"Nenhuma passagem registrada."* Painel com cabeçalho e
+nada embaixo parece defeito, e essa frase é fato, não comentário.
+
+⚠️ **O que PERMANECE, e não foi tocado porque ele não apontou:** a frase do **modal de
+observações** (*"Ficam no MoviZap, com autor e hora. Não vão para a OS do Harmonit, e não se
+apagam"*) — é outro diálogo. E o aviso de que **anexo não tem backup**, que é risco de perda
+de dado, não explicação.
+
+### 🚨 O que a remoção custa, dito onde alguém lê
+
+**O aviso de escrita era o único aviso prévio da tela.** Mover card **não tem confirmação**:
+o arrasto e o `select` escrevem no ERP na hora, e a tela só fala **depois**, quando a escrita
+falha (`erroDeMover`). O comportamento não mudou — o aviso prévio deixou de existir.
+⚠️ **E as regras continuam todas no código:** `gravar_situacao_da_os` grava a situação,
+`gravar_prioridade_da_os` reescreve a OS inteira (`SalvarOrdemServico`), o checklist vira
+observação ao mover, e nada disso chega ao Harmonit — a decisão **O4** dele de 04/11 segue
+valendo. O que saiu foi a tela **dizê-las**.
+
+⚠️ **E quem abrir uma OS antiga vai ver zero passagens** e pode concluir que ela nunca se
+moveu. A `os_passagem` começou em 29/10, e isso continua verdade; deixou de estar escrito.
+
+### A linha de identificadores, toda no mesmo corpo
+
+🔵 *"todos no mesmo tamanho"*. A OS era `--txt-md` e o resto da linha `--txt-sm`; agora o
+tamanho vem do pai (`--txt-md`) e **nenhum filho o muda**.
+⚠️ **O que distingue a OS passa a ser só a cor e o peso** — ela continua sendo o
+identificador com que se age, e o `--acento` dá essa leitura sem quebrar o alinhamento.
+⚠️ A risca que separa passou de `13px` para `1em`: com a linha toda em `--txt-md`, 13px
+pairava acima da base do texto.
+
+### As travas
+
+**Oito saíram e uma foi REESCRITA.** Nenhuma por estar errada — todas prendiam a **redação**
+dos textos que ele tirou:
+
+| arquivo | o que saiu |
+|---|---|
+| `painel_2210.teste.js` | 2 (a observação e o pé do modal) |
+| `painel_checklist_0411.teste.js` | 1 (*"diz que NÃO vai para a OS"*) |
+| `painel_card_modal_0511.teste.js` | 3 do pé do painel + 1 do texto do modal |
+
+🚨 **A reescrita é a que importa:** *"o aviso de escrita está no MESMO bloco que eles"*
+prendia **duas** coisas — a **posição** dos dois controles juntos no pé (a regra de separar
+ler de agir, que é o que a entrega de 05/11 fez) e a **frase** ao lado. A frase saiu; a
+posição continua sendo o ponto, e a trava passou a afirmar só isso, mais que a faixa de
+medidas não tem `<select>` nenhum.
+⚠️ **Jogar a trava inteira fora seria perder a prova do que a entrega fez.**
+
+### ⚠️ Quatro vezes, o mesmo tropeço meu: a minha prosa derrubando a minha asserção
+
+Em quatro patches desta sessão a asserção de "o texto saiu" reprovou porque **o comentário
+que eu escrevia no lugar citava o texto removido** — `}`, `:first-of-type`, `<style>` e
+agora *"Ao mover o card, isto vira"*.
+🚨 **A asserção tem de olhar o código, não o arquivo**: `re.sub(r"/\*.*?\*/", "", texto)`
+antes de contar. E num caso eu quase o contrário — asseverei largo demais e a asserção pegou
+a frase de **outro diálogo**, que ele não pediu para tirar.

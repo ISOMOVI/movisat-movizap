@@ -801,6 +801,14 @@ describe('os quatro temas do card aberto', () => {
    ⚠️ As travas olham a ESTRUTURA, não os pixels: quem redesenhar de novo pode
    mudar cor e espaço, mas não pode voltar a empilhar tudo com o mesmo peso.
    ============================================================================ */
+/* 🚨 DUAS TRAVAS DESTE BLOCO SAIRAM EM 05/11: ele tirou da tela as frases
+   que elas prendiam -- *"nao vao para a OS do Harmonit"* no pe do painel das
+   observacoes e *"mover de etapa escreve a situacao na OS"* no pe do modal.
+   ⚠️ As REGRAS continuam no codigo: a observacao nao chega ao Harmonit, e
+   mover grava a situacao la. O que se perdeu foi a prova de que a TELA dizia.
+   ⚠️ E mover card continua SEM confirmacao: a tela so fala quando a escrita
+   falha (`erroDeMover`). Estao no git, no commit anterior. */
+
 describe('o card aberto tem as quatro faixas', () => {
   const abrirOCard = async () => {
     estado.ficha = {
@@ -850,22 +858,7 @@ describe('o card aberto tem as quatro faixas', () => {
     expect(campos.join(' ')).toContain('Prioridade')
   })
 
-  it('a observacao DIZ que nao vai para a OS', async () => {
-    /* ⚠️ Sem essa frase, alguém escreve ali pensando que o técnico vai ler. */
-    const tela = await abrirOCard()
-    const recados = tela.find('.modal__recados').text()
-    /* 🔵 04/11: o plural entrou com o modal dos recados (área D) — a seção
-       deixou de ser "Observação do painel" e virou "Observações". A regra é a
-       mesma: a tela TEM de dizer que isto não vai para a OS. */
-    expect(recados).toMatch(/Não (vai|vão) para a OS/)
-    expect(recados).toMatch(/não se apaga/)
-  })
 
-  it('o pe diz que mover escreve no Harmonit', async () => {
-    const tela = await abrirOCard()
-    expect(tela.find('.modal__rodape').text())
-      .toContain('escreve a situação na OS do Harmonit')
-  })
 })
 
 /* ============================================================================

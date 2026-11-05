@@ -149,6 +149,11 @@ describe('o selo no card fechado', () => {
   })
 })
 
+/* 🚨 A TRAVA *"diz que NAO vai para a OS"* SAIU EM 05/11: ele tirou a frase
+   do pe do painel do checklist (*"nao precisam mante-los no card"*).
+   ⚠️ A regra segue: mover o card grava o checklist como observacao, e nada
+   chega ao Harmonit -- e a decisao O4 dele de 04/11. O que saiu foi o texto. */
+
 describe('a lista dentro do card', () => {
   beforeEach(() => {
     estado.quadro = quadro({ 251: [card({ checklist: { feitos: 0, total: 2 },
@@ -179,16 +184,6 @@ describe('a lista dentro do card', () => {
     expect(texto).toContain('1 de 3')
   })
 
-  it('🚨 diz que NÃO vai para a OS', async () => {
-    const tela = await abrir()
-    /* 🚨 INSENSIVEL A CAIXA, e isto foi um vermelho de 05/11: a frase virou o
-       PE do painel e passou a ABRIR a sentenca -- *"Nao vai para a OS do
-       Harmonit"*, com N maiusculo. O `toContain` exato reprovou, e a regra
-       medida continuava inteira. E a licao que esta casa chama de
-       varredura-de-rotulo-ignora-caixa: comparar texto de tela sem `i` prende
-       a GRAFIA, nao a regra. */
-    expect(tela.text()).toMatch(/não vai para a OS/i)
-  })
 
   it('marcar manda o PUT e relê do servidor', async () => {
     const tela = await abrir()

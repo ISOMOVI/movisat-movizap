@@ -1449,15 +1449,7 @@ onBeforeUnmount(() => {
                 {{ erroDoCheck }}
               </p>
 
-              <!-- 🔵 A FRASE DE REGRA E O PE DO PAINEL, e nao a abertura: era o
-                   segundo paragrafo do bloco, logo abaixo do titulo, e empurrava
-                   o checklist -- a lista e o assunto, a regra e a nota de pe.
-                   E o mockup que ele validou a mostrava embaixo. -->
-              <p class="modal__painel-pe">
-                Ao mover o card, isto vira uma <strong>observação</strong> aqui.
-                <strong>Não vai para a OS</strong> do Harmonit.
-              </p>
-            </section>
+                          </section>
 <section class="modal__recados modal__painel">
               <h3>
                 Observações
@@ -1468,11 +1460,7 @@ onBeforeUnmount(() => {
                   Abrir observações
                 </button>
               </div>
-              <p class="modal__painel-pe">
-                Com autor e hora, e não se apagam.
-                <strong>Não vão para a OS</strong> do Harmonit.
-              </p>
-            </section>
+                          </section>
             </div>
 
             <div class="modal__coluna modal__coluna--ler">
@@ -1534,10 +1522,19 @@ onBeforeUnmount(() => {
               <!-- 🚨 O HARMONIT NÃO REGISTRA SITUAÇÃO na linha do tempo: este log
                    é nosso, e começou a existir em 29/10. Dizer isso é o que
                    impede a tela de parecer que a OS nunca se moveu. -->
+              <!-- 🔵 05/11, ele: *"nao precisam mante-los no card"*. A explicacao
+                 saiu -- *"O Harmonit nao guarda a situacao na linha do tempo,
+                 este log e nosso e comecou em 29/10, entao OS movida antes
+                 disso nao aparece aqui"*.
+                 ⚠️ FICOU O ESTADO, sem a licao: painel com cabecalho e nada
+                 embaixo parece defeito, e *"nenhuma passagem registrada"* e
+                 fato, nao comentario. Se ele quiser o painel muda, e uma linha.
+                 🚨 O QUE A EXPLICACAO SEGURAVA, e agora nao segura mais: quem
+                 abrir uma OS antiga vai ver zero passagens e pode concluir que
+                 a OS nunca se moveu. A `os_passagem` comecou em 29/10, e isso
+                 continua verdade -- deixou de estar escrito. -->
               <p v-else-if="!passagens.length" class="nota pequeno">
-                Nenhuma passagem registrada. O Harmonit não guarda a situação na
-                linha do tempo — este log é nosso e começou em 29/10, então OS
-                movida antes disso não aparece aqui.
+                Nenhuma passagem registrada.
               </p>
               <ul v-else class="modal__passagens">
                 <li v-for="p in passagens" :key="p.id">
@@ -1585,18 +1582,20 @@ onBeforeUnmount(() => {
                 </select>
               </label>
 
-              <!-- 🚨 A FRASE DIZ O QUE CADA UM ESCREVE, e nao so que escrevem.
-                   ⚠️ Eu a havia encurtado para *"Os dois escrevem na OS do
-                   Harmonit"* ao mover os controles para ca, e com isso perdi
-                   duas informacoes que a frase antiga tinha: que o mover grava
-                   **a situacao**, e -- medido no `os_ponte.gravar_prioridade` --
-                   que mudar a prioridade reescreve **a OS inteira**, porque a
-                   unica rota de escrita do Harmonit e a `SalvarOrdemServico`.
-                   Um teste pegou: ele prendia a frase antiga. -->
-              <p class="modal__perigo">
-                Mover de etapa <strong>escreve a situação na OS do Harmonit</strong>.
-                Mudar a prioridade <strong>reescreve a OS inteira</strong>.
-              </p>
+              <!-- 🔵 05/11, ele: *"esse tbm"*. Saiu o aviso
+                   *"Mover de etapa escreve a situacao na OS do Harmonit. Mudar
+                   a prioridade reescreve a OS inteira"*.
+                   🚨 E O QUE SAIU ERA O UNICO AVISO NA TELA: mover card **nao tem
+                   confirmacao** -- o arrasto e o `select` escrevem no ERP na
+                   hora, e a tela so fala depois, quando a escrita FALHA
+                   (`erroDeMover`). O comportamento nao mudou; o aviso previo
+                   deixou de existir.
+                   ⚠️ Os dois controles seguem aqui no pe, juntos, que foi o
+                   motivo de trazer o aviso para ca -- e o motivo continua
+                   valendo para a POSICAO deles, ainda que a frase tenha saido.
+                   ⚠️ O que o ERP recebe nao mudou: `gravar_situacao_da_os`
+                   grava a situacao, e `gravar_prioridade_da_os` reescreve a OS
+                   inteira (`SalvarOrdemServico`). -->
             </div>
 
             <div class="modal__acoes">
@@ -1948,17 +1947,27 @@ onBeforeUnmount(() => {
   margin: 0; font-size: var(--txt-xl); font-weight: var(--peso-forte);
   line-height: 1.25; letter-spacing: -0.01em;
 }
+/* 🔵 05/11, ele: *"pode deixar do mesmo tamanho da informacao da OS;
+   Ex: OS 123456 - TERMO 8899 - Instalacao rastreador todos no mesmo tamanho"*.
+   O tamanho vem do pai e nenhum filho o muda -- a OS era `--txt-md` e o resto
+   da linha `--txt-sm`.
+   ⚠️ O QUE DISTINGUE A OS PASSA A SER SO A COR E O PESO, e nao o corpo: ela
+   continua sendo o identificador com que se age, e o `--acento` mais o negrito
+   dao essa leitura sem quebrar o alinhamento da linha. */
 .modal__ident {
   margin: 0; display: flex; align-items: baseline; flex-wrap: wrap;
   gap: var(--e-2);
-  font-size: var(--txt-sm); color: var(--texto-fraco);
+  font-size: var(--txt-md); color: var(--texto-fraco);
 }
-.modal__os { font-size: var(--txt-md); color: var(--acento); }
+.modal__os { color: var(--acento); }
 .modal__termo { color: var(--texto-fraco); }
 /* O risco vertical que separa os identificadores -- decoracao, e por isso
    `aria-hidden` no markup. */
 .modal__risco {
-  width: 1px; height: 13px; background: var(--borda-forte); display: inline-block;
+  /* ⚠️ A altura acompanha a linha: com a fonte toda em `--txt-md`, 13px
+     ficava curto e a risca pairava acima da base do texto. */
+  width: 1px; height: 1em; background: var(--borda-forte); display: inline-block;
+  align-self: center;
 }
 .modal__fechar {
   flex: none;
@@ -2053,13 +2062,7 @@ onBeforeUnmount(() => {
   display: flex; flex-wrap: wrap; align-items: flex-end; gap: var(--e-4);
   min-width: 0;
 }
-/* 🚨 O AVISO DE ESCRITA SAIU DE `.apagado`: #94A3B8 da **2,56:1** sobre
-   branco, e a norma pede 4,5:1 -- o texto menos legivel do modal era
-   justamente o que avisa que o gesto chega ao ERP. #B45309 da 5,02:1. */
-.modal__perigo {
-  margin: 0 0 var(--e-2); max-width: 30ch;
-  font-size: var(--txt-sm); color: var(--aviso-texto); line-height: 1.45;
-}
+
 .modal__acoes { display: flex; gap: var(--e-2); flex-wrap: wrap; }
 .painel__busca input, .painel__ordem select {
   min-height: var(--altura-toque);
@@ -2195,32 +2198,28 @@ onBeforeUnmount(() => {
    painel com `<p>`, `<ul>` e `<div>` isso dava respiro de topo em tres filhos
    ou em nenhum, dependendo de quais `v-if` estivessem ligados naquele card.
    `h3 + *` e `* + *` nao dependem do tipo nem de quantos existem. */
-.modal__painel > :not(h3):not(.modal__painel-pe) {
+.modal__painel > :not(h3) {
   margin-left: var(--e-4);
   margin-right: var(--e-4);
 }
 /* o que vem logo depois da faixa de cima */
-.modal__painel > h3 + :not(.modal__painel-pe) { margin-top: var(--e-3); }
+.modal__painel > h3 + * { margin-top: var(--e-3); }
 /* o espaco ENTRE os blocos do miolo */
-.modal__painel > :not(h3) + :not(h3):not(.modal__painel-pe) { margin-top: var(--e-3); }
+.modal__painel > :not(h3) + :not(h3) { margin-top: var(--e-3); }
 /* ⚠️ E o respiro de baixo so quando nao ha faixa de pe: com ela, o pe encosta
    na borda de proposito -- e faixa, nao conteudo. */
-.modal__painel > :not(.modal__painel-pe):last-child { margin-bottom: var(--e-4); }
+.modal__painel > :last-child { margin-bottom: var(--e-4); }
 
-/* A FAIXA DE BAIXO: a frase de regra, que antes abria o bloco e empurrava o
-   assunto para baixo.
-   🚨 E ela NAO usa `.nota`: o texto que diz *"nao vai para a OS do Harmonit"*
-   e o que impede alguem de escrever pensando que o tecnico vai ler, e tem de
-   ser legivel -- `--texto-fraco` da 4,76:1. */
-.modal__painel-pe {
-  margin: 0;
-  padding: var(--e-3) var(--e-4);
-  background: var(--fundo);
-  border-top: var(--borda-fina) solid var(--borda-forte);
-  font-size: var(--txt-sm);
-  color: var(--texto-fraco);
-}
-.modal__painel-pe strong { color: var(--texto); }
+/* 🔵 05/11, ele: *"nao precisam mante-los no card"*. A FAIXA DE BAIXO
+   saiu, e com ela as duas frases de regra (*"Ao mover o card, isto vira uma
+   observacao aqui -- nao vai para a OS do Harmonit"* e a das observacoes).
+   🚨 O QUE SAIU FOI O TEXTO, nao a regra: mover o card continua gravando o
+   checklist como observacao (`passagem.registrar_observacao`), e nada disso
+   continua chegando ao Harmonit. A decisao O4 dele de 04/11 -- *"So no
+   MoviZap, como observacao"* -- segue valendo no codigo.
+   ⚠️ Os `:not(.modal__painel-pe)` que o respiro do miolo carregava saem
+   junto: seletor que nomeia classe que nao existe mais e referencia morta que
+   parece viva. */
 /* ⚠️ A caixa agora rola no `modal__corpo`, então o modal alinha ao topo e
    a sombra do mockup fica visível na beirada. */
 /* 🚨 A REGRA QUE ALINHAVA O MODAL AO TOPO SAIU EM 05/11. Ela existia porque
