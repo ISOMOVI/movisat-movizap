@@ -1302,7 +1302,8 @@ onBeforeUnmount(() => {
       <div v-if="cardAberto" class="modal" role="dialog" aria-modal="true"
            :aria-label="`OS ${cardAberto.numero_ordem}`"
            @click.self="fecharCard">
-        <div ref="caixaDoCard" tabindex="-1" class="modal__caixa">
+        <div ref="caixaDoCard" tabindex="-1"
+             class="modal__caixa painel__dialogo">
           <!-- ============ 1. O TOPO: quem e esta OS, e o fechar ============
                🔵 05/11, proposta A: o CLIENTE e a primeira coisa, em corpo de
                titulo, e os identificadores descem para a linha de baixo. O
@@ -1891,23 +1892,43 @@ onBeforeUnmount(() => {
    guardava justo o bloco de tamanho previsivel.
    🔵 1000px (era 820) porque o corpo passou a ter duas colunas. ⚠️ E `100%`
    no `min()` segura a tela estreita. */
-.modal__caixa {
+.painel__dialogo {
+  /* 🚨 AS QUATRO PROPRIEDADES DE FORMA SAO DECLARADAS AQUI, inclusive as que
+     "parecem" o padrao -- e e o conserto do defeito que me escapou TRES vezes
+     em 05/11.
+
+     A `.modal__caixa` da CASA (`estilo/componentes.css`, linha 112) impoe
+     `max-width: 420px`, `padding: var(--e-5)` e `overflow-y: auto`. A regra
+     desta tela ganha por especificidade (o `scoped` a publica como
+     `.painel__dialogo[data-v-...]`, que e (0,2,0) contra (0,1,0)) -- mas **so
+     ganha no que DECLARA**. Eu declarava `width` e nao `max-width`, e
+     `max-width` e um TETO aplicado DEPOIS de `width`, qualquer que seja a
+     especificidade de quem definiu a largura. O modal tinha **420px**: as duas
+     colunas pedem 320+280 de base, nao cabiam, e o `flex-wrap: wrap` fazia o
+     que eu mandei -- empilhava. Uma coluna.
+     ⚠️ E as outras duas explicavam o resto: os 22px de padding faziam as faixas
+     nao encostarem na borda (contra o que o comentario da caixa afirmava), e o
+     `overflow-y: auto` era a SEGUNDA rolagem, justo a que eu dizia ter tirado.
+
+     ⚠️ A classe `modal__caixa` fica no elemento so pelo `user-select: text`
+     (copiar o numero da OS) -- toda a FORMA vem desta classe, e o que a
+     protege de voltar a vazar e a trava que le o CSS publicado
+     (`scripts/conferir_css_publicado.mjs`). */
   width: min(1000px, 100%);
+  max-width: min(1000px, 100%);
   max-height: min(900px, 92vh);
+  padding: 0;
+  overflow: hidden;
+  display: flex; flex-direction: column;
   background: var(--superficie);
-  /* 🔵 *"evidenciar as limitacoes das caixas, talvez espessura ou
-     sombreamento"*: a borda sobe de `--borda` para um tom mais forte e a
-     sombra e a de elevacao. */
   border: var(--borda-fina) solid var(--texto-apagado);
   border-radius: var(--r-md);
   box-shadow: var(--sombra-2);
-  overflow: hidden;
-  display: flex; flex-direction: column;
 }
 /* ⚠️ O `tabindex="-1"` existe para o foco PODER entrar na caixa ao abrir; ele
    nao deve desenhar um anel quando o foco chega por programa. */
-.modal__caixa:focus { outline: none; }
-.modal__caixa:focus-visible { outline: 2px solid var(--acento); outline-offset: -2px; }
+.painel__dialogo:focus { outline: none; }
+.painel__dialogo:focus-visible { outline: 2px solid var(--acento); outline-offset: -2px; }
 
 /* 1. o topo */
 /* 🚨 AS TRES FAIXAS DA CAIXA (topo, faixa, pe) TEM BORDA DE 2px, e e o que

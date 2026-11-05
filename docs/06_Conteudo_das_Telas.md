@@ -7419,3 +7419,113 @@ observações também têm pé.
 dessas travas mede cor ou tamanho computado. O que elas prendem é a **estrutura** que as
 faixas precisam para existir — a ordem da cascata, que é o que quebrou aqui, **nenhum teste
 desta suíte pega**. O que pegou foi ele abrir a tela.
+
+### 05/11, quarta volta — o modal tinha 420px, e a causa estava noutro arquivo
+
+🔵 Ele, pela terceira vez na mesma tela: *"quando abro o card, ainda está errado a dimensão.
+aparece só uma coluna"*. E depois, com razão: *"já era para estar corrigido, conforme a
+metodologia"*.
+
+## 🚨 A CAUSA
+
+**Existe uma `.modal__caixa` GLOBAL em `estilo/componentes.css` (linha 112), e eu nunca a
+abri.** Ela é a modal da casa — um aviso:
+
+```css
+.modal__caixa {
+  width: 100%;
+  max-width: 420px;        /* ← o modal do card tinha 420px */
+  max-height: 85vh;
+  overflow-y: auto;        /* ← a segunda rolagem */
+  padding: var(--e-5);     /* ← os 22px que impediam as faixas de encostar */
+  …
+}
+```
+
+A regra escopada do painel **ganha por especificidade** — o `scoped` a publica como
+`.modal__caixa[data-v-ff478dab]`, que é `(0,2,0)` contra `(0,1,0)`. **Mas só ganha no que
+declara.** Eu declarava `width: min(1000px, 100%)` e **nunca `max-width`**.
+
+🚨 **`max-width` é um TETO aplicado depois de `width`, qualquer que seja a especificidade de
+quem definiu a largura.** O modal tinha **420px**: as duas colunas pedem `320px + 280px` de
+base, não cabiam, e o `flex-wrap: wrap` fazia exatamente o que eu mandei — **empilhava**.
+Uma coluna. E as outras duas propriedades explicavam o resto do que ele via.
+
+## Por que me escapou três vezes
+
+1. **Li só o `<style scoped>` da tela.** A regra que mandava estava noutro arquivo.
+2. 🚨 **Acreditei no meu próprio comentário**, que jura em caixa alta que *"a caixa não tem
+   `padding`, e é o que dá a hierarquia"*. Ele descrevia a intenção, e eu o li como se
+   descrevesse o arquivo. **Terceira vez nesta sessão** que um comentário meu afirma o
+   contrário do que o código faz.
+3. **Nenhum teste alcançava isto** — e esse é o assunto da segunda metade desta seção.
+
+## ✅ A CORREÇÃO
+
+O diálogo do card ganhou classe própria, **`painel__dialogo`**, que declara **as quatro
+propriedades de forma** — inclusive as que "parecem" o padrão:
+
+```css
+.painel__dialogo {
+  width: min(1000px, 100%);
+  max-width: min(1000px, 100%);   /* explícito: não existe teto de outro lugar */
+  max-height: min(900px, 92vh);
+  padding: 0;                     /* explícito: as faixas encostam na borda */
+  overflow: hidden;               /* explícito: quem rola é o corpo */
+  display: flex; flex-direction: column;
+  …
+}
+```
+
+⚠️ **A `modal__caixa` fica no elemento só pelo `user-select: text`** (copiar o número da
+OS). Toda a **forma** vem da classe nova.
+⚠️ **Os outros dois diálogos da tela continuam na classe da casa** — os recados e o aviso
+de etapa são avisos, e a forma de 420px serve para eles; o `--curta` (26rem) do aviso já é
+da mesma família.
+
+🚨 **A lição que vale além deste caso:** quando uma tela reaproveita uma classe global e
+quer outra forma, **tem de declarar todas as propriedades de forma**. O que fica em branco
+vem da folha global, e vem calado.
+
+---
+
+## ✅ A TRAVA QUE FALTAVA — `frontend/scripts/conferir_css_publicado.mjs`
+
+🚨 **Três defeitos nesta sessão, uma única causa: nada nesta casa lê CSS.** O jsdom não
+aplica `<style scoped>` nem a folha global, então o vitest mede estrutura e texto e **nunca
+o resultado visual**. Nas três vezes quem achou foi ele, abrindo a tela.
+
+O script lê o **CSS que o navegador recebe** (`dist/assets/*.css`) e confere exatamente os
+três defeitos de 05/11:
+
+| # | o que confere | o defeito que pegaria |
+|---|---|---|
+| 1 | `.painel__dialogo` declara `max-width` com 1000px, `padding: 0` e `overflow: hidden` | o teto de **420px** herdado da modal da casa |
+| 2 | `.modal__painel` vem **depois** de `.modal__recados h3` | a **ordem de cascata** que derrubou o cabeçalho do painel |
+| 3 | os **doze** tokens de sistema estão num `:root`, e a `.escala-operacao` declara **só** `--txt-*` | o `}` fora de lugar que tirou `--menu-*`, `--sombra-*`, `--foco` e os `--conversa-*` do `:root` |
+
+⚠️ **Entrou no `npm run build`**, depois dos dois `vite build`: quem publica não consegue
+publicar um bundle com um dos três defeitos. É a única mudança no rito.
+
+🚨 **E o script NÃO "pula" quando não acha o `dist`: ele FALHA.** Teste que se declara verde
+sem ter medido nada é a pior espécie — esta casa já tem dois arquivos nesse estado no FPSL,
+contados no placar sem rodar uma linha.
+⚠️ **Lê TODOS os `.css` da pasta**, não só o `index-*`: medir um arquivo quando o Vite
+dividiu em dois seria falso verde pela porta de trás.
+
+### ✅ E a trava foi provada reprovando
+
+Conferência que só passa não vale nada. Forjei os dois defeitos no CSS construído e rodei:
+
+| forjadura | resultado |
+|---|---|
+| `max-width: 420px` no diálogo | ❌ **exit 1** — *"herda os 420px da .modal__caixa da casa e o modal aparece com UMA coluna"* |
+| `--sombra-1` dentro da `.escala-operacao` e fora do `:root` | ❌ **exit 1**, com **duas** queixas — o token ausente do `:root` e a escala declarando o que não é escala |
+| `.modal__painel` movido para antes das regras antigas | ❌ **exit 1** — *"a de baixo ganha, e o cabeçalho volta a cair para --txt-sm"* |
+| o CSS correto | ✅ exit 0 |
+
+⚠️ **A primeira forjadura que eu tentei não forjou nada:** renomeei `.escala-operacao[` com
+`sed`, supondo que ela fosse escopada — ela é **global**, vem do `tokens.css` e não leva
+`[data-v-]`. O `sed` não casou, o script passou, e eu quase registrei isso como prova.
+🚨 **Prova que não falha quando devia não é prova** — é a mesma família do falso verde que o
+script existe para pegar.
