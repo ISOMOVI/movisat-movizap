@@ -368,12 +368,12 @@ describe('os recados em modal (Área D)', () => {
     expect(tela.find('.recado__anexos a').exists()).toBe(false)
   })
 
-  it('⚠️ diz que o anexo NÃO tem backup', async () => {
-    const tela = await montar()
-    await abrirRecados(tela)
-    expect(tela.text()).toContain('não tem')
-    expect(tela.text()).toContain('backup')
-  })
+  /* 🚨 A TRAVA *"diz que o anexo NAO tem backup"* SAIU EM 05/11: ele mandou
+     apagar a frase (*"esses comentarios pode apagar, nao precisamos deles"*).
+     ⚠️ O FATO CONTINUA VERDADE -- a pasta dos anexos vive fora do repositorio
+     e o backup leva o banco, entao a linha sobrevive e o arquivo nao. O que
+     deixou de existir foi a tela dizer isso. Esta escrito na migracao 091 e no
+     `docs/06`, e a trava esta no git, no commit anterior. */
 
   it('o modal repete que não vai para a OS', async () => {
     const tela = await montar()

@@ -264,7 +264,8 @@ class TestOQuadro:
         for chave in ("colunas", "total", "desde", "so_abertas",
                       "ponte_respondeu", "fora_do_quadro", "pode_mover"):
             assert chave in q, chave
-        assert len(q["colunas"]) == 17
+        # 🔵 05/11: 18 -- a `Chamados` entrou na frente das 17 situações.
+        assert len(q["colunas"]) == 18
         # 🚨 ESTA LINHA AFIRMAVA O CONTRARIO HA UMA HORA, e e o segundo teste
         # meu de hoje a guardar a verdade antiga (o primeiro exigia a palavra
         # "Harmonit" numa frase errada). Mover passou a existir no Bloco D:
@@ -697,15 +698,24 @@ class TestOFiltroEAOrdem:
     def test_a_busca_casa_por_OS_e_diz_onde(self, cliente, token):
         cab = {"Authorization": f"Bearer {token}"}
         todos = cliente.get("/api/paineis/operacao", headers=cab).json()
-        cards = [c for col in todos["colunas"] for c in col["cards"]]
+        # 🚨 SO CARD COM OS, e isto mudou em 05/11: o primeiro card do quadro
+        # passou a ser da coluna `Chamados`, que nao tem numero de OS. Pegar
+        # `cards[0]` buscava por `None` e devolvia 0 -- a trava achou o proprio
+        # descuido antes de a tela mentir.
+        cards = [c for col in todos["colunas"] for c in col["cards"]
+                 if c.get("numero_ordem")]
         if not cards:
-            pytest.skip("o quadro esta vazio agora")
+            pytest.skip("o quadro nao tem card com OS agora")
         alvo = cards[0]
         r = cliente.get(
             f"/api/paineis/operacao?busca={alvo['numero_ordem']}",
             headers=cab).json()
         assert r["total"] == 1
         assert r["filtro_casou_por"] == ["OS"]
+        # 🚨 E a busca por OS NAO arrasta o chamado junto: ele nao tem numero,
+        # entao nao pode casar com um.
+        achados = [c for col in r["colunas"] for c in col["cards"]]
+        assert all(c.get("numero_ordem") for c in achados)
 
     def test_a_busca_casa_por_CLIENTE(self, cliente, token):
         cab = {"Authorization": f"Bearer {token}"}

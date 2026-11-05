@@ -7609,3 +7609,58 @@ agora *"Ao mover o card, isto vira"*.
 🚨 **A asserção tem de olhar o código, não o arquivo**: `re.sub(r"/\*.*?\*/", "", texto)`
 antes de contar. E num caso eu quase o contrário — asseverei largo demais e a asserção pegou
 a frase de **outro diálogo**, que ele não pediu para tirar.
+
+## Painel da Operação — a coluna `Chamados` (05/11)
+
+🔵 *"vamos criar uma coluna nova antes de 'Nova solicitação', chamada
+'Chamados' (...) nessa coluna não são OS ainda, somente o CARD mesmo, com OBS,
+etc"*. E a razão: *"O chamado é o cliente dizendo algo, como: 'rastreador parou
+de pegar'. O chamado é para analisar e decidir se realmente será aberta OS."*
+
+**O quadro passou a ter 18 colunas**: a `Chamados` e as 17 situações.
+
+| o que a coluna tem | o que ela NÃO tem |
+|---|---|
+| o nome do formulário onde o card de OS escreve `OS 17081` | número de OS — ele não existe ainda |
+| o cliente, o resumo do chamado e quando abriu | situação, placa, termo, checklist |
+| a barra vertical no acento, para dizer que é outro bicho | a linha *"situação N no Harmonit"* |
+
+🚨 **A coluna não diz *"situação N no Harmonit"*** porque a etapa é nossa — e as
+17 continuam dizendo, então a informação não saiu da tela.
+
+### O card aberto do chamado
+
+Diálogo **próprio**, de 900px e duas colunas:
+
+- **o que o cliente disse** — as respostas do formulário **por rótulo**
+  (🚨 nunca a chave do Bitrix, que é coisa como `COMPANY_UF_CRM_1646332310941`);
+- **as observações**, nas mesmas bolhas da OS, com anexo pelo mesmo caminho;
+- **o histórico de etapas**, lendo o retrato — o título **de então**.
+
+Três botões no pé:
+
+1. **Finalizar Chamado** → a pergunta **Resolvido / Não resolvido** aparece
+   **no lugar do botão**, e não num terceiro diálogo empilhado. ⚠️ O primeiro
+   clique **não grava nada**.
+2. **Abrir conversa** — empurra `/atendimento?numero=`, e a Caixa resolve o
+   resto. ⚠️ **Sem telefone o botão não aparece**, em vez de oferecer um gesto
+   que falha.
+3. **Reabrir chamado**, no lugar do Finalizar, quando o card já está arquivado.
+
+### O card arquivado
+
+🔵 *"Resolvido encerra o card e ele esmaece e fica no fim da fila arquivado com
+status de concluído"* / *"o status de 'Virou OS'"*.
+
+**Esmaece, vai para o fim da própria coluna, e tem o selo com o nome do
+desfecho.** 🚨 O selo não é enfeite: `opacity` não carrega informação, e
+esmaecer sozinho não distingue Resolvido de Virou OS.
+
+🚨 **Os dois SÓ MARCAM** — *"só marca; a OS é pelo Operação"*. Nenhuma rota de
+chamado fala com o Harmonit, e é por isso que **Reabrir** é seguro.
+
+### O arrasto entre os dois mundos
+
+Card de OS não entra na `Chamados`; card de chamado não entra numa das 17. A
+tela **recusa e diz por quê**, em vez de deixar a rota devolver 422 sem
+explicação.

@@ -585,7 +585,134 @@ function terminarArrasto() {
 /* O clique desiste se um arrasto acabou de acontecer. */
 function cliqueNoCard(card) {
   if (Date.now() - arrastouAgora < 400) return
+  /* 🔵 05/11: o card de CHAMADO abre outra ficha -- ele nao tem OS, entao
+     nao ha o que ler no ERP. */
+  if (card.origem === 'chamado') return abrirChamado(card)
   abrirCard(card)
+}
+
+/* ============================================================================
+   O CARD DE CHAMADO ABERTO (05/11)
+   ----------------------------------------------------------------------------
+   🔵 Ele: *"nessa coluna nao sao OS ainda, somente o CARD mesmo, com OBS,
+   etc"* · *"ter o botao de 'Finalizar Chamado' e dai vai perguntar 'Resolvido'
+   ou 'Nao resolvido'"* · *"no card do chamado, tbm tem um botao de 'abrir
+   conversa' que abrira a conversa com aquele numero no movizap para chat"*.
+
+   🚨 NENHUMA DESTAS LEITURAS VAI AO ERP, e e a diferenca inteira em relacao
+   ao card de OS: a `/chamado/{id}` le o nosso banco, entao ela nao pode
+   devolver 502 por falha de terceiro.
+   ============================================================================ */
+const chamadoAberto = ref(null)
+const fichaDoChamado = ref(null)
+const lendoChamado = ref(false)
+const erroDoChamado = ref('')
+const perguntandoDesfecho = ref(false)
+const finalizando = ref(false)
+
+async function abrirChamado(card) {
+  guardarFoco()
+  chamadoAberto.value = card
+  focarCaixa(caixaDoChamado)
+  fichaDoChamado.value = null
+  erroDoChamado.value = ''
+  recado.value = ''
+  erroDoRecado.value = ''
+  perguntandoDesfecho.value = false
+  await recarregarChamado(card.id)
+}
+
+async function recarregarChamado(cardId) {
+  lendoChamado.value = true
+  try {
+    fichaDoChamado.value = await api.get(
+      `/api/paineis/operacao/chamado/${cardId}`)
+  } catch (e) {
+    erroDoChamado.value = e instanceof ErroDeApi
+      ? e.message : 'Nao deu para ler o chamado agora.'
+  } finally {
+    lendoChamado.value = false
+  }
+}
+
+function fecharChamado() {
+  chamadoAberto.value = null
+  fichaDoChamado.value = null
+  perguntandoDesfecho.value = false
+  devolverFoco()
+}
+
+/* 🔵 *"Resolvido"* ou *"Nao resolvido"*. 🚨 Os dois SO MARCAM -- decisao
+   dele: *"so marca; a OS e pelo Operacao"*. Nada escreve no ERP, e e isso que
+   torna o botao reversivel. */
+async function finalizarChamado(desfecho) {
+  if (!chamadoAberto.value) return
+  finalizando.value = true
+  erroDoChamado.value = ''
+  try {
+    await api.post(
+      `/api/paineis/operacao/chamado/${chamadoAberto.value.id}/finalizar`,
+      { desfecho })
+    perguntandoDesfecho.value = false
+    await recarregarChamado(chamadoAberto.value.id)
+    /* ⚠️ Recarrega o quadro: o card arquivado esmaece e vai para o fim da
+       coluna, e isso e ordenacao do servidor. */
+    await carregar()
+  } catch (e) {
+    erroDoChamado.value = e instanceof ErroDeApi
+      ? e.message : 'Nao deu para finalizar o chamado.'
+  } finally {
+    finalizando.value = false
+  }
+}
+
+async function reabrirChamado() {
+  if (!chamadoAberto.value) return
+  finalizando.value = true
+  try {
+    await api.post(
+      `/api/paineis/operacao/chamado/${chamadoAberto.value.id}/reabrir`)
+    await recarregarChamado(chamadoAberto.value.id)
+    await carregar()
+  } catch (e) {
+    erroDoChamado.value = e instanceof ErroDeApi
+      ? e.message : 'Nao deu para reabrir o chamado.'
+  } finally {
+    finalizando.value = false
+  }
+}
+
+/* 🚨 ABRIR CONVERSA E UM `router.push`, E NADA MAIS -- o padrao ja existe e
+   esta em uso na ficha do cliente (`Clientes.vue`): a Caixa de Entrada le
+   `?numero=` e resolve os tres casos sozinha (uma conversa achada abre;
+   nenhuma abre o painel do `+` ja preenchido; varias deixam a lista filtrada).
+   ⚠️ E NAO se usa o `conversas.iniciar_conversa`: essa funcao EXIGE texto,
+   de proposito, para nao deixar conversa vazia orfa na Caixa. */
+function abrirConversaDoChamado() {
+  const tel = chamadoAberto.value?.telefone
+  if (!tel) return
+  router.push(`/atendimento?numero=${encodeURIComponent(tel)}`)
+}
+
+async function salvarRecadoDoChamado() {
+  const texto = (recado.value || '').trim()
+  const sid = fichaDoChamado.value?.chamado?.solicitacao_id
+  if (!texto || !sid) return
+  enviandoRecado.value = true
+  erroDoRecado.value = ''
+  try {
+    const r = await api.post('/api/paineis/operacao/chamado/observacao',
+                             { solicitacao_id: sid, texto })
+    fichaDoChamado.value = { ...fichaDoChamado.value,
+                             observacoes: r.observacoes || [] }
+    recado.value = ''
+    await carregar()
+  } catch (e) {
+    erroDoRecado.value = e instanceof ErroDeApi
+      ? e.message : 'Nao deu para salvar a observacao.'
+  } finally {
+    enviandoRecado.value = false
+  }
 }
 
 /* 🚨 O RETORNO VISUAL: a coluna acende quando o card passa por cima. Sem isto
@@ -608,6 +735,21 @@ async function soltarNaColuna(coluna) {
      navegadores geram depois do `drop` abriria o card por cima. */
   arrastouAgora = Date.now()
   if (!card || !quadro.value?.pode_mover) return
+  /* 🚨 A GUARDA DOS DOIS MUNDOS, e ela nasce com a coluna `Chamados`: as 17
+     colunas sao situacoes da OS no Harmonit, e a `Chamados` e etapa NOSSA.
+     Sem isto, soltar um card de OS na `Chamados` chamaria
+     `mover(card, null)` -- a rota recusa com 422, entao falharia no lado
+     seguro, mas com erro feio e sem dizer por que. */
+  if (!coluna.situacao_id && !card.solicitacao_id) {
+    erroDeMover.value = 'Esta OS não entra em Chamados: a coluna é de '
+      + 'chamados que ainda não viraram OS.'
+    return
+  }
+  if (coluna.situacao_id && card.solicitacao_id && !card.numero_ordem) {
+    erroDeMover.value = 'Este chamado ainda não é uma OS. Use o Finalizar '
+      + 'Chamado para marcar que ele virou OS.'
+    return
+  }
   /* Soltar na própria coluna não é movimento. */
   if (card.situacao_id === coluna.situacao_id) return
   await mover(card, coluna.situacao_id)
@@ -817,6 +959,7 @@ const ROTULO_ESTADO = {
 const caixaDoCard = ref(null)
 const caixaDosRecados = ref(null)
 const caixaDoAviso = ref(null)
+const caixaDoChamado = ref(null)
 
 /* 🚨 UMA PILHA, NAO UM SLOT, e a razao e a tela: os recados abrem DE DENTRO
    do card aberto, e o aviso de etapa abre por cima dos dois. Com um slot so,
@@ -828,6 +971,7 @@ function aoTeclar(evento) {
   if (evento.key !== 'Escape') return
   if (avisoDaEtapa.value) { fecharAvisoDaEtapa(); return }
   if (recadosAbertos.value) { fecharRecados(); return }
+  if (chamadoAberto.value) { fecharChamado(); return }
   if (cardAberto.value) { fecharCard() }
 }
 
@@ -1067,8 +1211,24 @@ onBeforeUnmount(() => {
                    ⚠️ O teclado continua alcançando: o NÚMERO DA OS é o botão
                    (alvo pequeno), e o resto do card arrasta. -->
               <div class="card__abrir"
-                   :class="{ 'card__abrir--excecao': cardEhExcecao(card) }"
+                   :class="{ 'card__abrir--excecao': cardEhExcecao(card),
+                             'card__abrir--chamado': card.origem === 'chamado',
+                             'card__abrir--arquivado': !!card.desfecho }"
                    @click="cliqueNoCard(card)">
+
+                <!-- 🔵 O SELO DO DESFECHO, e e o que faz o card arquivado dizer
+                     o que foi: *"Resolvido encerra o card e ele esmaece e fica
+                     no fim da fila arquivado com status de concluido"* / *"o
+                     status de 'Virou OS'"*.
+                     ⚠️ O esmaecer sozinho nao diz QUAL dos dois foi -- cor e
+                     opacidade nao sao portadores de informacao. -->
+                <span v-if="card.desfecho" class="card__arquivado">
+                  <i class="bi bi-archive" aria-hidden="true"></i>
+                  {{ card.desfecho_rotulo || card.desfecho }}
+                  <template v-if="card.desfecho_em">
+                    &middot; {{ dataCurta(card.desfecho_em) }}
+                  </template>
+                </span>
 
                 <!-- LINHA 1 -- O CLIENTE, e nao a OS. 🔵 Variante C, escolhida por
                      ele em 05/11. Isto muda a ordem de 29/10 (*"A OS VEM NA
@@ -1100,8 +1260,14 @@ onBeforeUnmount(() => {
                      horizontal do que vertical"* que ele pediu -- o card desce
                      de 5 faixas para 3. -->
                 <span class="card__linha">
-                  <span class="card__ident">
-                    <button class="card__os" type="button"
+                    <span class="card__ident">
+                    <!-- ⚠️ CHAMADO NAO TEM NUMERO DE OS, e a tela nao inventa um:
+                         o que identifica o chamado e o formulario de onde ele
+                         veio. O botao continua sendo o alvo de teclado. -->
+                    <button v-if="card.origem === 'chamado'" class="card__os"
+                            type="button"
+                            @click.stop="cliqueNoCard(card)">{{ card.formulario || 'Chamado' }}</button>
+                    <button v-else class="card__os" type="button"
                             @click.stop="cliqueNoCard(card)">OS {{ card.numero_ordem || card.os_id }}</button>
                     <!-- ⚠️ OS SEM TERMO E 1 DE CADA 7, e a tela nao diz nada: venda,
                          cartao RFID e manutencao nao nascem de termo. -->
@@ -1236,12 +1402,194 @@ onBeforeUnmount(() => {
         </section>
       </div>
 
+      <!-- ============ O CHAMADO ABERTO (05/11) ============
+           🔵 *"nessa coluna nao sao OS ainda, somente o CARD mesmo, com OBS,
+           etc"*. 🚨 Dialogo PROPRIO, e nao o do card de OS: um chamado nao tem
+           situacao, nem placa, nem termo, nem checklist -- reaproveitar o
+           outro faria metade dele ser condicional, e condicional em cima de
+           condicional e como o card de OS ficou grande. -->
+      <div v-if="chamadoAberto" class="modal modal--chamado" role="dialog"
+           aria-modal="true" :aria-label="`Chamado ${chamadoAberto.id}`"
+           @click.self="fecharChamado">
+        <div ref="caixaDoChamado" tabindex="-1"
+             class="modal__caixa painel__dialogo painel__dialogo--chamado">
+
+          <header class="modal__topo">
+            <div class="modal__quem">
+              <h2 class="modal__cliente">
+                {{ chamadoAberto.cliente || 'Chamado sem cliente identificado' }}
+              </h2>
+              <p class="modal__ident">
+                <strong class="modal__os">{{ chamadoAberto.formulario || 'Chamado' }}</strong>
+                <span class="modal__risco" aria-hidden="true"></span>
+                <span>aberto {{ quando(chamadoAberto.criada_em) }}</span>
+                <!-- ⚠️ O selo diz QUAL desfecho: esmaecer o card nao
+                     distingue Resolvido de Virou OS. -->
+                <template v-if="chamadoAberto.desfecho">
+                  <span class="modal__risco" aria-hidden="true"></span>
+                  <span class="card__arquivado">
+                    {{ chamadoAberto.desfecho_rotulo }}
+                  </span>
+                </template>
+              </p>
+            </div>
+            <button class="modal__fechar" type="button" aria-label="Fechar"
+                    @click="fecharChamado">✕</button>
+          </header>
+
+          <div class="modal__faixa">
+            <div class="faixa__medida">
+              <span class="faixa__rotulo">Etapa</span>
+              <strong>Chamados</strong>
+            </div>
+            <div class="faixa__medida">
+              <span class="faixa__rotulo">Aberto</span>
+              <strong>{{ duracao(chamadoAberto.criada_em) || '—' }}</strong>
+            </div>
+            <div class="faixa__medida">
+              <span class="faixa__rotulo">Observações</span>
+              <strong>{{ (fichaDoChamado && fichaDoChamado.observacoes || []).length }}</strong>
+            </div>
+            <div v-if="chamadoAberto.desfecho" class="faixa__medida">
+              <span class="faixa__rotulo">Finalizado</span>
+              <strong>{{ quando(chamadoAberto.desfecho_em) }}</strong>
+            </div>
+          </div>
+
+          <div class="modal__corpo modal__corpo--duas">
+            <div class="modal__coluna modal__coluna--fazer">
+              <p class="modal__secao">O que o cliente disse</p>
+
+              <section class="modal__recados modal__painel">
+                <h3>
+                  Chamado
+                  <span v-if="fichaDoChamado && fichaDoChamado.chamado"
+                        class="pilula">{{ fichaDoChamado.chamado.respostas.length }} campos</span>
+                </h3>
+                <p v-if="lendoChamado" class="nota pequeno">Lendo…</p>
+                <p v-else-if="erroDoChamado" class="aviso aviso--erro" role="alert">
+                  {{ erroDoChamado }}
+                </p>
+                <!-- 🚨 Os campos com ROTULO, nunca as chaves do Bitrix: a tela
+                     nao pode mostrar `COMPANY_UF_CRM_1646332310941` a ninguem. -->
+                <dl v-else-if="fichaDoChamado && fichaDoChamado.chamado"
+                    class="temas__respostas">
+                  <template v-for="r in fichaDoChamado.chamado.respostas" :key="r.nome">
+                    <dt>{{ r.rotulo }}</dt>
+                    <dd>{{ Array.isArray(r.valor) ? r.valor.join(' · ') : r.valor }}</dd>
+                  </template>
+                </dl>
+                <p v-else class="nota pequeno">
+                  Este card não veio de formulário.
+                </p>
+              </section>
+
+              <section class="modal__recados modal__painel">
+                <h3>
+                  Observações
+                  <span class="pilula">{{ (fichaDoChamado && fichaDoChamado.observacoes || []).length }}</span>
+                </h3>
+                <ul v-if="fichaDoChamado && fichaDoChamado.observacoes.length"
+                    class="recados">
+                  <BalaoDeRecado v-for="o in [...fichaDoChamado.observacoes].reverse()"
+                                 :key="o.id" :recado="o" :quando="quando" />
+                </ul>
+                <p v-else class="nota pequeno">Nenhuma observação ainda.</p>
+
+                <div class="modal__rodape--escrever">
+                  <textarea v-model="recado" rows="2" :disabled="enviandoRecado"
+                            placeholder="o que a análise deste chamado precisa registrar"
+                            aria-label="Escrever observação no chamado"></textarea>
+                  <div class="modal__pe">
+                    <button class="botao" type="button"
+                            :disabled="enviandoRecado || !recado.trim()"
+                            @click="salvarRecadoDoChamado">
+                      {{ enviandoRecado ? 'Salvando…' : 'Salvar' }}
+                    </button>
+                  </div>
+                  <p v-if="erroDoRecado" class="aviso aviso--erro" role="alert">
+                    {{ erroDoRecado }}
+                  </p>
+                </div>
+              </section>
+            </div>
+
+            <div class="modal__coluna modal__coluna--ler">
+              <p class="modal__secao">O histórico</p>
+              <section class="modal__log modal__painel">
+                <h3>Passagens de etapa</h3>
+                <ol v-if="fichaDoChamado && fichaDoChamado.historico.length"
+                    class="modal__passagens">
+                  <li v-for="p in fichaDoChamado.historico" :key="p.id">
+                    <span class="nota pequeno">{{ quando(p.em) }}</span>
+                    <span>
+                      <template v-if="p.de_titulo">{{ p.de_titulo }} &#8594; </template>
+                      <strong>{{ p.para_titulo }}</strong>
+                    </span>
+                    <span class="pilula">{{ p.quem || 'sem autor' }}</span>
+                  </li>
+                </ol>
+                <p v-else class="nota pequeno">Nenhuma passagem registrada.</p>
+              </section>
+            </div>
+          </div>
+
+          <footer class="modal__rodape">
+            <div class="modal__agir">
+              <!-- 🔵 *"um botao de 'abrir conversa' que abrira a conversa com
+                   aquele numero no movizap para chat"*.
+                   ⚠️ Sem telefone o botao NAO APARECE, em vez de oferecer um
+                   gesto que falha: o campo e obrigatorio no formulario de
+                   suporte, mas um card criado a mao nao tera. -->
+              <button v-if="chamadoAberto.telefone" class="botao botao--contorno"
+                      type="button" @click="abrirConversaDoChamado">
+                <i class="bi bi-whatsapp" aria-hidden="true"></i>
+                Abrir conversa
+              </button>
+
+              <!-- 🔵 *"ter o botao de 'Finalizar Chamado' e dai vai perguntar
+                   'Resolvido' ou 'Nao resolvido'"*. A pergunta aparece no lugar
+                   do botao, e nao num terceiro dialogo empilhado. -->
+              <template v-if="!chamadoAberto.desfecho">
+                <button v-if="!perguntandoDesfecho" class="botao"
+                        type="button" @click="perguntandoDesfecho = true">
+                  Finalizar Chamado
+                </button>
+                <span v-else class="desfecho__pergunta">
+                  <span class="desfecho__rotulo">Resolvido?</span>
+                  <button class="botao" type="button" :disabled="finalizando"
+                          @click="finalizarChamado('resolvido')">Resolvido</button>
+                  <button class="botao botao--contorno" type="button"
+                          :disabled="finalizando"
+                          @click="finalizarChamado('virou_os')">Não resolvido</button>
+                  <button class="botao botao--fantasma" type="button"
+                          :disabled="finalizando"
+                          @click="perguntandoDesfecho = false">Cancelar</button>
+                </span>
+              </template>
+              <!-- ⚠️ Reabrir existe porque finalizar SO MARCA: nada foi escrito
+                   fora, entao desfazer e seguro -- e marca que nao se desmarca
+                   seria porta de mao unica numa tela de uso diario. -->
+              <button v-else class="botao botao--contorno" type="button"
+                      :disabled="finalizando" @click="reabrirChamado">
+                Reabrir chamado
+              </button>
+            </div>
+
+            <div class="modal__acoes">
+              <button class="botao" type="button" @click="fecharChamado">Fechar</button>
+            </div>
+          </footer>
+        </div>
+      </div>
+
       <!-- ============ OS RECADOS, EM MODAL (Área D) ============ -->
       <div v-if="recadosAbertos && cardAberto"
            class="modal modal--recados" role="dialog"
            aria-modal="true" aria-label="Observações do card"
            @click.self="fecharRecados">
-        <div ref="caixaDosRecados" tabindex="-1" class="modal__caixa">
+        <div ref="caixaDosRecados" tabindex="-1"
+             class="modal__caixa painel__dialogo painel__dialogo--recados">
           <header class="modal__topo">
             <strong>Observações — OS {{ cardAberto.numero_ordem }}</strong>
             <button class="modal__fechar" type="button" aria-label="Fechar"
@@ -1267,21 +1615,53 @@ onBeforeUnmount(() => {
                       placeholder="o que a operação precisa saber sobre esta OS"
                       aria-label="Escrever observação"></textarea>
             <div class="linha">
-              <!-- ⚠️ A lista branca aparece para quem escolhe: recusar depois
-                   de subir desperdiça o tempo de quem opera. -->
-              <input type="file" aria-label="Anexar arquivo"
+              <!-- 🔵 05/11, ele: *"botao de anexo feio, coloca mais bonito"*.
+                   🚨 O `<input type="file">` NAO SE ESTILIZA de verdade -- cada
+                   navegador desenha o proprio botao e o proprio texto
+                   ("Nenhum arquivo selecionado"), e nada de CSS alcanca isso.
+                   O padrao e esconder o campo e usar um `<label>` como botao:
+                   o clique no rotulo abre o seletor nativo, sem JavaScript.
+                   ⚠️ ESCONDER COM `display: none` TIRARIA O CAMPO DO TECLADO.
+                   Ele fica na tela, de 1px e transparente, e o `:focus` do
+                   campo acende o rotulo -- quem navega por Tab continua vendo
+                   onde esta.
+                   ⚠️ A lista branca continua no `accept`: recusar depois de
+                   subir desperdica o tempo de quem opera. -->
+              <input id="anexo-do-recado" class="campo-de-arquivo" type="file"
                      accept=".pdf,.jpg,.jpeg,.png,.webp,.heic,.doc,.docx,.xls,.xlsx,.csv,.txt"
                      @change="escolherAnexo" />
+              <label class="botao botao--contorno anexo__rotulo"
+                     for="anexo-do-recado">
+                <i class="bi bi-paperclip" aria-hidden="true"></i>
+                <span>{{ anexoEscolhido ? 'Trocar arquivo' : 'Anexar' }}</span>
+              </label>
+              <!-- ⚠️ O nome do escolhido fica A VISTA: o seletor nativo fecha e
+                   quem escolheu nao tem outra confirmacao de que o arquivo
+                   entrou. -->
+              <span v-if="anexoEscolhido" class="anexo__escolhido"
+                    :title="anexoEscolhido.name">
+                {{ anexoEscolhido.name }}
+                <button class="anexo__tirar" type="button"
+                        aria-label="Tirar o arquivo escolhido"
+                        @click="anexoEscolhido = null">✕</button>
+              </span>
               <button class="botao botao--primario" type="button"
                       :disabled="enviandoRecado || (!recado.trim() && !anexoEscolhido)"
                       @click="salvarRecadoComAnexo">
                 {{ enviandoRecado ? 'Salvando…' : 'Salvar' }}
               </button>
             </div>
-            <p class="nota pequeno">
-              O arquivo fica no servidor do MoviZap e <strong>não tem
-              backup</strong> — não substitui o documento guardado no lugar certo.
-            </p>
+            <!-- 🔵 05/11, ele: *"esses comentarios pode apagar, nao
+                 precisamos deles"*. Saiu o aviso de que o anexo nao tem backup.
+                 🚨 O FATO CONTINUA VERDADE: a pasta dos anexos vive fora do
+                 `movizap_painel` e o backup leva o BANCO -- a linha com o
+                 caminho sobrevive, o arquivo nao. O que saiu foi a tela dizer
+                 isso; esta escrito na migracao 091 e no doc.
+                 ⚠️ E O CAMINHO DE DISCO NAO SE ESCREVE NESTE COMENTARIO: comentario
+                 de HTML entra no `html()` renderizado, e a trava do anexo
+                 procura exatamente por ele para provar que nao sai na tela.
+                 O proprio arquivo ja avisava isso sobre outra palavra, e eu
+                 repeti o erro. -->
             <p v-if="erroDoRecado" class="aviso aviso--erro" role="alert">
               {{ erroDoRecado }}
             </p>
@@ -1818,6 +2198,25 @@ onBeforeUnmount(() => {
   border-left: 3px solid var(--aviso);
 }
 
+/* 🔵 O card de CHAMADO e visivelmente outro: ele nao e uma OS. */
+.card__abrir--chamado { border-left: 3px solid var(--acento); }
+
+/* 🔵 *"ele esmaece e fica no fim da fila arquivado"*.
+   ⚠️ `opacity` NAO E O PORTADOR: o selo com o nome do desfecho esta no card,
+   e e ele que diz se foi Resolvido ou Virou OS. */
+.card__abrir--arquivado { opacity: .62; }
+.card__abrir--arquivado:hover { opacity: 1; }
+.card__arquivado {
+  display: inline-flex; align-items: center; gap: var(--e-1);
+  align-self: flex-start;
+  padding: 1px var(--e-2);
+  border: var(--borda-fina) solid var(--borda-forte);
+  border-radius: var(--r-full);
+  background: var(--superficie-2);
+  font-size: var(--txt-xs); font-weight: var(--peso-forte);
+  color: var(--texto-fraco);
+}
+
 /* ⚠️ AS TRES MEDIDAS SECUNDARIAS CAEM NA MESMA BORDA DIREITA ("ha N", "total
    N", "previsao dd/mm"), e e o que ele chamou de realinhar: o olho desce UMA
    coluna em vez de varrer cinco linhas soltas. */
@@ -2131,6 +2530,77 @@ onBeforeUnmount(() => {
 }
 .recados { list-style: none; margin: 0; padding: 0; }
 .modal__rodape--escrever { display: grid; gap: var(--e-2); }
+
+/* 🚨 O DIALOGO DOS RECADOS DECLARA A PROPRIA FORMA, e isto era o defeito
+   que ele viu como *"o layout esta errado ainda, sobreposto e sem tabulacao"*:
+   a caixa herdava a `.modal__caixa` da CASA (`estilo/componentes.css`), que e
+   um AVISO -- `max-width: 420px`, `padding: var(--e-5)` e `overflow-y: auto`,
+   e **sem** `display: flex`. Resultado: 420px para uma conversa de bolhas, o
+   padding da caixa SOMANDO com o do corpo, e o `flex-grow` do corpo sem efeito
+   nenhum (o pai nao era flex), entao nada rolava no lugar certo.
+   ⚠️ 640px e nao 1000: aqui e conversa, e linha de leitura comprida demais
+   e pior que estreita. */
+/* 🔵 O dialogo do CHAMADO: duas colunas como o da OS, mas mais estreito --
+   ele tem menos a mostrar (nao ha placa, termo, checklist nem temas do ERP). */
+.painel__dialogo--chamado {
+  width: min(900px, 100%);
+  max-width: min(900px, 100%);
+}
+/* O chamado abre por cima do quadro, e abaixo dos recados e do aviso. */
+.modal--chamado { z-index: calc(var(--z-modal, 50) + 5); }
+
+/* 🔵 A pergunta do desfecho fica NO LUGAR do botao, e nao num terceiro
+   dialogo: empilhar um dialogo para uma pergunta de duas opcoes foi o que
+   deixou o modal das observacoes atras do card em 05/11. */
+.desfecho__pergunta {
+  display: inline-flex; align-items: center; gap: var(--e-2); flex-wrap: wrap;
+}
+.desfecho__rotulo {
+  font-size: var(--txt-sm); font-weight: var(--peso-forte);
+  color: var(--texto-fraco);
+}
+
+.painel__dialogo--recados {
+  width: min(640px, 100%);
+  max-width: min(640px, 100%);
+}
+/* 🔵 O CORPO E A CONVERSA, e usa o papel que o sistema ja tem para isso. */
+.painel__dialogo--recados .modal__corpo { background: var(--conversa-fundo); }
+
+/* ---- o anexo, com cara de botao ---------------------------------------- */
+/* 🚨 O CAMPO FICA NA TELA, de 1px e transparente, e NAO em `display: none`:
+   escondido de verdade ele sai da ordem do teclado, e anexar deixaria de ser
+   alcancavel por Tab. */
+.campo-de-arquivo {
+  position: absolute;
+  width: 1px; height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+.anexo__rotulo {
+  display: inline-flex; align-items: center; gap: var(--e-2);
+  min-height: var(--altura-toque);
+  cursor: pointer;
+}
+/* ⚠️ O rotulo acende quando o CAMPO recebe foco -- e o que devolve ao
+   teclado o retorno visual que o `<label>` sozinho nao daria. */
+.campo-de-arquivo:focus-visible + .anexo__rotulo {
+  outline: 2px solid var(--acento); outline-offset: 2px;
+}
+.anexo__escolhido {
+  display: inline-flex; align-items: center; gap: var(--e-1);
+  min-width: 0; max-width: 22ch;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: var(--txt-sm); color: var(--texto-fraco);
+}
+.anexo__tirar {
+  flex: none;
+  width: 24px; height: 24px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: var(--borda-fina) solid var(--borda); border-radius: var(--r-sm);
+  background: var(--superficie); color: var(--texto-fraco);
+  font-size: var(--txt-xs); cursor: pointer;
+}
 
 /* O diálogo do aviso de etapa é curto: uma frase e o Ok. */
 .modal__caixa--curta { max-width: 26rem; }

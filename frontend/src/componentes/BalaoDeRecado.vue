@@ -118,9 +118,22 @@ async function baixar(anexo) {
 <style scoped>
 .recado { list-style: none; margin: 0 0 var(--e-3); }
 
+/* 🚨 ESTE BALAO TINHA ESCAPADO DO SISTEMA, e era a causa do *"sem
+   tabulacao"* que ele viu: usava `var(--fundo-2)` e `var(--raio)` -- e
+   **nenhum dos dois existe**. Os dois caiam no valor de emergencia, entao o
+   balao nao tinha superficie de verdade nem raio de verdade: uma lavagem de
+   cinza sobre o fundo, sem borda e sem forma.
+   ⚠️ E e EXATAMENTE o defeito que o `tokens.css` ja documenta sobre o balao
+   da Caixa, em 27/08: *"ate 27/08 ele usava `var(--raio, 12px)` -- token que
+   nao existe, entao caia no valor de emergencia"*. Eu repeti num componente
+   novo o erro que a casa tinha escrito.
+   🔵 Os tokens certos existem desde 27/08 e sao destes: `--conversa-balao`,
+   `--conversa-raio` e `--conversa-bico`. */
 .recado__balao {
-  background: var(--fundo-2, rgba(127, 127, 127, .08));
-  border-radius: var(--raio, 8px);
+  background: var(--conversa-balao);
+  border: var(--borda-fina) solid var(--borda);
+  border-radius: var(--conversa-raio);
+  box-shadow: var(--sombra-1);
   padding: var(--e-2) var(--e-3);
   /* ⚠️ O recado pode ter linha longa (o checklist tem). Quebrar é melhor que
      rolar na horizontal dentro do modal. */

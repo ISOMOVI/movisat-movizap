@@ -2886,3 +2886,95 @@ quando o arquivo sumiu — e **a tela diz isso a quem anexa**, antes de anexar.
 
 ⚠️ Recusa **antes** de escrever no disco: extensão, tamanho e vazio são
 conferidos primeiro, para não deixar arquivo solto sem linha no banco.
+
+## Migrações 092 e 093 — as etapas NOSSAS, e a coluna `Chamados`
+
+🔵 05/11: *"vamos criar uma coluna nova antes de 'Nova solicitação', chamada
+'Chamados', aqui vão ser gerados os cards que virão do forms de suporte, não
+mais em OS e nessa coluna não são OS ainda, somente o CARD mesmo, com OBS,
+etc"*. E a razão de negócio, na frase dele: *"O chamado é o cliente dizendo
+algo, como: 'rastreador parou de pegar'. O chamado é para analisar e decidir se
+realmente será aberta OS."*
+
+🚨 **A descoberta que desenhou o modelo:** a coluna `Chamados` e as pipelines de
+Pós-venda que ele pediu no mesmo dia (*"a aba 'Operação' do Movizap é a mesma
+lógica para os demais"*) **são a mesma coisa** — colunas que **não existem no
+Harmonit**. Mover numa coluna da Operação escreve `situacaoId` no ERP; mover
+numa destas escreve **só aqui**. Um motor serve os dois casos, e fazer a coluna
+Chamados sozinha seria fazer duas vezes.
+
+### As quatro tabelas
+
+```
+painel_aba        (id, painel, codigo_tela, titulo, ordem, ativo)
+pipeline_etapa    (id, aba_id → painel_aba CASCADE, titulo, ordem, ativo, final)
+pipeline_card     (id, aba_id, etapa_id, solicitacao_id NULL, cliente_id NULL,
+                   criado_em, criado_por,
+                   desfecho NULL CHECK (desfecho IN ('resolvido','virou_os')),
+                   desfecho_em, desfecho_por)
+pipeline_passagem (id, card_id → pipeline_card CASCADE,
+                   de_etapa, para_etapa, de_titulo, para_titulo, quem, em)
+```
+
+⚠️ **A aba tem `codigo_tela`** porque a permissão é **por aba** — decisão dele:
+*"será por abas. então terá mais de uma pipeline, mas todas dentro de
+'Pós-Venda'"* e *"a Karla terá permissão para ver o 'Financeiro' e todas as
+abas. A Erika, apenas a aba 3 do financeiro"*. `permissao` é campo da entrada no
+`telas.py`, então cada aba precisa da própria entrada. A aba da Operação reusa a
+`PNL_1.1`, porque a coluna `Chamados` **é parte do quadro da Operação**, não uma
+tela nova.
+
+🚨 **A `Chamados` NÃO entra na tupla `SITUACOES`** do `movizap/paineis.py`, e
+isso é deliberado: duas travas dependem de ela ter 17, e
+`checklist._etapa_conhecida` recusa situação fora dessas 17. A coluna é de outra
+natureza — etapa nossa, `situacao_id` nulo — e não uma 18ª situação do ERP. O
+quadro da Operação passou a responder **18 colunas**, com a `Chamados` na
+frente e chave `"chamados"` (e não `s<id>`, justamente para a tela não poder
+confundi-la com situação).
+
+### 🚨 A passagem é um RETRATO (migração 093)
+
+A `092` amarrava `de_etapa`/`para_etapa` por chave estrangeira em
+`pipeline_etapa`, **sem `ON DELETE`** — e isso tornava **impossível apagar uma
+aba**. As duas saídas óbvias eram ruins: `CASCADE` apagaria o histórico junto, e
+`SET NULL` deixaria a passagem sem dizer para onde o card foi.
+
+A `093` tira as duas chaves e grava **o título de então** (`de_titulo`,
+`para_titulo NOT NULL`). Renomear a etapa amanhã não reescreve o que a passagem
+dizia, e apagar a aba não leva o log. É o molde do `orcamento_item.servico`, que
+guarda o nome do serviço no item em vez de apontar para o catálogo.
+
+### A observação do card, com dois donos possíveis
+
+```sql
+ALTER TABLE os_observacao
+  ADD COLUMN solicitacao_id integer NULL
+      REFERENCES formulario_solicitacao(id) ON DELETE CASCADE,
+  ALTER COLUMN numero_os DROP NOT NULL,
+  ADD CONSTRAINT os_observacao_tem_um_dono
+      CHECK (numero_os IS NOT NULL OR solicitacao_id IS NOT NULL);
+CREATE INDEX idx_observacao_solicitacao ON os_observacao (solicitacao_id, em DESC);
+```
+
+🚨 **O CHECK é o ponto:** a observação tem um dono — OS **ou** chamado, nunca
+nenhum. É o molde do `midia_tem_um_dono` (047), com uma diferença medida: lá é
+ou-exclusivo (`<>`), aqui é `OR`, porque um chamado que vira OS pode querer os
+dois.
+
+⚠️ **O índice velho não serve**: `idx_observacao_os` é `(numero_os, em DESC)`, e
+buscar por `solicitacao_id` passaria por varredura. Daí o novo.
+
+✅ **O anexo vem de graça:** `os_observacao_arquivo` é chaveado por
+`observacao_id`, então a observação de chamado anexa pelo mesmo caminho da de
+OS, com a mesma pasta e o mesmo 410 de arquivo sumido.
+
+### ⚠️ O desfecho não mexe no `estado` da solicitação
+
+`formulario_solicitacao_estado_check` aceita só `nova`/`em_andamento`/
+`concluida`, e `formularios.py` conta `estado = 'nova'` em dois lugares.
+`estado` é **ciclo de vida**; desfecho é **como terminou**. Misturar faria todo
+código que testa `'concluida'` passar a errar.
+
+🚨 **E "Virou OS" SÓ MARCA** — decisão dele: *"só marca; a OS é pelo Operação"*.
+Nenhuma das rotas de chamado fala com o Harmonit, e é isso que torna
+`Finalizar Chamado` reversível por `Reabrir`.

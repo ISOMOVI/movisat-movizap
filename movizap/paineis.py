@@ -2,19 +2,39 @@
 
 🔵 Decisão dele em 22/10, depois de ver os mockups lado a lado: *"vamos de A
 somente para a Operação por enquanto, mas bem documentado para as demais
-futuramente"*. A opção A é o **kanban cujas colunas são as 11 situações da OS
-do Harmonit** -- a única das três em que mover o card É a ação, e foi esse o
+futuramente"*. A opção A é o **kanban cujas colunas são as situações da OS do
+Harmonit** (eram 11 em 22/10, e são **17** desde 29/10, quando ele deu a lista
+inteira na ordem do fluxo) -- a única das três em que mover o card É a ação, e foi esse o
 motivo que ele deu para o painel existir: *"hoje ainda não usamos a situação
 da OS, por isso o painel e consulta para atualizar a situação no painel"*.
 
-🚨 O QUE ESTE MÓDULO FAZ, E SÓ: lê solicitações e as distribui em colunas.
-**Não cria OS e não escreve no Harmonit** -- as duas rotas da ponte (criar OS
-e gravar `situacaoId`) são da volta seguinte e dependem de duas decisões dele
-(o mapa formulário → `problemaId` e a prioridade). Mover o card, por isso,
-ainda não existe: a tela DIZ isso, em vez de oferecer um gesto que não grava.
+🚨 O QUE ESTE MÓDULO FAZ, E SÓ: lê o que vai nas colunas e as monta. Ele
+**não escreve em nada** -- quem grava a situação no Harmonit é o
+`passagem.mover`, e quem grava etapa nossa é o `pipeline.mover`.
+⚠️ ISTO DIZIA *"mover o card ainda não existe"* ATÉ 05/11, e era verdade
+quando foi escrito: mover passou a existir no Bloco D de 29/10 (*"O card pode
+ser por arrastar"*). `M12` -- o texto era verdadeiro e a entrega seguinte não
+voltou para matá-lo.
 
-🚨 OS OUTROS TRÊS PAINÉIS NÃO SÃO ESTE COM OUTRO FILTRO, e é por isso que só
-o da Operação nasce agora. O que foi desenhado e medido para cada um está em
+🚨 OS OUTROS TRÊS PAINÉIS NÃO SÃO ESTE COM OUTRO FILTRO **DE OS**, e é por
+isso que só o da Operação nasceu em 22/10.
+
+🔵 E ISTO SE INVERTEU PELA METADE EM 05/11, por pedido dele: *"a aba
+'Operação' do Movizap é a mesma lógica para os demais"*, com as pipelines de
+Pós-venda escritas por ele. Na **forma** passam a ser o mesmo kanban; o que
+muda é **de quem é a coluna**:
+
+  · as 17 colunas da Operação são **situações da OS no Harmonit**, e mover
+    nelas **escreve no ERP**;
+  · a coluna `Chamados` (05/11) e as colunas de Pós-venda são **etapas
+    NOSSAS**, e mover nelas escreve **só no nosso banco**.
+
+🚨 O MOTOR DAS ETAPAS NOSSAS É O `movizap/pipeline.py`, e ele **não importa
+a ponte** -- há trava provando isso. A Operação é o caso misto de propósito: a
+`Chamados` à esquerda das 17. O que separa as duas naturezas é **de onde vem a
+coluna**, e não um `if` espalhado pelo módulo.
+
+O que foi desenhado e medido para cada um está em
 `docs/06_Conteudo_das_Telas.md` (22/10, quinta e sexta voltas) e nos mockups:
 
   · **Pós venda** NÃO É FILA, é MEDIÇÃO -- e isso saiu do formulário, não de
@@ -37,7 +57,8 @@ aqui dentro.
 import logging
 from datetime import date, datetime
 
-from . import banco, chamado_os, checklist, fpsl_ponte, passagem
+from . import (banco, chamado_os, checklist, fpsl_ponte,
+               passagem, pipeline)
 from .operacao import DadoInvalido
 
 log = logging.getLogger("movizap.paineis")
@@ -119,6 +140,28 @@ PAINEIS = {
 # Só este tem tela. É o que a rota confere, e é uma linha para mudar quando o
 # próximo nascer.
 COM_TELA = ("operacao",)
+
+# ----------------------------------------------------------------------------
+# A COLUNA `Chamados` -- a primeira do quadro, e a unica que NAO e do Harmonit
+# ----------------------------------------------------------------------------
+# 🔵 Pedido dele em 05/11: *"vamos criar uma coluna nova antes de 'Nova
+# solicitacao', chamada 'Chamados' (...) nessa coluna nao sao OS ainda, somente
+# o CARD mesmo"*. E a razao de negocio: *"O chamado e o cliente dizendo algo,
+# como: 'rastreador parou de pegar'. O chamado e para analisar e decidir se
+# realmente sera aberta OS."*
+#
+# 🚨 ELA NAO ENTRA NA TUPLA `SITUACOES`, e isso e deliberado: duas travas
+# dependem de ela ter 17 (`teste_rotas_formularios` afirma `len == 17`, e
+# `checklist._etapa_conhecida` recusa situacao fora das 17). A coluna Chamados e
+# de OUTRA NATUREZA -- etapa NOSSA, com `situacao_id` nulo -- e nao uma 18a
+# situacao do ERP.
+#
+# ⚠️ A `chave` nao segue o padrao `s<id>` das outras justamente para a tela
+# nao poder confundi-la com situacao.
+CHAVE_CHAMADOS = "chamados"
+# A aba da Operacao reusa o codigo da tela que ja existe: a coluna Chamados e
+# parte do quadro da Operacao, nao uma tela nova.
+ABA_DA_OPERACAO = "PNL_1.1"
 
 TETO_CARDS_POR_COLUNA = 50
 
@@ -368,6 +411,15 @@ def quadro(painel: str, so_abertas: bool = True,
     conhecidas = {sid for sid, _ in SITUACOES}
     colunas = [{"chave": f"s{sid}", "titulo": nome, "situacao_id": sid,
                 "nota": None, "cards": []} for sid, nome in SITUACOES]
+    # 🔵 A COLUNA `Chamados` VEM NA FRENTE DAS 17, e so no painel da Operacao
+    # -- *"antes de 'Nova solicitacao'"*. ⚠️ `situacao_id` NULO e o que a marca
+    # como etapa nossa: a tela ja nao desenha a linha *"situacao N no Harmonit"*
+    # quando ele e nulo, e o arrasto ja esta desligado para card sem OS.
+    etapa_chamados = _etapa_dos_chamados() if painel == "operacao" else None
+    if etapa_chamados:
+        colunas.insert(0, {"chave": CHAVE_CHAMADOS, "titulo": "Chamados",
+                           "situacao_id": None, "etapa_id": etapa_chamados["id"],
+                           "nota": None, "cards": []})
     por_chave = {c["chave"]: c for c in colunas}
 
     # 🚨 O que não tem coluna é CONTADO, não escondido (ver o cabeçalho).
@@ -490,6 +542,16 @@ def quadro(painel: str, so_abertas: bool = True,
             "termo": o.get("termo"),
         }, o.get("situacao_id"))
 
+    # ---- os cards de CHAMADO, que nao sao OS ----------------------------
+    # 🚨 ESTES VEM DO MOTOR DE ETAPAS NOSSAS (`movizap/pipeline.py`), e nao da
+    # ponte: chamado nao tem OS, entao nao ha o que pedir ao Harmonit.
+    if etapa_chamados:
+        for c in pipeline.cards_da_aba(etapa_chamados["aba_id"],
+                                       teto=TETO_CARDS_POR_COLUNA):
+            if c["etapa_id"] != etapa_chamados["id"]:
+                continue
+            por_chave[CHAVE_CHAMADOS]["cards"].append(_card_do_chamado(c, nomes))
+
     # ---- os cards das nossas solicitações que a ponte não trouxe ---------
     for linha in linhas:
         if not linha["os_id"]:
@@ -604,6 +666,9 @@ def quadro(painel: str, so_abertas: bool = True,
             # 🚨 "tem lista e ninguém abriu ainda" é diferente de "não tem
             # lista nenhuma": o primeiro mostra "0 de N", o segundo não mostra
             # nada. Sem este campo a tela não conseguiria dizer a diferença.
+            # ⚠️ Card de chamado nao tem checklist: `situacao_id` e nulo, e
+            # `_etapa_conhecida` do checklist exige uma das 17. Nao foi pedido,
+            # e forcar faria o checklist tratar a coluna nova como etapa do ERP.
             card["tem_checklist"] = card.get("situacao_id") in etapas_com_lista
 
     return {
@@ -637,6 +702,101 @@ def quadro(painel: str, so_abertas: bool = True,
         # mapa de transições, nem aqui nem na ponte — o Harmonit também não tem.
         "pode_mover": True,
     }
+
+
+def _etapa_dos_chamados() -> dict | None:
+    """A etapa `Chamados` da aba da Operacao, ou `None` se ela nao existir.
+
+    ⚠️ DEVOLVE `None` EM VEZ DE ESTOURAR: a migracao 092 a semeia, mas um
+    banco sem ela (um ambiente novo, um restore antigo) tem de montar o quadro
+    com as 17 e seguir -- e nao derrubar a tela da operacao inteira por falta de
+    uma coluna.
+    """
+    aba = pipeline.aba_por_codigo(ABA_DA_OPERACAO)
+    if not aba:
+        return None
+    for e in pipeline.etapas(aba["id"]):
+        if e["titulo"] == "Chamados":
+            return {"id": e["id"], "aba_id": aba["id"]}
+    return None
+
+
+def _card_do_chamado(c: dict, nomes: dict) -> dict:
+    """O card de um chamado, no MESMO contrato de chaves do card de OS.
+
+    🚨 O CONTRATO E UNICO DE PROPOSITO: a tela desenha um card so, e um
+    segundo formato faria dois caminhos de desenho para a mesma caixa. O que
+    muda sao os NULOS -- e eles sao a mesma regua do card de solicitacao sem
+    OS, que ja existia.
+
+    ⚠️ `numero_ordem` NULO e o que mantem o card nao-arrastavel e sem
+    `<select>` de mover: as duas guardas da tela olham esse campo, e o chamado
+    nao tem situacao para gravar no ERP.
+    """
+    valores = c.get("valores") or {}
+    return {
+        # """ + S + """ O `id` aqui e o do CARD DE PIPELINE, nao o da solicitacao: e por
+        # ele que a tela move, finaliza e reabre.
+        "id": c["id"],
+        "origem": "chamado",
+        "solicitacao_id": c["solicitacao_id"],
+        "formulario": c.get("formulario"),
+        "slug": c.get("slug"),
+        "criada_em": c.get("solicitada_em") or c["criado_em"],
+        "estado": None,
+        "cliente": (_nome_do_chamado(valores)
+                    or nomes.get(str(c.get("cliente_id")))),
+        "cliente_id": c.get("cliente_id"),
+        "resumo": _resumo(valores) or None,
+        "anexos": 0,
+        # ⚠️ OS NULOS QUE FAZEM O CARD SER UM CHAMADO:
+        "os_id": None,
+        "numero_ordem": None,
+        "situacao_id": None,
+        "situacao_em": None,
+        "tipo_nome": None,
+        "status_str": None,
+        "finalizada": None,
+        "placas": [],
+        "tecnicos": [],
+        "visto_em": None,
+        "etapa_desde": None,
+        "observacoes": c.get("observacoes") or 0,
+        "prioridade": None,
+        "prioridade_nome": None,
+        "termo": None,
+        # 🔵 O DESFECHO, que e o que faz o card esmaecer e ir para o fim:
+        # *"Resolvido encerra o card e ele esmaece e fica no fim da fila
+        # arquivado com status de concluido"*.
+        "desfecho": c.get("desfecho"),
+        "desfecho_em": c.get("desfecho_em"),
+        "desfecho_rotulo": pipeline.DESFECHOS.get(c.get("desfecho")),
+        "desfecho_por": c.get("desfecho_por_nome"),
+        # 🔵 *"no card do chamado, tbm tem um botao de 'abrir conversa'"*. O
+        # formulario de suporte coleta `CONTACT_PHONE` como OBRIGATORIO, com
+        # validacao de telefone -- entao ele sai normalizado dos `valores`.
+        "telefone": _telefone_do_chamado(valores),
+    }
+
+
+def _nome_do_chamado(valores: dict) -> str | None:
+    """Quem abriu o chamado -- a empresa, e o nome da pessoa como reserva."""
+    for chave in ("COMPANY_TITLE", "CONTACT_NAME"):
+        v = (valores or {}).get(chave)
+        if isinstance(v, str) and v.strip():
+            return v.strip()
+    return None
+
+
+def _telefone_do_chamado(valores: dict) -> str | None:
+    """O telefone de quem abriu, para o botao de abrir conversa.
+
+    ⚠️ Pode ser nulo: o campo e obrigatorio no formulario de suporte, mas
+    um card criado a mao (quando ele decidir a origem) nao tera. A tela nao
+    mostra o botao sem numero, em vez de oferecer um gesto que falha.
+    """
+    v = (valores or {}).get("CONTACT_PHONE")
+    return v.strip() if isinstance(v, str) and v.strip() else None
 
 
 def _mapa_de_painel() -> dict:

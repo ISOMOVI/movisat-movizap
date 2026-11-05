@@ -364,7 +364,11 @@ class TestRotaDoPainel:
                         headers={"Authorization": f"Bearer {token}"})
         assert r.status_code == 200
         assert len(paineis.SITUACOES) == 17
-        assert len(r.json()["colunas"]) == 17
+        # 🔵 05/11: 18 colunas -- as 17 situações mais a `Chamados`, que é
+        # etapa nossa e vem na frente. ⚠️ A `SITUACOES` segue com 17, e é o
+        # que impede o checklist de tratar a coluna nova como etapa do ERP.
+        assert len(r.json()["colunas"]) == 18
+        assert r.json()["colunas"][0]["chave"] == "chamados"
         # 🚨 A QUARTA TRAVA MINHA DO DIA a guardar a verdade antiga, e
         # as quatro no mesmo recurso. Mover passou a existir no Bloco D
         # (29/10): *"O card pode ser por arrastar"*. `pode_mover`

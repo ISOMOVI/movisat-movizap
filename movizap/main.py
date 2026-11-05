@@ -64,6 +64,7 @@ from . import preferencia
 from . import distribuicao
 from . import presenca
 from . import prompt as prompt_ia
+from . import pipeline
 from . import ratelimit
 from . import sync as sync_harmonit
 from . import telas as registro_telas
@@ -5568,6 +5569,147 @@ def observacoes_do_card(numero_os: int = Query(..., ge=1),
     """
     return {"numero_os": numero_os,
             "observacoes": _recados_com_anexos(numero_os)}
+
+
+# ----------------------------------------------------------------------------
+# O CARD DE CHAMADO -- a coluna `Chamados`, que nao e OS
+# ----------------------------------------------------------------------------
+# 🔵 Pedido dele em 05/11: *"nessa coluna nao sao OS ainda, somente o CARD
+# mesmo, com OBS, etc"*, e *"ter o botao de 'Finalizar Chamado' e dai vai
+# perguntar 'Resolvido' ou 'Nao resolvido'"*.
+#
+# 🚨 NENHUMA DESTAS ROTAS FALA COM O HARMONIT, e e a linha que as separa das
+# de OS: chamado nao tem OS, entao nao ha `situacaoId` para gravar. O
+# `movizap/pipeline.py` nem importa a ponte, e ha trava provando isso.
+class MoverChamado(BaseModel):
+    para_etapa: int
+
+
+class FinalizarChamado(BaseModel):
+    desfecho: str
+
+
+class ObservacaoDoChamado(BaseModel):
+    solicitacao_id: int
+    texto: str
+
+
+@app.post("/api/paineis/operacao/chamado/{card_id}/mover")
+def mover_chamado(card_id: int, dados: MoverChamado,
+                  usuario: dict = Depends(auth.requer_tela("PNL_1.1"))):
+    """Move o card de chamado entre as etapas NOSSAS.
+
+    ⚠️ Rota separada da de OS de proposito: a `/mover` escreve a situacao no
+    ERP, e esta nao tem o que escrever la. Duas rotas e o que impede um card de
+    chamado de cair no caminho que fala com o Harmonit.
+    """
+    return pipeline.mover(card_id, dados.para_etapa,
+                          atendente_id=usuario.get("id"))
+
+
+@app.post("/api/paineis/operacao/chamado/{card_id}/finalizar")
+def finalizar_chamado(card_id: int, dados: FinalizarChamado,
+                      usuario: dict = Depends(auth.requer_tela("PNL_1.1"))):
+    """Arquiva o chamado com um desfecho.
+
+    🚨 *"Virou OS"* SO MARCA -- decisao dele: *"so marca; a OS e pelo
+    Operacao"*. Nada aqui escreve no ERP, e e isso que torna o botao
+    reversivel.
+    """
+    return pipeline.finalizar(card_id, dados.desfecho,
+                              atendente_id=usuario.get("id"))
+
+
+@app.post("/api/paineis/operacao/chamado/{card_id}/reabrir")
+def reabrir_chamado(card_id: int,
+                    usuario: dict = Depends(auth.requer_tela("PNL_1.1"))):
+    """Desfaz o arquivamento. ⚠️ A passagem NAO e apagada."""
+    return pipeline.reabrir(card_id, atendente_id=usuario.get("id"))
+
+
+@app.get("/api/paineis/operacao/chamado/{card_id}")
+def ficha_do_chamado(card_id: int,
+                     usuario: dict = Depends(auth.requer_tela("PNL_1.1"))):
+    """O card aberto de um chamado: as respostas do formulario, os recados e o
+    historico de etapas.
+
+    ⚠️ NAO HA ida ao ERP aqui -- e por isso que esta rota nao pode devolver
+    502 por falha de terceiro, ao contrario da `/ficha` da OS.
+    """
+    card = banco.um(
+        """SELECT c.id, c.aba_id, c.etapa_id, c.solicitacao_id, c.cliente_id,
+                  c.criado_em, c.desfecho, c.desfecho_em,
+                  qa.nome AS desfecho_por_nome
+             FROM pipeline_card c
+             LEFT JOIN atendente qa ON qa.id = c.desfecho_por
+            WHERE c.id = %s""", (card_id,))
+    if not card:
+        raise HTTPException(status_code=404, detail="Este chamado nao existe.")
+
+    chamado = None
+    if card["solicitacao_id"]:
+        d = formularios_mod.uma(card["solicitacao_id"])
+        if d:
+            chamado = {
+                "solicitacao_id": card["solicitacao_id"],
+                "formulario": d.get("formulario"),
+                # 🚨 Os campos com ROTULO, nunca as chaves do Bitrix.
+                "respostas": d.get("respostas") or [],
+                "anexos": d.get("anexos") or [],
+            }
+    return {
+        "card": card,
+        "chamado": chamado,
+        "etapas": pipeline.etapas(card["aba_id"]),
+        "observacoes": _recados_do_chamado(card["solicitacao_id"]),
+        "historico": pipeline.historico(card_id),
+        "desfechos": pipeline.DESFECHOS,
+    }
+
+
+def _recados_do_chamado(solicitacao_id: int | None) -> list:
+    """Os recados de um chamado, com os anexos.
+
+    ⚠️ Mesma forma do `_recados_com_anexos` da OS, e de proposito: a tela
+    desenha as bolhas com o mesmo componente, entao o contrato tem de ser o
+    mesmo. O que muda e a coluna que amarra -- `solicitacao_id` em vez de
+    `numero_os`, pelo CHECK de dono duplo da migracao 092.
+    """
+    if not solicitacao_id:
+        return []
+    recados = banco.varios(
+        """SELECT o.id, o.texto, o.em, a.nome AS quem
+             FROM os_observacao o
+             LEFT JOIN atendente a ON a.id = o.atendente_id
+            WHERE o.solicitacao_id = %s
+            ORDER BY o.em DESC, o.id DESC""", (int(solicitacao_id),))
+    anexos = passagem.anexos_de([o["id"] for o in recados])
+    for o in recados:
+        o["anexos"] = anexos.get(o["id"], [])
+    return recados
+
+
+@app.post("/api/paineis/operacao/chamado/observacao")
+def observar_chamado(dados: ObservacaoDoChamado,
+                     usuario: dict = Depends(auth.requer_tela("PNL_1.1"))):
+    """Grava um recado no chamado.
+
+    🚨 O CHECK `os_observacao_tem_um_dono` (migracao 092) e o que garante
+    que o recado tem dono: OS **ou** chamado, nunca nenhum.
+    """
+    texto = (dados.texto or "").strip()
+    if not texto:
+        raise HTTPException(status_code=422,
+                            detail="Escreva a observacao antes de salvar.")
+    if len(texto) > 4000:
+        raise HTTPException(status_code=422,
+                            detail="A observacao passa de 4000 caracteres.")
+    linha = banco.um(
+        """INSERT INTO os_observacao (solicitacao_id, texto, atendente_id)
+           VALUES (%s, %s, %s) RETURNING id""",
+        (dados.solicitacao_id, texto, usuario.get("id")))
+    return {"id": linha["id"],
+            "observacoes": _recados_do_chamado(dados.solicitacao_id)}
 
 
 @app.get("/api/paineis/operacao/ficha")

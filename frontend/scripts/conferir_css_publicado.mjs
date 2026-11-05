@@ -150,6 +150,31 @@ function osTresDialogosNaoEmpatamNoZIndex(css) {
   }
 }
 
+/* ------------------------------------------------------------------ 5 */
+function oDialogoDoChamadoTemTetoProprioENaoEmpata(css) {
+  /* 🚨 MESMO DEFEITO DE 05/11, OUTRO DIALOGO: a `.modal__caixa` da casa
+     impoe `max-width: 420px`, e teto nao se vence com especificidade -- so
+     redeclarando. Um dialogo que declara `width` e esquece `max-width`
+     aparece com UMA coluna, e foi o que ele apontou tres vezes.
+     ⚠️ O jsdom nao faz layout: nenhum teste de tela alcanca isto. */
+  const r = regra(css, '.painel__dialogo--chamado');
+  if (!r) {
+    return falhar('.painel__dialogo--chamado não existe no CSS publicado — '
+                  + 'o diálogo do chamado herdaria os 420px da casa.');
+  }
+  const mw = prop(r.corpo, 'max-width');
+  if (!mw || !mw.includes('900px')) {
+    falhar(`.painel__dialogo--chamado max-width = ${mw} — tem de declarar `
+           + '900px, senão herda os 420px da .modal__caixa e o diálogo do '
+           + 'chamado aparece com UMA coluna.');
+  }
+  const z = regra(css, '.modal--chamado');
+  if (!z || !prop(z.corpo, 'z-index')) {
+    falhar('.modal--chamado não declara z-index — o diálogo do chamado '
+           + 'empataria com o card aberto e desapareceria atrás dele.');
+  }
+}
+
 /* ------------------------------------------------------------------ */
 const css = cssPublicado()
 if (!erros.length) {
@@ -157,6 +182,7 @@ if (!erros.length) {
   oPainelVemDepoisDasRegrasAntigas(css)
   osTokensDeSistemaEstaoNoRoot(css)
   osTresDialogosNaoEmpatamNoZIndex(css)
+  oDialogoDoChamadoTemTetoProprioENaoEmpata(css)
 }
 
 if (erros.length) {
@@ -164,5 +190,6 @@ if (erros.length) {
   erros.forEach((e, i) => console.error(`  ${i + 1}. ${e}\n`))
   process.exit(1)
 }
-console.log('CSS publicado: as 4 conferências passaram (teto do diálogo, '
-            + 'ordem da cascata, tokens no :root, empilhamento dos diálogos)')
+console.log('CSS publicado: as 5 conferências passaram (teto do diálogo, '
+            + 'ordem da cascata, tokens no :root, empilhamento dos diálogos, '
+            + 'teto e empilhamento do diálogo do chamado)')

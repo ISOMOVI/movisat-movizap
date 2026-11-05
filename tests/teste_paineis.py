@@ -143,9 +143,20 @@ def teste_as_colunas_sao_exatamente_as_dezessete_dele():
     """🔵 29/10: *"qualquer aba fora dessas não deve estar no painel"*."""
     q = paineis.quadro("operacao")
     assert len(paineis.SITUACOES) == 17
-    assert len(q["colunas"]) == 17
-    # 🚨 Toda coluna É uma situação -- não há mais coluna sem `situacao_id`.
-    assert all(c["situacao_id"] for c in q["colunas"])
+    # 🔵 05/11: SÃO 18, e a 18ª é a `Chamados` -- *"vamos criar uma coluna
+    # nova antes de 'Nova solicitação', chamada 'Chamados'"*.
+    # 🚨 As 17 DELE continuam 17: a `Chamados` não entra na `SITUACOES`, e é
+    # essa separação que mantém esta trava dizendo o que ele pediu em 29/10
+    # (*"qualquer aba fora dessas não deve estar no painel"*) sobre as colunas
+    # do ERP, que são as únicas de que aquela frase falava.
+    assert len(q["colunas"]) == 18
+    # 🚨 Toda coluna de SITUAÇÃO é uma situação; a `Chamados` é etapa nossa,
+    # e `situacao_id` nulo é o que a marca como tal.
+    do_erp = [c for c in q["colunas"] if c["chave"] != "chamados"]
+    assert len(do_erp) == 17
+    assert all(c["situacao_id"] for c in do_erp)
+    assert q["colunas"][0]["chave"] == "chamados"
+    assert q["colunas"][0]["situacao_id"] is None
 
 
 def teste_a_ordem_das_colunas_e_a_dele_e_nao_alfabetica_nem_por_id():
@@ -156,12 +167,15 @@ def teste_a_ordem_das_colunas_e_a_dele_e_nao_alfabetica_nem_por_id():
     quebrar nada visível.
     """
     q = paineis.quadro("operacao")
-    titulos = [c["titulo"] for c in q["colunas"]]
+    # 🔵 A `Chamados` vem ANTES de todas, e a ordem das 17 do ERP não se
+    # mexeu: a análise do chamado acontece antes de existir OS.
+    assert [c["titulo"] for c in q["colunas"]][0] == "Chamados"
+    titulos = [c["titulo"] for c in q["colunas"] if c["chave"] != "chamados"]
     assert titulos[0] == "Novo Solicitação 1ª"
     assert titulos[1] == "Pendente de ação da Movisat"
     assert titulos[-1] == "Contratual"
     assert titulos != sorted(titulos)
-    ids = [c["situacao_id"] for c in q["colunas"]]
+    ids = [c["situacao_id"] for c in q["colunas"] if c["chave"] != "chamados"]
     assert ids != sorted(ids)
     # E o começo do fluxo é a situação em que a OS nasce.
     assert ids[0] == 38
