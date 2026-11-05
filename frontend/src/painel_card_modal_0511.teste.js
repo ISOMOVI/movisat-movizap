@@ -474,3 +474,74 @@ describe('o card em três faixas (segunda volta)', () => {
     expect(texto).not.toContain('prazo')
   })
 })
+
+/* ==========================================================================
+   O PAINEL DO MODAL — as três faixas, e a ORDEM da cascata
+   --------------------------------------------------------------------------
+   🔵 Ele, olhando a tela: *"o layout do card apos o clique esta errado"*.
+   🚨 A CAUSA: eu escrevi as regras do `.modal__painel` ANTES das regras antigas
+   de `.modal__recados`/`.modal__log`/`.modal__temas`. Mesma especificidade, e a
+   que vem depois ganha — então o cabeçalho do painel caía para `--txt-sm` e o
+   `gap` voltava a `--e-2`, e o painel ficava uma caixa de padding único em vez
+   das três faixas do mockup.
+   ⚠️ **jsdom não aplica `<style scoped>`**, então nenhum teste aqui mede cor ou
+   tamanho computado — é o limite conhecido desta suíte. O que se mede é a
+   ESTRUTURA que as faixas precisam para existir.
+   ========================================================================== */
+describe('as três faixas do painel do modal', () => {
+  it('🔵 o checklist e as observações são painéis', async () => {
+    estado.checklist = [{ id: 1, texto: 'zz', feito: false, avulso: false }]
+    const tela = await abrirOCard(await montar({
+      251: [card({ tem_checklist: true })],
+    }))
+    const paineis = tela.findAll('.modal__painel')
+    /* checklist, observações, temas e passagens */
+    expect(paineis.length).toBe(4)
+  })
+
+  it('🚨 o h3 é FILHO DIRETO do painel — é ele que vira a faixa de cima', async () => {
+    /* O seletor é `.modal__painel > h3`. Se o markup envolver o título num
+       `<div>`, a faixa deixa de pintar e ninguém percebe. */
+    estado.checklist = [{ id: 1, texto: 'zz', feito: false, avulso: false }]
+    const tela = await abrirOCard(await montar({
+      251: [card({ tem_checklist: true })],
+    }))
+    const painel = tela.findAll('.modal__painel')[0].element
+    const h3 = painel.querySelector('h3')
+    expect(h3).toBeTruthy()
+    expect(h3.parentElement).toBe(painel)
+  })
+
+  it('🔵 a frase de regra é o PÉ do painel, e não a abertura', async () => {
+    /* Antes ela era o segundo parágrafo, logo abaixo do título, e empurrava o
+       checklist para baixo. A lista é o assunto; a regra é nota de pé. */
+    estado.checklist = [{ id: 1, texto: 'zz', feito: false, avulso: false }]
+    const tela = await abrirOCard(await montar({
+      251: [card({ tem_checklist: true })],
+    }))
+    const painel = tela.findAll('.modal__painel')[0].element
+    const pe = painel.querySelector('.modal__painel-pe')
+    expect(pe).toBeTruthy()
+    expect(pe.textContent).toMatch(/não vai para a OS/i)
+    /* é o ÚLTIMO filho, não o segundo */
+    expect(painel.lastElementChild).toBe(pe)
+  })
+
+  it('🚨 a frase de regra NÃO usa a classe que falha contraste', async () => {
+    const tela = await abrirOCard(await montar({
+      251: [card({ tem_checklist: true })],
+    }))
+    tela.findAll('.modal__painel-pe').forEach((p) => {
+      expect(p.classes()).not.toContain('nota')
+      expect(p.classes()).not.toContain('apagado')
+    })
+  })
+
+  it('as observações também têm pé, e ele diz que não vão para a OS', async () => {
+    const tela = await abrirOCard(await montar())
+    const pes = tela.findAll('.modal__painel-pe')
+    expect(pes.length).toBeGreaterThanOrEqual(1)
+    const textos = pes.map((p) => p.text()).join(' ')
+    expect(textos).toMatch(/não vão para a OS/i)
+  })
+})

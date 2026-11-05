@@ -228,9 +228,12 @@
    toque ja esta no minimo da norma.
    ========================================================================== */
 .escala-operacao {
-  --txt-xs:  13px;
-  --txt-sm:  14.5px;
-  --txt-md:  16px;
-  --txt-lg:  18px;
-  --txt-xl:  22px;
+  /* 🔵 05/11, segunda medida dele na tela: *"pode reduzir a fonte da tela em
+     1, card fechado e aberto"*. O +2 ficou grande demais com a coluna de
+     360px; o +1 e o que ele validou. ⚠️ A base continua 11/12,5/14/16/20. */
+  --txt-xs:  12px;
+  --txt-sm:  13.5px;
+  --txt-md:  15px;
+  --txt-lg:  17px;
+  --txt-xl:  21px;
 }

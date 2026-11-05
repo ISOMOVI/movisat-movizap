@@ -7352,3 +7352,70 @@ o que o cobre hoje é ele abrir a tela.
 
 ⚠️ **Três dos quatro foram de montar texto por script sem validar a estrutura antes de
 gravar.** É o mesmo defeito em três formas.
+
+### 05/11, terceira volta — o painel do modal estava errado, e a causa era a CASCATA
+
+🔵 Ele, olhando a tela: *"o layout do card apos o clique esta errado"* · *"pode reduzir a
+fonte da tela em 1, card fechado e aberto"*.
+
+🚨 **A CAUSA, medida:** eu escrevi as regras do `.modal__painel` **antes** das regras
+antigas de `.modal__recados`, `.modal__log` e `.modal__temas`, que já viviam mais abaixo
+na folha. **Mesma especificidade** (`.modal__painel h3` e `.modal__recados h3` são as duas
+`0,1,1`), e **a que vem depois ganha**. Resultado:
+
+| o que eu declarei | o que a tela aplicava |
+|---|---|
+| `.modal__painel h3 { font-size: var(--txt-md) }` | `--txt-sm` — o cabeçalho do painel ficava pequeno |
+| `.modal__painel { gap: var(--e-3) }` | `var(--e-2)` — o miolo apertado |
+
+⚠️ **E o painel nunca ganhou as faixas do mockup.** Eu havia posto `padding: var(--e-4)` na
+seção inteira, então ele era uma caixa com um padding só — não o painel de **três faixas**
+(cabeçalho com fundo, miolo, pé) que ele validou no artboard. É isso que ele viu de errado.
+
+✅ **Consertado, e a ordem agora é parte da entrega:** o bloco do `.modal__painel` foi para
+o **fim** da folha, depois das três regras antigas, com o motivo escrito no lugar onde
+alguém vai mexer. No CSS publicado: `.modal__recados h3` no byte 197.311 e `.modal__painel`
+no 199.428.
+
+✅ **As três faixas, como no mockup:**
+- **cabeçalho** — o `<h3>` já envolvia o título e a pílula no markup, então **ele é a
+  faixa**: `display: flex; justify-content: space-between`, fundo `--superficie-2` e borda
+  embaixo. Não precisou de `<div>` novo.
+- **miolo** — `padding: 0` no painel e respiro lateral nos filhos, pela mesma régua da
+  `.modal__caixa`: cada faixa tem o seu, e é isso que faz o cabeçalho e o pé terem fundo
+  próprio sem buraco branco nas beiradas.
+- **pé** — a frase de regra, que **era a abertura do bloco** e empurrava o assunto para
+  baixo. 🔵 No mockup ela está embaixo; agora está. ⚠️ E **não usa `.nota`**: o texto que
+  diz *"não vai para a OS do Harmonit"* é o que impede alguém de escrever pensando que o
+  técnico vai ler.
+
+⚠️ **Um refino meu no caminho:** a primeira versão do respiro usava `:first-of-type`, que
+casa **o primeiro de cada TIPO de elemento** — num painel com `<p>`, `<ul>` e `<div>` isso
+dava respiro de topo em três filhos ou em nenhum, dependendo de quais `v-if` estivessem
+ligados naquele card. Trocado por vizinhança (`h3 + *` e `* + *`), que não depende do tipo.
+
+✅ **A escala caiu de +2 para +1**, por medida dele na tela: **12 / 13,5 / 15 / 17 / 21**
+(era 13 / 14,5 / 16 / 18 / 22). O +2 ficou grande demais depois que a coluna foi a 360px.
+⚠️ A base global continua 11 / 12,5 / 14 / 16 / 20.
+
+### ⚠️ Uma trava que reprovou por GRAFIA, não por regra
+
+A frase de regra virou o pé do painel e passou a **abrir a sentença** — *"**N**ão vai para a
+OS do Harmonit"*, com N maiúsculo. O teste usava `toContain('não vai para a OS')`, exato, e
+reprovou com a regra inteira de pé. Virou `toMatch(/não vai para a OS/i)`.
+🚨 É a lição que esta casa chama de **varredura de rótulo ignora caixa**: comparar texto de
+tela sem `i` prende a **grafia**, não a regra.
+
+### As travas novas
+
+**+5** em `painel_card_modal_0511.teste.js` (**36** no arquivo, **141** nas três suítes do
+painel, rodadas 3×; **721** na suíte JS inteira):
+o checklist e as observações são painéis · **o `<h3>` é filho DIRETO do painel** (se o markup
+o envolver num `<div>`, a faixa deixa de pintar e ninguém percebe) · a frase de regra é o
+**último** filho, e não o segundo · ela **não** usa a classe que falha contraste · as
+observações também têm pé.
+
+🚨 **E o limite continua dito:** o **jsdom não aplica `<style scoped>`**, então nenhuma
+dessas travas mede cor ou tamanho computado. O que elas prendem é a **estrutura** que as
+faixas precisam para existir — a ordem da cascata, que é o que quebrou aqui, **nenhum teste
+desta suíte pega**. O que pegou foi ele abrir a tela.

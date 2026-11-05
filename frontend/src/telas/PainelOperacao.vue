@@ -1475,11 +1475,6 @@ onBeforeUnmount(() => {
                 Checklist desta etapa
                 <span class="pilula">{{ feitosDoCheck }} de {{ checklist.length }}</span>
               </h3>
-              <p class="nota pequeno">
-                O que fazer nesta etapa. Ao mover o card para outra, isto vira uma
-                <strong>observação</strong> aqui no painel — e também
-                <strong>não vai para a OS</strong> do Harmonit.
-              </p>
 
               <p v-if="carregandoCheck" class="nota pequeno">lendo…</p>
 
@@ -1513,21 +1508,30 @@ onBeforeUnmount(() => {
               <p v-if="erroDoCheck" class="aviso aviso--erro" role="alert">
                 {{ erroDoCheck }}
               </p>
+
+              <!-- 🔵 A FRASE DE REGRA E O PE DO PAINEL, e nao a abertura: era o
+                   segundo paragrafo do bloco, logo abaixo do titulo, e empurrava
+                   o checklist -- a lista e o assunto, a regra e a nota de pe.
+                   E o mockup que ele validou a mostrava embaixo. -->
+              <p class="modal__painel-pe">
+                Ao mover o card, isto vira uma <strong>observação</strong> aqui.
+                <strong>Não vai para a OS</strong> do Harmonit.
+              </p>
             </section>
 <section class="modal__recados modal__painel">
               <h3>
                 Observações
                 <span class="pilula">{{ ((ficha && ficha.observacoes) || []).length }}</span>
               </h3>
-              <p class="nota pequeno">
-                Ficam no MoviZap, com autor e hora. <strong>Não vão para a OS</strong>
-                do Harmonit, e não se apagam.
-              </p>
               <div class="modal__pe">
                 <button class="botao" type="button" @click="abrirRecados">
                   Abrir observações
                 </button>
               </div>
+              <p class="modal__painel-pe">
+                Com autor e hora, e não se apagam.
+                <strong>Não vão para a OS</strong> do Harmonit.
+              </p>
             </section>
             </div>
 
@@ -2068,15 +2072,11 @@ onBeforeUnmount(() => {
    *"seis secoes soltas com o mesmo peso"*).
    🔵 *"espessura ou sombreamento"*: borda forte + sombra de 1px, e o
    cabecalho do painel com fundo. */
-.modal__painel {
-  background: var(--superficie);
-  border: var(--borda-fina) solid var(--borda-forte);
-  border-radius: var(--r-md);
-  box-shadow: var(--sombra-1);
-  padding: var(--e-4);
-  gap: var(--e-3);
-}
-.modal__painel h3 { font-size: var(--txt-md); }
+/* 🚨 AS REGRAS DO PAINEL VIVEM NO FIM DESTE BLOCO, e nao aqui, porque as
+   regras antigas de `.modal__recados`/`.modal__log`/`.modal__temas` estao mais
+   abaixo com a MESMA especificidade -- e a que vem depois ganha. Escritas aqui,
+   o cabecalho do painel caia para `--txt-sm` e o `gap` voltava a `--e-2`.
+   Procure por `.modal__painel` no fim da folha de estilo. */
 
 /* 4. o pe */
 .modal__rodape {
@@ -2191,6 +2191,77 @@ onBeforeUnmount(() => {
 .temas__respostas dt { font-size: var(--txt-xs); color: var(--texto-fraco); margin-top: var(--e-2); }
 .temas__respostas dd { margin: 0; }
 .modal__pe { display: flex; gap: var(--e-2); justify-content: flex-end; flex-wrap: wrap; }
+
+/* ==========================================================================
+   O PAINEL DO MODAL -- as tres faixas do mockup que ele validou
+   --------------------------------------------------------------------------
+   🚨 ESTE BLOCO TEM DE VIR DEPOIS de `.modal__recados`, `.modal__log` e
+   `.modal__temas`: as tres tem a mesma especificidade que ele, e na primeira
+   tentativa eu as escrevi DEPOIS das minhas -- o cabecalho do painel caiu para
+   `--txt-sm`, o `gap` voltou a `--e-2`, e o painel ficou uma caixa de padding
+   unico em vez das tres faixas. Foi o que ele viu: *"o layout do card apos o
+   clique esta errado"*.
+
+   🔵 *"espessura ou sombreamento"*: borda forte, sombra de 1px, e o cabecalho
+   com fundo proprio -- e e a faixa que da a hierarquia, nao o tamanho da fonte.
+   ========================================================================== */
+.modal__painel {
+  background: var(--superficie);
+  border: var(--borda-fina) solid var(--borda-forte);
+  border-radius: var(--r-md);
+  box-shadow: var(--sombra-1);
+  /* ⚠️ PADDING ZERO: cada faixa tem o seu, e e isso que faz o cabecalho e o pe
+     terem fundo proprio sem buraco branco nas beiradas -- a mesma regua da
+     `.modal__caixa`. */
+  padding: 0;
+  gap: 0;
+  overflow: hidden;
+}
+
+/* A FAIXA DE CIMA. O `h3` ja envolve o titulo e a pilula no markup, entao ele
+   e a faixa -- nao precisou de `<div>` novo. */
+.modal__painel > h3 {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: var(--e-2);
+  margin: 0;
+  padding: var(--e-3) var(--e-4);
+  background: var(--superficie-2);
+  border-bottom: var(--borda-fina) solid var(--borda-forte);
+  font-size: var(--txt-md);
+}
+
+/* O MIOLO: tudo o que nao e faixa ganha o respiro lateral.
+   🚨 O ESPACO VERTICAL VEM POR VIZINHANCA, E NAO POR TIPO. A primeira versao
+   usava `:first-of-type`, que casa o primeiro de CADA tipo de elemento -- num
+   painel com `<p>`, `<ul>` e `<div>` isso dava respiro de topo em tres filhos
+   ou em nenhum, dependendo de quais `v-if` estivessem ligados naquele card.
+   `h3 + *` e `* + *` nao dependem do tipo nem de quantos existem. */
+.modal__painel > :not(h3):not(.modal__painel-pe) {
+  margin-left: var(--e-4);
+  margin-right: var(--e-4);
+}
+/* o que vem logo depois da faixa de cima */
+.modal__painel > h3 + :not(.modal__painel-pe) { margin-top: var(--e-3); }
+/* o espaco ENTRE os blocos do miolo */
+.modal__painel > :not(h3) + :not(h3):not(.modal__painel-pe) { margin-top: var(--e-3); }
+/* ⚠️ E o respiro de baixo so quando nao ha faixa de pe: com ela, o pe encosta
+   na borda de proposito -- e faixa, nao conteudo. */
+.modal__painel > :not(.modal__painel-pe):last-child { margin-bottom: var(--e-4); }
+
+/* A FAIXA DE BAIXO: a frase de regra, que antes abria o bloco e empurrava o
+   assunto para baixo.
+   🚨 E ela NAO usa `.nota`: o texto que diz *"nao vai para a OS do Harmonit"*
+   e o que impede alguem de escrever pensando que o tecnico vai ler, e tem de
+   ser legivel -- `--texto-fraco` da 4,76:1. */
+.modal__painel-pe {
+  margin: 0;
+  padding: var(--e-3) var(--e-4);
+  background: var(--fundo);
+  border-top: var(--borda-fina) solid var(--borda-forte);
+  font-size: var(--txt-sm);
+  color: var(--texto-fraco);
+}
+.modal__painel-pe strong { color: var(--texto); }
 /* ⚠️ A caixa agora rola no `modal__corpo`, então o modal alinha ao topo e
    a sombra do mockup fica visível na beirada. */
 /* 🚨 A REGRA QUE ALINHAVA O MODAL AO TOPO SAIU EM 05/11. Ela existia porque

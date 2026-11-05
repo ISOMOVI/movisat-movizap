@@ -181,7 +181,13 @@ describe('a lista dentro do card', () => {
 
   it('🚨 diz que NÃO vai para a OS', async () => {
     const tela = await abrir()
-    expect(tela.text()).toContain('não vai para a OS')
+    /* 🚨 INSENSIVEL A CAIXA, e isto foi um vermelho de 05/11: a frase virou o
+       PE do painel e passou a ABRIR a sentenca -- *"Nao vai para a OS do
+       Harmonit"*, com N maiusculo. O `toContain` exato reprovou, e a regra
+       medida continuava inteira. E a licao que esta casa chama de
+       varredura-de-rotulo-ignora-caixa: comparar texto de tela sem `i` prende
+       a GRAFIA, nao a regra. */
+    expect(tela.text()).toMatch(/não vai para a OS/i)
   })
 
   it('marcar manda o PUT e relê do servidor', async () => {
