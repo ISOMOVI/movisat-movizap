@@ -245,6 +245,11 @@ function temSelo(grupo) {
     lista fixa aqui. */
 const grupos = computed(() => {
   const porGrupo = new Map()
+  // 🚨 06/11, A PORTA TRANCADA, consertada: o conjunto dos códigos que ESTA
+  // pessoa alcança. Serve para saber se a tela-mãe de uma aba chegou junto.
+  // 🔵 Ele, sobre a armadilha: *"4 ok"* — e ela deixou de ser hipótese no
+  // mesmo dia, porque a aba `CFG_15.1` concede painel aba por aba.
+  const alcanca = new Set(sessao.telas.map((t) => t.codigo))
   for (const tela of sessao.telas) {
     // rota com parâmetro (/atendimento/{id}) não é item de menu: só se chega
     // nela a partir de outra tela.
@@ -257,7 +262,21 @@ const grupos = computed(() => {
     // ⚠️ APRESENTAÇÃO, NÃO PERMISSÃO. Elas continuam vindo em `sessao.telas`,
     // e têm de continuar: é essa lista que a guarda de rota usa para saber o
     // que este usuário pode abrir.
-    if (tela.aba_de) continue
+    //
+    // 🚨 06/11 — A PORTA TRANCADA. Até hoje esta linha era `if (tela.aba_de)
+    // continue`, e isso bastava porque toda aba vinha acompanhada da mãe: a
+    // casca `/config` é `atendimento`, então todo mundo que tem uma aba de
+    // configuração tem a `CFG_0.1` também. Com a aba de permissão dos painéis
+    // isso deixou de ser verdade: conceder **só** a `PNL_1.3` (a aba de dentro
+    // do Pós-venda) dava uma pessoa com a tela, com a rota e com permissão --
+    // e **sem nenhum item de menu**, porque o item era da `PNL_1.2`. O 403
+    // nunca aparecia; a tela simplesmente não existia para ela.
+    //
+    // ⚠️ A CONDIÇÃO É "A MÃE CHEGOU?", e não uma lista de exceções: aba cuja
+    // mãe está presente continua escondida (as seis `CFG_*` e a `PNL_1.3` de
+    // quem tem as duas), e aba órfã desenha o próprio item, com o título e a
+    // rota dela. Nada muda para quem já usava o menu ontem.
+    if (tela.aba_de && alcanca.has(tela.aba_de)) continue
     // ⚠️ Fallback do fallback: backend antigo (ou tela sem grupo) ainda cai
     // no prefixo. O MoviZap serve o `dist` do disco -- tela e backend podem
     // ficar um passo fora de sincronia no meio de uma publicação.

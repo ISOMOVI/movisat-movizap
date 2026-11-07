@@ -71,6 +71,14 @@
 
   /* ---- camadas -------------------------------------------------------- */
   --z-conteudo: 1;
+  /* 🔵 06/11: os controles de rolagem do quadro (a barra grudada no
+     alto e as faixas da borda). Acima do conteúdo e MUITO abaixo da
+     barra de status e do modal: controle de rolagem por cima de um
+     diálogo é o defeito de camada que a conferência do CSS caça.
+     ⚠️ A barra usa `calc(var(--z-rolagem) + 1)` para ficar sobre as
+     faixas -- as duas vivem no mesmo quadro e a ordem entre elas não
+     pode depender da ordem do template. */
+  --z-rolagem:   5;
   --z-barra:    50;
   --z-flutuante: 100;
   --z-modal:    200;

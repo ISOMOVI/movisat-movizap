@@ -7718,3 +7718,138 @@ depois veremos"*). Hoje `pos_venda` só recebe NPS e CES, e **nenhum formulário
 alimenta Treinamentos**. A tela **diz** que não há card — quadro vazio que não
 explica por que está vazio é `M12`. Quando ele disser de onde vêm, é
 **configuração**, não código.
+
+## 06/11 — `CFG_15.1` Permissão dos painéis
+
+🔵 **Pedido dele:** *"em configuração, crie uma aba de permissão para os
+paineis, ali vou definir quem pode ver o que e por aba tbm, como notará que o
+pós venda ja possui abas"*.
+
+**Uma grade.** Linhas = atendentes **ativos**; colunas = as telas do grupo
+"Painéis", na ordem do registro. Uma caixa por cruzamento.
+
+| coluna | de onde vem o nome |
+|---|---|
+| Operação | `PNL_1.1` |
+| Treinamentos | `PNL_1.2` — **do banco** (`painel_aba.titulo`) |
+| Pós-venda | `PNL_1.3` — **do banco**, e a coluna entra **recuada** (`aba_de`) |
+
+🚨 **AS DUAS COLUNAS DO PÓS-VENDA TERIAM O MESMO NOME SEM O BANCO.** No
+registro, `PNL_1.2` e `PNL_1.3` se chamam as duas "Pós-venda" (correção dele de
+05/11: o item de menu é o do painel). O nome que as distingue mora em
+`painel_aba.titulo` — e sem ele marcar uma das duas seria chute. É o detalhe
+que ele antecipou: *"como notará que o pós venda ja possui abas"*.
+
+🚨 **MARCAR NÃO GRAVA.** Marcar é dar acesso a dado de cliente; gravar no clique
+transformaria um toque errado em concessão silenciosa. A linha alterada fica
+destacada, com **Gravar** e **desfazer**, e o rodapé conta quantas linhas estão
+pendentes.
+
+⚠️ **A TELA REDESENHA DO QUE O SERVIDOR DEVOLVEU.** O `PUT` responde com a grade
+**relida**, e não com um `ok`. Tela que confia no próprio palpite é como `M12`
+começa.
+
+⚠️ **SEM PARÁGRAFO DIDÁTICO** (decisão dele, 30/10: *"atrapalha o
+profissionalismo"*). O que a tela escreve é ESTADO: o perfil de cada pessoa, o
+código de cada coluna, **quem concedeu e em que dia** cada marca, e quantas
+linhas faltam gravar.
+
+🔴 **O que esta aba NÃO faz:** não cria conta, não muda perfil, não concede
+nenhuma tela fora dos painéis, e não concede a si mesma.
+
+## 06/11 — `PNL_1.4` Financeiro
+
+🔵 **As dez colunas, na ordem dele** (*"do 1"*, e a lista sob o cabeçalho
+"Colunas"):
+
+`Nova solicitação` · `Contratos assinados` · `Contrato vinculado no financeiro`
+· `Aguardando prazo` · `Aguardando Datascope` · `Em tratativa` · `Aguardando
+terceiros` · `INADIMPLENTES` · **`Atendimento feito`** · **`Não atendido`**
+
+🚨 **UMA ABA, E NÃO QUATRO.** O Pós-venda tem duas porque ele escreveu **duas**
+listas de colunas. Aqui a lista é **uma**. ⚠️ O que havia antes sobre "abas do
+financeiro" era o exemplo de permissão que ele mesmo marcou como *"Apenas
+exemplo"*, e a lista do §2.1 do `MoviZap_Formularios_PLANO.md` (`Financeiro ·
+Pagamento técnicos · Administrativo · Fornecedores`), que é de **formulários**,
+não de etapas. Repartir dez colunas entre quatro abas inventadas seria escopo
+meu. Aba nova é uma linha na migração e uma no `telas.py`.
+
+🚨 **"INADIMPLENTES" ENTROU SEM A AUTOMAÇÃO.** Ele escreveu *"INADIMPLENTES
+(Automação move para pipeline Cobrança)"* — o parêntese é **comportamento
+futuro**, não parte do nome. E não dá para construí-lo hoje: o painel "Cobrança"
+**não existe**, nem como tela nem no vocabulário (`painel_aba_painel_conhecido`
+aceita só `operacao`, `pos_venda`, `contratual`, `financeiro`). Automação que
+move card para pipeline inexistente não é automação, é perda de card. 🔴 Fica
+como decisão dele. ⚠️ Há trava provando que **não há `Cobrança` em painel
+nenhum**, para o dia em que alguém "lembrar" de ligar isso.
+
+🚨 **DOIS FINS, e não um.** "Atendimento feito" e "Não atendido" são os dois;
+marcar só a última diria que chegar em "Atendimento feito" não é terminar.
+⚠️ `final` segue sendo só o fato no banco — nada na tela depende dele ainda.
+
+## 06/11 — `PNL_1.5` Contratual
+
+🔵 **As seis colunas, na ordem dele** (*"gere a mesmta tela do 'Financeiro' para
+o 'Contratual' - seguindo o seguindo modelo para colunas"*):
+
+`Elaborar contrato` · `Aguardando pendencias` · `Aguardando assinatura` ·
+**`Assinado`** · **`Não assinado`** · **`Desistiu de cancelar`**
+
+🚨 **DUAS LINHAS DA LISTA DELE NÃO ENTRARAM, E ISSO É LEITURA MINHA.** A lista
+colada começava com *"Regras de automação e gatilhos"* e *"pesquisar"*. Li as
+duas como a **moldura da tela de onde ele copiou** — o link de automação do CRM e
+a caixa de busca —, por três razões: na lista do Financeiro, meia hora antes, a
+linha equivalente era o cabeçalho literal **"Colunas"**; *"pesquisar"* vem em
+minúscula no meio de títulos capitalizados; e as seis restantes formam um fluxo
+fechado de contrato. 🔴 **Se eu errei, o conserto é uma linha da migração 097** —
+e está nos Próximos Passos como **pergunta aberta**, não como fato. Há trava
+provando que nenhuma coluna se chama "pesquisar" nem contém "gatilho", e é ela
+que fica vermelha quando alguém corrigir a leitura.
+
+🚨 **TRÊS FINS:** Assinado, Não assinado e Desistiu de cancelar.
+
+⚠️ **A GRAFIA É A DELE:** "pendencias" sem acento, e "Desistiu de cancelar"
+inteiro. Corrigir ortografia de rótulo ditado é renomear a coluna dele sem pedir
+— e o rótulo é o que o operador procura com os olhos. Há trava para isso.
+
+🔴 **OS TRÊS NASCEM VAZIOS, e é decisão dele:** *"as regras de criação de cards em
+'financeiro', 'pós-venda' e 'Contratual' ainda ficam em branco mesmo"*. A
+`PainelAba` escreve **"Nenhum card nesta aba ainda."** — quadro vazio que não diz
+por que está vazio é `M12`.
+
+### 🚨 06/11, achado POR ELE: as colunas não apareciam — o `meta.aba` QUE FALTAVA
+
+🔵 Ele: *"não estão aparecendo as colunas de 'financeiro' e ' contratual'"*.
+
+**A causa.** O `PainelAba.vue` descobre qual aba carregar em
+`rota.meta?.aba || ''` — **não** em `meta.codigo`. As duas rotas que eu escrevi
+levavam só `codigo` e `titulo`, porque copiei a forma do `meta` das rotas de
+`/config`, que não têm `aba`, em vez das duas do Pós-venda, que têm. Com o campo
+ausente, o código ficava **vazio** e a tela pedia `/api/paineis/aba/` sem código
+nenhum: nenhuma coluna, e nenhum erro visível.
+
+🚨 **TUDO O MAIS ESTAVA CERTO, e é isso que faz o defeito.** Entrada no registro,
+item de menu, rota, permissão, **200** na API quando chamada com o código, as 10
+e as 6 colunas no banco, e **2227 testes verdes**. O elo que faltava era o
+**quarto**: quem devolve → quem grava → quem lê → **quem diz à tela o que ler**.
+A casa já tinha catalogado os três primeiros (`campo novo não entra sozinho`);
+este acrescenta o quarto.
+
+**O conserto:** `aba: 'PNL_1.4'` e `aba: 'PNL_1.5'` no `meta`, mais
+`largo: true` — que não é enfeite: o Financeiro tem **dez** colunas e sem ele o
+quadro ficaria apertado na coluna de conteúdo.
+
+🚨 **A TRAVA NOVA É ESTRUTURAL, e tinha de ser** (`rotas_painel_0611.teste.js`,
+6 travas): ela **não cita** `PNL_1.4` nem `PNL_1.5`. Varre o roteador e cobra de
+**toda** rota que monta a `PainelAba` quatro coisas — ter `meta.aba`, ter
+`meta.aba == meta.codigo` (apontar para outra tela seria pior que tela vazia:
+mostraria o conteúdo de um painel na permissão de outro), ter `largo: true`, e
+ter `name == meta.codigo`. Assim o próximo painel não pode repetir o
+esquecimento. ⚠️ Uma trava que citasse os dois códigos ficaria verde no dia
+seguinte e seria inútil. **Reverter o `meta.aba` de uma das duas deixa 3
+vermelhas** — forjado e pego.
+
+⚠️ **E a prova não foi o teste:** foi `grep` no **bundle publicado**
+(`frontend/dist/assets/index-*.js`), que agora contém `aba:"PNL_1.4"` e
+`aba:"PNL_1.5"`. Suíte verde não prova tela (`M9`) — e aqui ela estava verde
+enquanto a tela estava vazia.

@@ -53,8 +53,15 @@ const CATALOGO = [
   // mudar o código da tela (que é imutável).
   { codigo: 'LIG_1.1', titulo: 'Ligações', rota: '/ligacoes', icone: 'bi-telephone', aba_de: null, grupo: 'Atendimento', subgrupo: null },
   { codigo: 'CAD_1.1', titulo: 'Clientes', rota: '/clientes', icone: 'bi-building', aba_de: null, grupo: 'Cadastro', subgrupo: null },
+  // A casca do `/config` e a aba dela. 🚨 06/11: AS DUAS, e não só a aba --
+  // a fixture tinha uma aba ÓRFÃ, que o sistema não produz. A `CFG_0.1` é
+  // `atendimento`, então quem alcança `CFG_1.1` alcança a casca junto. Com
+  // o conserto da porta trancada (aba órfã passa a desenhar o próprio
+  // item), a fixture órfã viraria uma regra de mentira. ⚠️ Fixture irreal
+  // não se conserta afrouxando o código.
+  { codigo: 'CFG_0.1', titulo: 'Configurações', rota: '/config', icone: 'bi-sliders', aba_de: null, grupo: 'Configuração', subgrupo: null },
   // Aba de outra tela: continua na sessão (a guarda de rota usa), e NÃO vira
-  // item de menu.
+  // item de menu -- porque a mãe dela veio junto.
   { codigo: 'CFG_1.1', titulo: 'Canais', rota: '/config/canais', icone: 'bi-plug', aba_de: 'CFG_0.1', grupo: 'Configuração', subgrupo: null },
 ]
 
@@ -84,7 +91,7 @@ beforeEach(() => {
 describe('grupos vindos do backend', () => {
   it('monta os grupos na ordem em que o backend mandou', () => {
     const tela = montar()
-    expect(nomesDosGrupos(tela)).toEqual(['Início', 'Atendimento', 'Cadastro'])
+    expect(nomesDosGrupos(tela)).toEqual(['Início', 'Atendimento', 'Cadastro', 'Configuração'])
   })
 
   it('põe Ligações dentro de Atendimento, sem tocar no código da tela', () => {
@@ -95,8 +102,19 @@ describe('grupos vindos do backend', () => {
   })
 
   it('não desenha grupo sem nenhuma tela visível', () => {
-    // "Configuração" só tem tela-aba: existe na sessão, não vira grupo.
-    expect(nomesDosGrupos(montar())).not.toContain('Configuração')
+    // Grupo cujas telas não chegaram NENHUMA: o menu é construído a
+    // partir do que veio, nunca de uma lista fixa.
+    const tela = montar([CATALOGO[1]])
+    expect(nomesDosGrupos(tela)).toEqual(['Atendimento'])
+  })
+
+  it('a aba não vira item de menu quando a tela-mãe veio junto', () => {
+    // 🚨 06/11: a regra que sobrou do `if (tela.aba_de) continue`. Com a
+    // mãe presente -- que é o caso de todas as quinze `CFG_*` --, a aba
+    // continua escondida, e o item é o da casca.
+    const tela = montar()
+    expect(titulosVisiveis(tela)).toContain('Configurações')
+    expect(titulosVisiveis(tela)).not.toContain('Canais')
   })
 
   it('cai no prefixo do código quando a tela vem sem grupo', () => {

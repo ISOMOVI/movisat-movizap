@@ -98,6 +98,8 @@ aparecem todos.
 | `EML_1.1` | E-mail | `/email` | `atendimento` | 1 |
 | `FRM_1.1` | Solicitações | `/solicitacoes` | `equipe` | 1 |
 | `PNL_1.1` | Operação | `/paineis/operacao` | `owner` | 1 |
+| `PNL_1.4` | Financeiro | `/paineis/financeiro` | `owner` | 1 |
+| `PNL_1.5` | Contratual | `/paineis/contratual` | `owner` | 1 |
 
 ### 🚨 `PNL_1.1` mudou de natureza em 29/10 — o card é a OS
 
@@ -206,6 +208,7 @@ e duplicá-los quebraria a tela quando o tema mudar.
 | `ORC_1.1` | Orçamentos | `/orcamentos` | `atendimento` | 1 |
 | `CFG_13.1` | Orçamento (numeração) | `/config/orcamento` | `owner` | 1 |
 | `CFG_14.1` | Vínculo dos técnicos | `/config/vinculo-tecnicos` | `owner` | 1 |
+| `CFG_15.1` | Permissão dos painéis | `/config/permissao-paineis` | `owner` | 1 |
 | `TEC_1.1` | Técnicos | `/tecnicos` | `atendimento` | 1 |
 | `TEC_1.2` | Credenciamento de técnicos | `/tecnicos/credenciar` | `equipe` | 1 |
 | `REL_1.1` | Relatórios | `/relatorios` | `owner` | 3 |
@@ -271,11 +274,14 @@ O campo **`icone`** deste registro é o que o menu desenha, e ele é **a fonte
 | `ORC_1.1` Orçamentos | `bi-receipt-cutoff` | menu |
 | `CFG_13.1` Orçamento | `bi-receipt` | aba |
 | `CFG_14.1` Vínculo dos técnicos | `bi-person-vcard` | aba |
+| `CFG_15.1` Permissão dos painéis | `bi-shield-lock` | aba |
 | `TEC_1.1` Técnicos | `bi-person-badge` | menu |
 | `TEC_1.2` Credenciamento de técnicos | `bi-patch-check` | aba (sem tela própria) |
 | `ATD_3.1` Informativos | `bi-megaphone` | menu |
 | `FRM_1.1` Solicitações | `bi-ui-checks` | menu |
 | `PNL_1.1` Operação | `bi-kanban` | menu (grupo Painéis) |
+| `PNL_1.4` Financeiro | `bi-cash-coin` | menu (grupo Painéis) |
+| `PNL_1.5` Contratual | `bi-file-earmark-text` | menu (grupo Painéis) |
 | `PNL_1.2` Pós-venda | `bi-clipboard-check` | menu (grupo Painéis) |
 | `PNL_1.3` Pós-venda | `bi-clipboard-check` | **sem item** — tem `aba_de` |
 | `CAD_1.1` Clientes | `bi-building` | menu |
@@ -645,3 +651,98 @@ quando ele der as colunas.
 apertada). O conserto é o `MenuLateral` desenhar o item quando a pessoa alcança
 **qualquer** aba do conjunto — frente própria. Hoje as duas são `owner`, que vê
 tudo, então o defeito não tem como aparecer ainda.
+
+## 06/11 — `CFG_15.1`, e a PRIMEIRA permissão que não é por perfil
+
+🔵 **Pedido dele:** *"em configuração, crie uma aba de permissão para os
+paineis, ali vou definir quem pode ver o que e por aba tbm, como notará que o
+pós venda ja possui abas"*.
+
+| o quê | onde |
+|---|---|
+| a aba | `CFG_15.1`, `aba_de: CFG_0.1`, **só owner**, entre Sincronização e Vínculo |
+| a tabela | `tela_concedida` (migração 095) — uma linha por pessoa e tela |
+| a regra | `telas.pode_acessar` passa a honrar a concessão **antes** de recusar tela `owner` |
+| a identidade | `auth.buscar_usuario` traz `telas_concedidas`, lido **a cada requisição** |
+| as rotas | `GET` e `PUT /api/config/permissao-paineis` |
+
+🚨 **ATÉ 06/11 A PERMISSÃO DO MOVIZAP ERA SÓ POR PERFIL**, e perfil não sabe
+dizer *"esta pessoa, esta aba"*. `atendente.perfil` dá um conjunto de nomes
+(`PERFIS`), cada tela declara **um** desses nomes, e `pode_acessar` recusava
+toda tela `owner` a todo não-owner. As três telas de painel são `owner` — então
+**não existia caminho de concessão nenhum**. Medido em 06/11: só o Iago (121)
+alcançava qualquer painel, e a `atendente_time_permissao` estava **vazia**.
+
+🚨 **A CONCESSÃO VENCE O `permissao: owner` DA TELA.** É a linha mais
+importante da entrega; sem ela a aba gravaria sem efeito. ⚠️ **A tela não é
+rebaixada:** continua `owner` no registro, e quem não tem linha em
+`tela_concedida` continua barrado. O que existe é uma lista de exceções
+**nomeadas**, cada uma com quem concedeu e quando. Rebaixar a tela para
+`equipe` seria outra coisa inteiramente: abriria o painel para todo admin de
+uma vez, sem ninguém marcar nada.
+
+🚨 **SÓ O GRUPO "PAINÉIS" É CONCEDÍVEL, e a trava é no backend.** A lista sai do
+REGISTRO (`grupo == "Painéis"`), não de uma lista escrita à mão: painel novo
+entra sozinho — é o que o **Financeiro** vai precisar quando as colunas dele
+chegarem. ⚠️ E a `CFG_15.1` **não pode conceder a si mesma**: ela é do grupo
+"Configuração". Ninguém se concede a própria chave, nem concede `CFG_1.1` (os
+canais do WhatsApp) por descuido.
+
+⚠️ **FORA DO TOKEN DE PROPÓSITO.** Com a lista no JWT, revogar um painel só
+valeria no próximo login — e o token do MoviZap vale até a virada do dia.
+Permissão que demora um dia para sair não é permissão.
+
+⚠️ **O OWNER APARECE NA GRADE, marcado e sem caixa:** tirá-lo faria a grade
+parecer incompleta; deixá-lo marcável ofereceria um gesto sem efeito (o
+precedente é o `ModalAgendar`).
+
+### 🚨 A PORTA TRANCADA, que deixou de ser hipótese no mesmo dia
+
+Até 06/11 o `MenuLateral` pulava **toda** tela com `aba_de`. Isso bastava porque
+toda aba vinha acompanhada da mãe: a casca `/config` é `atendimento`, então quem
+tem `CFG_1.1` tem a `CFG_0.1` junto. Com esta aba deixou de ser verdade —
+conceder **só** a `PNL_1.3` dava uma pessoa com tela, com rota e com permissão e
+**sem nenhum item de menu**, porque o item é da `PNL_1.2`. O 403 nunca
+apareceria: a tela simplesmente não existiria para ela.
+
+🔵 Decisão dele: *"4 ok"*. A condição virou **"a mãe chegou?"**: aba com a mãe
+presente continua escondida (as quinze `CFG_*`), aba órfã desenha o próprio
+item, com o título e a rota dela. ⚠️ A regra antiga não foi afrouxada, foi
+**condicionada** — e uma fixture do `menu_grupos_2110.teste.js` que tinha uma
+aba órfã (situação que o sistema não produz) foi corrigida, e não o código.
+
+## 06/11 — `PNL_1.4` Financeiro e `PNL_1.5` Contratual: os quatro painéis existem
+
+🔵 **Pedidos dele, na ordem:** *"do 1"* + a lista de dez colunas, e *"conclua e
+exiba o financeiro no paniel para owner"*; depois *"Depois gere a mesmta tela do
+'Financeiro' para o 'Contratual'"* + a lista, e *"as regras de criação de cards
+em 'financeiro', 'pós-venda' e 'Contratual' ainda ficam em branco mesmo. Mas
+eleas ja devem aparecer no menu para owner"*.
+
+| painel | código | rota | colunas | migração |
+|---|---|---|---|---|
+| Financeiro | `PNL_1.4` | `/paineis/financeiro` | **10** | 096 |
+| Contratual | `PNL_1.5` | `/paineis/contratual` | **6** | 097 |
+
+**O vocabulário de `paineis.PAINEIS` declarava quatro desde 22/10, e agora os
+quatro têm tela.** ⚠️ `COM_TELA` continua sendo só `("operacao",)`, e é certo:
+ele governa o `quadro()`, que fala com o Harmonit. Os três novos passam pelo
+`quadro_da_aba`, que não fala com ninguém de fora.
+
+🚨 **UMA ENTRADA POR PAINEL, E NENHUMA COM `aba_de`.** Cada um é um item de menu
+próprio. O Pós-venda continua sendo **um** item com duas abas dentro (correção
+dele de 05/11) — é o único com `aba_de`.
+
+🚨 **CÓDIGOS:** o comentário da `PNL_1.1` reservava `1.2`, `1.3` e `1.4` para os
+outros três painéis desde 22/10. O Pós-venda gastou **duas** (`1.2` e `1.3`,
+porque são duas abas), então o Financeiro ficou com `1.4` e o Contratual com
+`1.5`. Os dois conferidos contra `CODIGOS_APOSENTADOS` antes de escrever.
+
+🚨 **OS DOIS APARECERAM NA ABA `CFG_15.1` SEM UMA LINHA DE CÓDIGO.** A aba de
+permissão nasceu de manhã com três painéis e **não foi tocada** por estas duas
+entregas: a lista de concedíveis sai do grupo "Painéis" do REGISTRO. Era o
+desenho, e estas são as duas primeiras provas dele. ⚠️ Há trava em cada um dos
+dois arquivos de teste — e a do Financeiro teve de ser **consertada**: a primeira
+versão fixava a lista inteira de painéis e ficou vermelha quando o Contratual
+entrou, meia hora depois. Teste que existe para provar que *"painel novo entra
+sozinho"* não pode ser o que obriga a editar teste quando um painel novo entra.

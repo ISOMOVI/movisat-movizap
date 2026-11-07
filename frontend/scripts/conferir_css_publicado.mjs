@@ -198,6 +198,61 @@ function oDialogoDoChamadoTemTetoProprioENaoEmpata(css) {
   }
 }
 
+
+/* ------------------------------------------------------------------ 6 */
+function osControlesDeRolagemFicamNaCamadaCerta(css) {
+  /* 🚨 06/11, a camada NOVA. A barra grudada no alto e as faixas da borda
+     ficam POR CIMA do quadro -- e camada nova e justamente o tipo de regra que
+     some numa cascata sem nenhum teste de tela notar: o jsdom nao pinta.
+
+     ⚠️ E ha um segundo defeito possivel, pior: a faixa esconde-se em
+     `@media (hover: none)` para nao comer a area de arrastar no celular. Se
+     essa regra ESCAPAR da media query, a faixa desaparece para TODOS -- foi
+     exatamente o que um `max-width` global fez com o modal em 05/11. */
+  const barra = regra(css, '.barrarolo')
+  if (!barra) {
+    return falhar('.barrarolo não existe no CSS publicado — a barra de '
+                  + 'rolagem do quadro não subiu.')
+  }
+  if (!/position:\s*sticky/.test(barra.corpo)) {
+    falhar('.barrarolo não é `sticky` — ela voltaria a ficar no pé do quadro, '
+           + 'que é a queixa que ela existe para resolver.')
+  }
+  const zb = prop(barra.corpo, 'z-index') || ''
+  if (!zb.includes('--z-rolagem')) {
+    falhar('.barrarolo não usa a escala `--z-rolagem` (achei ' + (zb || 'nada')
+           + '). Número cru funciona hoje e não acompanha a escala amanhã.')
+  }
+
+  const faixa = regra(css, '.borda')
+  if (!faixa) {
+    return falhar('.borda não existe no CSS publicado — as faixas de rolagem '
+                  + 'não subiram.')
+  }
+  const zf = prop(faixa.corpo, 'z-index') || ''
+  if (!zf.includes('--z-rolagem')) {
+    falhar('.borda não usa a escala `--z-rolagem` (achei ' + (zf || 'nada') + ').')
+  }
+  if (!/pointer-events:\s*none/.test(faixa.corpo)) {
+    falhar('.borda não tem `pointer-events: none` — ela cobriria o quadro '
+           + 'inteiro e nenhum card seria clicável.')
+  }
+
+  /* 🚨 O `display:none` da faixa TEM de estar dentro de `@media (hover: none)`.
+     Fora dela, a faixa desaparece para todo mundo. */
+  const escondido = [...css.matchAll(/\.borda(\[[^\]]*\])?\s*\{\s*display:\s*none/g)]
+  for (const m of escondido) {
+    const antes = css.slice(0, m.index)
+    const abriu = antes.lastIndexOf('@media')
+    const fechou = antes.lastIndexOf('}')
+    if (!(abriu > fechou)) {
+      falhar('`.borda { display: none }` está FORA de uma media query no CSS '
+             + 'publicado: as faixas de rolagem ficariam invisíveis para '
+             + 'todos, em qualquer tela.')
+    }
+  }
+}
+
 /* ------------------------------------------------------------------ */
 const css = cssPublicado()
 if (!erros.length) {
@@ -206,6 +261,7 @@ if (!erros.length) {
   osTokensDeSistemaEstaoNoRoot(css)
   osTresDialogosNaoEmpatamNoZIndex(css)
   oDialogoDoChamadoTemTetoProprioENaoEmpata(css)
+  osControlesDeRolagemFicamNaCamadaCerta(css)
 }
 
 if (erros.length) {
@@ -213,6 +269,6 @@ if (erros.length) {
   erros.forEach((e, i) => console.error(`  ${i + 1}. ${e}\n`))
   process.exit(1)
 }
-console.log('CSS publicado: as 5 conferências passaram (teto do diálogo, '
+console.log('CSS publicado: as 6 conferências passaram (teto do diálogo, '
             + 'ordem da cascata, tokens no :root, empilhamento dos diálogos, '
-            + 'teto e empilhamento do diálogo do chamado)')
+            + 'teto e empilhamento do diálogo do chamado, camada dos controles de rolagem)')

@@ -65,6 +65,7 @@ from . import distribuicao
 from . import presenca
 from . import prompt as prompt_ia
 from . import pipeline
+from . import permissao_paineis
 from . import ratelimit
 from . import sync as sync_harmonit
 from . import telas as registro_telas
@@ -1076,6 +1077,56 @@ def gravar_numeracao(entrada: NumeracaoEntrada,
                      usuario: dict = Depends(auth.requer_tela("CFG_13.1"))):
     orcamento_mod.definir_proximo_numero(entrada.proximo_numero)
     return {"proximo_numero": orcamento_mod.proximo_numero()}
+
+
+# ===========================================================================
+# CFG_15.1 — A PERMISSÃO DOS PAINÉIS, por pessoa e por aba (06/11)
+# ===========================================================================
+# 🔵 Pedido dele: *"em configuração, crie uma aba de permissão para os paineis,
+# ali vou definir quem pode ver o que e por aba tbm, como notará que o pós venda
+# ja possui abas"*.
+#
+# 🚨 AS DUAS ROTAS SÃO `CFG_15.1`, QUE É `owner` — e `CFG_15.1` NÃO é do grupo
+# "Painéis", então ela não pode ser concedida por ela mesma. Escrito de
+# propósito: ninguém se concede a própria chave.
+class PermissaoDePainel(BaseModel):
+    """A linha inteira de UMA pessoa, e não um clique.
+
+    🚨 `codigos` É O ESTADO COMPLETO dela, porque é isso que faz desmarcar
+    revogar. ⚠️ Lista vazia é válida e significa *"nenhum painel"* — não é
+    campo faltando.
+    """
+    atendente_id: int = Field(ge=1)
+    codigos: list[str] = Field(default_factory=list, max_length=50)
+
+
+@app.get("/api/config/permissao-paineis")
+def ler_permissao_paineis(
+        usuario: dict = Depends(auth.requer_tela("CFG_15.1"))):
+    """A grade pronta: as telas de painel, as pessoas ativas e as marcas."""
+    return permissao_paineis.grade()
+
+
+@app.put("/api/config/permissao-paineis")
+def gravar_permissao_paineis(
+        entrada: PermissaoDePainel,
+        usuario: dict = Depends(auth.requer_tela("CFG_15.1"))):
+    """Grava a linha de uma pessoa e DEVOLVE A GRADE RELIDA.
+
+    ⚠️ Devolve a grade inteira, e não um `ok`: a tela redesenha do que o banco
+    respondeu, e não do que ela achava que tinha mandado. Tela que confia no
+    próprio palpite é como `M12` começa.
+
+    🚨 CÓDIGO FORA DOS PAINÉIS É 422, e não 500 nem 200 calado: a recusa é de
+    REGRA (só o grupo "Painéis" é concedível), e quem a lê precisa saber o que
+    foi recusado.
+    """
+    try:
+        permissao_paineis.definir(entrada.atendente_id, entrada.codigos,
+                                  concedida_por=usuario.get("id"))
+    except permissao_paineis.TelaNaoConcedivel as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    return permissao_paineis.grade()
 
 
 class OrdemDoAgendamento(BaseModel):

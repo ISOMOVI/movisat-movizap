@@ -27,7 +27,7 @@ import { computed, onMounted, onBeforeUnmount, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { api, ErroDeApi } from '../api/cliente.js'
 import DialogoDeChamado from '../componentes/DialogoDeChamado.vue'
-import { codigosPermitidos } from '../estado/sessao.js'
+import { sessao } from '../estado/sessao.js'
 
 const rota = useRoute()
 const quadro = ref(null)
@@ -50,22 +50,33 @@ const total = computed(() => quadro.value?.total ?? 0)
 /* 🔵 AS ABAS DENTRO DA TELA -- correcao dele em 05/11: *"so aba principal
    no menu. As demais sao dentro dela ja"*.
 
-   ⚠️ A LISTA SAI DA PERMISSAO, e nao de uma constante solta: quem nao tem
-   a `PNL_1.3` nao ve a segunda aba. A fonte e o `codigosPermitidos` da
-   sessao -- a mesma que a guarda de rota usa, porque duas fontes
-   divergiriam no dia em que ele conceder uma aba a alguem.
+   🚨 06/11, A LISTA PASSOU A SAIR DO PAINEL, e e conserto de um defeito meu
+   que ELE achou: *"os itens do pos venda estao aparecendo dentro do financeiro
+   e contratual. qual a dificuldade em mante-los separados?"*. Antes era uma
+   constante `AS_ABAS = [PNL_1.2, PNL_1.3]` escrita aqui, filtrada so por
+   PERMISSAO -- e eu reusei esta tela nos dois paineis novos. Quem e owner tem
+   as duas abas do Pos-venda, entao a tira delas aparecia dentro do Financeiro
+   e do Contratual. ⚠️ Nao era permissao errada: era a lista nao ter dono.
 
-   🚨 E ELAS SAO DECLARADAS AQUI, e nao lidas do servidor, de proposito: o
-   nome e a ORDEM das abas sao dele (*"Aba 1: Treinamentos (...) Aba 2:
-   Pos-venda"*), e o `telas.py` ja e a fonte de quem pode abrir cada uma. */
-const AS_ABAS = [
-  { codigo: 'PNL_1.2', titulo: 'Treinamentos', rota: '/paineis/pos-venda' },
-  { codigo: 'PNL_1.3', titulo: 'Pós-venda',
-    rota: '/paineis/pos-venda/realizado' },
-]
-const abasVisiveis = computed(
-  () => AS_ABAS.filter((a) => codigosPermitidos.value.has(a.codigo)),
-)
+   🔵 E ele fechou o desenho no mesmo minuto: *"o financeiro tera suas
+   proprias abas, mas por agora so 1, o mesmo para o contratual, so o pos
+   venda ja temos as duas pipelines em abas"*. Com a lista vindo do painel, a
+   segunda aba do Financeiro vai aparecer SOZINHA no dia em que ele a criar --
+   nenhuma linha daqui muda.
+
+   ⚠️ DUAS FONTES, cada uma com o que e dela: o SERVIDOR diz quais abas sao
+   deste painel e como se chamam (`painel_aba`, que e onde moram
+   "Treinamentos" e "Pos-venda" -- no registro as duas telas se chamam as duas
+   "Pos-venda"); o `sessao.telas` da a ROTA e, de graca, a permissao: aba que
+   a pessoa nao alcanca nao esta nessa lista e cai fora sem segunda regua. */
+const abasVisiveis = computed(() => {
+  const doPainel = quadro.value?.abas || []
+  const porCodigo = new Map(sessao.telas.map((t) => [t.codigo, t]))
+  return doPainel
+    .filter((a) => porCodigo.has(a.codigo_tela))
+    .map((a) => ({ codigo: a.codigo_tela, titulo: a.titulo,
+                   rota: porCodigo.get(a.codigo_tela).rota }))
+})
 
 function dataCurta(iso) {
   if (!iso) return '—'
@@ -198,8 +209,11 @@ async function soltarNaColuna(coluna) {
     <!-- 🔵 AS ABAS: *"abas de pipeline: Treinamento / Pos venda"*.
          ⚠️ Com uma aba so, a barra nao aparece: uma aba sozinha nao e
          escolha, e desenhar a barra seria enfeite. -->
+    <!-- ⚠️ O rotulo do `nav` sai do TITULO DO PAINEL, e nao fixo no
+         Pos-venda: com a tela servindo cinco abas de tres paineis, "Abas do
+         Pos-venda" seria a tela mentindo para quem usa leitor de tela. -->
     <nav v-if="abasVisiveis.length > 1" class="abas"
-         aria-label="Abas do Pós-venda">
+         :aria-label="`Abas de ${quadro?.titulo || 'painel'}`">
       <RouterLink v-for="a in abasVisiveis" :key="a.codigo" :to="a.rota"
                   class="abas__item"
                   :class="{ 'abas__item--atual': a.codigo === codigo }"

@@ -304,7 +304,12 @@ def teste_o_grupo_paineis_deixou_de_nascer_vazio():
     # permissao para ver o 'Financeiro' e todas as abas. A Erika, apenas a
     # aba 3 do financeiro"*. `permissao` e campo da entrada, entao duas abas
     # com permissoes diferentes nao cabem numa so.
-    assert dentro == ["PNL_1.1", "PNL_1.2", "PNL_1.3"]
+    # 🔵 06/11: o Financeiro (`PNL_1.4`, 10 colunas) e o Contratual
+    # (`PNL_1.5`, 6) entraram, e com eles os QUATRO paineis declarados em
+    # `paineis.PAINEIS` desde 22/10 passaram a ter tela. ⚠️ `COM_TELA` segue
+    # sendo so `operacao`, e e certo: ele governa o `quadro()`, que fala com o
+    # Harmonit -- os tres novos passam pelo `quadro_da_aba`, que nao fala.
+    assert dentro == ["PNL_1.1", "PNL_1.2", "PNL_1.3", "PNL_1.4", "PNL_1.5"]
     # ⚠️ E AS DUAS NASCEM SO DO OWNER: *"todas hoje nascem somente para o
     # owner"*. Conceder e gesto dele.
     for codigo in ("PNL_1.2", "PNL_1.3"):

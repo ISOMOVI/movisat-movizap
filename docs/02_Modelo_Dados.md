@@ -2978,3 +2978,74 @@ código que testa `'concluida'` passar a errar.
 🚨 **E "Virou OS" SÓ MARCA** — decisão dele: *"só marca; a OS é pelo Operação"*.
 Nenhuma das rotas de chamado fala com o Harmonit, e é isso que torna
 `Finalizar Chamado` reversível por `Reabrir`.
+
+## `tela_concedida` — a permissão que não é por perfil (migração 095, 06/11)
+
+```
+tela_concedida
+  id             bigserial PK
+  atendente_id   bigint NOT NULL -> atendente(id) ON DELETE CASCADE
+  codigo_tela    varchar(16) NOT NULL        -- código do `movizap/telas.py`
+  concedida_por  bigint -> atendente(id) ON DELETE SET NULL
+  concedida_em   timestamptz NOT NULL DEFAULT now()
+  UNIQUE (atendente_id, codigo_tela)
+```
+
+🔵 Nasceu do pedido dele de 06/11: *"em configuração, crie uma aba de permissão
+para os paineis, ali vou definir quem pode ver o que e por aba tbm"*.
+
+🚨 **É A LISTA DE EXCEÇÕES NOMEADAS DA PERMISSÃO.** Até 06/11 quem decidia
+acesso era só `atendente.perfil` → `telas.PERFIS`. Cada linha aqui diz *"esta
+pessoa alcança esta tela"*, e `telas.pode_acessar` a honra **antes** de recusar
+tela `owner`. ⚠️ A tela continua `owner` no registro — isto não a rebaixa.
+
+🚨 **SEM FK EM `codigo_tela`, de propósito:** o catálogo de telas é o CÓDIGO
+(`movizap/telas.py`), não uma tabela — a mesma razão de `painel_aba.codigo_tela`
+não ter. Quem limita o que pode ser gravado é a rota, que só aceita código do
+grupo "Painéis".
+
+🚨 **A UNIQUE É A TRAVA DA TELA.** Sem ela, conceder duas vezes daria duas
+linhas e revogar apagaria uma só: a pessoa continuaria vendo o painel e a tela
+de permissão diria "não concedido" — `M12`, e sobre quem vê o quê.
+
+⚠️ **AS DUAS FK SÃO DIFERENTES DE PROPÓSITO.** `atendente_id` cai em **CASCADE**
+(a concessão não tem sentido sem quem a recebeu); `concedida_por` cai em **SET
+NULL** (apagar quem concedeu não tira o acesso de quem recebeu, só o autor).
+
+⚠️ **LIDA A CADA REQUISIÇÃO** por `auth.buscar_usuario`, e **não** guardada no
+token: revogar vale no próximo clique da pessoa, não no próximo login dela. A
+leitura degrada para vazio se a tabela não responder — a pessoa perde o painel
+concedido e continua entrando, que é o lado certo de falhar.
+
+**Hoje:** 0 linhas. Quem concede é ele, na aba `CFG_15.1`. A migração não
+concede nada a ninguém.
+
+## Os quatro painéis em `painel_aba` (migrações 092 · 094 · 096 · 097)
+
+| painel | `codigo_tela` | título da aba | etapas | migração |
+|---|---|---|---|---|
+| `operacao` | `PNL_1.1` | Operação | **1** (`Chamados`) | 092 |
+| `pos_venda` | `PNL_1.2` | Treinamentos | 4 | 094 |
+| `pos_venda` | `PNL_1.3` | Pós-venda | 4 | 094 |
+| `financeiro` | `PNL_1.4` | Financeiro | **10** | 096 |
+| `contratual` | `PNL_1.5` | Contratual | **6** | 097 |
+
+🚨 **`painel_aba.painel` TEM VOCABULÁRIO FECHADO** (`painel_aba_painel_conhecido`):
+`operacao`, `pos_venda`, `contratual`, `financeiro`. Painel novo — "Cobrança", por
+exemplo, que a anotação dele sobre INADIMPLENTES menciona — precisa de migração
+que **amplie o CHECK** antes de qualquer aba. É a armadilha que a casa já
+catalogou em `contato.relacao`: código recusando valor que o banco aceita, ou o
+contrário.
+
+⚠️ **A `PNL_1.1` tem UMA etapa só**, e não dezessete: as 17 colunas da Operação
+são **situações da OS do Harmonit**, calculadas em `paineis.quadro()`. A única
+etapa nossa dela é a `Chamados`. As dos outros três são **todas** nossas, e
+vivem aqui.
+
+⚠️ **Etapa é única DENTRO da aba, não no sistema:** "Solicitação" aparece nas
+duas abas do Pós-venda, e "Assinado" (contratual) e "Contratos assinados"
+(financeiro) são colunas diferentes de painéis diferentes.
+
+**Cards hoje: 1 no total** (um chamado na `Chamados` da Operação). Os quatro
+painéis novos estão **vazios por decisão dele** — a origem dos cards segue em
+aberto (*"as regras de criação de cards (...) ainda ficam em branco mesmo"*).

@@ -99,15 +99,24 @@ class TestDeclaracaoDosGrupos:
         assert telas.GRUPOS["Painéis"] == []
         dentro = [t["codigo"] for t in telas.TELAS if telas.grupo_da(t) == "Painéis"]
         # 🔵 05/11: entraram as duas abas do Pos-venda.
-        assert dentro == ["PNL_1.1", "PNL_1.2", "PNL_1.3"]
+        # 🔵 06/11: entraram o Financeiro (`PNL_1.4`) e o Contratual
+        # (`PNL_1.5`) -- *"conclua e exiba o financeiro no paniel para owner"*
+        # e *"gere a mesmta tela do 'Financeiro' para o 'Contratual'"*. Os
+        # quatro paineis do `paineis.PAINEIS` passaram a ter tela.
+        assert dentro == ["PNL_1.1", "PNL_1.2", "PNL_1.3", "PNL_1.4", "PNL_1.5"]
         # 🚨 MAS O MENU DESENHA DOIS ITENS, E NAO TRES, e e correcao dele no
         # mesmo dia: *"so aba principal no menu. As demais sao dentro dela
         # ja"*. A `PNL_1.3` leva `aba_de`, e o `MenuLateral` pula toda tela
         # que tem esse campo -- a mesma convencao das seis `CFG_*`.
         itens = [t for t in telas.TELAS
                  if telas.grupo_da(t) == "Painéis" and not t.get("aba_de")]
-        assert [t["codigo"] for t in itens] == ["PNL_1.1", "PNL_1.2"]
-        assert [t["titulo"] for t in itens] == ["Operação", "Pós-venda"]
+        # 🔵 06/11: QUATRO itens, e cinco telas -- a `PNL_1.3` continua
+        # sendo a unica com `aba_de`, porque e a aba de dentro do Pos-venda.
+        # O Financeiro e o Contratual sao paineis proprios, com item proprio.
+        assert ([t["codigo"] for t in itens]
+                == ["PNL_1.1", "PNL_1.2", "PNL_1.4", "PNL_1.5"])
+        assert ([t["titulo"] for t in itens]
+                == ["Operação", "Pós-venda", "Financeiro", "Contratual"])
 
 
 class TestGrupoNaoMexeEmPermissao:

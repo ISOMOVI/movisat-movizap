@@ -194,6 +194,74 @@ TELAS = [
         "aba_de": "PNL_1.2",
     },
     {
+        # 🔵 06/11, pedido dele: *"do 1"* -- as colunas do Financeiro, que era
+        # a pendência de 05/11 -- seguido da lista das dez e de *"conclua e
+        # exiba o financeiro no paniel para owner"*.
+        #
+        # 🚨 UMA ENTRADA, E NÃO QUATRO. O Pós-venda tem duas porque ele
+        # escreveu DUAS listas de colunas; aqui a lista é uma, sob o título
+        # "Colunas". ⚠️ O que havia sobre "abas do financeiro" era o exemplo de
+        # permissão que ele marcou como *"Apenas exemplo"*, e a lista do §2.1 do
+        # `MoviZap_Formularios_PLANO.md`, que é de FORMULÁRIOS, não de etapas.
+        # Repartir dez colunas entre quatro abas inventadas seria escopo meu.
+        #
+        # 🚨 `owner`, E É A PALAVRA DELE: *"exiba o financeiro no paniel para
+        # owner"*. ⚠️ E agora isso tem consequência nova: a aba `CFG_15.1`
+        # (06/11) concede o grupo "Painéis", e a lista de concedíveis sai do
+        # REGISTRO -- então esta tela aparece lá para ele marcar **sozinha**,
+        # sem uma linha de código a mais. Era o desenho; esta entrada é a
+        # primeira prova dele.
+        #
+        # ⚠️ AS COLUNAS NÃO MORAM AQUI, moram no banco (`pipeline_etapa`,
+        # migração 096). Esta entrada é a PORTA: código, rota e quem entra.
+        #
+        # ⚠️ Código conferido contra `CODIGOS_APOSENTADOS` (só `ATD_4.1`) e
+        # contra os códigos em uso: `PNL_1.4` estava livre, e era o reservado
+        # pelo comentário da `PNL_1.1` desde 22/10.
+        "codigo": "PNL_1.4",
+        "titulo": "Financeiro",
+        "rota": "/paineis/financeiro",
+        "icone": "bi-cash-coin",
+        "descricao": "Financeiro: da solicitação ao atendimento, em dez etapas nossas.",
+        "grupo": "Painéis",
+        "permissao": "owner",
+        "fase": 1,
+    },
+    {
+        # 🔵 06/11, pedido dele: *"Depois gere a mesmta tela do 'Financeiro'
+        # para o 'Contratual'"*, com a lista de colunas colada em seguida.
+        #
+        # 🚨 DUAS LINHAS DA LISTA DELE NÃO ENTRARAM, e é leitura minha:
+        # *"Regras de automação e gatilhos"* e *"pesquisar"* são a moldura da
+        # tela de onde ele copiou (o link de automação e a caixa de busca do
+        # CRM), não etapas de contrato -- a lista do Financeiro, meia hora
+        # antes, vinha com o cabeçalho literal "Colunas" no mesmo lugar.
+        # ⚠️ Está escrito nos Próximos Passos como PERGUNTA ABERTA, e o
+        # conserto é uma linha da migração 097.
+        #
+        # 🚨 `owner`, e é a palavra dele: *"eleas ja devem aparecer no menu
+        # para owner"*. ⚠️ Com a `CFG_15.1` (de hoje mais cedo), esta tela
+        # aparece na aba de permissão **sozinha** -- a lista de concedíveis sai
+        # do grupo "Painéis" do registro, não de lista escrita à mão.
+        #
+        # ⚠️ AS COLUNAS NÃO MORAM AQUI, moram no banco (`pipeline_etapa`,
+        # migração 097). Esta entrada é a PORTA: código, rota e quem entra.
+        #
+        # ⚠️ Código conferido contra `CODIGOS_APOSENTADOS` (só `ATD_4.1`) e
+        # contra os códigos em uso: `PNL_1.5` estava livre. O comentário da
+        # `PNL_1.1` reservava 1.2/1.3/1.4 para os outros três painéis -- o
+        # Pós-venda gastou DUAS (1.2 e 1.3, porque são duas abas), então o
+        # Financeiro ficou com 1.4 e o Contratual com 1.5.
+        "codigo": "PNL_1.5",
+        "titulo": "Contratual",
+        "rota": "/paineis/contratual",
+        "icone": "bi-file-earmark-text",
+        "descricao": "Contratual: de elaborar o contrato aos três desfechos.",
+        "grupo": "Painéis",
+        "permissao": "owner",
+        "fase": 1,
+    },
+    {
         # 🔵 22/10: a tela que recebe o que chega pelos formularios proprios
         # (`forms.movisat.com.br`). Modulo `FRM`, nao ATD: formulario nao e
         # conversa -- tem definicao, tem campo obrigatorio e tem anexo, e
@@ -708,6 +776,39 @@ TELAS = [
         "aba_de": "CFG_0.1",
     },
     {
+        # 🔵 06/11, pedido dele: *"em configuração, crie uma aba de permissão
+        # para os paineis, ali vou definir quem pode ver o que e por aba tbm,
+        # como notará que o pós venda ja possui abas"*.
+        #
+        # 🚨 ESTA ABA É A PRIMEIRA QUE CONCEDE TELA. Até 06/11 a permissão do
+        # MoviZap era só por PERFIL (`PERFIS` abaixo), e perfil não sabe dizer
+        # *"esta pessoa, esta aba"*. A tabela `tela_concedida` (migração 095) é
+        # a lista de exceções nomeadas, e o `pode_acessar` lá embaixo a honra
+        # ANTES de recusar tela `owner`.
+        #
+        # 🚨 ELA CONCEDE SÓ O GRUPO "PAINÉIS", e a trava é no backend
+        # (`permissao_paineis.codigos_concediveis`), não na tela. Uma aba de
+        # marcar caixas é fácil de generalizar por descuido, e generalizada ela
+        # concederia `CFG_1.1` -- os canais do WhatsApp.
+        #
+        # ⚠️ `owner` E ASSIM FICA: quem concede painel é ele. Esta é a única
+        # entrada do registro cuja permissão NÃO pode ser concedida por ela
+        # mesma, porque não é do grupo "Painéis" -- escrito de propósito, para
+        # ninguém se conceder a própria chave.
+        #
+        # ⚠️ Código conferido contra `CODIGOS_APOSENTADOS` (só `ATD_4.1`) e
+        # contra os códigos em uso: `CFG_15.1` estava livre.
+        "codigo": "CFG_15.1",
+        "titulo": "Permissão dos painéis",
+        "rota": "/config/permissao-paineis",
+        "icone": "bi-shield-lock",
+        "descricao": "Quem vê cada painel e cada aba de painel.",
+        "permissao": "owner",
+        "grupo": "Configuração",
+        "fase": 1,
+        "aba_de": "CFG_0.1",
+    },
+    {
         "codigo": "REL_1.1",
         "titulo": "Relatórios",
         "rota": "/relatorios",
@@ -852,7 +953,27 @@ def ativas() -> list[dict]:
 
 
 def pode_acessar(usuario: dict, codigo: str) -> bool:
+    """As TRÊS portas, nesta ordem: owner · concessão nomeada · perfil.
+
+    🚨 A CONCESSÃO NOMEADA VENCE O `permissao: owner` DA TELA, e é a regra que
+    06/11 acrescentou (migração 095, aba `CFG_15.1`). 🔵 Pedido dele: *"em
+    configuração, crie uma aba de permissão para os paineis, ali vou definir
+    quem pode ver o que e por aba tbm"*. Sem esta linha a aba nova gravaria sem
+    efeito: as três telas de painel são `owner`, e o `return False` abaixo
+    recusava todo mundo -- não existia caminho de concessão nenhum.
+
+    ⚠️ A TELA NÃO É REBAIXADA. Ela continua `owner` no registro, e quem não tem
+    linha em `tela_concedida` continua barrado. O que a concessão cria é uma
+    exceção NOMEADA, com autor e hora -- e só o grupo "Painéis" é concedível,
+    trava que vive no `permissao_paineis.py`, não aqui.
+
+    ⚠️ `telas_concedidas` vem do `auth.buscar_usuario`, que a lê do banco a cada
+    requisição. Ela NÃO está no token: revogar na aba vale no próximo clique da
+    pessoa, e não no próximo login dela.
+    """
     if usuario.get("owner"):
+        return True
+    if codigo in set(usuario.get("telas_concedidas") or ()):
         return True
     tela = por_codigo(codigo)
     if tela["permissao"] == "owner":

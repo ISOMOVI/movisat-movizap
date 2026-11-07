@@ -838,6 +838,24 @@ def quadro_da_aba(codigo_tela: str) -> dict | None:
         'painel': aba['painel'],
         'aba': aba['codigo_tela'],
         'titulo': aba['titulo'],
+        # 🚨 06/11: AS ABAS IRMAS, as deste painel e so dele. Achado por ele:
+        # *"os itens do pos venda estao aparecendo dentro do financeiro e
+        # contratual"*. A tela declarava a lista em CODIGO e filtrava so por
+        # permissao -- reusada nos paineis novos, levava a tira do Pos-venda
+        # para dentro deles.
+        #
+        # 🔵 Decisao dele no mesmo minuto: *"o financeiro tera suas proprias
+        # abas, mas por agora so 1, o mesmo para o contratual, so o pos venda
+        # ja temos as duas pipelines em abas"*. Por isso sai do BANCO: no dia
+        # em que o Financeiro ganhar a segunda aba, ela aparece sozinha.
+        #
+        # ⚠️ O `titulo` daqui e o da ABA (`painel_aba.titulo`), que e onde
+        # moram "Treinamentos" e "Pos-venda" -- no registro as duas telas se
+        # chamam as duas "Pos-venda". A ROTA nao vem aqui: o frontend a resolve
+        # pelo `sessao.telas`, e assim aba que a pessoa nao alcanca cai fora
+        # sozinha, sem segunda regua de permissao.
+        'abas': [{'codigo_tela': a['codigo_tela'], 'titulo': a['titulo']}
+                 for a in pipeline.abas(aba['painel'])],
         'colunas': colunas,
         'total': desenhados,
         'pode_mover': True,

@@ -237,6 +237,26 @@ const rotas = [
     meta: { codigo: 'PNL_1.3', aba: 'PNL_1.3',
             titulo: 'Pós-venda', largo: true },
   },
+  {
+    // 🔵 06/11, ele: *"conclua e exiba o financeiro no paniel para owner"*.
+    // 🚨 MESMA `PainelAba` das abas do Pós-venda: as colunas vivem no banco
+    // (`pipeline_etapa`), não no código -- uma tela por painel seria copiar o
+    // mesmo kanban quatro vezes.
+    path: '/paineis/financeiro',
+    name: 'PNL_1.4',
+    component: PainelAba,
+    meta: { codigo: 'PNL_1.4', aba: 'PNL_1.4',
+            titulo: 'Financeiro', largo: true },
+  },
+  {
+    // 🔵 06/11, ele: *"gere a mesmta tela do 'Financeiro' para o
+    // 'Contratual'"*. Mesma `PainelAba`: as colunas vivem no banco.
+    path: '/paineis/contratual',
+    name: 'PNL_1.5',
+    component: PainelAba,
+    meta: { codigo: 'PNL_1.5', aba: 'PNL_1.5',
+            titulo: 'Contratual', largo: true },
+  },
 
   // 🔵 22/10: a FRM_1.1, o que chega pelos formularios proprios.
   // 🚨 REGISTRO E ROTEADOR ANDAM JUNTOS: tela registrada no backend e ausente
@@ -371,6 +391,16 @@ const rotas = [
     name: 'CFG_14.1',
     component: Configuracoes,
     meta: { codigo: 'CFG_14.1', titulo: 'Vínculo dos técnicos' },
+  },
+  {
+    // 🔵 06/11, pedido dele: *"em configuração, crie uma aba de permissão para
+    // os paineis, ali vou definir quem pode ver o que e por aba tbm"*.
+    // 🚨 Só owner, e esta é a única aba que NÃO pode ser concedida por ela
+    // mesma: ela concede o grupo "Painéis", e `CFG_15.1` é "Configuração".
+    path: '/config/permissao-paineis',
+    name: 'CFG_15.1',
+    component: Configuracoes,
+    meta: { codigo: 'CFG_15.1', titulo: 'Permissão dos painéis' },
   },
   {
     // 🔵 Decisão 9 dele (19/10): a numeração do orçamento, só do owner.

@@ -41,6 +41,7 @@ import Notificacoes from './Notificacoes.vue'
 import MensagensRapidas from './MensagensRapidas.vue'
 import OrcamentoNumeracao from './OrcamentoNumeracao.vue'
 import VinculoTecnicos from './VinculoTecnicos.vue'
+import PermissaoPaineis from './PermissaoPaineis.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -62,6 +63,7 @@ const COMPONENTE = {
   'CFG_12.1': MensagensRapidas,
   'CFG_13.1': OrcamentoNumeracao,
   'CFG_14.1': VinculoTecnicos,
+  'CFG_15.1': PermissaoPaineis,
 }
 // Atalhos fica ANTES de Telas: e preferencia de quem usa, nao registro do
 // sistema -- e quem procura ajuste pessoal nao vai olhar no fim da fila.
@@ -73,7 +75,11 @@ const COMPONENTE = {
 // numeração de documento, não preferência de quem usa.
 // 'Vínculo dos técnicos' (21/10) entra junto das do SISTEMA, ao lado de
 // Sincronização: as duas falam do que vem de fora e do que não casou.
-const ORDEM = ['CFG_7.1', 'CFG_2.1', 'CFG_1.1', 'CFG_5.1', 'CFG_4.1', 'CFG_3.1', 'CFG_14.1', 'CFG_13.1', 'CFG_10.1', 'CFG_11.1', 'CFG_12.1', 'CFG_6.1', 'CFG_8.1', 'CFG_9.1']
+// 'Permissão dos painéis' (06/11) entra junto das do SISTEMA e ANTES das da
+// pessoa: é quem alcança o quê, não preferência de quem usa. Fica ao lado do
+// 'Registro de telas' seria o oposto do que ele vai fazer -- ali se LÊ o
+// catálogo, aqui se CONCEDE -- então vem na frente, com as de operação.
+const ORDEM = ['CFG_7.1', 'CFG_2.1', 'CFG_1.1', 'CFG_5.1', 'CFG_4.1', 'CFG_3.1', 'CFG_15.1', 'CFG_14.1', 'CFG_13.1', 'CFG_10.1', 'CFG_11.1', 'CFG_12.1', 'CFG_6.1', 'CFG_8.1', 'CFG_9.1']
 
 /* Título curto para a aba. O do registro é bom para o menu e comprido para uma
    barra de abas ("IA — prompt" vira só "IA", porque a escada mora aqui). */
@@ -92,6 +98,9 @@ const ROTULO = {
   'CFG_12.1': 'Mensagens rápidas',
   'CFG_13.1': 'Orçamento',
   'CFG_14.1': 'Vínculo dos técnicos',
+  // ⚠️ "Painéis" seco seria ambíguo na barra -- existe o GRUPO "Painéis" no
+  // menu lateral, e a aba não é ele.
+  'CFG_15.1': 'Permissão dos painéis',
 }
 
 /* 🚨 SÓ AS ABAS QUE ESTE USUÁRIO ENXERGA. A permissão continua sendo por tela,

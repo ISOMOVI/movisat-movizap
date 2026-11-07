@@ -36,6 +36,8 @@ import { api, ErroDeApi } from '../api/cliente.js'
 import AjudaDaTela from '../componentes/AjudaDaTela.vue'
 import BalaoDeRecado from '../componentes/BalaoDeRecado.vue'
 import DialogoDeChamado from '../componentes/DialogoDeChamado.vue'
+import BarraDeRolagem from '../componentes/BarraDeRolagem.vue'
+import RolagemDaBorda from '../componentes/RolagemDaBorda.vue'
 
 const router = useRouter()
 const quadro = ref(null)
@@ -546,6 +548,11 @@ async function removerItem(item) {
   }
 }
 
+/* 🔵 06/11: o elemento do quadro, que os dois controles de rolagem
+   precisam. ⚠️ Vem por `ref` do template e NAO por `querySelector`: o
+   quadro nasce dentro de um `v-if`, e um seletor rodaria antes de ele
+   existir. */
+const rolo = ref(null)
 const arrastando = ref(null)
 const movendo = ref(null)
 const erroDeMover = ref('')
@@ -1046,7 +1053,24 @@ onBeforeUnmount(() => {
            palavra -- escrevê-la aqui fazia o teste reprovar com a tela
            correta. -->
 
-      <div class="quadro">
+      <!-- 🔵 06/11, ele: *"precisamos disso nos paineis, pois o scroll ficou
+           la embaixo"* · *"Ok go"* · *"pode ligar a rolagem horizontal via
+           mouse sobreposto"*.
+
+           🚨 O CASCO existe para as faixas terem onde se pendurar: elas sao
+           `position: absolute` sobre a area visivel, e sem um ancestral
+           `relative` se penduraim no casco do painel inteiro.
+
+           ⚠️ A BARRA FICA FORA DO CASCO, e e de proposito: ela e `sticky` em
+           relacao ao `.painel__conteudo` (que tem `overflow: auto`), e um
+           ancestral `relative` com altura do quadro nao muda isso -- mas
+           deixa-la DENTRO do casco a poria por baixo das faixas na mesma
+           camada. Fora, a ordem fica explicita. -->
+      <BarraDeRolagem :rolo="rolo" rotulo="quadro da Operação" />
+
+      <div class="quadro__casco">
+        <RolagemDaBorda :rolo="rolo" rotulo="quadro" />
+        <div ref="rolo" class="quadro">
         <section
           v-for="(coluna, indice) in quadro.colunas"
           :key="coluna.chave"
@@ -1295,6 +1319,7 @@ onBeforeUnmount(() => {
             </p>
           </div>
         </section>
+        </div>
       </div>
 
       <!-- ============ O CHAMADO ABERTO (05/11) ============
@@ -1748,6 +1773,10 @@ onBeforeUnmount(() => {
 .tela__cabecalho h1 { margin: 0; font-size: var(--txt-xl); }
 
 
+/* 🔵 06/11: o casco das faixas de rolagem. `relative` e tudo o que ele
+   faz -- as faixas se penduram nele, e o quadro continua sendo o unico
+   com `overflow-x`. */
+.quadro__casco { position: relative; }
 .quadro { display: flex; gap: var(--e-3); overflow-x: auto; padding-bottom: var(--e-3); align-items: flex-start; }
 
 /* 🔵 A BORDA DE CIMA É A COR DA ETAPA — do mockup. A cor vem do `:style`,

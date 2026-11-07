@@ -114,6 +114,13 @@ def buscar_usuario(login: str) -> dict | None:
                 "owner": True,
                 "ativo": True,
                 "permissoes": sorted(registro_telas.PERMISSOES_VALIDAS),
+                # ⚠️ Vazio, e a chave existe por FORMA: esta identidade é
+                # `owner: True`, e `pode_acessar` devolve `True` na primeira
+                # linha -- concessão nunca é consultada aqui. A chave está
+                # presente para que todo usuário do sistema tenha o mesmo
+                # formato, e um `usuario["telas_concedidas"]` em código futuro
+                # não estoure justamente na porta de emergência.
+                "telas_concedidas": [],
             }
         return None
 
@@ -147,7 +154,42 @@ def buscar_usuario(login: str) -> dict | None:
         # Conta nova nasce sem nada: perfil desconhecido devolve conjunto
         # vazio, e conjunto vazio é menu vazio. Falha fechado.
         "permissoes": sorted(registro_telas.permissoes_do_perfil(linha["perfil"])),
+        # 🚨 06/11: AS CONCESSÕES NOMEADAS, lidas A CADA REQUISIÇÃO e não
+        # guardadas no token. 🔵 Pedido dele: *"em configuração, crie uma aba de
+        # permissão para os paineis"* (migração 095, aba `CFG_15.1`).
+        #
+        # ⚠️ FORA DO TOKEN DE PROPÓSITO. Com a lista no JWT, revogar um painel
+        # só valeria no próximo login da pessoa -- e o token do MoviZap vale até
+        # a virada do dia. Permissão que demora um dia para ser retirada não é
+        # permissão. O `get_usuario` já relê o atendente a cada requisição, e
+        # esta leitura entra no mesmo caminho.
+        #
+        # ⚠️ `_concessoes` DEGRADA PARA VAZIO, nunca estoura: se a tabela não
+        # existir (banco um passo atrás da aplicação, no meio de uma
+        # publicação), a pessoa perde o painel concedido e continua entrando.
+        # O contrário -- 500 no login de todo mundo -- seria pior.
+        "telas_concedidas": _concessoes(linha["id"]),
     }
+
+
+def _concessoes(atendente_id: int) -> list[str]:
+    """Os códigos de tela concedidos a esta pessoa (migração 095).
+
+    ⚠️ IMPORT LOCAL, e não no topo: `permissao_paineis` importa o registro de
+    telas, que não importa `auth` -- mas o módulo de permissão é o lugar onde a
+    regra de concessão vive, e trazê-lo para o topo deste arquivo criaria um elo
+    de import entre a porta e a aba que concede. Aqui o custo é um `import`
+    resolvido do cache a cada chamada.
+    """
+    from movizap import permissao_paineis
+
+    try:
+        return sorted(permissao_paineis.do_atendente(atendente_id))
+    except Exception as e:  # noqa: BLE001 -- ver a advertência acima
+        log.warning("não deu para ler as concessões de tela do atendente %s "
+                    "(%s): a pessoa entra com o perfil dela, sem painel "
+                    "concedido", atendente_id, e.__class__.__name__)
+        return []
 
 
 def validar_login(login: str, senha: str) -> dict | None:
