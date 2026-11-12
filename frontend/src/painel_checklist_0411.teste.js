@@ -25,6 +25,22 @@ import { flushPromises, mount } from '@vue/test-utils'
 const estado = {
   quadro: null, postado: [], apagado: [], resposta: null,
   checklist: [], empurrado: [],
+  /* 🔵 11/11: o campo de texto da etapa. `campos` é o CATÁLOGO que o servidor
+     manda (etapa -> campo), e `camposDaEtapa` são os valores já escritos. */
+  campos: {}, camposDaEtapa: {},
+}
+
+/* O catálogo como o `movizap/campo_etapa.py` o devolve -- retrato, e não
+   invenção: se o servidor mudar os rótulos, esta fixture fica irreal e é isso
+   que se conserta, não o código. */
+const CATALOGO = {
+  rastreio: { situacao_id: 677, rotulo: 'Rastreamento',
+              ajuda: 'O código que será enviado ao cliente junto com o item.',
+              ao_cliente: true },
+  devolucao: { situacao_id: 15696, rotulo: 'Devolução',
+               ajuda: 'O código de devolução do item. Consulta interna da '
+                      + 'operadora — não é enviado ao cliente.',
+               ao_cliente: false },
 }
 
 vi.mock('../src/api/cliente.js', () => ({}))
@@ -35,7 +51,8 @@ vi.mock('./api/cliente.js', () => ({
       if (c.includes('/checklist')) return { itens: estado.checklist }
       if (c.includes('/passagens')) return { passagens: [] }
       if (c.includes('/ficha')) {
-        return { observacoes: estado.observacoes || [], prioridades: {} }
+        return { observacoes: estado.observacoes || [], prioridades: {},
+                 campos: estado.campos, campos_da_etapa: estado.camposDaEtapa }
       }
       return estado.quadro
     },
@@ -62,6 +79,14 @@ vi.mock('./api/cliente.js', () => ({
       return { itens: estado.checklist }
     },
   },
+  /* 🚨 O QUE O `estado/sessao.js` IMPORTA. A tela passou a ler quem está
+     logado (para o `souOwner` do apagar), e sem estes três o import do módulo
+     estoura na COLETA -- a suíte inteira cai antes do primeiro teste.
+     ⚠️ Molde do `abas_do_painel_0611.teste.js`, que já os declarava. */
+  quandoPerderSessao: () => {},
+  definirToken: () => {},
+  temToken: () => false,
+  relatarErroDeBotao: () => {},
   ErroDeApi: class extends Error {},
 }))
 
@@ -123,6 +148,8 @@ beforeEach(() => {
   estado.checklist = []
   estado.empurrado = []
   estado.observacoes = []
+  estado.campos = CATALOGO
+  estado.camposDaEtapa = {}
   try { localStorage.clear() } catch { /* jsdom sempre tem, mas não custa */ }
 })
 
@@ -348,6 +375,55 @@ describe('os recados em modal (Área D)', () => {
     expect(sistema.findAll('.recado__linha').length).toBe(3)
   })
 
+  /* --------------------------------------------------------------------------
+     A COR DO PLACAR — 11/11
+     🔵 Ele: *"os marcados ficam com em verde e os não marcados ficam em
+     vermelho"*.
+     ⚠️ A classe é o que se pode medir: o jsdom não calcula cor computada, e
+     afirmar sobre `color` aqui seria afirmar sobre nada.
+     ------------------------------------------------------------------------ */
+  it('🔵 o item feito fica verde e o que faltou fica vermelho', async () => {
+    const tela = await montar()
+    await abrirRecados(tela)
+    const sistema = tela.findAll('.recado').find(
+      (b) => b.text().includes('[checklist]'))
+    const linhas = sistema.findAll('.recado__linha')
+    /* A primeira linha é o cabeçalho com o placar — não é item, não tem cor. */
+    expect(linhas[0].classes()).not.toContain('recado__linha--feito')
+    expect(linhas[0].classes()).not.toContain('recado__linha--falta')
+    expect(linhas[1].text()).toContain('Um')
+    expect(linhas[1].classes()).toContain('recado__linha--feito')
+    expect(linhas[2].text()).toContain('Dois')
+    expect(linhas[2].classes()).toContain('recado__linha--falta')
+  })
+
+  it('🚨 o ✓ e o ✗ CONTINUAM no texto — cor não é portador sozinha', async () => {
+    const tela = await montar()
+    await abrirRecados(tela)
+    const sistema = tela.findAll('.recado').find(
+      (b) => b.text().includes('[checklist]'))
+    /* Quem não distingue verde de vermelho tem de continuar lendo o placar.
+       É a mesma régua da pílula do card (âmbar E luminosidade) e do item
+       riscado E esmaecido. */
+    expect(sistema.text()).toContain('✓ Um')
+    expect(sistema.text()).toContain('✗ Dois')
+  })
+
+  it('⚠️ recado de PESSOA que começa com ✓ não é pintado', async () => {
+    /* Pintar qualquer linha com ✓ inventaria significado: só o recado do
+       checklist é placar de etapa. */
+    estado.observacoes = [
+      { id: 20, texto: '✓ falei com o cliente\n✗ não atendeu',
+        em: '2026-11-04T15:00:00-03:00', quem: 'Karla', anexos: [] },
+    ]
+    const tela = await montar()
+    await abrirRecados(tela)
+    const linhas = tela.findAll('.recado__linha')
+    expect(linhas.length).toBe(2)
+    expect(linhas[0].classes()).not.toContain('recado__linha--feito')
+    expect(linhas[1].classes()).not.toContain('recado__linha--falta')
+  })
+
   it('🚨 o anexo é pedido pelo ID, nunca pelo caminho de disco', async () => {
     /* ⚠️ ESTA TRAVA MUDOU DE ALVO EM 05/11, e nao de regra. Ela exigia um
        `<a href>` -- e o `<a href>` era o DEFEITO: a rota do anexo e protegida
@@ -475,5 +551,241 @@ describe('o termo no card (Área E)', () => {
     estado.quadro.filtro_casou_por = ['termo']
     const tela = await montar()
     expect(tela.text()).toContain('casou por termo')
+  })
+})
+
+/* ============================================================================
+   O CAMPO DE TEXTO DA ETAPA — Rastreamento e Devolução (11/11)
+   ----------------------------------------------------------------------------
+   🔵 *"Abaixo de 'Observações', criar um campo de texto chamado
+   'Rastreamento'"* (etapa 677) · *"um campo de texto chamado 'Devolução' (...)
+   Apenas para consulta interna da operadora"* (etapa 15696).
+
+   🚨 A TELA NÃO SABE QUAL ETAPA PEDE QUAL CAMPO -- quem diz é o servidor, no
+   catálogo que a ficha devolve. Estas travas provam isso: trocar a situação do
+   catálogo muda onde a caixa aparece, sem tocar na tela.
+   ========================================================================== */
+describe('o campo de texto da etapa', () => {
+  async function abrirCardEm(situacao) {
+    estado.quadro = quadro({ [situacao]: [card({ situacao_id: situacao })] })
+    const tela = await montar()
+    await tela.find('.card__abrir').trigger('click')
+    await flushPromises()
+    await flushPromises()
+    return tela
+  }
+
+  it('🔵 na etapa 677 a caixa Rastreamento aparece', async () => {
+    const tela = await abrirCardEm(677)
+    const texto = tela.find('.modal__caixa').text()
+    expect(texto).toContain('Rastreamento')
+    expect(texto).toContain('será enviado ao cliente')
+    expect(tela.findAll('input[placeholder="Rastreamento"]').length).toBe(1)
+  })
+
+  it('🔵 na etapa 15696 a caixa Devolução aparece, e diz que é interna', async () => {
+    const tela = await abrirCardEm(15696)
+    const texto = tela.find('.modal__caixa').text()
+    expect(texto).toContain('Devolução')
+    /* 🚨 A diferença entre os dois campos é ESTA FRASE: o rastreio vai ao
+       cliente, a devolução não. Sem ela, a operadora não tem como saber. */
+    expect(texto).toContain('não é enviado ao cliente')
+  })
+
+  it('⚠️ etapa que não pede campo não desenha caixa nenhuma', async () => {
+    const tela = await abrirCardEm(251)
+    expect(tela.findAll('input[placeholder="Rastreamento"]').length).toBe(0)
+    expect(tela.findAll('input[placeholder="Devolução"]').length).toBe(0)
+  })
+
+  it('🚨 a tela DIZ que o código não vai para o Harmonit', async () => {
+    /* A mesma régua da observação: quem escreve precisa saber se chegou ao
+       ERP, e não chega. */
+    const tela = await abrirCardEm(677)
+    expect(tela.find('.modal__caixa').text())
+      .toContain('Não vai para a OS do Harmonit')
+  })
+
+  it('grava pela rota certa, com a chave da etapa', async () => {
+    const tela = await abrirCardEm(677)
+    const caixa = tela.find('input[placeholder="Rastreamento"]')
+    await caixa.setValue('AA123456789BR')
+    await tela.findAll('button').find((b) => b.text() === 'Gravar').trigger('click')
+    await flushPromises()
+    const pedido = estado.postado.find(
+      ([c]) => String(c).includes('/campo-da-etapa'))
+    expect(pedido).toBeTruthy()
+    expect(pedido[1]).toEqual({ numero_os: 17056, chave: 'rastreio',
+                                valor: 'AA123456789BR' })
+  })
+
+  it('⚠️ caixa vazia não grava, e espaço só também não', async () => {
+    const tela = await abrirCardEm(677)
+    const botao = tela.findAll('button').find((b) => b.text() === 'Gravar')
+    expect(botao.attributes('disabled')).toBeDefined()
+    await tela.find('input[placeholder="Rastreamento"]').setValue('   ')
+    expect(botao.attributes('disabled')).toBeDefined()
+    expect(estado.postado.filter(([c]) => String(c).includes('/campo-da-etapa')))
+      .toEqual([])
+  })
+
+  it('🔵 o valor já escrito aparece com quem e quando', async () => {
+    estado.camposDaEtapa = {
+      rastreio: { valor: 'BB999999999BR', quem: 'Karla',
+                  em: '2026-11-10T14:00:00-03:00' },
+    }
+    const tela = await abrirCardEm(677)
+    const texto = tela.find('.modal__caixa').text()
+    expect(texto).toContain('BB999999999BR')
+    expect(texto).toContain('Karla')
+  })
+
+  it('🚨 o rastreio escrito na 677 CONTINUA visível em outra etapa', async () => {
+    /* ⚠️ É o caso de uso real: na 15747 (Aguardando recebimento) o cliente
+       pergunta onde está o item, e o código foi escrito na etapa anterior. */
+    estado.camposDaEtapa = {
+      rastreio: { valor: 'CC777777777BR', quem: 'Karla', em: null },
+    }
+    const tela = await abrirCardEm(15747)
+    expect(tela.find('.modal__caixa').text()).toContain('CC777777777BR')
+    /* E sem caixa para escrever: esta etapa não pede campo. */
+    expect(tela.findAll('input[placeholder="Rastreamento"]').length).toBe(0)
+  })
+})
+
+/* ============================================================================
+   APAGAR OBSERVAÇÃO — 11/11
+   ----------------------------------------------------------------------------
+   🔵 Dele: *"Se excluírem, aparecerá como 'Observação excluida' e log's"* ·
+   *"somente owner pode visualizar o exlcuido, com botão, como no chat
+   interno"* · *"deve ter disponivel exibição da autoria sim, é um dos
+   objetivos, rastreabilidade"*.
+
+   🚨 O CONTEÚDO É ESCONDIDO PELO SERVIDOR, NÃO PELA TELA: para quem não é
+   owner o `texto` chega **nulo**. Estas travas montam as duas respostas
+   possíveis -- é o retrato do que a rota devolve, e não uma invenção da
+   fixture.
+   ========================================================================== */
+describe('apagar observação', () => {
+  /* ⚠️ HELPER PRÓPRIO: o `abrirRecados` do bloco dos recados vive dentro
+     daquele `describe` e não se alcança daqui. Copiar o gesto é melhor que
+     subir a função para o topo do arquivo e dar a dois blocos uma dependência
+     comum que nenhum dos dois pediu. */
+  async function abrirRecados(tela) {
+    await tela.find('.card__abrir').trigger('click')
+    await flushPromises()
+    await tela.findAll('button').find((b) => b.text() === 'Abrir observações')
+      .trigger('click')
+    await flushPromises()
+  }
+
+  /* ⚠️ O `beforeEach` de fora monta o quadro VAZIO -- sem card não há
+     `.card__abrir` para clicar, e o modal dos recados vive dentro do card
+     aberto. */
+  beforeEach(() => { estado.quadro = quadro({ 251: [card()] }) })
+
+  /* O que o servidor manda para quem NÃO é owner: sem texto, sem anexo, com a
+     autoria dos dois lados. */
+  const apagadaFechada = {
+    id: 30, texto: null, em: '2026-11-11T09:00:00-03:00', quem: 'Karla',
+    apagada_em: '2026-11-11T10:00:00-03:00', apagada_por_nome: 'Iago',
+    anexos: [],
+  }
+  /* O que ele manda para o owner: o texto vem. */
+  const apagadaAberta = { ...apagadaFechada, texto: 'o que dizia' }
+
+  const normal = {
+    id: 31, texto: 'recado de gente', em: '2026-11-11T11:00:00-03:00',
+    quem: 'Karla', apagada_em: null, apagada_por_nome: null, anexos: [],
+  }
+  const doSistema = {
+    id: 32, texto: '[sistema] prioridade: Normal → Alta',
+    em: '2026-11-11T11:30:00-03:00', quem: null,
+    apagada_em: null, apagada_por_nome: null, anexos: [],
+  }
+
+  it('🔵 o recado apagado diz "Observação excluída" e não mostra o texto', async () => {
+    estado.observacoes = [apagadaFechada]
+    const tela = await montar()
+    await abrirRecados(tela)
+    const texto = tela.find('.modal--recados').text()
+    expect(texto).toContain('Observação excluída')
+    expect(texto).not.toContain('o que dizia')
+  })
+
+  it('🔵 a AUTORIA fica visível para quem não é owner', async () => {
+    /* É o objetivo que ele nomeou: some o QUE dizia, não QUEM escreveu nem
+       QUEM apagou. */
+    estado.observacoes = [apagadaFechada]
+    const tela = await montar()
+    await abrirRecados(tela)
+    const texto = tela.find('.modal--recados').text()
+    expect(texto).toContain('Karla')
+    expect(texto).toContain('excluída por Iago')
+  })
+
+  it('🚨 quem não é owner NÃO tem o botão "ver o que dizia"', async () => {
+    estado.observacoes = [apagadaFechada]
+    const tela = await montar()
+    await abrirRecados(tela)
+    const botoes = tela.findAll('.recado__revelar')
+      .filter((b) => b.text().includes('ver o que dizia'))
+    expect(botoes.length).toBe(0)
+  })
+
+  it('⚠️ o anexo do recado apagado não aparece', async () => {
+    /* Deixar `comprovante-pix.pdf` ao lado de "Observação excluída" devolveria
+       pela legenda o que o apagar tirou do texto. */
+    estado.observacoes = [{
+      ...apagadaFechada,
+      anexos: [{ id: 7, nome_original: 'comprovante-pix.pdf', bytes: 10,
+                 mime: 'application/pdf' }],
+    }]
+    const tela = await montar()
+    await abrirRecados(tela)
+    expect(tela.find('.modal--recados').text())
+      .not.toContain('comprovante-pix.pdf')
+  })
+
+  it('🔵 o botão "excluir" aparece no recado de gente', async () => {
+    estado.observacoes = [normal]
+    const tela = await montar()
+    await abrirRecados(tela)
+    const botao = tela.findAll('.recado__revelar')
+      .find((b) => b.text() === 'excluir')
+    expect(botao).toBeTruthy()
+  })
+
+  it('🚨 e NÃO aparece no recado do SISTEMA', async () => {
+    /* Aquele texto é o log (checklist, prioridade, rastreio). Apagar log é
+       apagar a prova. */
+    estado.observacoes = [doSistema]
+    const tela = await montar()
+    await abrirRecados(tela)
+    const botao = tela.findAll('.recado__revelar')
+      .find((b) => b.text() === 'excluir')
+    expect(botao).toBeUndefined()
+  })
+
+  it('⚠️ nem no recado JÁ apagado', async () => {
+    estado.observacoes = [apagadaFechada]
+    const tela = await montar()
+    await abrirRecados(tela)
+    const botao = tela.findAll('.recado__revelar')
+      .find((b) => b.text() === 'excluir')
+    expect(botao).toBeUndefined()
+  })
+
+  it('clicar em excluir chama a rota certa, com o id do recado', async () => {
+    estado.observacoes = [normal]
+    const tela = await montar()
+    await abrirRecados(tela)
+    await tela.findAll('.recado__revelar')
+      .find((b) => b.text() === 'excluir').trigger('click')
+    await flushPromises()
+    const pedido = estado.postado.find(
+      ([c]) => String(c).includes('/observacao/') && String(c).endsWith('/apagar'))
+    expect(pedido).toBeTruthy()
+    expect(String(pedido[0])).toBe('/api/paineis/operacao/observacao/31/apagar')
   })
 })

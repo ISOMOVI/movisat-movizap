@@ -267,9 +267,20 @@ TELAS = [
         # conversa -- tem definicao, tem campo obrigatorio e tem anexo, e
         # nenhuma dessas tres coisas existe numa mensagem.
         #
-        # ⚠️ `permissao: equipe` = owner e admin, a mesma regua da Fila e do
-        # Historico. Nao e `atendimento` porque a solicitacao traz dado de
-        # cadastro (CNPJ, endereco, valor) de quem ainda nao e cliente.
+        # 🔵 11/11, DECISAO DELE: *"deixe exclusiva ao owner mesmo assim"*.
+        # Era `equipe` (owner + admin) desde 22/10, pela mesma regua da Fila e
+        # do Historico -- a solicitacao traz dado de cadastro (CNPJ, endereco,
+        # valor) de quem ainda nao e cliente. Ele apertou mais.
+        #
+        # ✅ E ISSO CONSERTA UM DESENCONTRO MEDIDO em 11/11: a FRM_1.1 era
+        # `equipe` e a PNL_1.1 (o painel que APONTA para ela, com o link "Ver o
+        # chamado em Solicitacoes") e `owner` -- entao o admin via a
+        # solicitacao e nao via o card. Agora as duas pedem o mesmo.
+        #
+        # ⚠️ EFEITO: o selo de solicitacoes novas no menu e o interruptor de
+        # aviso da CFG_11.1 dependem de alcancar esta tela, entao os dois
+        # deixam de existir para o admin. E consequencia da decisao, nao
+        # defeito.
         #
         # ⚠️ O GRUPO E "Atendimento" DE PROPOSITO, e nao "Paineis": esta tela e
         # a CAIXA do que chega (ler, mudar estado, baixar anexo), e painel e
@@ -284,7 +295,7 @@ TELAS = [
         "icone": "bi-ui-checks",
         "descricao": "O que chega pelos formulários próprios.",
         "grupo": "Atendimento",
-        "permissao": "equipe",
+        "permissao": "owner",
         "fase": 1,
     },
     # ---- CAD: cadastro ----
@@ -770,6 +781,66 @@ TELAS = [
         "rota": "/config/vinculo-tecnicos",
         "icone": "bi-person-vcard",
         "descricao": "O que falta para o agendamento achar o técnico na OS do Harmonit.",
+        "permissao": "owner",
+        "grupo": "Configuração",
+        "fase": 1,
+        "aba_de": "CFG_0.1",
+    },
+    {
+        # 🔵 11/11, pedido dele: *"Em configurações tela nova de 'Disparos
+        # Operação' -> Deixar o campo de menagens que são enviadas em cada etapa
+        # do fluxo com interruptor de 'ligado e desligado'"* · *"nasce em branco
+        # e com interruptor desligado ainda, na tela de config exclusiva
+        # owner"*.
+        #
+        # 🚨 ESTA ABA GOVERNA A PRIMEIRA COISA DO PAINEL QUE FALA COM O CLIENTE
+        # SOZINHA. Até aqui, nada no painel enviava nada sem alguém clicar. O
+        # que protege é a mensagem nascer vazia e desligada -- e o banco não
+        # deixar ligar vazia (CHECK da migração 102).
+        #
+        # 🔵 `owner` pela régua que ele fixou no mesmo dia: *"toda tela nova
+        # nasce somente owner"*.
+        #
+        # ⚠️ Código reservado desde 11/11 de manhã, e havia trava provando que
+        # seguia livre (`teste_checklist_de_cards`). A trava muda de alvo agora:
+        # passa a afirmar que a `CFG_16.1` **existe** e é dos disparos.
+        "codigo": "CFG_16.1",
+        "titulo": "Disparos Operação",
+        "rota": "/config/disparos-operacao",
+        "icone": "bi-send",
+        "descricao": "A mensagem que cada etapa manda ao cliente.",
+        "permissao": "owner",
+        "grupo": "Configuração",
+        "fase": 1,
+        "aba_de": "CFG_0.1",
+    },
+    {
+        # 🔵 11/11, sugestão minha que ele aceitou: *"boa sugestão, pode fazer
+        # uma outra aba só para isso de 'Checklist de Cards' vamos centralizar
+        # os fixos ali"*.
+        #
+        # 🚨 ESTA ABA NASCE PARA ROTAS QUE JÁ EXISTIAM SEM TELA. As rotas de
+        # modelo do checklist estão no ar desde 04/11, com permissão da Geral
+        # (`CFG_7.1`) -- e **ninguém nunca pôde usá-las**, porque não havia tela
+        # nenhuma e nenhuma trava as cobria. Código no ar sem porta e sem trava
+        # é pior que código ausente: parece pronto.
+        #
+        # ⚠️ A PERMISSÃO DE ESCRITA MUDA DE `CFG_7.1` PARA CÁ, e é o certo:
+        # mexer na lista da etapa muda o card de todo mundo, e agora existe uma
+        # tela cuja única função é isso. Ler continua sendo de quem opera
+        # (`PNL_1.1`) -- o card precisa saber onde há checklist.
+        #
+        # 🔵 `owner` por decisão dele de 11/11: *"toda tela nova nasce somente
+        # owner"*.
+        #
+        # ⚠️ Código conferido contra `CODIGOS_APOSENTADOS` e contra os códigos
+        # em uso: `CFG_17.1` está livre. A `CFG_16.1` fica reservada para os
+        # *Disparos Operação*, que é a outra aba que ele pediu no mesmo dia.
+        "codigo": "CFG_17.1",
+        "titulo": "Checklist de Cards",
+        "rota": "/config/checklist-de-cards",
+        "icone": "bi-list-check",
+        "descricao": "A lista fixa de cada etapa do painel da Operação.",
         "permissao": "owner",
         "grupo": "Configuração",
         "fase": 1,

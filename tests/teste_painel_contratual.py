@@ -157,7 +157,7 @@ def teste_a_grafia_e_a_DELE():
 # ============================================================================
 # O QUADRO E A ROTA
 # ============================================================================
-def teste_o_quadro_abre_com_as_seis_colunas_e_zero_cards():
+def teste_o_quadro_abre_com_as_seis_colunas_dele():
     """🔴 Vazio por decisão dele: *"as regras de criação de cards (...) ainda
     ficam em branco mesmo"*. A `PainelAba` escreve "Nenhum card nesta aba
     ainda." -- quadro vazio que não diz por quê é `M12`."""
@@ -165,7 +165,22 @@ def teste_o_quadro_abre_com_as_seis_colunas_e_zero_cards():
     assert q is not None
     assert q["painel"] == "contratual"
     assert [c["titulo"] for c in q["colunas"]] == AS_SEIS
-    assert q["total"] == 0
+    # 🚨 ERA `assert q["total"] == 0`, E ELA ESTAVA CERTA EM 06/11: o painel
+    # nasceu desenhado e **vazio por decisão dele**, com a origem dos cards em
+    # aberto. ⚠️ Em 11/11 ele decidiu a origem, e a trava passou a **reprovar
+    # quando o sistema funciona** -- o pior tipo de vermelho, porque ensina a
+    # ignorar o placar.
+    #
+    # O que fica no lugar não depende do que a operação tem hoje: todo card
+    # que aparecer tem de estar numa coluna DESTA aba. É assim que se pega
+    # card órfão sem exigir fila vazia.
+    etapas_desta_aba = {c["etapa_id"] for c in q["colunas"]}
+    for coluna in q["colunas"]:
+        for card in coluna["cards"]:
+            assert card["etapa_id"] in etapas_desta_aba, card
+    assert q["total"] == sum(len(c["cards"]) for c in q["colunas"])
+    # ⚠️ E card fora de coluna é CONTADO, nunca escondido (`M12`).
+    assert q["fora_do_quadro"] == 0, q["fora_do_quadro"]
     assert all(c["situacao_id"] is None for c in q["colunas"])
 
 

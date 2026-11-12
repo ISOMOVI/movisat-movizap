@@ -37,6 +37,18 @@ import logoMovisat from './movisat_logo.png'
 
 const slug = (window.location.pathname.split('/f/')[1] || '').split(/[?#/]/)[0]
 
+/* 🔵 O CONVITE (11/11): *"pré-preenchidos quando abertos pelo botão dentro do
+   chat"*.
+
+   🚨 O QUE VEM NA URL É SÓ UM BILHETE OPACO. Os valores vêm de uma rota, e
+   nunca da query string: endereço entra no log de acesso do servidor, no
+   histórico do navegador de quem abriu e em qualquer repasse do link por
+   WhatsApp. Esconder em base64 não resolveria nada disso.
+
+   ⚠️ Bilhete ausente é o caso NORMAL — quem chega pelo site não tem nenhum, e
+   a página abre vazia como sempre. */
+const bilheteDoConvite = new URLSearchParams(window.location.search).get('c') || ''
+
 const def = ref(null)
 const valores = reactive({})
 const anexos = reactive({})
@@ -56,6 +68,10 @@ const sugestoes = reactive({})
    para placa ativa na WESO. */
 const placasConferidas = reactive({})
 const buscando = ref(false)
+/* 🔵 Veio de um convite do chat E trouxe valor? Então a tela DIZ isso -- campo
+   preenchido sem explicação faz a pessoa achar que a Movisat já tem mais do que
+   tem, ou que outra pessoa mexeu ali. */
+const veioDeConvite = ref(false)
 /* 🚨 Quem a BUSCA confirmou. Vazio = nenhuma empresa vinculada, e é o que
    dispara a caixa de diálogo antes de enviar (pedido dele, 29/10). */
 const clienteAchado = ref('')
@@ -88,8 +104,45 @@ async function carregar() {
     def.value = await r.json()
     desafio.value = def.value.desafio
     document.title = def.value.titulo || 'Formulário'
+    await preencherDoConvite()
   } catch {
     erro.value = 'Não consegui abrir o formulário agora. Tente de novo em instantes.'
+  }
+}
+
+/* 🔵 O convite do chat: os valores que a Movisat já sabe, prontos na tela.
+
+   🚨 SUGESTÃO, NUNCA VERDADE: tudo fica editável, e o envio revalida no
+   servidor como sempre. Um convite de uma semana atrás pode trazer um CNPJ que
+   mudou, e quem confirma é a pessoa que está lendo.
+
+   ⚠️ **Falha em silêncio, de propósito.** Bilhete vencido, formulário
+   desligado depois do convite, rota fora do ar: a página abre **vazia**, que é
+   exatamente o que ela fazia antes do convite existir. Mostrar "não deu para
+   pré-preencher" assustaria quem só quer escrever um chamado.
+
+   ⚠️ E não sobrescreve o que a pessoa já digitou: ela pode ter começado a
+   preencher antes de a resposta chegar. */
+async function preencherDoConvite() {
+  if (!bilheteDoConvite) return
+  try {
+    const r = await fetch(
+      `/api/publico/convite/${encodeURIComponent(bilheteDoConvite)}`)
+    if (!r.ok) return
+    const c = await r.json()
+    /* ⚠️ O convite é de OUTRO formulário: não preenche nada. O link pode ter
+       sido editado à mão, e sugerir o valor de um formulário no campo de
+       outro escreveria dado no lugar errado. */
+    if (!c || c.slug !== slug) return
+    const nomes = new Set((def.value?.campos || []).map((x) => x.nome))
+    for (const [nome, valor] of Object.entries(c.valores || {})) {
+      if (!nomes.has(nome)) continue
+      if (valores[nome] !== undefined && valores[nome] !== '') continue
+      valores[nome] = valor
+    }
+    veioDeConvite.value = Object.keys(c.valores || {}).length > 0
+  } catch {
+    /* ver o comentário acima: silêncio é o desenho */
   }
 }
 
@@ -239,6 +292,9 @@ async function enviar() {
   try {
     const corpo = new FormData()
     corpo.append('valores', JSON.stringify(valores))
+    /* ⚠️ Vai junto só para MARCAR o convite como usado -- o servidor não lê
+       valor nenhum dele no envio. */
+    if (bilheteDoConvite) corpo.append('convite', bilheteDoConvite)
     corpo.append('abertura', def.value.abertura)
     corpo.append('isca', document.getElementById('isca')?.value || '')
     if (desafio.value) {
@@ -325,6 +381,10 @@ onMounted(carregar)
         Etapa {{ etapa + 1 }} de {{ etapas.length }}
       </p>
 
+      <p v-if="veioDeConvite" class="apoio apoio--convite">
+        Já preenchemos o que sabemos. Confira antes de enviar e corrija o que
+        estiver diferente.
+      </p>
       <CamposDoFormulario
         :campos="def.campos"
         :regras="def.regras"
@@ -391,6 +451,13 @@ onMounted(carregar)
 </template>
 
 <style scoped>
+/* ⚠️ Tom de informação, não de alerta: não houve problema nenhum. */
+.apoio--convite {
+  border-left: 3px solid var(--info, #1565c0);
+  padding-left: .75rem;
+  margin-bottom: 1rem;
+}
+
 .pagina {
   min-height: 100vh;
   padding: var(--e-5) var(--e-4);

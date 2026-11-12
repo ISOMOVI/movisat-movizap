@@ -26,13 +26,53 @@ import { pedirBlob } from '../api/cliente.js'
 const props = defineProps({
   recado: { type: Object, required: true },
   quando: { type: Function, required: true },
+  /* 🔵 11/11: apagar observação. `souOwner` decide se o botão
+     "ver o que dizia" existe -- e **quem diz é o servidor**: para quem não é
+     owner o `texto` já vem nulo, então o botão não teria o que revelar. */
+  souOwner: { type: Boolean, default: false },
+  podeApagar: { type: Boolean, default: false },
 })
+
+const emit = defineEmits(['apagar'])
 
 /* `[checklist]` e `[sistema]` são os dois prefixos que o servidor usa. */
 const doSistema = computed(
   () => /^\[(checklist|sistema)\]/.test(props.recado.texto || ''))
 
+/* 🔵 11/11, dele: *"os marcados ficam com em verde e os não marcados ficam
+   em vermelho"*.
+
+   🚨 A CLASSE SAI DO PRÓPRIO ✓/✗, QUE CONTINUA NO TEXTO. Cor sozinha não é
+   portador de informação -- quem não distingue verde de vermelho continua
+   lendo o sinal, exatamente como a pílula do card usa âmbar E luminosidade
+   diferente, e como o item feito do checklist é riscado E esmaecido.
+   ⚠️ Só vale no recado do CHECKLIST: um recado de pessoa que comece com ✓ não
+   é placar de etapa, e pintá-lo seria inventar significado. */
 const linhas = computed(() => String(props.recado.texto || '').split('\n'))
+
+const doChecklist = computed(
+  () => /^\[checklist\]/.test(props.recado.texto || ''))
+
+function classeDaLinha(linha) {
+  if (!doChecklist.value) return null
+  const t = String(linha || '').trimStart()
+  if (t.startsWith('✓')) return 'recado__linha--feito'
+  if (t.startsWith('✗')) return 'recado__linha--falta'
+  return null
+}
+
+/* 🔵 11/11, pedido dele: *"Se excluírem, aparecerá como 'Observação excluida' e
+   log's"* · *"somente owner pode visualizar o exlcuido, com botão, como no chat
+   interno"* · e a autoria fica: *"é um dos objetivos, rastreabilidade"*. */
+const apagada = computed(() => !!props.recado.apagada_em)
+
+/* 🚨 O OWNER REVELA; OS OUTROS NÃO TÊM O QUE REVELAR. O `texto` vem nulo do
+   servidor para quem não é owner, então a condição é dupla de propósito: nem a
+   tela oferece o gesto, nem haveria conteúdo se oferecesse. */
+const podeRevelar = computed(
+  () => apagada.value && props.souOwner && !!props.recado.texto)
+
+const original = ref(false)
 
 function tamanho(bytes) {
   if (!bytes) return ''
@@ -77,13 +117,31 @@ async function baixar(anexo) {
 </script>
 
 <template>
-  <li class="recado" :class="{ 'recado--sistema': doSistema }">
+  <li class="recado"
+      :class="{ 'recado--sistema': doSistema, 'recado--apagada': apagada }">
     <div class="recado__balao">
-      <p v-for="(linha, i) in linhas" :key="i" class="recado__linha">{{ linha }}</p>
+      <!-- O recado APAGADO: a frase no lugar do conteúdo. -->
+      <p v-if="apagada && !original" class="recado__apagada">
+        <i class="bi bi-slash-circle" aria-hidden="true"></i>
+        Observação excluída
+        <button v-if="podeRevelar" type="button" class="recado__revelar"
+                @click="original = true">ver o que dizia</button>
+      </p>
+
+      <template v-else>
+        <p v-if="apagada" class="recado__apagada">
+          excluída ·
+          <button type="button" class="recado__revelar"
+                  @click="original = false">esconder</button>
+        </p>
+        <p v-for="(linha, i) in linhas" :key="i"
+           class="recado__linha" :class="classeDaLinha(linha)">{{ linha }}</p>
+      </template>
 
       <p v-if="erroDoAnexo" class="recado__erro" role="alert">{{ erroDoAnexo }}</p>
 
-      <ul v-if="recado.anexos && recado.anexos.length" class="recado__anexos">
+      <ul v-if="!apagada && recado.anexos && recado.anexos.length"
+          class="recado__anexos">
         <li v-for="a in recado.anexos" :key="a.id">
           <!-- ⚠️ O ID, nunca o caminho de disco. E abre em outra aba: baixar
                nao pode tirar quem opera do painel.
@@ -111,6 +169,24 @@ async function baixar(anexo) {
       <span v-if="doSistema">registrado pelo sistema</span>
       <span v-else>{{ recado.quem || 'sem autor' }}</span>
       <span>· {{ quando(recado.em) }}</span>
+
+      <!-- 🔵 A AUTORIA DO APAGAR FICA VISÍVEL PARA TODOS, e é o objetivo que
+           ele nomeou: *"deve ter disponivel exibição da autoria sim, é um dos
+           objetivos, rastreabilidade"*. O que some é o conteúdo, não o rastro:
+           quem escreveu, quando, quem apagou e quando continuam na tela. -->
+      <span v-if="apagada" class="recado__marca">
+        · excluída por {{ recado.apagada_por_nome || 'sem autor' }}
+        em {{ quando(recado.apagada_em) }}
+      </span>
+
+      <!-- 🚨 QUALQUER PESSOA COM O PAINEL APAGA, decisão dele (11/11), e SEM
+           janela de tempo -- diferente do chat interno, onde só o autor apaga e
+           só por 48 h. ⚠️ Não aparece no recado do SISTEMA: aquele texto é o
+           log (checklist, prioridade, rastreio), e apagar log é apagar a
+           prova. -->
+      <button v-if="!apagada && !doSistema && podeApagar" type="button"
+              class="recado__revelar" title="Excluir esta observação"
+              @click="emit('apagar', recado)">excluir</button>
     </p>
   </li>
 </template>
@@ -142,6 +218,26 @@ async function baixar(anexo) {
 
 /* 🚨 O recado do sistema é visivelmente outro: barra na lateral E a frase
    "registrado pelo sistema" no pé. Cor sozinha não é portador. */
+/* 🚨 VERDE E VERMELHO COM O SINAL DO LADO -- ver o comentário do
+   `classeDaLinha`. ⚠️ Os tokens da casa, nunca cor crua: cor crua aqui
+   ficaria errada no tema escuro. */
+/* O balão apagado: itálico e sublinhado pontilhado, molde exato do
+   `.balao__apagada` do chat interno -- os dois estados têm de parecer o mesmo
+   estado, porque são. */
+.recado__apagada {
+  margin: 0; font-style: italic; color: var(--texto-apagado);
+  display: flex; align-items: center; gap: 4px; flex-wrap: wrap;
+}
+.recado__revelar {
+  background: none; border: 0; padding: 0; font: inherit; color: inherit;
+  cursor: pointer; text-decoration: underline dotted; text-underline-offset: 2px;
+}
+.recado__revelar:hover { text-decoration: underline; }
+.recado__marca { color: var(--texto-apagado); }
+
+.recado__linha--feito { color: var(--ok-texto, #15803D); }
+.recado__linha--falta { color: var(--erro, #B91C1C); }
+
 .recado--sistema .recado__balao {
   border-left: 3px solid var(--acento, #1B75BB);
   background: transparent;

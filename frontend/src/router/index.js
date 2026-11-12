@@ -403,6 +403,23 @@ const rotas = [
     meta: { codigo: 'CFG_15.1', titulo: 'Permissão dos painéis' },
   },
   {
+    // 🔵 11/11: a aba do *Checklist de Cards* (`CFG_17.1`). As rotas de modelo
+    // existiam desde 04/11 SEM TELA -- esta é a porta que faltava.
+    path: '/config/checklist-de-cards',
+    name: 'CFG_17.1',
+    component: Configuracoes,
+    meta: { codigo: 'CFG_17.1', titulo: 'Checklist de Cards' },
+  },
+  {
+    // 🔵 11/11: a aba dos *Disparos Operação* (`CFG_16.1`). 🚨 Governa a
+    // primeira coisa do painel que fala com o cliente sozinha -- e é por isso
+    // que tudo nela nasce desligado.
+    path: '/config/disparos-operacao',
+    name: 'CFG_16.1',
+    component: Configuracoes,
+    meta: { codigo: 'CFG_16.1', titulo: 'Disparos Operação' },
+  },
+  {
     // 🔵 Decisão 9 dele (19/10): a numeração do orçamento, só do owner.
     path: '/config/orcamento',
     name: 'CFG_13.1',

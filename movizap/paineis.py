@@ -57,7 +57,7 @@ aqui dentro.
 import logging
 from datetime import date, datetime
 
-from . import (banco, chamado_os, checklist, fpsl_ponte,
+from . import (banco, chamado_os, checklist, fpsl_ponte, horas_uteis,
                passagem, pipeline)
 from .operacao import DadoInvalido
 
@@ -105,10 +105,26 @@ SITUACOES = (
     (16490, "Analise de Equipamentos Retornados"),
     (15694, "Atendimento finalizado"),
     (16491, "Não atendido"),
-    (15746, "Financeiro"),
-    (15695, "Pós venda"),
-    (16492, "Contratual"),
 )
+
+# 🚨 AS TRES QUE SAIRAM EM 11/11, e para onde foram:
+#
+#   15746 Financeiro  -> painel Financeiro, etapa "Nova solicitação"
+#   15695 Pós venda   -> painel Pós-venda,  etapa "Nova solicitação"
+#   16492 Contratual  -> painel Contratual, primeira etapa
+#
+# 🔵 Decisao dele, 11/11, sobre uma OS de ressarcimento que nasceu na coluna
+# `Financeiro` DESTE painel: *"não é nesse financeiro que deve nascer, essas
+# etapas finais do OP devem ser excluídas e deveria ter nascido no painel
+# Financeiro, na etapa correta 'Nova solicitação'"*.
+#
+# 🚨 ELAS NAO FORAM APAGADAS DA OPERACAO: foram REENDERECADAS. O destino vive
+# em `pipeline_etapa.recebe_situacao` (migracao 106), porque e decisao dele e
+# muda sem deploy -- ao contrario das 14 que ficam, que o ERP manda.
+#
+# ⚠️ E SE O DESTINO FOR APAGADO, a OS cai em `fora_do_quadro` e e CONTADA, nao
+# escondida. Nenhuma OS pode sumir de todas as telas por causa de um cadastro.
+SITUACOES_REENDERECADAS = (15746, 15695, 16492)
 
 # 🔵 29/10: AS DUAS COLUNAS QUE NÃO ERAM SITUAÇÃO SAÍRAM -- *"qualquer aba
 # fora dessas não deve estar no painel"*. E o motivo de cada uma deixou de
@@ -408,6 +424,16 @@ def quadro(painel: str, so_abertas: bool = True,
     nomes = _nomes_de_cliente({o.get("cliente_id") for o in os_do_erp
                                if o.get("cliente_id")})
 
+    # 🚨 ANTES DE DISTRIBUIR: a OS cuja situacao tem etapa noutro painel ganha
+    # o card dela LA. Aqui porque este e o unico lugar que ja leu a ponte --
+    # e dentro de `try` porque semear e efeito colateral: falhar nao pode
+    # tirar o quadro do ar.
+    try:
+        pipeline.semear_os(os_do_erp)
+    except Exception:  # noqa: BLE001
+        log.exception("painel %s: nao deu para semear os cards dos outros "
+                      "paineis", painel)
+
     conhecidas = {sid for sid, _ in SITUACOES}
     colunas = [{"chave": f"s{sid}", "titulo": nome, "situacao_id": sid,
                 "nota": None, "cards": []} for sid, nome in SITUACOES]
@@ -415,12 +441,47 @@ def quadro(painel: str, so_abertas: bool = True,
     # -- *"antes de 'Nova solicitacao'"*. ⚠️ `situacao_id` NULO e o que a marca
     # como etapa nossa: a tela ja nao desenha a linha *"situacao N no Harmonit"*
     # quando ele e nulo, e o arrasto ja esta desligado para card sem OS.
-    etapa_chamados = _etapa_dos_chamados() if painel == "operacao" else None
-    if etapa_chamados:
-        colunas.insert(0, {"chave": CHAVE_CHAMADOS, "titulo": "Chamados",
-                           "situacao_id": None, "etapa_id": etapa_chamados["id"],
-                           "nota": None, "cards": []})
+    # 🔵 11/11: AS ETAPAS NOSSAS ENTRAM ONDE ELAS DIZEM QUE ENTRAM. A
+    # `Chamados` vem na frente de todas (`depois_da_situacao` nulo) e a
+    # `Serviço Realizado` **entre a 1316 e a 15694** -- que é a ordem que ele
+    # descreveu: *"moverão para la e depois auditarão o card e por fim,
+    # atendimento finalizado"*.
+    #
+    # 🚨 "ENTRE" NÃO SE DIZ COM UM NÚMERO SOLTO: a etapa carrega a situação
+    # DEPOIS da qual ela aparece (migração 105). Renumerar as 17 no banco seria
+    # copiar para cá uma lista que vive no código e que o ERP manda.
+    #
+    # ⚠️ `situacao_id` NULO é o que marca a coluna como nossa: a tela usa isso
+    # para saber que mover ali não escreve no ERP.
+    etapas_nossas = (pipeline.etapas_nossas_da_operacao()
+                     if painel == "operacao" else [])
+    for etapa in etapas_nossas:
+        coluna = {"chave": f"e{etapa['id']}", "titulo": etapa["titulo"],
+                  "situacao_id": None, "etapa_id": etapa["id"],
+                  "nota": None, "cards": []}
+        # A `Chamados` mantém a chave histórica: 22 travas e o arrasto a usam.
+        if etapa["titulo"] == "Chamados":
+            coluna["chave"] = CHAVE_CHAMADOS
+        depois = etapa.get("depois_da_situacao")
+        if depois is None:
+            colunas.insert(0, coluna)
+            continue
+        onde = next((i for i, c in enumerate(colunas)
+                     if c["situacao_id"] == depois), None)
+        # ⚠️ Âncora que não existe mais (situação renomeada ou fora das 17) põe
+        # a coluna no FIM, e não a esconde: coluna sumida leva card com ela.
+        colunas.insert(onde + 1 if onde is not None else len(colunas), coluna)
+
     por_chave = {c["chave"]: c for c in colunas}
+
+    # 🚨 AS OS QUE ESTÃO NUMA ETAPA NOSSA NÃO VÃO PARA A COLUNA DA SITUAÇÃO
+    # DELAS. É o card com duas posições: a OS segue em 1316 no Harmonit e o
+    # card mora aqui até alguém movê-lo para `Atendimento finalizado`.
+    os_em_etapa_nossa = {}
+    if painel == "operacao" and etapas_nossas:
+        aba = pipeline.aba_por_codigo(ABA_DA_OPERACAO)
+        if aba:
+            os_em_etapa_nossa = pipeline.cards_por_os(aba["id"])
 
     # 🚨 O que não tem coluna é CONTADO, não escondido (ver o cabeçalho).
     falhas = chamado_os.falhas_em_aberto(painel)
@@ -431,6 +492,11 @@ def quadro(painel: str, so_abertas: bool = True,
     # 🔵 Ele, 29/10: o NÚMERO do chamado vale mais que a contagem.
     quais_nunca = chamado_os.quais_sem_tentativa(painel)
     fora = {"sem_os": 0, "situacao_fora": 0, "situacoes": [],
+            # 🔵 11/11: quantas OS desta leitura moram agora em OUTRO painel.
+            # ⚠️ Nao e defeito nem pendencia: e informacao, e a tela a escreve
+            # como informacao -- "2 OS estao no painel Financeiro", nao "2 OS
+            # fora do quadro".
+            "noutro_painel": 0,
             "os_falhou": falhas["quantas"],
             "os_falhou_chamados": falhas["chamados"],
             "os_falhou_em": falhas["ultima"],
@@ -447,7 +513,26 @@ def quadro(painel: str, so_abertas: bool = True,
     vistos = set()
 
     def _colocar(card: dict, situacao) -> None:
-        """Põe o card na coluna da situação dele, ou conta como fora."""
+        """Põe o card na coluna da situação dele, ou conta como fora.
+
+        🔵 11/11: ou na ETAPA NOSSA, quando a OS está pousada numa.
+        """
+        etapa_nossa = os_em_etapa_nossa.get(card.get("numero_ordem"))
+        if etapa_nossa:
+            alvo = por_chave.get(f"e{etapa_nossa}")
+            if alvo is not None:
+                # ⚠️ O card leva a situação REAL do ERP junto: é ela que a
+                # trava de concorrência compara quando alguém o mover de volta.
+                alvo["cards"].append(card)
+                return
+        # 🚨 REENDERECADA NAO E "FORA DO QUADRO". A linha do `fora_do_quadro`
+        # avisa *"ha OS que nenhuma coluna mostra"*; estas estao noutro
+        # painel, por decisao dele. Conta-las ali seria a tela mentindo (M12)
+        # -- e foi o primeiro efeito que a medicao mostrou depois de tirar as
+        # tres colunas.
+        if situacao in SITUACOES_REENDERECADAS:
+            fora["noutro_painel"] += 1
+            return
         if situacao not in conhecidas:
             fora["situacao_fora"] += 1
             # ⚠️ O número cru entra na lista, nunca um rótulo inventado -- é a
@@ -545,12 +630,27 @@ def quadro(painel: str, so_abertas: bool = True,
     # ---- os cards de CHAMADO, que nao sao OS ----------------------------
     # 🚨 ESTES VEM DO MOTOR DE ETAPAS NOSSAS (`movizap/pipeline.py`), e nao da
     # ponte: chamado nao tem OS, entao nao ha o que pedir ao Harmonit.
-    if etapa_chamados:
-        for c in pipeline.cards_da_aba(etapa_chamados["aba_id"],
-                                       teto=TETO_CARDS_POR_COLUNA):
-            if c["etapa_id"] != etapa_chamados["id"]:
-                continue
-            por_chave[CHAVE_CHAMADOS]["cards"].append(_card_do_chamado(c, nomes))
+    # ⚠️ UMA LEITURA PARA TODAS AS ETAPAS NOSSAS, e nao uma por etapa: sao duas
+    # hoje (`Chamados` e `Servico Realizado`) e serao mais.
+    # 🚨 E O CARD DE CHAMADO SO ENTRA NA COLUNA DELE: card com `numero_os` ja
+    # foi colocado pelo `_colocar`, junto da OS -- aqui entram so os que nao
+    # tem OS, que e o que faz deles um chamado.
+    if etapas_nossas:
+        aba_nossa = pipeline.aba_por_codigo(ABA_DA_OPERACAO)
+        por_etapa = {e["id"]: e for e in etapas_nossas}
+        if aba_nossa:
+            for c in pipeline.cards_da_aba(aba_nossa["id"],
+                                           teto=TETO_CARDS_POR_COLUNA):
+                if c.get("numero_os"):
+                    continue
+                etapa = por_etapa.get(c["etapa_id"])
+                if not etapa:
+                    continue
+                chave = (CHAVE_CHAMADOS if etapa["titulo"] == "Chamados"
+                         else f"e{etapa['id']}")
+                alvo = por_chave.get(chave)
+                if alvo is not None:
+                    alvo["cards"].append(_card_do_chamado(c, nomes))
 
     # ---- os cards das nossas solicitações que a ponte não trouxe ---------
     for linha in linhas:
@@ -747,6 +847,16 @@ def _card_do_chamado(c: dict, nomes: dict) -> dict:
         "cliente_id": c.get("cliente_id"),
         "resumo": _resumo(valores) or None,
         "anexos": 0,
+        # 🚨 A CHAVE DE EXIBICAO DA OS, e ela e SEPARADA do `numero_ordem`
+        # de proposito (11/11): desde a migracao 106 ha card COM OS em etapa
+        # nossa -- as OS reenderecadas para os paineis Financeiro, Pos-venda e
+        # Contratual. O operador precisa ver QUAL OS e.
+        #
+        # ⚠️ E `numero_ordem` CONTINUA NULO: e esse nulo que as duas guardas da
+        # tela leem para manter o card nao-arrastavel e sem `<select>` de
+        # mover. Reusar o `numero_ordem` para exibir ligaria o arrasto para o
+        # ERP numa aba cujo mover escreve so no nosso banco.
+        "numero_os": c.get("numero_os"),
         # ⚠️ OS NULOS QUE FAZEM O CARD SER UM CHAMADO:
         "os_id": None,
         "numero_ordem": None,
@@ -758,7 +868,17 @@ def _card_do_chamado(c: dict, nomes: dict) -> dict:
         "placas": [],
         "tecnicos": [],
         "visto_em": None,
-        "etapa_desde": None,
+        # 🔵 11/11: *"controle de atraso o contador de tempo de etapa"*.
+        # 🚨 ERA `None` FIXO, E A TELA DIZIA "não medido" EM TODO CARD DE
+        # CHAMADO -- o contador existia no `PainelOperacao.vue` desde o Bloco C
+        # e nunca teve o que mostrar aqui. Agora vem da `pipeline_passagem`,
+        # pelo `cards_da_aba`.
+        "etapa_desde": c.get("etapa_desde"),
+        # 🔵 *"Abrirá com prazo de 24hrs uteis (08:00 - 18:00) para conclusão,
+        # apenas informativo do card e controle de atraso"*, com a janela que
+        # ele fixou depois: 08:30-17:00.
+        # ⚠️ INFORMATIVO: nada no card depende disto para funcionar.
+        "prazo": horas_uteis.prazo_do_chamado(c.get("criado_em")),
         "observacoes": c.get("observacoes") or 0,
         "prioridade": None,
         "prioridade_nome": None,
@@ -815,6 +935,24 @@ def quadro_da_aba(codigo_tela: str) -> dict | None:
     if not aba:
         return None
     etapas = pipeline.etapas(aba['id'])
+
+    # 🚨 ESTA ABA SEMEIA O QUE E DESTA ABA, se alguma etapa dela recebe
+    # situacao do ERP (migracao 106). ⚠️ Sem isto, o card da OS financeira so
+    # nasceria quando alguem abrisse a OPERACAO -- um acoplamento invisivel
+    # entre duas telas, e o tipo de coisa que funciona por meses e um dia para
+    # sem ninguem entender por que.
+    #
+    # 🚨 A PROMESSA DO CABECALHO CONTINUA VALENDO: o card e materializado, e a
+    # leitura da ponte esta dentro de `try`. Ponte caida = nenhum card NOVO, e
+    # nunca quadro vazio -- os cards que ja existem sao linhas no nosso banco.
+    if any(e.get('recebe_situacao') for e in etapas):
+        try:
+            resposta = fpsl_ponte.os_por_situacao(data_matriz(),
+                                                  so_abertas=True)
+            pipeline.semear_os(resposta.get('os') or [])
+        except Exception as e:  # noqa: BLE001
+            log.warning('aba %s: a ponte nao respondeu ao semear: %s',
+                        codigo_tela, e)
     colunas = [{'chave': f"e{e['id']}", 'titulo': e['titulo'],
                 'situacao_id': None, 'etapa_id': e['id'],
                 'final': e['final'], 'nota': None, 'cards': []}

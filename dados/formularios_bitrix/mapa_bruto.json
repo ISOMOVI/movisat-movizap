@@ -7235,5 +7235,495 @@
     }
    }
   }
+ },
+ "38": {
+  "id": "38",
+  "sec": "2mjr3q",
+  "lang": "br",
+  "address": "https://movisat.bitrix24.com.br",
+  "views": {
+   "click": {
+    "type": "panel",
+    "position": "right",
+    "vertical": "bottom"
+   },
+   "auto": {
+    "type": "popup",
+    "position": "center",
+    "vertical": "bottom",
+    "delay": 5
+   }
+  },
+  "data": {
+   "schemaVersion": 1,
+   "acceptBySubmitEnabled": false,
+   "agreementNoticeSupported": true,
+   "agreementNoticeTextMaxLength": 1000,
+   "language": "br",
+   "editMode": false,
+   "design": {
+    "border": {
+     "bottom": false,
+     "top": false,
+     "left": false,
+     "right": false
+    },
+    "color": {
+     "primary": "#f26b36ff",
+     "primaryText": "#ffffffff",
+     "text": "#000000ff",
+     "background": "#ffffffff",
+     "fieldBorder": "#0000000c",
+     "fieldBackground": "#0000000c",
+     "fieldFocusBackground": "#ffffffff"
+    }
+   },
+   "title": "Ideias e Sugestões",
+   "desc": "",
+   "buttonCaption": "Enviar",
+   "useSign": false,
+   "date": {
+    "dateFormat": "DD/MM/YYYY",
+    "dateTimeFormat": "DD/MM/YYYY HH:MI:SS",
+    "sundayFirstly": false
+   },
+   "currency": {
+    "code": "BRL",
+    "title": "Reais",
+    "format": "R$#"
+   },
+   "fields": [
+    {
+     "id": "CONTACT_UF_CRM_6227C13CCA255",
+     "name": "CONTACT_UF_CRM_6227C13CCA255",
+     "label": "Contrato Pessoa Física ou Jurídica?",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "list",
+     "placeholder": null,
+     "value": "",
+     "items": [
+      {
+       "label": "Pessoa Física (CPF)",
+       "value": "1754",
+       "selected": false
+      },
+      {
+       "label": "Pessoa Jurídica (CNPJ)",
+       "value": "1756",
+       "selected": false
+      }
+     ],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "COMPANY_TITLE",
+     "name": "COMPANY_TITLE",
+     "label": "Empresa",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "company-name",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "COMPANY_UF_CRM_1646332310941",
+     "name": "COMPANY_UF_CRM_1646332310941",
+     "label": "CNPJ",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "double",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "CONTACT_UF_CRM_1646331183902",
+     "name": "CONTACT_UF_CRM_1646331183902",
+     "label": "CPF",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "double",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "CONTACT_NAME",
+     "name": "CONTACT_NAME",
+     "label": "Primeiro Nome",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "name",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "CONTACT_LAST_NAME",
+     "name": "CONTACT_LAST_NAME",
+     "label": "Sobrenome",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "last-name",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "CONTACT_EMAIL",
+     "name": "CONTACT_EMAIL",
+     "label": "E-mail",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "WORK",
+     "type": "email",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "CONTACT_PHONE",
+     "name": "CONTACT_PHONE",
+     "label": "Telefone",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "WORK",
+     "type": "phone",
+     "placeholder": null,
+     "value": "+55",
+     "items": [],
+     "hint": "Não esqueça de incluir o DDD",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "DEAL_UF_CRM_622BAA8C56ED7",
+     "name": "DEAL_UF_CRM_622BAA8C56ED7",
+     "label": "Destino de melhoria",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "list",
+     "placeholder": null,
+     "value": "",
+     "items": [
+      {
+       "label": "Funcionalidade atual",
+       "value": "2244",
+       "selected": false
+      },
+      {
+       "label": "Desenvolvimento de nova funcionalidade",
+       "value": "2246",
+       "selected": false
+      }
+     ],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "DEAL_UF_CRM_622BAA8C67566",
+     "name": "DEAL_UF_CRM_622BAA8C67566",
+     "label": "Funcionalidades do sistema a ser trabalhada",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "list",
+     "placeholder": null,
+     "value": "",
+     "items": [
+      {
+       "label": "Tela do Mapa",
+       "value": "2248",
+       "selected": false
+      },
+      {
+       "label": "Grid de veículos",
+       "value": "2250",
+       "selected": false
+      },
+      {
+       "label": "Telemetria",
+       "value": "2252",
+       "selected": false
+      },
+      {
+       "label": "Ponto de Interesse",
+       "value": "2254",
+       "selected": false
+      },
+      {
+       "label": "Cerca Eletrônica",
+       "value": "2256",
+       "selected": false
+      },
+      {
+       "label": "Mapa de Calor",
+       "value": "2258",
+       "selected": false
+      },
+      {
+       "label": "Régua de Distâncias",
+       "value": "2260",
+       "selected": false
+      },
+      {
+       "label": "Dashboard",
+       "value": "2262",
+       "selected": false
+      },
+      {
+       "label": "Alertas",
+       "value": "2264",
+       "selected": false
+      },
+      {
+       "label": "Irregularidades",
+       "value": "2266",
+       "selected": false
+      },
+      {
+       "label": "Relatórios",
+       "value": "2268",
+       "selected": false
+      },
+      {
+       "label": "Gestão de Abastecimento",
+       "value": "2270",
+       "selected": false
+      },
+      {
+       "label": "Gestão de Condutores",
+       "value": "2272",
+       "selected": false
+      },
+      {
+       "label": "Gestão de Despesas",
+       "value": "2274",
+       "selected": false
+      },
+      {
+       "label": "Gestão de Entregas",
+       "value": "2276",
+       "selected": false
+      },
+      {
+       "label": "Gestão de Manutenções",
+       "value": "2278",
+       "selected": false
+      },
+      {
+       "label": "Gestão de Multas",
+       "value": "2280",
+       "selected": false
+      },
+      {
+       "label": "Gestão de Rotas",
+       "value": "2282",
+       "selected": false
+      },
+      {
+       "label": "Gestão de Sinistros",
+       "value": "2284",
+       "selected": false
+      },
+      {
+       "label": "Gestão de Veículos",
+       "value": "2286",
+       "selected": false
+      },
+      {
+       "label": "Gestão de Visitas",
+       "value": "2288",
+       "selected": false
+      },
+      {
+       "label": "Integração com acessórios",
+       "value": "2290",
+       "selected": false
+      },
+      {
+       "label": "Integração com sistemas",
+       "value": "2292",
+       "selected": false
+      },
+      {
+       "label": "Outro",
+       "value": "2294",
+       "selected": false
+      }
+     ],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    },
+    {
+     "id": "DEAL_UF_CRM_1646660825704",
+     "name": "DEAL_UF_CRM_1646660825704",
+     "label": "Detalhe ao máximo a melhoria: O que ela resolve? Como deve ser trabalhada no sistema?",
+     "visible": true,
+     "required": true,
+     "multiple": false,
+     "valueType": "",
+     "type": "string",
+     "placeholder": null,
+     "value": "",
+     "items": [],
+     "hint": "",
+     "hintOnFocus": false,
+     "autocomplete": false,
+     "bigPic": false,
+     "size": null,
+     "contentTypes": null
+    }
+   ],
+   "agreements": [],
+   "dependencies": [
+    {
+     "id": "2226",
+     "typeId": 0,
+     "logic": "or",
+     "list": [
+      {
+       "condition": {
+        "target": "CONTACT_UF_CRM_6227C13CCA255",
+        "event": "change",
+        "value": "1756",
+        "operation": "="
+       },
+       "action": {
+        "target": "COMPANY_TITLE",
+        "type": "show",
+        "value": ""
+       }
+      },
+      {
+       "condition": {
+        "target": "CONTACT_UF_CRM_6227C13CCA255",
+        "event": "change",
+        "value": "1756",
+        "operation": "="
+       },
+       "action": {
+        "target": "COMPANY_UF_CRM_1646332310941",
+        "type": "show",
+        "value": ""
+       }
+      },
+      {
+       "condition": {
+        "target": "CONTACT_UF_CRM_6227C13CCA255",
+        "event": "change",
+        "value": "1754",
+        "operation": "="
+       },
+       "action": {
+        "target": "CONTACT_UF_CRM_1646331183902",
+        "type": "show",
+        "value": ""
+       }
+      }
+     ]
+    },
+    {
+     "id": "2228",
+     "typeId": 0,
+     "logic": "or",
+     "list": [
+      {
+       "condition": {
+        "target": "DEAL_UF_CRM_622BAA8C56ED7",
+        "event": "change",
+        "value": "2244",
+        "operation": "="
+       },
+       "action": {
+        "target": "DEAL_UF_CRM_622BAA8C67566",
+        "type": "show",
+        "value": ""
+       }
+      }
+     ]
+    }
+   ],
+   "captcha": {
+    "service": "google",
+    "recaptcha": {
+     "use": false
+    },
+    "yandexCaptcha": {
+     "use": false
+    }
+   }
+  }
  }
 }

@@ -104,9 +104,13 @@ const POS_VENDA = quadroDe('pos_venda', 'PNL_1.2', 'Treinamentos',
    `menu_grupos_2110.teste.js` ja documentava isto desde 21/10. */
 const STUB_LINK = { props: ['to'], template: '<a :href="to"><slot /></a>' }
 
-async function montar(quadro, codigo) {
+async function montar(quadro, codigo, titulo) {
   estado.quadro = quadro
-  estado.rota = { meta: { codigo, aba: codigo }, query: {}, params: {} }
+  /* ⚠️ O `titulo` do `meta` entrou em 11/11: o `h1` do painel vem da ROTA, e
+     sem ele a fixture nao podia distinguir o cabecalho do Financeiro do
+     cabecalho do Pos-venda -- que era exatamente o defeito. */
+  estado.rota = { meta: { codigo, aba: codigo, titulo },
+                  query: {}, params: {} }
   const tela = mount(PainelAba, {
     global: { stubs: { RouterLink: STUB_LINK } },
   })
@@ -188,5 +192,48 @@ describe('a tira de abas', () => {
     const tela = await montar(FINANCEIRO, 'PNL_1.4')
     expect(tela.findAll('.coluna').length).toBe(3)
     expect(tela.text()).toContain('INADIMPLENTES')
+  })
+})
+
+/* ============================================================================
+   O TÍTULO DO PAINEL — 11/11
+   ----------------------------------------------------------------------------
+   🔵 Ele: *"Pipeline Financeiro e Contratual com nomes errados - Ajustar"* ·
+   *"deve condizer com o tipo da Aba"*.
+
+   🚨 O `h1` ESTAVA ESCRITO À MÃO como "Pós-venda". Este componente serve os
+   quatro painéis de aba, porque as colunas vivem no banco -- então um título
+   literal é o nome de UM painel aparecendo em todos. O Financeiro e o
+   Contratual, no ar desde 06/11, abriam dizendo "Pós-venda".
+
+   ⚠️ NENHUMA TRAVA PEGAVA porque nenhuma afirmava o título: as nove daqui
+   mediam colunas, permissão e rotas. O cabeçalho não estava no contrato, e o
+   que não está no contrato ninguém defende.
+   ========================================================================== */
+describe('o título do painel vem da rota', () => {
+  it('🚨 o Financeiro diz "Financeiro", e NÃO "Pós-venda"', async () => {
+    const tela = await montar(null, 'PNL_1.4', 'Financeiro')
+    const h1 = tela.find('.painel__titulo')
+    expect(h1.text()).toBe('Financeiro')
+    expect(h1.text()).not.toContain('Pós-venda')
+  })
+
+  it('🚨 o Contratual diz "Contratual"', async () => {
+    const tela = await montar(null, 'PNL_1.5', 'Contratual')
+    expect(tela.find('.painel__titulo').text()).toBe('Contratual')
+  })
+
+  it('o Pós-venda continua dizendo "Pós-venda" nas duas abas', async () => {
+    for (const codigo of ['PNL_1.2', 'PNL_1.3']) {
+      const tela = await montar(null, codigo, 'Pós-venda')
+      expect(tela.find('.painel__titulo').text()).toBe('Pós-venda')
+    }
+  })
+
+  it('⚠️ sem título na rota, cai no nome da aba — nunca em branco', async () => {
+    /* Falha no lado legível: um `h1` vazio é pior que o nome da aba repetido. */
+    const tela = await montar(null, 'PNL_1.4', undefined)
+    expect(tela.find('.painel__titulo').text().trim().length)
+      .toBeGreaterThan(0)
   })
 })

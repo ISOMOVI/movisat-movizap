@@ -53,6 +53,7 @@ NOSSOS = [
     ("CREDENCIAMENTO",      "164", "credenciamento-tecnico", "Credenciamento de parceiros técnicos",  "Operações", "operacao"),
     ("PAGAMENTO_TECNICOS",  "184", "pagamento-tecnicos",     "Pagamento de parceiros técnicos",       "Financeiro", "financeiro"),
     ("FORNECEDORES",        "238", "fornecedores",           "Fornecedores",                          "Administrativo", "financeiro"),
+    ("IDEIAS",              "38",  "ideias-sugestoes",       "Ideias e sugestões",                    "Produto", None),
 ]
 
 
@@ -68,7 +69,14 @@ NOSSOS = [
 # ve e ele valida formulario por formulario no navegador. Ligar o proximo e
 # acrescentar o codigo a este conjunto e rodar a carga: sem migracao, sem
 # deploy.
-FORMATO_NOVO = {"SUPORTE"}
+# 🚨 ERA `{"SUPORTE"}` E O BANCO TINHA OS 15 EM `novo`: o
+# `etapas_dos_formularios.py` os passou todos em 11/11, e este script teria
+# revertido 14 para `classico` na proxima carga completa -- mudando o que a
+# internet ve, sem erro nenhum.
+#
+# ⚠️ `None` aqui significa TODOS. Nao e lista: lista volta a divergir no dia em
+# que o 17o formulario nascer e ninguem lembrar de acrescentar.
+FORMATO_NOVO = None
 
 # As etapas, por codigo. Os campos sao citados pelo `nosso_nome`.
 #
@@ -116,6 +124,30 @@ ETAPAS = {
 # ⚠️ `fora` TIRA o campo (ele deixa de existir, nao fica escondido). O resto
 # muda o campo que fica.
 AJUSTES = {
+    # 🚨 A RESCISAO, E POR QUE ESTA LINHA EXISTE: a migracao 104 consertou o
+    # tipo destes dois NO BANCO, e a carga os devolvia a `string` -- o tipo vem
+    # do Bitrix. Aqui o conserto sobrevive a qualquer rodada.
+    #
+    # ⚠️ Sao os campos do NOVO TITULAR: quem assume o contrato. Validacao que
+    # fica so no navegador, nesses dois, e validacao que nao existe.
+    "RESCISAO": {
+        "campos": {
+            "e-mail-do-novo-titular": {"tipo": "email"},
+            "telefone-com-ddd-do-novo-titular": {"tipo": "phone"},
+        },
+    },
+    # 🔵 11/11, o 16o formulario (Bitrix 38, "Ideias e sugestoes").
+    #
+    # 🚨 *"os erros de bitrix ficam para tras"* (dele, 11/11): o campo que pede
+    # *"Detalhe ao maximo a melhoria"* vinha como UMA LINHA de texto no
+    # Bitrix. Pedir o maximo de detalhe numa caixa de uma linha e o proprio
+    # formulario desencorajando a resposta que ele quer. Seis linhas, como o
+    # `detalhe-a-ocorrencia` do Suporte.
+    "IDEIAS": {
+        "campos": {
+            "detalhe-ao-maximo-a-melhoria-o-que-ela-r": {"linhas": 6},
+        },
+    },
     # 🔵 04/11: o bloco BANCO virou DADOS DE PAGAMENTO -- *"pode ser TED, PIX,
     # ou boleto, oopção por lista e campo com os dados"*, e *"ajuste no
     # formulario tbm, o mesmo formato. ai amarra eles"*.
@@ -216,6 +248,16 @@ AJUSTES = {
 # pessoa le -- no Bitrix era o contrario, toda a validacao no navegador, e um
 # POST cru criou registro em 22/10.
 VALIDACOES = {
+    # 🚨 RETRATO DO BANCO em 11/11, trazido para ca porque ESTE arquivo e a
+    # fonte: a carga apaga e reescreve os campos, e o que nao estiver aqui
+    # nao volta. As 55 linhas abaixo do Suporte vieram das migracoes 103 e
+    # 104, que escreveram direto no banco -- entao o script tinha 5 e a
+    # verdade eram 60, e a proxima carga completa teria apagado 55 sem dizer
+    # nada.
+    #
+    # ⚠️ `rg`, `website`, data e lista ficam DE FORA de proposito (decisao de
+    # 11/11): nao sao formato fechado, e exigir um formato que a pessoa nao
+    # tem recusa a resposta certa.
     "SUPORTE": {
         "cnpj": "cnpj",
         "cpf": "cpf",
@@ -223,7 +265,137 @@ VALIDACOES = {
         "telefone": "telefone",
         "veiculo-e-placa-somente-se-for-referente": "placa",
     },
+    "ADITIVO": {
+        "cnpj": "cnpj",
+        "cpf": "cpf",
+        "e-mail": "email",
+        "telefone": "telefone",
+        "veiculo-e-placa": "placa",
+    },
+    "ADMINISTRATIVO": {
+        "cnpj": "cnpj",
+        "cpf": "cpf",
+        "e-mail": "email",
+        "telefone": "telefone",
+    },
+    "CONTATO": {
+        "cnpj": "cnpj",
+        "e-mail": "email",
+        "telefone": "telefone",
+    },
+    "CREDENCIAMENTO": {
+        "cnpj": "cnpj",
+        "cpf": "cpf",
+        "cep": "cep",
+        "telefone-fixo": "telefone",
+        "telefone-celular-whatsapp": "telefone",
+        "e-mail-geral-da-empresa": "email",
+        "e-mail": "email",
+    },
+    "DEMONSTRACAO": {
+        "cnpj": "cnpj",
+        "e-mail": "email",
+        "telefone": "telefone",
+    },
+    "FICHA_CADASTRAL": {
+        "cnpj": "cnpj",
+        "cpf": "cpf",
+        "telefone-da-empresa-com-ddd": "telefone",
+        "telefone": "telefone",
+        "e-mail": "email",
+    },
+    "FINANCEIRO": {
+        "cnpj": "cnpj",
+        "cpf": "cpf",
+        "e-mail": "email",
+        "telefone": "telefone",
+    },
+    "FORNECEDORES": {
+        "cnpj": "cnpj",
+        "e-mail": "email",
+        "e-mail-2": "email",
+        "telefone": "telefone",
+        "telefone-2": "telefone",
+    },
+    "NPS": {
+        "e-mail": "email",
+        "telefone": "telefone",
+    },
+    "PAGAMENTO_TECNICOS": {
+        "cnpj": "cnpj",
+        "cpf": "cpf",
+    },
+    "RESCISAO": {
+        "cnpj": "cnpj",
+        "cpf": "cpf",
+        "e-mail": "email",
+        "telefone": "telefone",
+        "veiculo-e-placa": "placa",
+        # 🚨 Os dois do NOVO TITULAR vinham `string` do Bitrix e o servidor
+        # decide pelo TIPO: sem a migracao 104 a validacao ficava so no
+        # navegador, no campo que define o DONO DO CONTRATO.
+        "e-mail-do-novo-titular": "email",
+        "telefone-com-ddd-do-novo-titular": "telefone",
+    },
+    "SUBSTITUICAO": {
+        "cnpj": "cnpj",
+        "cpf": "cpf",
+        "e-mail": "email",
+        "telefone": "telefone",
+    },
+    "TESTE_GRATUITO": {
+        "cnpj": "cnpj",
+        "cpf": "cpf",
+        "e-mail": "email",
+        "telefone": "telefone",
+    },
+    # 🔵 11/11, o 16o formulario (Bitrix 38), o cartao de "Ideias e sugestoes"
+    # do SAC -- o unico dos 8 cartoes que nunca foi reconstruido.
+    "IDEIAS": {
+        "cnpj": "cnpj",
+        "cpf": "cpf",
+        "e-mail": "email",
+        "telefone": "telefone",
+    },
 }
+
+
+def _derivar_etapas(codigo: str) -> list[dict] | None:
+    """As etapas de um formulario, pela MESMA regra do script de etapas.
+
+    🚨 Importado, nao copiado: `etapas_dos_formularios.derivar` e a unica
+    derivacao, e as 13 travas dele valem para esta chamada tambem.
+    """
+    import importlib.util
+    cam = RAIZ / "scripts" / "etapas_dos_formularios.py"
+    spec = importlib.util.spec_from_file_location("_etapas", cam)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    f = banco.um("SELECT id, slug FROM formulario WHERE codigo = %s",
+                 (codigo,))
+    if not f or f["slug"] in mod.INTOCAVEIS:
+        return None
+    campos = banco.varios(
+        "SELECT nosso_nome, rotulo, tipo FROM formulario_campo"
+        " WHERE formulario_id = %s ORDER BY ordem, id", (f["id"],))
+    etapas, _origem = mod.derivar(f["slug"], campos)
+    erros = mod.conferir(f["slug"], campos, etapas)
+    if erros:
+        # ⚠️ NAO escreve etapa incoerente: formulario sem etapa continua
+        # mostrando todos os campos, que e ruim; com etapa errada ele ESCONDE
+        # campo, que e pior.
+        print("   !! etapas de %s nao derivaram: %s" % (codigo, erros))
+        return None
+    return etapas
+
+
+def derivadas_do_banco(codigo: str) -> list:
+    """Quantas etapas o formulario tem AGORA -- para o relato dizer a verdade."""
+    r = banco.um("SELECT etapas FROM formulario WHERE codigo = %s", (codigo,))
+    e = (r or {}).get("etapas")
+    if isinstance(e, str):
+        e = json.loads(e)
+    return e or []
 
 
 def main(pedidos: list[str]) -> None:
@@ -239,7 +411,8 @@ def main(pedidos: list[str]) -> None:
         bruto = mapa.get(bitrix_id)
         if not bruto:
             sys.exit(f"{codigo}: o mapa nao tem o formulario {bitrix_id}")
-        formato = "novo" if codigo in FORMATO_NOVO else "classico"
+        formato = ("novo" if FORMATO_NOVO is None
+                   or codigo in FORMATO_NOVO else "classico")
         r = formularios.gravar_definicao(bruto, codigo=codigo, slug=slug,
                                          setor=setor, titulo=titulo,
                                          painel=painel, ordem=ordem * 10,
@@ -247,7 +420,22 @@ def main(pedidos: list[str]) -> None:
                                          etapas=ETAPAS.get(codigo),
                                          validacoes=VALIDACOES.get(codigo),
                                          ajustes=AJUSTES.get(codigo))
-        etapas = len(ETAPAS.get(codigo) or [])
+        # 🚨 AS ETAPAS DOS OUTROS 15 NAO MORAM AQUI, E E DE PROPOSITO: elas
+        # SAO DERIVADAS da definicao, pelo `etapas_dos_formularios.derivar`,
+        # que ja existe e ja tem 13 travas. Copiar os 15 agrupamentos para
+        # este arquivo criaria uma TERCEIRA verdade -- e foi a segunda que
+        # causou o defeito que este conserto fecha.
+        #
+        # ⚠️ O Suporte continua com o agrupamento EXPLICITO acima: e a base
+        # que ele aprovou, e o derivador o trata como INTOCAVEL.
+        if codigo not in ETAPAS:
+            derivadas = _derivar_etapas(codigo)
+            if derivadas:
+                banco.executar(
+                    "UPDATE formulario SET etapas = %s, formato = 'novo',"
+                    " atualizado_em = now() WHERE codigo = %s",
+                    (json.dumps(derivadas, ensure_ascii=False), codigo))
+        etapas = len(ETAPAS.get(codigo) or derivadas_do_banco(codigo))
         print(f"{codigo:<20} /f/{slug:<24} painel={(painel or '-'):<11} "
               f"campos={r['campos']:<3} "
               f"regras={r['regras']} escondidos_por_regra={r['escondidos']} "

@@ -28,9 +28,21 @@ from .config import settings
 
 log = logging.getLogger(__name__)
 
-# Curto de propósito: isto roda dentro de um clique do operador. É melhor
-# dizer "não deu para consultar agora" em 4 s do que pendurar a tela.
-TEMPO_LIMITE = 4.0
+# 🔵 11/11, DECISÃO DELE: *"sim, pode fazer"* -- subir o teto da leitura.
+#
+# 🚨 ERAM 4 s, E O NÚMERO ESTAVA ERRADO PARA O CASO QUE ACONTECE. A régua
+# original ("melhor dizer 'não deu' em 4 s do que pendurar a tela") vale quando
+# a demora é anômala. Medido em 09/11: sob exaustão do pool de conexões do
+# Harmonit (`all pooled connections were in use and max pool size was
+# reached`), cada leitura leva **~15,5 s** e aí volta erro -- 164 ocorrências em
+# 07/11, 73 em 09/11. Com 4 s, abrir o card NUNCA conseguia nem chegar à
+# mensagem de erro do ERP: estourava antes e dizia *"o FPSL não respondeu no
+# tempo"*, culpando a peça errada.
+#
+# ⚠️ 20 s é acima do perfil medido e ainda abaixo do teto da ESCRITA (25 s),
+# que é o que de fato não pode ser ultrapassado: a leitura é o primeiro passo
+# dela.
+TEMPO_LIMITE = 20.0
 
 # A aplicação do FPSL, direto -- ver a advertência do topo sobre o 8005.
 BASE_PADRAO = "http://127.0.0.1:8004"
@@ -63,8 +75,18 @@ def _pedir(caminho: str, params: dict) -> dict:
             timeout=TEMPO_LIMITE,
         )
     except httpx.TimeoutException:
-        log.warning("timeout consultando o FPSL em %s", caminho)
-        raise FpslIndisponivel("o FPSL não respondeu no tempo") from None
+        log.warning("timeout consultando o FPSL em %s (teto de %ss)",
+                    caminho, TEMPO_LIMITE)
+        # 🚨 A FRASE NÃO ACUSA QUEM NÃO FOI. O que medimos é só isto: não veio
+        # resposta no teto. A causa conhecida e recorrente é o Harmonit sem
+        # conexão livre, e dizer "o FPSL não respondeu" mandava quem lê olhar
+        # o serviço errado. ⚠️ Mas não afirmamos a causa -- "costuma ser".
+        # ⚠️ Não digo "nada foi escrito" aqui: este caminho é só de LEITURA
+        # (`_pedir` faz GET), e a frase pertence ao caminho da escrita.
+        raise FpslIndisponivel(
+            f"não veio resposta no tempo ({int(TEMPO_LIMITE)}s). Quando isso "
+            "acontece, costuma ser o Harmonit sem conexão livre -- pode "
+            "tentar de novo") from None
     except httpx.HTTPError as e:
         log.warning("falha de rede consultando o FPSL em %s: %s", caminho, e)
         raise FpslIndisponivel("não foi possível falar com o FPSL") from None

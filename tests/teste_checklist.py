@@ -77,21 +77,41 @@ def meus(numero_os, etapa=ETAPA):
 # ---------------------------------------------------------------------------
 
 class TestOModelo:
-    def test_o_seed_das_tres_etapas_dele_esta_de_pe(self):
-        """🔵 As listas são dele, literais. Se alguém as mudar, aqui reprova."""
-        por_etapa = {251: 3, 16488: 4, 677: 2}
+    def test_o_seed_das_etapas_dele_esta_de_pe(self):
+        """🔵 As listas são dele, literais. Se alguém as mudar, aqui reprova.
+
+        ⚠️ ESTA TRAVA MUDOU DE NÚMERO EM 11/11, E NÃO DE REGRA. Eram três
+        etapas (090); ele escreveu mais quatro no bloco de 11/11 e a migração
+        098 as semeou. A regra continua a mesma: a lista é dele, literal.
+        """
+        por_etapa = {251: 4, 16488: 4, 677: 2,
+                     15797: 1, 890: 2, 1316: 4, 16490: 1}
         for etapa, quantos in por_etapa.items():
             reais = [m for m in checklist.modelos(etapa)
                      if not m["texto"].startswith(MARCA)]
             assert len(reais) == quantos, f"etapa {etapa}"
         textos = [m["texto"] for m in checklist.modelos(16488)]
         assert "Nota Fiscal (emitir e enviar)" in textos
+        # Os itens de 11/11, com as palavras dele.
+        assert "Detalhes dos itens" in [m["texto"]
+                                        for m in checklist.modelos(251)]
+        assert ("Verificar Central 24hrs"
+                in [m["texto"] for m in checklist.modelos(1316)])
+        assert ("Inserir foto do ID"
+                in [m["texto"] for m in checklist.modelos(16490)])
+        assert ("Verificar com o Customer Success, se cliente irá rescindir."
+                in [m["texto"] for m in checklist.modelos(15797)])
 
-    def test_as_seis_etapas_sem_lista_continuam_sem(self):
-        """⚠️ Ele citou seis etapas e não escreveu os itens. Inventar tarefa de
-        operação seria adivinhar o trabalho de quem faz."""
-        for etapa in (15747, 15797, 890, 16489, 1316, 15696):
-            assert checklist.modelos(etapa) == []
+    def test_as_etapas_que_ele_deixou_em_branco_continuam_sem(self):
+        """⚠️ Ele citou estas etapas e NÃO escreveu item nenhum nelas.
+        Inventar tarefa de operação seria adivinhar o trabalho de quem faz.
+
+        🚨 A 15696 e a 677 são o caso especial: nelas ele pediu CAMPO DE TEXTO
+        (Devolução / Rastreamento), que não é item de marcar -- por isso a
+        15696 continua aqui mesmo depois de 11/11.
+        """
+        for etapa in (38, 16487, 15747, 16489, 15694, 16491, 15696):
+            assert checklist.modelos(etapa) == [], f"etapa {etapa}"
 
     def test_etapa_fora_das_17_recusa_com_frase(self):
         with pytest.raises(DadoInvalido) as e:
@@ -104,8 +124,12 @@ class TestOModelo:
 
     def test_etapas_com_modelo_diz_onde_tem_checklist(self):
         """É isto que decide se o botão aparece no card e se o aviso é dado."""
-        assert {251, 16488, 677} <= checklist.etapas_com_modelo()
-        assert 1316 not in checklist.etapas_com_modelo()
+        com = checklist.etapas_com_modelo()
+        assert {251, 16488, 677, 15797, 890, 1316, 16490} <= com
+        # ⚠️ A 1316 ENTROU EM 11/11 -- antes era o exemplo de "etapa sem
+        # checklist". O exemplo agora é a 15696, que leva campo de texto e não
+        # lista de marcar.
+        assert 15696 not in com
 
 
 # ---------------------------------------------------------------------------

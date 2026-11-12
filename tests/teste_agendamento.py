@@ -125,6 +125,22 @@ def _criar(base, ordens, quando=None, cliente=HARMONIT_A, endereco="Rua Um, 100"
     )
 
 
+def _dia_do_banco(quando):
+    """O dia que o BANCO vai reportar para este instante.
+
+    🚨 `do_dia` compara `a.inicio::date`, e o Postgres resolve esse cast no
+    fuso da sessão (`America/Sao_Paulo`), não em UTC. Perguntar a data com
+    `datetime.now(timezone.utc).date()` fazia este teste reprovar **das 21h à
+    meia-noite** -- três horas por dia em que a data UTC já virou e a do banco
+    não. Medido em 11/11 às 21:21 BRT (00:21 UTC).
+
+    ⚠️ Não é cálculo de fuso escrito à mão: quem responde é o próprio banco,
+    com o mesmo cast que a consulta usa. Se o fuso da sessão mudar, o teste
+    acompanha sozinho.
+    """
+    return banco.um("SELECT %s::timestamptz::date AS d", (quando,))["d"]
+
+
 class TestUmaOsUmCompromisso:
     def test_a_mesma_os_nao_entra_em_dois_compromissos_ativos(self, base):
         _criar(base, [{"numero_os": OS_UM, "placa": "ABC1D23"}])
@@ -209,11 +225,33 @@ class TestEnderecoEConsulta:
         a = _criar(base, [{"numero_os": 997030, "placa": "AAA1A11"},
                           {"numero_os": 997031, "placa": "BBB2B22"}],
                    quando=quando)
-        no_dia = [x for x in agendamento.do_dia(quando.date()) if x["id"] == a]
+        # 🚨 O dia vem do BANCO, não de UTC -- ver `_dia_do_banco`.
+        no_dia = [x for x in agendamento.do_dia(_dia_do_banco(quando))
+                  if x["id"] == a]
         assert len(no_dia) == 1
         assert [o["numero_os"] for o in no_dia[0]["ordens"]] == [997030, 997031]
         # O nome do técnico vem da junção -- a tela não faz segunda chamada.
         assert no_dia[0]["tecnico_nome"].startswith(CLIENTE)
+
+    def test_o_dia_e_o_do_BANCO_e_nao_o_de_UTC(self, base):
+        """🚨 A trava que guarda o defeito de 11/11.
+
+        `a.inicio::date` é resolvido no fuso da sessão do Postgres. Entre 21h e
+        meia-noite (BRT) a data UTC está um dia à frente, e perguntar em UTC
+        devolve lista vazia. Esta trava prova que a consulta e a pergunta usam
+        o MESMO calendário -- o do banco.
+
+        ⚠️ Ela não finge um horário: ela confere a identidade que tem de valer
+        a qualquer hora, e nas três horas da janela ela reprova se alguém
+        voltar a perguntar em UTC.
+        """
+        quando = datetime.now(timezone.utc) + timedelta(days=11)
+        a = _criar(base, [{"numero_os": 997035, "placa": None}], quando=quando)
+        dia = _dia_do_banco(quando)
+        assert [x["id"] for x in agendamento.do_dia(dia) if x["id"] == a] == [a]
+        # E o compromisso está no período que contém esse dia.
+        ids = [x["id"] for x in agendamento.do_periodo(dia, dia)]
+        assert a in ids, "do_dia e do_periodo têm de concordar sobre o dia"
 
     def test_o_periodo_cobre_o_carrossel_da_semana(self, base):
         hoje = datetime.now(timezone.utc)
@@ -348,7 +386,12 @@ class TestPonteComOFpsl:
         monkeypatch.setattr(fpsl_ponte.httpx, "get", demora)
         with pytest.raises(fpsl_ponte.FpslIndisponivel) as e:
             fpsl_ponte.os_do_cliente("998063")
+        # ⚠️ ESTA TRAVA MUDOU DE TEXTO EM 11/11, E NÃO DE REGRA. A frase
+        # passou a nomear o teto e a dizer quem costuma ser a causa -- antes
+        # dizia "o FPSL não respondeu no tempo", culpando a peça errada.
         assert "tempo" in str(e.value)
+        assert "20s" in str(e.value), "a frase tem de nomear o teto"
+        assert "Harmonit" in str(e.value)
 
     def test_chave_recusada_diz_o_que_conferir(self, monkeypatch):
         monkeypatch.setattr(

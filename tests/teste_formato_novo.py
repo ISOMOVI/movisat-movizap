@@ -186,14 +186,27 @@ def test_o_padrao_e_classico_e_sem_etapas():
     apagar()
 
 
-def test_os_quinze_de_producao_so_tem_o_suporte_em_novo():
-    """🚨 Interruptor nasce desligado. Se este teste ficar vermelho, alguém
-    ligou o formato novo em outro formulário -- e isso é decisão DELE, não
-    efeito colateral de uma carga."""
-    linhas = banco.varios(
-        "SELECT codigo, formato FROM formulario WHERE codigo <> %s", (CODIGO,))
-    novos = sorted(l["codigo"] for l in linhas if l["formato"] == "novo")
-    assert novos == ["SUPORTE"]
+def test_os_quinze_de_producao_estao_TODOS_em_novo():
+    """🔵 MUDOU DE ALVO EM 11/11, POR DECISÃO DELE, e não de regra.
+
+    Até 10/11 esta trava afirmava que **só o Suporte** estava no formato novo --
+    e estava certa: ligar o formato era decisão dele, não efeito de carga. Em
+    11/11 ele decidiu: *"tudo que foi pedido deve ser entregue, principalmente
+    os formularios que ainda nao sairam"*.
+
+    🚨 A REGRA QUE ELA GUARDA AGORA É A MESMA DE ANTES, VIRADA: o formato é
+    decisão dele, e hoje a decisão é **todos**. Se um voltar para `classico`,
+    isto fica vermelho -- e aí alguém mexeu sem ele pedir.
+    """
+    linhas = banco.varios("SELECT codigo, formato FROM formulario")
+    classicos = sorted(l["codigo"] for l in linhas
+                       if l["formato"] != "novo")
+    assert classicos == [], classicos
+    # 🔵 11/11, mais tarde: SAO 16. O 16o e "Ideias e sugestoes" (Bitrix 38),
+    # o 7o cartao do SAC -- o unico dos 8 que nunca tinha sido reconstruido.
+    # ⚠️ O numero continua aqui de proposito: formulario que aparece ou
+    # desaparece sem ninguem pedir e o que esta linha pega.
+    assert len(linhas) == 16, sorted(l["codigo"] for l in linhas)
 
 
 # ---------------------------------------------------------------------------

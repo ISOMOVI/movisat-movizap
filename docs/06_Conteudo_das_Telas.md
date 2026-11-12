@@ -7853,3 +7853,354 @@ vermelhas** — forjado e pego.
 (`frontend/dist/assets/index-*.js`), que agora contém `aba:"PNL_1.4"` e
 `aba:"PNL_1.5"`. Suíte verde não prova tela (`M9`) — e aqui ela estava verde
 enquanto a tela estava vazia.
+
+---
+
+## 11/11 — o painel da Operação depois do teste dele no navegador
+
+🔵 Origem: o bloco que ele colou em 11/11, depois de exercitar o painel em
+09/11. 🚨 **O teste dele no navegador achou o que a suíte não via** — de novo:
+o card de chamado estava **inerte na tela com 22 travas verdes**.
+
+### 1. 🚨 O card de chamado nascia esmaecido e sem aceitar clique
+
+🔵 *"Card já nasceu esmaecido e portanto sem permitir interação *erro*. Precisa
+nascer aberto para tratativa."*
+
+**A causa era `null === null`.** `movendo` nasce nulo e **todo card de chamado
+tem `numero_ordem` nulo** (o backend manda assim, de propósito), então
+`movendo === card.numero_ordem` era verdadeiro **desde a montagem da tela** — e
+a classe `.card--movendo` é `opacity: .55` **mais `pointer-events: none`**.
+
+⚠️ **Por que as 22 travas de 05/11 não viram:** o jsdom não faz layout e
+`pointer-events: none` **não impede `dispatchEvent`**. Um teste que clica passa
+com o card morto na tela. As travas novas olham a **classe**, não o clique.
+
+O mesmo defeito estava em segundo lugar: o `<select>` *Mover para* do card
+aberto nascia desabilitado para card sem OS.
+
+### 2. O diálogo do aviso da etapa
+
+🔵 *"Apagar comentário: 'Não aviso de novo nesta etapa pelos próximos 10
+minutos.'"* · *"Reduzir o tamanho do modal e centralizar botão"*.
+
+- a frase saiu da tela; ⚠️ **o silêncio de 10 minutos continua existindo** —
+  saiu só o anúncio dele;
+- `.modal__caixa--curta` foi de **26rem para 22rem**;
+- 🚨 **o botão estava à esquerda por causa do `space-between` do rodapé da
+  casa**: com um filho só, `space-between` encosta o único botão na borda. A
+  correção é `justify-content: center` **só neste modal** — o rodapé geral
+  serve modais de dois botões, onde o `space-between` está certo.
+
+A **7ª conferência do CSS publicado** guarda as duas coisas: nenhum teste de
+tela alcança largura nem posição, porque o jsdom não faz layout.
+
+### 3. O placar do checklist ganhou cor na observação
+
+🔵 *"os marcados ficam com em verde e os não marcados ficam em vermelho"*.
+
+A observação do checklist já existia (`[checklist] etapa — 2 de 3`, com ✓/✗).
+Agora cada linha ganha classe pelo próprio sinal: `--feito` em verde
+(`--ok-texto`, que é o tom que passa a norma de contraste) e `--falta` em
+vermelho.
+
+🚨 **O ✓ e o ✗ continuam no texto.** Cor sozinha não é portador — a mesma régua
+da pílula do card (âmbar **e** luminosidade) e do item riscado **e** esmaecido.
+⚠️ E vale **só** no recado do checklist: recado de pessoa que comece com ✓ não
+é placar de etapa.
+
+### 4. A placa aceita hífen e espaço dentro do padrão
+
+🔵 *"Formato de placas com hife, espaço, etc além do atual"*.
+
+📏 **Medido:** o buraco era só no **Mercosul**. `ABC-1234` e `SAVEIRO ABC1234`
+já passavam (o texto é quebrado por `[^A-Z0-9]+` e basta um pedaço casar), mas
+**`ABC-1D23` não passava de jeito nenhum** — quebra em `ABC` + `1D23`, e nenhum
+dos dois é placa. Agora os **pares vizinhos** também são testados colados.
+⚠️ Colam-se pares, nunca o texto inteiro: `SAVEIRO ABC1234` viraria
+`SAVEIROABC1234` e o que é resposta certa passaria a ser recusa.
+
+### 5. O texto do veículo, e a placa SEGUE OPCIONAL
+
+🔵 O texto é dele: *"Para abertura de chamado é necessário informar o veículo
+que deseja suporte, por gentileza selecione na lista acima. Caso o veículo não
+apareça na listagem, entrar em contato via whatsapp"*.
+
+🚨 **Entra como AJUDA do campo, não como recusa de envio** — ele decidiu no
+mesmo dia que *"pode nascer sem a placa neste momento mesmo"*. Se a frase
+virasse erro de envio, a tela diria *"é necessário"* sobre algo que não é.
+
+📏 **E o *"estava dando erro sem placa"* foi medido:** em 09/11 houve um **400
+às 08:50:48** e um **201 às 08:50:56**, oito segundos depois — e o que passou
+foi a solicitação **2660, com 8 campos e `placas_conferidas` nulo**, ou seja
+**um envio sem placa**. Enviar sem placa funciona, e `obrigatorio = false` está
+certo no banco. O 400 de oito segundos antes foi **outra recusa**.
+
+🚨 **E aqui estava o defeito de verdade: a frase da recusa não era registrada em
+lugar nenhum.** O log tinha `POST … -> 400 em 36ms` e **nada sobre o motivo**.
+Agora o handler do `DadoInvalido` escreve a frase em `warning`.
+⚠️ **Vai a frase, nunca os valores enviados** — o corpo tem CNPJ, telefone e
+e-mail, e log não é lugar de dado de cliente.
+
+### 6. O contador de etapa do chamado acendeu
+
+🔵 *"controle de atraso o contador de tempo de etapa"*.
+
+🚨 **O contador estava na tela desde o Bloco C e nunca teve o que mostrar:** o
+`paineis._card_do_chamado` mandava **`etapa_desde: None` fixo**, e todo card de
+chamado dizia literalmente **`não medido`**. O dado sempre existiu na
+`pipeline_passagem` (linha na criação, linha em cada movimento); faltava a
+consulta.
+
+⚠️ É **subconsulta**, e não `JOIN`: o `JOIN` multiplicaria as linhas e a
+contagem de observações ao lado passaria a contar errado. Há trava guardando a
+forma.
+⚠️ **Card sem passagem continua dizendo "não medido"**, e não um zero — zero
+diria que o card acabou de chegar.
+
+### 7. O prazo de 24 horas úteis, janela fixa 08:30-17:00
+
+🔵 *"Abrirá com prazo de 24hrs uteis (08:00 - 18:00) para conclusão, apenas
+informativo do card e controle de atraso"*, e no mesmo dia: *"use 08:30 - 17:00
+para calculo, será fixo"*.
+
+A conta é do servidor (`movizap/horas_uteis.py`); a tela só desenha. Dois
+motivos: fazer a conta nos dois lugares as faria divergir na primeira mexida, e
+o navegador tem o fuso da máquina de quem olha, não o da operação.
+
+🚨 **A jornada dos atendentes NÃO entra**, e é decisão dele. A jornada é **por
+pessoa**, então dois cards iguais venceriam em horas diferentes e o card
+mudaria de prazo ao ser transferido.
+
+⚠️ **Feriado não entra:** não existe tabela de feriado no sistema, e um
+calendário inventado erraria justamente nos feriados municipais, que são os que
+fecham a operação. Só sábado e domingo saem da conta.
+
+⚠️ **24 horas úteis não são um dia:** a janela tem **8,5 h**, então o prazo é de
+**2 dias e 7 horas**. Um chamado aberto na segunda às 09:00 vence na **quarta às
+16:00** — conferido em trava. Se o que ele quis dizer foi "um dia útil", o valor
+é 8,5 e se troca em uma linha (`PRAZO_CHAMADO_HORAS`).
+
+O card escreve **"vence em 7h 30min úteis"** ou **"atrasado há 1h 30min
+úteis"**. 🚨 **A palavra "úteis" fica escrita**: 7h30 de prazo numa sexta às 16h
+não são 7h30 de relógio, e sem ela o número parece errado.
+⚠️ **Informativo:** não esmaece, não bloqueia, não muda a ordem da coluna.
+
+### 8. Os campos Rastreamento e Devolução
+
+🔵 *"Abaixo de 'Observações', criar um campo de texto chamado 'Rastreamento'"*
+(etapa 677) · *"um campo de texto chamado 'Devolução' (...) Apenas para consulta
+interna da operadora"* (etapa 15696).
+
+📘 O modelo está no `docs/02` (`os_campo_da_etapa`, migração 099). Na tela:
+
+- a seção fica **abaixo de Observações**, como ele desenhou, e **só existe**
+  quando a etapa pede o campo ou quando já há valor escrito;
+- 🚨 **quem diz qual etapa pede qual campo é o servidor** — a tela não tem a
+  lista escrita. Duas listas divergiriam na primeira etapa nova, e a de cá
+  desenharia caixa onde o servidor recusaria gravar;
+- ⚠️ **o valor continua visível em outras etapas:** o rastreio escrito na 677 é
+  justamente o que alguém quer ler depois, na 15747, quando o cliente pergunta
+  onde está o item;
+- a ajuda de cada campo **diz se ele vai ao cliente** — é a única diferença
+  visível entre os dois, e sem ela a operadora não tem como saber;
+- a tela **diz** que o código não vai para a OS do Harmonit, pela mesma razão da
+  observação.
+
+### 🔴 O que esta volta devolve para ele
+
+1. **Exercitar no navegador** (`M9`): clicar no card de chamado (era o defeito)
+   · ver o prazo e o contador · mover para etapa com checklist e ver o diálogo
+   novo · marcar 2 de 3, mover, e ver a observação **colorida** · escrever um
+   código em Rastreamento e achar a observação do sistema.
+2. **As quatro decisões que ficaram abertas**, e nenhuma trava o que subiu:
+   quem pode apagar observação e se o anexo segue visível para todos · subir o
+   teto de 4 s da ficha (é limite, e é dele) · para quem vai o aviso de abertura
+   de chamado · e os dois conflitos do mapa de etapa inicial por tipo de termo
+   (as duas OS de ressarcimento, que **hoje nascem no Financeiro de propósito**,
+   e a substituição, que gera **duas** OS).
+3. 🔴 **O vermelho conhecido continua sendo DADO:** o `teste_cadastro`, pelo
+   número de teste dele com dois cadastros.
+
+---
+
+## 11/11, segunda volta — as 23 respostas dele, e as 6 que já estão no ar
+
+🔵 Ele respondeu as 23 dúvidas numeradas. O que subiu nesta volta:
+
+### 1. ✅ O teto da leitura da ficha: 4 s → 20 s (resposta 4: *"sim, pode fazer"*)
+
+🚨 Os 4 s estavam **errados para o caso que acontece**. A régua original
+(*"melhor dizer 'não deu' em 4 s do que pendurar a tela"*) vale quando a demora é
+anômala; medido em 09/11, sob exaustão do pool do Harmonit **cada leitura leva
+~15,5 s**. Com 4 s, abrir o card **nunca** chegava à mensagem de erro do ERP.
+
+**E a frase deixou de culpar a peça errada:** era *"o FPSL não respondeu no
+tempo"*; agora é *"não veio resposta no tempo (20s). Quando isso acontece,
+costuma ser o Harmonit sem conexão livre — pode tentar de novo"*.
+⚠️ **Não afirma a causa** — diz *"costuma ser"*, porque o que se mede é só a
+ausência de resposta.
+⚠️ 20 s fica **abaixo do teto da escrita (25 s)**, que é o que de fato não pode
+ser ultrapassado: a leitura é o primeiro passo dela.
+
+### 2. ✅ Apagar observação (respostas 1, 2 e 3)
+
+📘 O modelo está no `docs/02` (migração 101). Na tela:
+
+- **qualquer pessoa com o painel apaga** (*"todos que tem acesso a visualização
+  do painel"*), **sem janela de tempo** (*"pode ser apagada conforme disponivel
+  mesmo"*) — as duas coisas **diferentes do chat interno**, onde só o autor
+  apaga e só por 48 h;
+- o balão vira **"Observação excluída"**, e o **owner** tem o botão
+  **"ver o que dizia"** (molde exato do chat);
+- 🔵 **a autoria fica visível para todos**: *"excluída por Iago em 11/11 10:00"*,
+  ao lado de quem escreveu — *"é um dos objetivos, rastreabilidade"*;
+- ⚠️ **o anexo some junto**, e a rota de download barra também: deixar
+  `comprovante-pix.pdf` ao lado de "Observação excluída" devolveria pela legenda
+  o que o apagar tirou;
+- 🚨 **o recado do SISTEMA não tem o botão** — aquele texto é o log (checklist,
+  prioridade, rastreio), e apagar log é apagar a prova;
+- 🚨 **a frase da tela que dizia *"e não se apagam"* morreu** (`M12`): era
+  verdadeira quando escrita, e é por isso que a entrega seguinte tem de voltar
+  para matá-la. Agora diz *"Excluir mantém o registro de quem escreveu e de quem
+  excluiu."*
+
+### 3. ✅ A Solicitações passou a ser exclusiva do owner (respostas 20 e 21)
+
+🔵 *"pode ser, mas deixe esclusiva ao owner mesmo assim"*. A `FRM_1.1` era
+`equipe` desde 22/10.
+
+✅ **E isso conserta o desencontro medido em 11/11:** a `FRM_1.1` era `equipe` e
+a `PNL_1.1` — o painel que **aponta** para ela, com o link *"Ver o chamado em
+Solicitações"* — é `owner`. O admin via a solicitação e **não** via o card.
+⚠️ **Efeito:** o selo de solicitações novas no menu e o interruptor de aviso da
+`CFG_11.1` deixam de existir para o admin. É consequência da decisão.
+
+### 4. ✅ "Solicitação" → "Nova solicitação" (migração 100)
+
+🔵 *"já tem na aba 1 'Solicitação' ajustar par 'Nova solicitação' para
+padronizar"*. Vale para as duas abas do Pós-venda; o Financeiro já nascera
+assim.
+⚠️ **Renomear não reescreve o histórico**, e isso é a 093 funcionando: a
+`pipeline_passagem` guarda o título como **retrato**. Passagem gravada antes
+continua dizendo "Solicitação", que é o nome que a coluna tinha quando o card
+passou por ela.
+
+### 5. ✅ O número de teste voltou a ter um dono só (resposta 22)
+
+🔵 *"pode deixar só o velasco o outro pode ocultar da base"*.
+📏 **Medido antes de tocar:** o contato **91041** é o que tem a **ficha de
+técnico com os 6 preços** de 04/11 — ficou. O **198394** (*"Iago Do Ó"*,
+`origem: movizap`, mesmo cliente Velasco, sem ficha, sem preço) saiu.
+
+🚨 **O que resolve é tirar o TELEFONE, não o `ativo`:** o
+`cadastro.por_telefone` **não filtra por `ativo`** — inativar sozinho deixaria o
+número ambíguo para quem atende, que é o problema de verdade. O contato **não
+foi apagado**: saiu a associação do telefone e ele ficou `ativo = false`, com a
+linha de volta impressa no log da operação.
+
+⚠️ **Consequência dita:** a conversa que aponta para o 198394 continua lá;
+mensagem **nova** daquele número passa a resolver para o 91041. Juntar as duas é
+gesto dele.
+
+✅ **Com isso a suíte do MoviZap ficou 100% verde: 2303 Python, nenhum vermelho**
+— o `teste_cadastro` era o único, e era **dado**.
+
+### 🚨 Os três defeitos meus desta volta, todos pegos pela própria suíte
+
+1. **Quebrei um bloco de comentário** ao reescrever o cabeçalho do
+   `passagem.py`: troquei texto dentro de um bloco `#` por linhas **sem** o `#`,
+   e o Python leu duas delas como código indentado. Pego pelo `py_compile`.
+2. **Importar a sessão derrubou 4 suítes inteiras na coleta.** O
+   `PainelOperacao` passou a ler quem está logado, e o `estado/sessao.js`
+   importa `quandoPerderSessao`/`definirToken`/`temToken` do `api/cliente.js` —
+   que os mocks daqueles 4 arquivos não declaravam. ⚠️ **Consertei a fixture, e
+   o molde já existia** no `abas_do_painel_0611.teste.js` desde 06/11: eu não vi
+   e repeti o buraco em quatro arquivos.
+3. 🚨 **`atendente.owner` é coluna GERADA** (`perfil = 'owner'`, migração 025), e
+   minha fixture tentava `SET owner = true` — o banco recusa com
+   `GeneratedAlways`, e as 15 travas novas caíram no setup. **Quem faz alguém
+   owner é o PERFIL.**
+
+
+---
+
+## `CFG_17.1` Checklist de Cards — 11/11
+
+🔵 Sugestão minha que ele aceitou: *"boa sugestão, pode fazer uma outra aba só
+para isso de 'Checklist de Cards' vamos centralizar os fixos ali"* ·
+*"sim, toda tela nova nasce somente owner"*.
+
+🚨 **A TELA NASCEU PARA ROTAS QUE JÁ ESTAVAM NO AR SEM PORTA.** As três de modelo
+do checklist existem desde 04/11 com permissão da Geral, e **ninguém nunca pôde
+usá-las**: não havia tela, e `grep checklist/modelo tests/` dava **zero**.
+Acrescentar item na lista de uma etapa só era possível escrevendo migração.
+⚠️ **Código no ar sem porta e sem trava é pior que código ausente: parece
+pronto.**
+
+### O que a tela mostra
+
+- **as 17 etapas, inclusive as vazias** — tela que só mostra etapa com lista não
+  deixa acrescentar na que está vazia, e são as vazias que ele precisa
+  preencher. ⚠️ A coluna `Chamados` **não entra**: não é situação do ERP.
+- uma etapa aberta por vez, com selo contando **só os itens ativos**;
+- a etapa sem lista **diz o que a falta causa**: *"o card não mostra o botão do
+  checklist, e mover para cá não dá aviso"*;
+- o item **desativado aparece, riscado**, com *"fora da lista — segue nos cards
+  que já o tinham"*. 🚨 Esconder faria a tela mentir sobre o que existe;
+- a ação se chama **"Desativar"** / **"Reativar"**, por extenso. ⚠️ Um ✕
+  pareceria apagar, e **apagar é o que esta tela não faz**;
+- **um campo de acrescentar POR ETAPA**, e não um compartilhado: com um só,
+  escrever e trocar de etapa levaria o texto para a etapa errada.
+
+### O que ela NÃO faz, e diz
+
+A linha de estado é **uma só**: *"N de 17 etapas com lista · vale para os
+próximos cards"*.
+🔵 **E é uma linha de propósito:** ele já tirou texto explicativo de tela **três
+vezes** (*"atrapalha o profissionalismo"*), e a régua da casa é que a tela diga
+o **estado**, não ensine a regra. O que o item desativado faz nos cards antigos
+está escrito **na linha dele**, onde é estado.
+
+⚠️ **Mudar o texto não reescreve card já aberto** (o item do card é cópia,
+migração 090), e **acrescentar é aditivo**: o item novo entra na próxima abertura
+daquela etapa, inclusive em card que já estava aberto, sem tocar no que está
+marcado.
+
+### A permissão
+
+A escrita passou de `CFG_7.1` (Geral) para **`CFG_17.1`**; ler continua
+`PNL_1.1`, porque o card precisa saber onde há checklist.
+🚨 **E o docstring da rota continuava dizendo "a permissão é a da Geral"** —
+mentira que a trava nova pegou (`M12`), porque ela afirma que `CFG_7.1` **não
+aparece** mais na fonte daquelas rotas.
+
+
+---
+
+## `CFG_16.1` Disparos Operação — 11/11
+
+📘 O modelo está no `docs/02` (`etapa_mensagem`, migração 102).
+
+🚨 **É A ÚLTIMA CONFERÊNCIA QUE EXISTE ANTES DE O CLIENTE RECEBER.** Com o
+interruptor ligado, mover um card para a etapa **envia**, sem outra confirmação.
+
+### O que a tela mostra
+
+- a linha de estado: **N de 17 etapas ligadas · canal whatsapp · vai para o
+  cliente** (os três vêm do servidor, para a tela não os afirmar por conta
+  própria);
+- 🔵 **a nota que ele pediu**: *"Nenhuma destas mensagens vai ao técnico."*;
+- o selo de cada etapa diz **"Ligado" / "Desligado" por extenso** — a diferença
+  aqui é *fala com o cliente* ou *não fala*, e cor sozinha não carrega isso;
+- os **botões de variável**, com a grafia dele, que inserem no texto;
+- 🚨 **o texto RESOLVIDO com valores de exemplo** ("João", "17105",
+  "AA123456789BR"): ler `{{Nome}}` não diz nada sobre o que o cliente vê;
+- **Salvar texto** só habilita quando o texto **mudou** — gravar aqui é mexer no
+  que o cliente vai receber, e um `v-model` direto gravaria a cada tecla;
+- 🚨 **Ligar fica desabilitado sem texto**, e o servidor recusa com frase, e o
+  banco recusa de novo.
+
+⚠️ **Nenhuma etapa tem texto hoje**, e nenhuma está ligada: é o tempo 1 que ele
+pediu. O texto do rastreio que ele passou em 04/11 não sobreviveu em documento
+nenhum, e ele disse *"depois colo"*.

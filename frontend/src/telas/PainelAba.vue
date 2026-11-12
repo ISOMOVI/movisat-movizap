@@ -26,11 +26,18 @@
 import { computed, onMounted, onBeforeUnmount, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { api, ErroDeApi } from '../api/cliente.js'
+import BarraDeRolagem from '../componentes/BarraDeRolagem.vue'
 import DialogoDeChamado from '../componentes/DialogoDeChamado.vue'
+import RolagemDaBorda from '../componentes/RolagemDaBorda.vue'
 import { sessao } from '../estado/sessao.js'
 
 const rota = useRoute()
 const quadro = ref(null)
+/* 🚨 `rolo`, e nao `quadro`: naquele nome ja mora o JSON do painel.
+   Este e o elemento com `overflow-x`, que os dois controles de rolagem
+   recebem por `prop` -- a mesma ligacao que a Operacao usa desde
+   06/11. */
+const rolo = ref(null)
 const carregando = ref(true)
 const erro = ref('')
 const abertas = ref({})
@@ -44,6 +51,14 @@ const focoAnterior = ref(null)
 /* ⚠️ O código da aba vem da ROTA, não de um `prop`: é o que permite uma tela
    servir as duas (e as do Financeiro, quando ele der as colunas). */
 const codigo = computed(() => rota.meta?.aba || '')
+
+/* 🔵 11/11: *"deve condizer com o tipo da Aba"*. A ordem das fontes importa: o
+   `meta.titulo` da rota é o nome do PAINEL (Pós-venda, Financeiro,
+   Contratual), que é o que o cabeçalho quer; o `quadro.titulo` do servidor é o
+   nome da ABA aberta, que já aparece na barra de abas logo abaixo. Repetir a
+   aba no `h1` diria duas vezes a mesma coisa e deixaria o painel sem nome. */
+const tituloDoPainel = computed(
+  () => rota.meta?.titulo || quadro.value?.titulo || 'Painel')
 
 const total = computed(() => quadro.value?.total ?? 0)
 
@@ -195,7 +210,13 @@ async function soltarNaColuna(coluna) {
 <template>
   <section class="painel escala-operacao">
     <header class="painel__topo">
-      <h1 class="painel__titulo">Pós-venda</h1>
+      <!-- 🚨 O TÍTULO VEM DA ROTA, NUNCA ESCRITO À MÃO. Este componente serve
+           os quatro painéis de aba (Pós-venda, Financeiro, Contratual e os que
+           vierem), porque as colunas vivem no banco -- então um título literal
+           aqui é o título de UM painel aparecendo em todos. Foi o que
+           aconteceu: o Financeiro e o Contratual abriam dizendo "Pós-venda".
+           ⚠️ O `meta.titulo` já existia e já estava certo em cada rota. -->
+      <h1 class="painel__titulo">{{ tituloDoPainel }}</h1>
       <div class="painel__medidas">
         <span class="pilula">{{ total }} {{ total === 1 ? 'card' : 'cards' }}</span>
         <button class="botao botao--contorno" type="button"
@@ -237,7 +258,15 @@ async function soltarNaColuna(coluna) {
       Nenhum card nesta aba ainda.
     </p>
 
-    <div v-if="quadro" class="painel__quadro">
+    <!-- 🔵 11/11, item 1 dele: a rolagem que a Operacao tem desde 06/11
+         chega as abas. ⚠️ A barra fica FORA do casco, como na Operacao: dentro
+         dele ela entraria na mesma camada das colunas e ficaria por baixo. -->
+    <BarraDeRolagem v-if="quadro" :rolo="rolo"
+                    :rotulo="`quadro de ${tituloDoPainel}`" />
+
+    <div v-if="quadro" class="painel__casco">
+      <RolagemDaBorda :rolo="rolo" rotulo="quadro" />
+      <div ref="rolo" class="painel__quadro">
       <div v-for="(coluna, indice) in quadro.colunas" :key="coluna.chave"
            class="coluna"
            :class="{ 'coluna--vazia': !coluna.total,
@@ -286,7 +315,13 @@ async function soltarNaColuna(coluna) {
               <span class="card__ident">
                 <button class="card__os" type="button"
                         @click.stop="cliqueNoCard(card)">
-                  {{ card.formulario || 'Card ' + card.id }}
+                  <!-- 🚨 CARD COM OS EXISTE AQUI DESDE A MIGRACAO 106: as OS
+                       das situacoes 15746, 15695 e 16492 sairam das colunas da
+                       Operacao e nascem nestes paineis. Sem esta linha o card
+                       dizia "Card 912" -- um numero NOSSO, que nao serve para
+                       procurar nada no Harmonit. -->
+                  <template v-if="card.numero_os">OS {{ card.numero_os }}</template>
+                  <template v-else>{{ card.formulario || 'Card ' + card.id }}</template>
                 </button>
                 <span class="card__quando">{{ dataCurta(card.criada_em) }}</span>
               </span>
@@ -300,6 +335,7 @@ async function soltarNaColuna(coluna) {
 
           <p v-if="!coluna.total" class="nota pequeno">Vazia.</p>
         </div>
+      </div>
       </div>
     </div>
 
@@ -316,6 +352,12 @@ async function soltarNaColuna(coluna) {
   align-items: center; justify-content: space-between;
 }
 .painel__titulo { margin: 0; font-size: var(--txt-lg); }
+
+/* 🚨 `relative` E A CONDICAO da faixa de rolagem da borda: ela e
+   `position: absolute` e, sem um ancestral posicionado, ancoraria no elemento
+   que rola -- e aí andaria junto com o conteudo em vez de ficar parada na
+   borda. Foi o mesmo cuidado que a Operacao tomou em 06/11. */
+.painel__casco { position: relative; }
 .painel__medidas { display: flex; align-items: center; gap: var(--e-2); }
 
 /* ⚠️ A ABA ATUAL E MARCADA POR BORDA, e nao so por cor: cor sozinha nao

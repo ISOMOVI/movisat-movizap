@@ -3049,3 +3049,535 @@ duas abas do Pós-venda, e "Assinado" (contratual) e "Contratos assinados"
 **Cards hoje: 1 no total** (um chamado na `Chamados` da Operação). Os quatro
 painéis novos estão **vazios por decisão dele** — a origem dos cards segue em
 aberto (*"as regras de criação de cards (...) ainda ficam em branco mesmo"*).
+
+---
+
+## `os_campo_da_etapa` — o campo de texto que a etapa pede (migração 099, 11/11)
+
+🔵 Pedido dele, duas vezes com a mesma forma: *"Enviar por correio - Abaixo de
+'Observações', criar um campo de texto chamado 'Rastreamento' que é onde a
+operadora irá colocar o código de rastreamento que será enviado ao cliente"* e
+*"Aguardando devolução - Abaixo de 'Observações', criar um campo de texto
+chamado 'Devolução' (...) Apenas para consulta interna da operadora"*.
+
+```sql
+os_campo_da_etapa (id, numero_os, chave, valor,
+                   atendente_id → atendente SET NULL, em)
+```
+
+🚨 **NÃO EXISTIA NENHUM CAMPO LIVRE POR ETAPA ANTES DISTO.** O que havia era o
+item de checklist *"Inserir código de rastreio"* (etapa 677, migração 090), que
+**só marca que alguém inseriu** — `checklist_item` tem `texto`, `feito`,
+`feito_por` e `feito_em`, e nenhum lugar para o código. Marcar o item continua
+valendo; agora há onde escrever.
+
+### Uma tabela para os dois campos, e não duas colunas na OS
+
+O terceiro campo por etapa vai aparecer — ele já pediu dois no mesmo bloco —, e
+coluna por pedido é como nasce tabela larga que ninguém sabe ler. A chave é
+texto, com **vocabulário fechado** no `CHECK os_campo_chave_check`
+(`rastreio`, `devolucao`), e o que cada chave significa mora em
+`movizap/campo_etapa.py`, onde dá para ler a regra junto do código.
+
+⚠️ **Chave nova exige migração** que amplie o CHECK — a mesma armadilha de
+`painel_aba.painel` e de `contato.relacao`. A trava
+`teste_campo_etapa.py::test_as_chaves_do_codigo_sao_as_do_CHECK_do_banco`
+compara o dicionário do código com o CHECK do banco, para que ninguém mexa só
+num dos dois.
+
+### As duas chaves, e por que não são o mesmo campo
+
+| chave | etapa | rótulo | vai ao cliente? |
+|---|---|---|---|
+| `rastreio` | **677** Enviar por correio/transportadora | Rastreamento | **sim** — é o código que a mensagem da etapa seguinte vai levar |
+| `devolucao` | **15696** Aguardando devolução de equipamento | Devolução | **não** — *"Apenas para consulta interna da operadora"* |
+
+🚨 **A diferença é dado, não comentário** (`campo_etapa.CAMPOS[...]["ao_cliente"]`),
+e é o que impede o primeiro disparo automático de mandar o código de devolução
+para o cliente.
+
+### Nunca se dá `UPDATE`: cada gravação é uma linha
+
+O valor de agora é o **mais recente** (`DISTINCT ON (chave) ... ORDER BY em DESC`,
+o molde do `passagem.etapa_desde`), e o anterior fica.
+🚨 **A razão é concreta:** a operadora que troca o código de rastreio não pode
+apagar o anterior, que **pode já ter ido para o cliente** — saber o que foi
+mandado antes é o que permite dizer "mandei o errado".
+O índice `idx_campo_etapa_atual (numero_os, chave, em DESC, id DESC)` serve
+exatamente essa leitura.
+
+### A chave é `numero_os`, como na `os_observacao`
+
+E **não** a solicitação: amarrar na solicitação deixaria sem onde escrever toda
+OS que nasceu no ERP, que é a maioria.
+⚠️ **Sem FK para a OS**, pelo mesmo motivo da `os_observacao` e da
+`os_passagem`: não existe tabela de OS nossa — a OS vive no Harmonit e o cache
+é do FPSL, outro banco.
+
+### Gravar gera observação, e gravar não escreve no Harmonit
+
+🔵 *"O mesmo para os dados de 'Rastreamento' (...) o mesmo para o campo de
+'Devolução'"* — gerar OBS. Cada gravação escreve
+`[sistema] Rastreamento: AA123456789BR` na `os_observacao`, com autor e hora.
+
+⚠️ **A OBS sai na GRAVAÇÃO, e não ao sair da etapa** — ao contrário do
+checklist. Para o checklist o que vale registrar é o placar final; aqui o que
+vale é *qual código foi posto e por quem*, e esperar a saída da etapa perderia a
+troca feita no meio.
+⚠️ **A OBS falhar não desfaz a gravação:** o código é o dado, a OBS é o rastro.
+
+🚨 **`movizap/campo_etapa.py` NÃO IMPORTA A PONTE**, e há trava estrutural
+provando. Escrever o código na OS exigiria `SalvarOrdemServico` — a **OS
+inteira** —, que é a armadilha do endereço e da situação. A tela **diz** isso a
+quem escreve: *"Fica registrado aqui e vira observação no card. Não vai para a
+OS do Harmonit."*
+
+### Teto de 120 caracteres
+
+`CHECK os_campo_valor_tamanho`. É código de rastreio, não recado — quem precisa
+escrever um parágrafo tem a observação, que aceita 4000.
+
+---
+
+## `os_observacao.apagada_em` / `.apagada_por` — apagar o recado (migração 101, 11/11)
+
+🔵 Pedido dele: *"Permitir excluir OBS's, porém manter os logs e somente owner
+pode visualizar o exlcuido, com botão, como no chat interno, sem que vejam essa
+informação. Se excluírem, aparecerá como 'Observação excluida' e log's."*
+E as três respostas do mesmo dia: apaga **todos que têm acesso à visualização do
+painel**; **sem janela de tempo** (*"pode ser apagada conforme disponivel
+mesmo"*); e **a autoria fica visível** — *"é um dos objetivos,
+rastreabilidade"*.
+
+```sql
+os_observacao (… , apagada_em TIMESTAMPTZ,
+                   apagada_por INTEGER → atendente SET NULL)
+```
+
+🚨 **ISTO INVERTEU UMA DECISÃO ESCRITA, e o texto velho morreu junto.** A
+migração 084 afirmava, no comentário da coluna `texto`, que *"nao ha coluna de
+'apagada' nem de 'editada', de proposito"*, e a tela repetia isso em palavras
+(*"e não se apagam"*). Os dois foram atualizados na mesma entrega — senão o
+sistema mente sobre si mesmo (`M12`). **Editar continua não existindo.**
+
+### Três diferenças deliberadas em relação ao chat interno
+
+| | chat interno (061) | aqui (101) |
+|---|---|---|
+| quem apaga | **só o autor** | **qualquer pessoa com a `PNL_1.1`** |
+| janela | **48 h** | **nenhuma** |
+| `apagada_por` | **não existe** | **existe** |
+
+🚨 **A terceira é consequência da primeira.** No chat, "quem apagou" é dedutível
+— só o autor pode —, então a coluna seria redundante. Aqui qualquer pessoa apaga
+o recado de qualquer um, e sem a coluna a pergunta *"quem apagou?"* não teria
+resposta. Rastreabilidade é o objetivo que ele nomeou.
+
+### O texto não é destruído; quem esconde é a leitura
+
+Molde exato do `chat.py:421-444`. `passagem._esconder_apagados` zera `texto` e
+`anexos` para quem **não** é owner, e o banco continua com tudo — é o que permite
+ao owner ver o que dizia e o que torna a decisão reversível.
+
+⚠️ **A autoria NÃO é escondida**: quem escreveu, quando, quem apagou e quando
+continuam na tela para todos. Some **só o que o recado dizia**.
+
+⚠️ **O anexo some da lista junto com o texto.** Deixar
+`comprovante-pix-joao.pdf` ao lado de *"Observação excluída"* devolveria pela
+legenda o que o apagar tirou — é o vazamento que o chat interno fechou em 07/10,
+na mensagem citada.
+
+🚨 **E a rota de download barra também** (`passagem.anexo_e_de_apagada`, molde do
+`chat._eh_de_apagada`): a lista esconder não basta, porque a rota aceita um id, e
+esse id esteve na tela de quem viu o recado antes de alguém apagar. Responde
+**404, não 403** — 403 confirmaria que o arquivo existe, que é metade do que o
+apagar esconde.
+
+### `eu` nasce nulo, e nulo não é owner
+
+`passagem.observacoes(numero_os, eu=None)` devolve a versão **fechada** quando
+não lhe dizem quem está lendo. ⚠️ Falha no lado seguro, e isso importa porque
+**cinco pontos** de `main.py` chamam essa leitura: é o elo *quem devolve → quem
+grava → quem lê* que a casa já catalogou, e um ponto esquecido daria ao owner a
+tela de todo mundo, em silêncio.
+
+### Os dois donos possíveis
+
+`observacoes_da_solicitacao` nasceu nesta entrega movendo para o módulo a
+consulta que vivia dentro da rota do chamado. ⚠️ **Regra que mora na rota é
+regra que o segundo caminho esquece**, e com o apagar a regra de esconder passou
+a ser obrigatória nos dois.
+
+### O recado do SISTEMA não se apaga
+
+Não é regra de banco: é a tela não oferecer o botão. Aquele texto é o **log**
+(checklist da etapa, troca de prioridade, código de rastreio), e apagar log é
+apagar a prova.
+
+
+---
+
+## `etapa_mensagem` — o disparo de cada etapa (migração 102, 11/11)
+
+🔵 Pedido dele: *"Em configurações tela nova de 'Disparos Operação' -> Deixar o
+campo de menagens que são enviadas em cada etapa do fluxo com interruptor de
+'ligado e desligado'"*, com quatro respostas no mesmo dia: *"nasce em branco e
+com interruptor desligado ainda, na tela de config exclusiva owner"* · *"por hora
+só whatsapp"* · *"por enquanto somente cliente deixe no painel de disparos uma
+nota que nenhuma vai ao tecnico"* · *"ao ligar o interruptor, sairá
+automaticamente como na regra"*.
+
+```sql
+etapa_mensagem (id, situacao_id UNIQUE, canal, texto, ativo,
+                atualizado_em, atualizado_por → atendente SET NULL)
+```
+
+🚨 **ATÉ AQUI NADA NO PAINEL FALAVA COM O CLIENTE SEM ALGUÉM CLICAR.** Isto
+afrouxa, por decisão dele, a régua da ÁREA F de 04/11 (*"confirmação antes de
+enviar, sempre"*). O que ficou no lugar da confirmação:
+
+| guarda | onde |
+|---|---|
+| nasce **vazia e desligada**, nas 17 | o `INSERT` da própria 102 |
+| **não dá para ligar vazia** | `CHECK etapa_mensagem_ligada_tem_texto` |
+| **só whatsapp** | `CHECK etapa_mensagem_canal_conhecido` |
+| **só ao cliente** | o destinatário é DERIVADO da OS, não escolhido |
+| **falhar não desfaz o mover** | `enviar_da_etapa` não levanta, e o `mover` ainda embrulha em `try` |
+| **só dispara se o ERP aceitou** | o bloco está dentro do `if resposta.get("ok")` |
+
+### Uma linha por etapa, e as 17 já nascem
+
+Criar a linha só quando ele escrevesse faria a tela ter **dois estados** ("não
+existe" e "existe vazia") para a mesma coisa.
+⚠️ A coluna `Chamados` **não entra**: não é situação do ERP.
+
+### O canal: atendimento, nunca informativo
+
+🚨 O informativo é de campanha (`informativos.py`), e usá-lo mostraria ao
+cliente **o número errado**.
+⚠️ E `estado` **não é coluna** do `canal` — é derivado do Evolution a cada
+leitura. Conferir conexão no SQL custaria uma ida ao gateway dentro do clique de
+mover; se o canal estiver fora do ar, o envio falha e **o motivo vira observação
+do sistema no card**.
+
+### O envio passa pela conversa
+
+`conversas.iniciar_conversa`, nunca o `evolution` cru: ele confere se o número
+tem WhatsApp, reusa a conversa aberta e **grava a mensagem**. Enviar por fora
+deixaria o cliente com uma mensagem que a operação não vê.
+⚠️ A trava disso mede `__code__.co_names`, e **não** o texto da função: o
+docstring fala do evolution de propósito, e varredura de texto reprovava por
+causa do comentário que explica a regra.
+
+### As três variáveis são as PALAVRAS DELE
+
+`{{Contato: Primeiro nome}}` · `{{Nome}}` (o número da OS) ·
+`{{Código de envio/acompanhamento transporte}}` (o código gravado na etapa 677).
+🚨 A grafia não se "melhora": ele escreve o texto copiando estes nomes, e
+divergência deixa a variável sem resolver -- **saindo crua ao cliente**.
+⚠️ Variável desconhecida é **removida** do texto final, nunca enviada crua. Sem
+nome, o primeiro nome cai em *"tudo bem"*.
+
+### Nenhum texto foi semeado, e é fato, não esquecimento
+
+O texto que ele passou em 04/11 **não sobreviveu em documento nenhum** — do bloco
+daquele dia restaram só os três nomes de variável. Semear um texto inventado
+seria pôr palavra dele na boca do sistema. Ele disse *"depois colo"*.
+
+---
+
+## `pipeline_card.numero_os` e `pipeline_etapa.depois_da_situacao` — a etapa `Serviço Realizado` (migração 105, 11/11)
+
+🔵 Decisão dele: *"Criar nova etapa de 'Serviço Realizado'"*, **nossa, fora do
+Harmonit**, e o fluxo nas palavras dele: *"a coluna nova é para evitar
+reverificação de item esquecido, então moverão para la e depois auditarão o card
+e por fim, atendimento finalizado"*.
+
+```sql
+pipeline_card  (… , numero_os INTEGER)          -- sem FK
+pipeline_etapa (… , depois_da_situacao INTEGER) -- onde a etapa nossa entra
+```
+
+### 🚨 Até aqui, card nosso era card SEM OS
+
+A coluna `Chamados` (092) é de chamados que **ainda não viraram OS**, e
+`pipeline_card` só sabia apontar para `solicitacao_id`. A `Serviço Realizado` é o
+**primeiro caso de card COM OS numa etapa nossa**: a OS fica parada em **1316**
+no Harmonit enquanto o card está aqui, e só sai de 1316 quando alguém move para
+`Atendimento finalizado`.
+
+⚠️ **Isso é consequência da decisão dele, e está dita:** enquanto o card estiver
+nesta etapa, o Harmonit **não reflete** que a auditoria está em curso. Em troca, a
+operação ganha o passo de conferir antes de finalizar — que é o que ele pediu.
+
+**Sem FK em `numero_os`**, pela mesma razão da `os_observacao` e da `os_passagem`:
+não existe tabela de OS nossa — a OS vive no Harmonit e o cache é do FPSL, outro
+banco.
+
+### Uma OS não pode estar em duas etapas nossas
+
+`idx_pipeline_card_os_unica (aba_id, numero_os) WHERE numero_os IS NOT NULL AND
+desfecho IS NULL`.
+⚠️ Sem ele, um clique duplo no arrasto deixaria **a mesma OS em duas colunas**, e
+o quadro a mostraria duas vezes.
+
+### "Entre a 1316 e a 15694" não se diz com um número solto
+
+🚨 As colunas da Operação são as **17 situações do ERP, calculadas no código**; as
+nossas vivem no banco. A `Chamados` ia na frente de todas e `ordem = 0` bastava.
+A `Serviço Realizado` tem de entrar **no meio** — então a etapa nossa diz **depois
+de quem** ela vem (`depois_da_situacao`), e nulo = na frente de tudo.
+
+⚠️ **Renumerar as 17 no banco** seria copiar para cá uma lista que vive no código
+e que o ERP manda.
+⚠️ **Âncora que não existe mais** (situação renomeada ou fora das 17) põe a coluna
+no **fim**, e não a esconde: coluna sumida leva card com ela.
+
+### O quadro passou a ter 19 colunas
+
+17 do ERP + `Chamados` + `Serviço Realizado`.
+🚨 **`len(SITUACOES)` continua 17**, e é essa separação que mantém verdadeira a
+frase dele de 29/10 (*"qualquer aba fora dessas não deve estar no painel"*) sobre
+as colunas **do ERP**, que eram as únicas de que aquela frase falava.
+
+⚠️ **E "do ERP" deixou de ser "tudo menos chamados":** com duas etapas nossas, o
+que as separa é o **`situacao_id` nulo**, não o nome de uma delas. Duas travas
+antigas filtravam pelo nome e passaram a contar errado — uma delas estourou com
+`None < int`.
+
+### Entrar não escreve no ERP; sair escreve
+
+| gesto | rota | escreve no Harmonit? |
+|---|---|---|
+| pôr a OS na etapa nossa | `POST /api/paineis/operacao/etapa-nossa` | **não** |
+| tirar (mover para coluna do ERP) | `POST /api/paineis/operacao/mover` | **sim** |
+
+🚨 **Duas rotas, de propósito:** a `/mover` grava `situacaoId` no ERP, e a outra
+não toca no Harmonit. Uma rota só, decidindo por dentro, seria o caminho errado
+esperando acontecer.
+
+🚨 **A ORDEM NA SAÍDA IMPORTA:** solta DEPOIS de a escrita no ERP dar certo.
+Soltar antes deixaria o card fora da etapa nossa **e ainda na situação velha** se
+o Harmonit recusasse — ou seja, o card sumiria das duas colunas.
+
+### Sair FINALIZA o card, não o apaga
+
+`desfecho = 'resolvido'`. 🚨 O histórico de passagens é o registro de que a
+auditoria aconteceu, e apagar a linha levaria isso junto
+(`pipeline_passagem` tem `ON DELETE CASCADE` no card).
+
+### A exceção no arrasto é NOMEADA
+
+A guarda dos dois mundos continua recusando card de OS na `Chamados`. O que
+mudou é uma exceção **nomeada** para a etapa nossa que aceita OS — não um
+afrouxamento da regra.
+
+---
+
+## `pipeline_etapa.recebe_situacao` e `formulario.etapa_destino_id` — as filas da Operação em relação aos outros painéis (migração 106, 11/11)
+
+🔵 **Duas frases dele, e as duas são a mesma ideia:**
+
+- *"não é nesse financeiro que deve nascer, como foi dito essas etapas finais do
+  OP devem ser excluídas e deveria ter nascido no painel Financeiro, na etapa
+  correta 'Nova solicitação'"*;
+- *"fiz teste com form de aditivo e não abriu card no contratual como foi
+  pedido"*.
+
+### 📏 O que a medição achou antes de escrever uma linha
+
+| achado | número |
+|---|---|
+| a OS **17119** (ressarcimento, termo 8947) nasceu na situação **15746** e apareceu na coluna *Financeiro* da **Operação** | — |
+| passagens para 15746 / 15695 / 16492 no `os_passagem`, desde que o log existe | **zero** |
+| o envio de aditivo dele gerou a solicitação **3437** com cards | **nenhum** |
+| slugs no `chamado_os.PROBLEMA_POR_FORMULARIO`, que era o portão do card | **1** (`suporte`) |
+
+🚨 **Ninguém moveu a 17119: ela nasceu ali.** O log não tem uma única passagem
+para aquelas três situações — e eu era o suspeito.
+
+### As duas colunas, e por que são duas e não uma
+
+```sql
+pipeline_etapa.recebe_situacao  -- "OS nesta situação do ERP mora NESTA etapa"
+formulario.etapa_destino_id     -- "o card deste formulário nasce NESTA etapa"
+```
+
+🚨 **São dois caminhos diferentes, e misturá-los era o defeito:** a primeira é um
+card que **o ERP cria** e nós apenas colocamos no lugar; a segunda é um card que
+**nasce aqui**, sem OS, como os chamados do Suporte desde 29/10. O portão antigo
+exigia estar no mapa de **problema do Harmonit** para criar um **card** — duas
+coisas sem relação.
+
+### 🚨 Por que o destino é DADO e não código
+
+As 17 situações vivem em código porque **o ERP as manda**. O destino é o
+contrário: é decisão dele, muda por painel e por formulário, e mudar não pode
+exigir deploy — a mesma razão de `formulario.painel` ser coluna.
+
+### As três que saíram, e para onde foram
+
+| situação | ia para | agora nasce em |
+|---|---|---|
+| 15746 Financeiro | coluna da Operação | **PNL_1.4 › Nova solicitação** |
+| 15695 Pós venda | coluna da Operação | **PNL_1.3 › Nova solicitação** |
+| 16492 Contratual | coluna da Operação | 🔴 **PNL_1.5 › Elaborar contrato** |
+
+🔴 **A terceira espera ele:** o Contratual **não tem** "Nova solicitação" — as
+seis colunas que ele escreveu começam em *Elaborar contrato*. Inventar uma
+coluna ali seria mexer numa lista dele. Mudar é **uma linha**, e há trava que
+muda de alvo junto.
+
+⚠️ **Tirar sem dar destino faria a OS sumir de TODAS as telas.** É o `M12` na
+forma mais cara, e nenhuma suíte reclamaria — o card simplesmente não estaria
+lá. Por isso a trava `test_toda_situacao_reenderecada_tem_etapa_que_a_recebe`
+existe, e por isso as duas metades vieram no mesmo passo.
+
+### O card é MATERIALIZADO, não calculado na hora
+
+`pipeline.semear_os(os_do_erp)` cria a linha em `pipeline_card`.
+
+🚨 **A escolha é deliberada:** se o quadro daquele painel fosse montado lendo a
+ponte, ficaria **vazio** quando o FPSL ou o Harmonit caíssem — e o
+`quadro_da_aba` existe com a promessa oposta (*"este quadro não pode ficar vazio
+porque um terceiro caiu"*). Materializado, a queda de um terceiro impede card
+**novo** de aparecer, e nunca apaga o que já está na tela.
+
+🚨 **Idempotente pelo índice, não por consulta:** o
+`idx_pipeline_card_os_unica` (migração 105) é quem garante. Conferir antes com
+um `SELECT` deixaria uma janela entre a conferência e a escrita — e duas pessoas
+abrindo o painel ao mesmo tempo é o caso comum, não o raro.
+⚠️ **Mas card FINALIZADO não renasce:** o índice único só vale para
+`desfecho IS NULL`, então uma OS já tratada voltaria a nascer a cada leitura.
+A guarda extra olha também o card com desfecho.
+
+### Quem semeia, e por que os DOIS
+
+| quem | quando | por quê |
+|---|---|---|
+| `quadro("operacao")` | a cada abertura do painel | é o único lugar que **já** lia a ponte |
+| `quadro_da_aba(...)` | se a aba tem etapa que recebe situação | ⚠️ sem isto, o card da OS financeira só nasceria quando alguém abrisse a **Operação** — um acoplamento invisível entre duas telas |
+
+Os dois dentro de `try`: semear é efeito colateral e não pode tirar o quadro do
+ar.
+
+### Dois defeitos que só a medição no estado real mostrou
+
+1. **O card não mostrava a OS.** `_card_do_chamado` põe `numero_ordem: None` de
+   propósito — é esse nulo que mantém o card não-arrastável. Entrou uma chave
+   **nova**, `numero_os`, só de exibição. ⚠️ Reusar o `numero_ordem` ligaria o
+   arrasto para o ERP numa aba cujo mover escreve só no nosso banco.
+   O card dizia *"Card 912"* — um número **nosso**, que não serve para procurar
+   nada no Harmonit.
+2. **A Operação dizia que as duas OS estavam "fora do quadro".** Não estão:
+   estão em outro painel, por decisão dele. `fora_do_quadro` avisa *"há OS que
+   nenhuma coluna mostra"* — usá-lo para OS **reendereçada** é a tela mentindo
+   (`M12`). Entrou a conta `noutro_painel`, separada.
+
+### O empate que a regra derivada errou
+
+O destino de cada formulário é **derivado** do `painel` dele (a primeira etapa
+daquele painel), e não escrito à mão em 16 linhas. A derivação acertou três
+painéis e **errou um**: o Pós-venda tem **duas abas**, e *"a primeira por
+ordem"* entregou **CES e NPS** na fila de **Treinamentos**. Pesquisa não é
+treinamento.
+
+⚠️ **Derivar é certo; derivação com empate precisa de desempate NOMEADO**, e não
+do acaso da `ordem`. A exceção está no arquivo da migração, para quem
+reconstruir a base chegar no mesmo lugar.
+
+### A rolagem chegou às outras abas (item 1 dele)
+
+`grep -c rolo PainelAba.vue` dava **0**; a Operação tinha os dois controles
+desde 06/11. 🚨 **O `ref` não pode se chamar `quadro`:** naquela tela `quadro`
+já é o ref do JSON do painel, e reusar o nome poria o elemento do DOM onde a
+tela espera os dados — uma colisão que o Vue não reclama e que deixaria o quadro
+sem desenhar.
+
+⚠️ **A trava olha a ESTRUTURA, não o gesto:** o jsdom não faz layout, então
+`scrollWidth` é sempre 0 e "arrastar e ver rolar" não prova nada. O que prova é
+que os dois controles estão na árvore **ligados ao mesmo elemento que rola** —
+e o defeito forjado (controle na árvore, `prop` nula) deixa exatamente essas
+duas travas vermelhas.
+
+---
+
+## `formulario_convite` — o link do formulário pré-preenchido (migração 107)
+
+🔵 **Pedido dele, 11/11:** formulários *"pré-preenchidos quando abertos pelo
+botão dentro do chat"*.
+
+Uma linha é **um convite**: um formulário + os valores que a Movisat sugere +
+quem convidou e de onde.
+
+| coluna | o que guarda |
+|---|---|
+| `bilhete` | 🚨 **o que viaja na URL**: opaco, `secrets.token_urlsafe(16)`, `UNIQUE`. Não deriva do `id` nem da data, então não se adivinha a partir de um convite conhecido |
+| `slug` | o formulário. ⚠️ **Slug e não `formulario_id`**: é o slug que monta o link e é por ele que a página pública pede a definição |
+| `valores` | `JSONB`, pelo **nome** do campo. 🚨 **Sugestão, nunca verdade** |
+| `conversa_id`, `cliente_id` | de onde o convite saiu, para o rastro. Os dois podem ser nulos |
+| `criado_por`, `criado_em` | quem e quando |
+| `expira_em` | 🚨 **o convite vence** — 7 dias |
+| `aberto_em`, `aberturas` | marca da primeira abertura e a contagem. ⚠️ **Marca, não trava** |
+| `usado_em`, `solicitacao_id` | o convite virou solicitação. ⚠️ **Não invalida nada** |
+
+### 🚨 Por que uma tabela, e não os valores na URL
+
+O caminho curto seria `/f/suporte?cnpj=...&telefone=...`. **Isso põe dado de
+cliente no endereço**, e endereço não é lugar de dado: ele entra no **log de
+acesso do nginx** (que guarda a linha de requisição inteira, com a query
+string), no **histórico do navegador** de quem abriu, no `Referer` de qualquer
+recurso que a página carregue, e em **qualquer repasse do link** por WhatsApp ou
+e-mail. ⚠️ **Base64 não resolve nada disso** — esconde do olho, não do log.
+
+Então o bilhete viaja e os valores ficam aqui. Quem tem o bilhete lê os valores
+**daquele** convite, por uma rota pública que devolve só `{slug, valores}`.
+
+### As quatro decisões que a tabela carrega
+
+1. 🚨 **Vence.** Link pré-preenchido é um ponteiro para dado de cliente: sem
+   prazo, um link repassado no ano que vem ainda abriria a ficha de alguém.
+2. ⚠️ **Abrir não gasta.** A pessoa recarrega a página, perde a aba, volta no
+   dia seguinte — gastar no primeiro `GET` viraria *"o link não funciona
+   mais"*, que é o pior jeito de proteger.
+3. ⚠️ **Enviar não apaga.** O rastro de quem convidou quem fica; apagar
+   deixaria a solicitação sem origem.
+4. 🚨 **Os valores são sugestão, nunca verdade.** O envio continua validando
+   tudo pelo `formularios.validar`. Se fossem verdade, um convite velho com CNPJ
+   antigo gravaria o CNPJ antigo sem ninguém olhar.
+
+### 🚨 A sugestão é por RÓTULO, não por tipo de campo
+
+Medido nas 16 definições, e é o achado que desenhou o `SUGESTAO_POR_ROTULO`:
+
+| armadilha | formulário |
+|---|---|
+| **dois** campos `phone` e **dois** `email`, e os segundos são *"... do novo titular"* | `rescisao` |
+| **dois** `phone` (da empresa e pessoal) | `ficha-cadastral` |
+| `double` é **CNPJ, CPF, RG e "Quantidade de veículos"** | quatro formulários |
+
+⚠️ **Sugerir o telefone de quem está rescindindo no campo do novo titular não é
+defeito de tela: é a pessoa errada escrita num termo.** Por isso o mapa é lista
+fechada de rótulos, casa **exato** (sem acento, sem caixa) e só o **primeiro**
+campo de cada rótulo recebe.
+
+**Efeito medido e desejado:** a `ficha-cadastral` **não** recebe nome, porque
+pede *"Nome completo do responsável em assinar o contrato"*, que não bate exato
+com *"Nome completo"* — e quem fala no WhatsApp não é necessariamente quem
+assina.
+
+### Dois fatos do modelo que o código teve de obedecer
+
+1. 🚨 **`conversa` não tem `cliente_id`** — só `contato_id`. O cliente vem por
+   `contato.cliente_id`.
+2. 🚨 **`cliente.tipo_pessoa` é INTEIRO** (`cadastro.TIPO_PESSOA`: `0` indefinido,
+   `1` Jurídica, `2` Física, `3` Estrangeiro). ⚠️ **É ele quem decide se o
+   documento vai no campo de CNPJ ou no de CPF, nunca o comprimento do texto** —
+   cadastro com documento pela metade existe, e adivinhar pelo tamanho poria
+   CNPJ no campo de CPF. `0` e `3` não sugerem documento nenhum.
+
+### O índice
+
+`idx_convite_da_conversa (conversa_id, criado_em DESC) WHERE conversa_id IS NOT
+NULL` — a pergunta da tela do chat: *"quais convites desta conversa?"*. A busca
+pelo bilhete usa o `UNIQUE`.

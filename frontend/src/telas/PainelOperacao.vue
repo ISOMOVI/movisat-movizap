@@ -35,6 +35,7 @@ import { useRouter } from 'vue-router'
 import { api, ErroDeApi } from '../api/cliente.js'
 import AjudaDaTela from '../componentes/AjudaDaTela.vue'
 import BalaoDeRecado from '../componentes/BalaoDeRecado.vue'
+import { sessao } from '../estado/sessao.js'
 import DialogoDeChamado from '../componentes/DialogoDeChamado.vue'
 import BarraDeRolagem from '../componentes/BarraDeRolagem.vue'
 import RolagemDaBorda from '../componentes/RolagemDaBorda.vue'
@@ -207,8 +208,14 @@ async function abrirCard(card) {
    🚨 A OBSERVAÇÃO NÃO VAI PARA O ERP: 🔵 *"com autor e hora, no MoviZap. Não
    vai para a `solucaoTecnica`"* — aquele campo é da operação técnica, o cliente
    pode lê-lo num relatório, e escrever nele gravaria a OS inteira a cada
-   recado. ⚠️ E não se apaga nem se edita: reescrever recado é reescrever a
-   história que a operação leu.
+   recado. ⚠️ E NÃO SE EDITA: reescrever recado é reescrever a história que a
+   operação leu.
+
+   🔵 11/11: APAGAR passou a existir, por decisão dele -- *"Permitir excluir
+   OBS's, porém manter os logs e somente owner pode visualizar o exlcuido"*.
+   ⚠️ Apagar **não destrói o texto**: quem esconde é a leitura, no servidor, e a
+   autoria dos dois lados (quem escreveu, quem apagou) fica visível para todos,
+   que é o objetivo que ele nomeou -- *"rastreabilidade"*.
    ============================================================================ */
 const recado = ref('')
 const salvando = ref(false)
@@ -554,6 +561,13 @@ async function removerItem(item) {
    existir. */
 const rolo = ref(null)
 const arrastando = ref(null)
+/* 🚨 NULO É "NINGUÉM ESTÁ SENDO MOVIDO", E NÃO UM CARD.
+   Todo card de chamado tem `numero_ordem` nulo (o backend manda assim, de
+   propósito), então comparar `movendo === card.numero_ordem` sem conferir o
+   nulo dava `null === null` -- e a coluna `Chamados` inteira nascia com
+   `.card--movendo`, que é `opacity: .55` MAIS `pointer-events: none`: o card
+   parecia arquivado e não aceitava clique nenhum.
+   ⚠️ Quem compara com isto confere o nulo primeiro, sempre. */
 const movendo = ref(null)
 const erroDeMover = ref('')
 
@@ -643,6 +657,21 @@ async function soltarNaColuna(coluna) {
      Sem isto, soltar um card de OS na `Chamados` chamaria
      `mover(card, null)` -- a rota recusa com 422, entao falharia no lado
      seguro, mas com erro feio e sem dizer por que. */
+  /* 🔵 11/11: A EXCEÇÃO É NOMEADA, e não um afrouxamento da guarda. A
+     `Serviço Realizado` é etapa NOSSA que aceita card COM OS -- é o único
+     lugar do sistema que atravessa os dois mundos, e ele a pediu justamente
+     para auditar o card antes de finalizar.
+     🚨 A guarda continua recusando a `Chamados`, que é de chamado SEM OS. */
+  if (!coluna.situacao_id && card.numero_ordem) {
+    if (!coluna.etapa_id) return
+    if (coluna.titulo === 'Chamados') {
+      erroDeMover.value = 'Esta OS não entra em Chamados: a coluna é de '
+        + 'chamados que ainda não viraram OS.'
+      return
+    }
+    await pousarNaEtapaNossa(card, coluna)
+    return
+  }
   if (!coluna.situacao_id && !card.solicitacao_id) {
     erroDeMover.value = 'Esta OS não entra em Chamados: a coluna é de '
       + 'chamados que ainda não viraram OS.'
@@ -656,6 +685,27 @@ async function soltarNaColuna(coluna) {
   /* Soltar na própria coluna não é movimento. */
   if (card.situacao_id === coluna.situacao_id) return
   await mover(card, coluna.situacao_id)
+}
+
+/* 🔵 11/11: pousar a OS numa etapa NOSSA. 🚨 ROTA SEPARADA da `/mover`, de
+   propósito: a `/mover` grava `situacaoId` no ERP, e esta **não escreve no
+   Harmonit** -- a OS fica em 1316 e o card passa a morar aqui. Duas rotas é o
+   que impede o caminho errado. */
+async function pousarNaEtapaNossa(card, coluna) {
+  erroDeMover.value = ''
+  movendo.value = card.numero_ordem
+  try {
+    await api.post('/api/paineis/operacao/etapa-nossa', {
+      numero_os: card.numero_ordem,
+      etapa_id: coluna.etapa_id,
+    })
+  } catch (e) {
+    erroDeMover.value = e instanceof ErroDeApi
+      ? e.message : 'Não consegui pôr esta OS nesta etapa.'
+  } finally {
+    movendo.value = null
+    await carregar()
+  }
 }
 
 async function moverDoModal(paraSituacao) {
@@ -710,6 +760,139 @@ async function mover(card, paraSituacao) {
    ⚠️ E NÃO HÁ COR POR TEMPO: o mockup mostra laranja "depois do limite", e o
    limite **nunca foi dito**. Escolher um número aqui seria regra imaginária.
    ============================================================================ */
+/* ============================================================================
+   APAGAR OBSERVAÇÃO — 11/11
+   ----------------------------------------------------------------------------
+   🔵 Dele: *"Permitir excluir OBS's, porém manter os logs e somente owner pode
+   visualizar o exlcuido, com botão, como no chat interno"*, e as três respostas
+   do mesmo dia: apaga *"todos que tem acesso a visualização do painel"*, **sem
+   janela de tempo**, e a **autoria fica visível** (*"é um dos objetivos,
+   rastreabilidade"*).
+
+   🚨 `podeApagar` É `true` PORQUE A PERMISSÃO JÁ É A PORTA. Quem está vendo
+   este modal tem a `PNL_1.1` -- é literalmente o que ele definiu como "quem
+   pode apagar". A prop existe para o componente não decidir sozinho: ele é
+   usado em dois lugares, e o dia em que um deles for só-leitura a diferença
+   mora aqui, não dentro do balão.
+   ⚠️ **Quem esconde o conteúdo é o SERVIDOR**, não esta tela: para quem não é
+   owner o `texto` já chega nulo. O `souOwner` daqui só decide se o botão "ver o
+   que dizia" aparece -- e sem conteúdo ele não teria o que revelar.
+   ============================================================================ */
+const souOwner = computed(() => Boolean(sessao.usuario?.owner))
+const apagandoRecado = ref(0)
+
+async function apagarRecado(recado) {
+  if (!recado || apagandoRecado.value) return
+  apagandoRecado.value = recado.id
+  try {
+    const r = await api.post(
+      `/api/paineis/operacao/observacao/${recado.id}/apagar`, {})
+    /* A resposta já vem escondida para quem pediu -- a tela não precisa de uma
+       segunda leitura, e nunca recebe conteúdo que não pode mostrar. */
+    if (ficha.value && r.observacoes) ficha.value.observacoes = r.observacoes
+  } catch (e) {
+    erroDoRecado.value = e instanceof ErroDeApi
+      ? e.message : 'Não consegui excluir esta observação.'
+  } finally {
+    apagandoRecado.value = 0
+  }
+}
+
+/* ============================================================================
+   O CAMPO DE TEXTO DA ETAPA — Rastreamento e Devolução (11/11)
+   ----------------------------------------------------------------------------
+   🔵 *"Abaixo de 'Observações', criar um campo de texto chamado
+   'Rastreamento'"* (etapa 677) e *"um campo de texto chamado 'Devolução' (...)
+   Apenas para consulta interna da operadora"* (etapa 15696).
+
+   🚨 QUEM DIZ QUAL CAMPO A ETAPA PEDE É O SERVIDOR (`movizap/campo_etapa.py`,
+   que a ficha devolve em `campos`). A tela não tem a lista de etapa→campo
+   escrita: duas listas divergiriam na primeira etapa nova, e a de cá
+   desenharia caixa onde o servidor recusaria gravar.
+
+   ⚠️ O VALOR DE OUTRAS ETAPAS CONTINUA VISÍVEL quando existe: o rastreio
+   escrito na 677 é justamente o que alguém quer ler depois, na 15747, quando o
+   cliente pergunta onde está o item.
+   ============================================================================ */
+const campoNovo = ref('')
+const salvandoCampo = ref(false)
+const erroDoCampo = ref('')
+
+/* O campo que a etapa ABERTA pede, ou nada. */
+const campoDaEtapa = computed(() => {
+  const defs = (ficha.value && ficha.value.campos) || {}
+  const sid = cardAberto.value && cardAberto.value.situacao_id
+  if (!sid) return null
+  for (const [chave, d] of Object.entries(defs)) {
+    if (Number(d.situacao_id) === Number(sid)) return { ...d, chave }
+  }
+  return null
+})
+
+/* Os valores já escritos nesta OS, de qualquer etapa. */
+const camposJaEscritos = computed(() => {
+  const vals = (ficha.value && ficha.value.campos_da_etapa) || {}
+  const defs = (ficha.value && ficha.value.campos) || {}
+  return Object.entries(vals).map(([chave, v]) => ({
+    chave, ...v, rotulo: (defs[chave] && defs[chave].rotulo) || chave,
+  }))
+})
+
+async function salvarCampoDaEtapa() {
+  const def = campoDaEtapa.value
+  const valor = campoNovo.value.trim()
+  if (!def || !valor || salvandoCampo.value) return
+  salvandoCampo.value = true
+  erroDoCampo.value = ''
+  try {
+    const r = await api.post('/api/paineis/operacao/campo-da-etapa', {
+      numero_os: cardAberto.value.numero_ordem,
+      chave: def.chave,
+      valor,
+    })
+    /* 🚨 A FICHA É ATUALIZADA DA RESPOSTA, e não de uma segunda leitura: a
+       rota já devolve o campo E as observações (gravar gera uma), e reler
+       seria ida ao ERP por nada. */
+    if (ficha.value) {
+      ficha.value.campos_da_etapa = r.campos_da_etapa || {}
+      if (r.observacoes) ficha.value.observacoes = r.observacoes
+    }
+    campoNovo.value = ''
+  } catch (e) {
+    erroDoCampo.value = e instanceof ErroDeApi
+      ? e.message : 'Não consegui gravar este campo.'
+  } finally {
+    salvandoCampo.value = false
+  }
+}
+
+/* ============================================================================
+   O PRAZO DE 24 HORAS ÚTEIS — 11/11
+   ----------------------------------------------------------------------------
+   🔵 *"Abrirá com prazo de 24hrs uteis (08:00 - 18:00) para conclusão, apenas
+   informativo do card e controle de atraso o contador de tempo de etapa"*, com
+   a janela que ele fixou no mesmo dia: **08:30-17:00, fixa**.
+
+   🚨 A CONTA É DO SERVIDOR (`movizap/horas_uteis.py`), e a tela só desenha. Dois
+   motivos: fazer a conta aqui a duplicaria (e as duas divergiriam na primeira
+   mexida, que é a lição do `WHERE` copiado de 22/10), e o navegador tem o fuso
+   da máquina de quem olha, não o da operação.
+
+   ⚠️ INFORMATIVO. Não esmaece, não bloqueia, não muda a ordem da coluna.
+   ============================================================================ */
+function prazoCurto(prazo) {
+  if (!prazo || !prazo.vence_em) return null
+  const seg = Math.abs(Math.floor(Number(prazo.segundos_uteis) || 0))
+  const h = Math.floor(seg / 3600)
+  const m = Math.floor((seg % 3600) / 60)
+  const quanto = h ? `${h}h ${m}min` : `${m}min`
+  /* ⚠️ "úteis" fica escrito: 7h de prazo numa sexta às 16h não são 7h de
+     relógio, e sem a palavra o número parece errado para quem olha o reloginho. */
+  return prazo.atrasado
+    ? `atrasado há ${quanto} úteis`
+    : `vence em ${quanto} úteis`
+}
+
 function duracao(iso) {
   if (!iso) return null
   const t = new Date(iso).getTime()
@@ -1107,9 +1290,12 @@ onBeforeUnmount(() => {
 
           <div v-if="abertas[coluna.chave]" class="coluna__corpo">
             <p v-if="coluna.nota" class="nota pequeno">{{ coluna.nota }}</p>
-            <p v-if="coluna.situacao_id" class="nota pequeno">
-              situação {{ coluna.situacao_id }} no Harmonit
-            </p>
+            <!-- 🔵 11/11: SAIU a linha *"situação N no Harmonit"*. Ele:
+                 *"voltou a aparecr generico"* -- e é a quarta vez que ele tira
+                 texto didático da tela. O número da situação é informação de
+                 depuração; a coluna já tem o NOME, que é o que quem opera usa.
+                 ⚠️ O dado NÃO se perde: `coluna.situacao_id` continua vindo na
+                 rota, e é ele que o arrasto usa para saber onde soltar. -->
 
             <!-- 🚨 A OS VEM NA FRENTE, e isto mudou com a D8: até 29/10 o card
                  começava pelo nome do formulário, e desde que o card é a OS
@@ -1118,7 +1304,8 @@ onBeforeUnmount(() => {
                  campo vazio. -->
             <article v-for="card in coluna.cards"
                      :key="card.numero_ordem || card.id" class="card"
-                     :class="{ 'card--movendo': movendo === card.numero_ordem }"
+                     :class="{ 'card--movendo': movendo !== null
+                                && movendo === card.numero_ordem }"
                      :draggable="quadro.pode_mover && !!card.numero_ordem"
                      @dragstart="comecarArrasto(card, $event)"
                      @dragend="terminarArrasto">
@@ -1218,6 +1405,17 @@ onBeforeUnmount(() => {
                     <template v-if="duracao(card.criada_em)">
                       &middot; total {{ duracao(card.criada_em) }}
                     </template>
+                  </span>
+                </span>
+
+                <!-- 🔵 O PRAZO, só onde ele existe: hoje é o card de chamado.
+                     ⚠️ O selo DIZ "atrasado" por extenso, nunca só por cor --
+                     a mesma régua da pílula do checklist. -->
+                <span v-if="prazoCurto(card.prazo)" class="card__linha card__dado">
+                  <span class="card__prazo"
+                        :class="{ 'card__prazo--atrasado': card.prazo.atrasado }">
+                    <i class="bi bi-hourglass-split" aria-hidden="true"></i>
+                    {{ prazoCurto(card.prazo) }}
                   </span>
                 </span>
 
@@ -1345,15 +1543,23 @@ onBeforeUnmount(() => {
           </header>
 
           <div class="modal__corpo">
+            <!-- 🚨 ESTA FRASE DIZIA "e não se apagam", E PASSOU A SER
+                 MENTIRA em 11/11 (`M12`): ele pediu o excluir no mesmo dia. O
+                 texto era verdadeiro quando escrito, e é justamente isso que
+                 faz o defeito -- a entrega seguinte precisa voltar para
+                 matá-lo. -->
             <p class="nota pequeno">
               Ficam no MoviZap, com autor e hora. <strong>Não vão para a OS</strong>
-              do Harmonit, e não se apagam.
+              do Harmonit. Excluir mantém o registro de quem escreveu e de quem
+              excluiu.
             </p>
 
             <ul v-if="ficha && ficha.observacoes && ficha.observacoes.length"
                 class="recados">
               <BalaoDeRecado v-for="o in [...ficha.observacoes].reverse()"
-                             :key="o.id" :recado="o" :quando="quando" />
+                             :key="o.id" :recado="o" :quando="quando"
+                             :sou-owner="souOwner" :pode-apagar="true"
+                             @apagar="apagarRecado" />
             </ul>
             <p v-else class="nota pequeno">Nenhuma observação ainda.</p>
           </div>
@@ -1429,9 +1635,6 @@ onBeforeUnmount(() => {
           <p>
             Esta etapa tem <strong>checklist</strong>. Ele fica
             <strong>dentro do card</strong> — abra o card para ver o que fazer.
-          </p>
-          <p class="nota pequeno">
-            Não aviso de novo nesta etapa pelos próximos 10 minutos.
           </p>
         </div>
         <div class="modal__rodape">
@@ -1604,6 +1807,47 @@ onBeforeUnmount(() => {
                 </button>
               </div>
                           </section>
+
+<!-- 🔵 ABAIXO DE OBSERVAÇÕES, como ele desenhou. A seção só existe quando a
+     etapa pede o campo, ou quando já há valor escrito para mostrar. -->
+<section v-if="campoDaEtapa || camposJaEscritos.length"
+                     class="modal__recados modal__painel">
+              <h3>{{ campoDaEtapa ? campoDaEtapa.rotulo : 'Códigos desta OS' }}</h3>
+
+              <!-- O que já foi escrito, de qualquer etapa. -->
+              <ul v-if="camposJaEscritos.length" class="modal__passagens">
+                <li v-for="c in camposJaEscritos" :key="c.chave">
+                  <strong>{{ c.rotulo }}:</strong> {{ c.valor }}
+                  <span class="nota pequeno">
+                    {{ c.quem || 'sem autor' }}<span v-if="c.em">, {{ quando(c.em) }}</span>
+                  </span>
+                </li>
+              </ul>
+
+              <template v-if="campoDaEtapa">
+                <p class="nota pequeno">{{ campoDaEtapa.ajuda }}</p>
+                <div class="modal__pe">
+                  <input v-model="campoNovo" class="campo__entrada"
+                         :placeholder="campoDaEtapa.rotulo"
+                         :aria-label="campoDaEtapa.rotulo + ' desta OS'"
+                         @keyup.enter="salvarCampoDaEtapa" />
+                  <button class="botao" type="button"
+                          :disabled="!campoNovo.trim() || salvandoCampo"
+                          @click="salvarCampoDaEtapa">Gravar</button>
+                </div>
+                <!-- ⚠️ A TELA DIZ QUE NÃO VAI PARA O HARMONIT, pela mesma razão
+                     da observação: quem escreve um código precisa saber se ele
+                     chegou ao ERP, e ele não chega. -->
+                <p class="nota pequeno">
+                  Fica registrado aqui e vira observação no card.
+                  Não vai para a OS do Harmonit.
+                </p>
+              </template>
+
+              <p v-if="erroDoCampo" class="aviso aviso--erro" role="alert">
+                {{ erroDoCampo }}
+              </p>
+                          </section>
             </div>
 
             <div class="modal__coluna modal__coluna--ler">
@@ -1708,7 +1952,8 @@ onBeforeUnmount(() => {
                      class="faixa__campo">
                 <span class="faixa__rotulo">Mover para</span>
                 <select :value="cardAberto.situacao_id"
-                        :disabled="movendo === cardAberto.numero_ordem"
+                        :disabled="movendo !== null
+                                  && movendo === cardAberto.numero_ordem"
                         @change="moverDoModal(Number($event.target.value))">
                   <option v-for="c in quadro.colunas" :key="c.chave"
                           :value="c.situacao_id">{{ c.titulo }}</option>
@@ -1910,6 +2155,11 @@ onBeforeUnmount(() => {
 .modal__caixa { user-select: text; }
 /* Enquanto a escrita no ERP não voltou, o card fica apagado e o select
    desabilitado -- dois cliques seguidos seriam duas escritas. */
+/* O selo do prazo. ⚠️ `--erro` e não vermelho cru, e o texto já diz
+   "atrasado": cor sozinha não é portador. */
+.card__prazo { display: inline-flex; align-items: center; gap: 4px; }
+.card__prazo--atrasado { color: var(--erro); font-weight: 600; }
+
 .card--movendo { opacity: .55; pointer-events: none; }
 .card__mover { display: block; margin-top: var(--e-1); }
 .card__mover select {
@@ -2335,7 +2585,10 @@ onBeforeUnmount(() => {
 }
 
 /* O diálogo do aviso de etapa é curto: uma frase e o Ok. */
-.modal__caixa--curta { max-width: 26rem; }
+/* 🔵 11/11, dele: *"Reduzir o tamanho do modal e centralizar botão"*.
+   ⚠️ 22rem e não menos: a frase tem duas linhas em tela de celular, e caixa
+   mais estreita a quebraria em quatro. */
+.modal__caixa--curta { max-width: 22rem; }
 
 .check__linha {
   display: flex;
@@ -2461,6 +2714,11 @@ onBeforeUnmount(() => {
    dois -- a mesma ordem da pilha de foco e do `Escape`. */
 .modal--recados { z-index: calc(var(--z-modal, 50) + 10); }
 .modal--aviso { z-index: calc(var(--z-modal, 50) + 20); }
+/* 🚨 O BOTÃO ESTAVA À ESQUERDA POR CAUSA DO `space-between` DO RODAPÉ DA CASA:
+   com um filho só, `space-between` encosta o único botão na borda. Centralizar
+   aqui, e NÃO no `.modal__rodape` geral -- os outros modais têm dois botões,
+   e lá o `space-between` é o certo. */
+.modal--aviso .modal__rodape { justify-content: center; }
 .card__ha { font-size: var(--txt-xs); color: var(--texto-fraco); }
 /* 🔵 O CLIENTE E A PRIMEIRA LINHA e o maior texto do card (variante C):
    e por ele que a operacao pensa, e os identificadores vem depois.

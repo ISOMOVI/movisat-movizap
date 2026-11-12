@@ -162,7 +162,7 @@ class TestInadimplentes:
 # ============================================================================
 # O QUADRO — vazio, e a tela DIZ isso
 # ============================================================================
-def teste_o_quadro_abre_com_as_dez_colunas_e_zero_cards():
+def teste_o_quadro_abre_com_as_dez_colunas_dele():
     """🔴 Nascer vazio é ESTADO, não defeito: a origem dos cards segue em aberto
     por decisão dele (*"3 por enquanto matem assim"*). ⚠️ E a `PainelAba` escreve
     *"Nenhum card nesta aba ainda."* -- quadro vazio que não explica por que está
@@ -171,7 +171,22 @@ def teste_o_quadro_abre_com_as_dez_colunas_e_zero_cards():
     assert q is not None
     assert q["painel"] == "financeiro"
     assert [c["titulo"] for c in q["colunas"]] == AS_DEZ
-    assert q["total"] == 0
+    # 🚨 ERA `assert q["total"] == 0`, E ELA ESTAVA CERTA EM 06/11: o painel
+    # nasceu desenhado e **vazio por decisão dele**, com a origem dos cards em
+    # aberto. ⚠️ Em 11/11 ele decidiu a origem, e a trava passou a **reprovar
+    # quando o sistema funciona** -- o pior tipo de vermelho, porque ensina a
+    # ignorar o placar.
+    #
+    # O que fica no lugar não depende do que a operação tem hoje: todo card
+    # que aparecer tem de estar numa coluna DESTA aba. É assim que se pega
+    # card órfão sem exigir fila vazia.
+    etapas_desta_aba = {c["etapa_id"] for c in q["colunas"]}
+    for coluna in q["colunas"]:
+        for card in coluna["cards"]:
+            assert card["etapa_id"] in etapas_desta_aba, card
+    assert q["total"] == sum(len(c["cards"]) for c in q["colunas"])
+    # ⚠️ E card fora de coluna é CONTADO, nunca escondido (`M12`).
+    assert q["fora_do_quadro"] == 0, q["fora_do_quadro"]
     # 🚨 `situacao_id` nulo em TODAS: aqui não existe coluna do ERP.
     assert all(c["situacao_id"] is None for c in q["colunas"])
 

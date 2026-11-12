@@ -39,9 +39,10 @@ from movizap.config import settings  # noqa: E402
 # 🔵 As duas abas que a migração 094 semeia, com as colunas que ele escreveu.
 AS_ABAS = {
     "PNL_1.2": ("Treinamentos",
-                ["Solicitação", "Treinamento 1", "Treinamento 2", "Entregue"]),
+                ["Nova solicitação", "Treinamento 1", "Treinamento 2",
+                 "Entregue"]),
     "PNL_1.3": ("Pós-venda",
-                ["Solicitação", "Testes", "Realizar Pós-venda",
+                ["Nova solicitação", "Testes", "Realizar Pós-venda",
                  "Pós-venda Realizado"]),
 }
 
@@ -152,7 +153,7 @@ def teste_a_coluna_Solicitacao_existe_nas_DUAS_abas_e_sao_duas():
     for codigo in AS_ABAS:
         aba = pipeline.aba_por_codigo(codigo)
         sol = [e for e in pipeline.etapas(aba["id"])
-               if e["titulo"] == "Solicitação"]
+               if e["titulo"] == "Nova solicitação"]
         assert len(sol) == 1, codigo
         ids.append(sol[0]["id"])
     assert ids[0] != ids[1]
@@ -303,7 +304,11 @@ def teste_o_card_da_aba_abre_e_move_para_quem_tem_a_tela(
         # 🚨 E a passagem guarda o TÍTULO DE ENTÃO (retrato, migração 093).
         passagens = pipeline.historico(card["id"])
         assert passagens[0]["para_titulo"] == "Realizar Pós-venda"
-        assert passagens[0]["de_titulo"] == "Solicitação"
+        # ⚠️ O RETRATO É DO NOME DE AGORA porque esta passagem é criada
+        # pelo próprio teste, depois da migração 100. Passagem gravada
+        # ANTES dela continua dizendo "Solicitação" no banco, e isso é a
+        # 093 funcionando: renomear a etapa não reescreve o histórico.
+        assert passagens[0]["de_titulo"] == "Nova solicitação"
     finally:
         banco.executar("DELETE FROM pipeline_card WHERE id = %s",
                        (card["id"],))
@@ -318,7 +323,7 @@ def teste_o_quadro_da_aba_mostra_o_card_na_coluna_certa():
         por_titulo = {c["titulo"]: c for c in q["colunas"]}
         assert [c["id"] for c in por_titulo["Treinamento 1"]["cards"]] \
             == [card["id"]]
-        assert por_titulo["Solicitação"]["cards"] == []
+        assert por_titulo["Nova solicitação"]["cards"] == []
         assert q["total"] == 1
         # ⚠️ O card leva a `etapa_id`: sem ela a tela compararia `undefined`
         # com o id da coluna, e todo solto iria à rota.

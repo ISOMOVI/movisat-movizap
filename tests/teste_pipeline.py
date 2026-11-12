@@ -294,6 +294,50 @@ class TestAOrdemDaFila:
 
 
 # ============================================================================
+# O TEMPO NA ETAPA — 11/11
+# ============================================================================
+class TestOTempoNaEtapa:
+    """🔵 *"controle de atraso o contador de tempo de etapa"*.
+
+    🚨 O CONTADOR ESTAVA NA TELA DESDE O BLOCO C E NUNCA TINHA DADO: o
+    `paineis._card_do_chamado` mandava `etapa_desde: None` FIXO, e todo card de
+    chamado dizia "não medido". O dado sempre existiu na `pipeline_passagem`.
+    """
+
+    def test_o_card_recem_criado_tem_etapa_desde_igual_a_criacao(self, aba):
+        """A criação já grava passagem (`de_etapa` nulo), então o card novo
+        entrou na etapa quando nasceu -- e isso é a verdade, não um zero."""
+        c = pipeline.criar(aba["id"], aba["etapas"][0])
+        achado = next(x for x in pipeline.cards_da_aba(aba["id"])
+                      if x["id"] == c["id"])
+        assert achado["etapa_desde"] is not None
+        # mesma linha de passagem: a diferença é de microssegundos
+        assert abs((achado["etapa_desde"]
+                    - achado["criado_em"]).total_seconds()) < 5
+
+    def test_mover_ANDA_com_o_etapa_desde(self, aba):
+        """🚨 É isto que o contador mede: o tempo na etapa ATUAL, não o total."""
+        c = pipeline.criar(aba["id"], aba["etapas"][0])
+        antes = next(x for x in pipeline.cards_da_aba(aba["id"])
+                     if x["id"] == c["id"])["etapa_desde"]
+        pipeline.mover(c["id"], aba["etapas"][1], atendente_id=None)
+        depois = next(x for x in pipeline.cards_da_aba(aba["id"])
+                      if x["id"] == c["id"])["etapa_desde"]
+        assert depois > antes
+
+    def test_o_etapa_desde_NAO_quebra_a_conta_de_observacoes(self):
+        """⚠️ A trava que guarda a forma da consulta: `JOIN` com a
+        `pipeline_passagem` multiplicaria as linhas e a contagem de observações
+        da subconsulta ao lado passaria a contar errado. Tem de ser
+        subconsulta, e esta trava é o que prova.
+        """
+        import inspect
+        fonte = inspect.getsource(pipeline.cards_da_aba)
+        assert "SELECT max(p.em) FROM pipeline_passagem" in fonte
+        assert "JOIN pipeline_passagem" not in fonte
+
+
+# ============================================================================
 # 🚨 A MIGRAÇÃO 093 — a passagem é RETRATO, e foi esta suíte que a pediu
 # ============================================================================
 class TestOHistoricoEhRetrato:

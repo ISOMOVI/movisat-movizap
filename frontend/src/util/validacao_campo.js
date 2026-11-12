@@ -141,8 +141,23 @@ const PLACA_MERCOSUL = /^[A-Z]{3}\d[A-Z]\d{2}$/
    resposta certa, não resposta errada. */
 export function placaVale(texto) {
   const bruto = String(texto ?? '').toUpperCase()
-  return bruto.split(/[^A-Z0-9]+/).some(
-    (p) => PLACA_ANTIGA.test(p) || PLACA_MERCOSUL.test(p))
+  const partes = bruto.split(/[^A-Z0-9]+/).filter(Boolean)
+  const casa = (p) => PLACA_ANTIGA.test(p) || PLACA_MERCOSUL.test(p)
+  if (partes.some(casa)) return true
+  /* 🚨 OS PARES VIZINHOS COLADOS, e isto conserta um buraco medido em 11/11:
+     `ABC-1234` passava por acidente (o `1234` sozinho não casa, mas o texto
+     tinha outro pedaço que casava), e `ABC-1D23` NÃO passava -- ele quebra em
+     `ABC` + `1D23`, e nenhum dos dois é placa. Ou seja: o padrão Mercosul com
+     hífen, que é como muita gente escreve, era recusado.
+     ⚠️ Colam-se PARES VIZINHOS, nunca o texto inteiro: `SAVEIRO ABC1234`
+     viraria `SAVEIROABC1234` e deixaria de casar.
+     ⚠️ Limite conhecido e aceito: `ABC-1-D23` (dois separadores dentro da
+     placa) continua fora -- seriam três pedaços, e não vi ninguém escrever
+     assim. */
+  for (let i = 0; i < partes.length - 1; i += 1) {
+    if (casa(partes[i] + partes[i + 1])) return true
+  }
+  return false
 }
 
 /* A frase que a pessoa lê. Vazio = sem nada a dizer.

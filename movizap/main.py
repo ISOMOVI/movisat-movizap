@@ -52,6 +52,8 @@ from . import agendamento
 from . import cep as cep_mod
 from . import formularios as formularios_mod
 from . import paineis as paineis_mod
+from . import campo_etapa
+from . import disparo_etapa
 from . import fpsl_ponte
 from . import orcamento as orcamento_mod
 from . import orcamento_consulta
@@ -916,6 +918,57 @@ def catalogo_do_orcamento(conversa_id: int | None = None,
 def orcamentos_da_conversa(conversa_id: int,
                            usuario: dict = Depends(auth.requer_tela("ATD_1.2"))):
     return {"orcamentos": orcamento_mod.da_conversa(conversa_id)}
+
+
+class ConviteDeFormulario(BaseModel):
+    slug: str
+
+
+@app.post("/api/conversas/{conversa_id}/link-de-formulario", status_code=201)
+def criar_convite_de_formulario(
+        conversa_id: int, corpo: ConviteDeFormulario,
+        usuario: dict = Depends(auth.requer_tela("ATD_1.2"))):
+    """Monta o link do formulario ja preenchido com o que a casa sabe do
+    cliente desta conversa. 🔵 Pedido dele, 11/11.
+
+    🚨 **A ROTA NAO MANDA MENSAGEM NENHUMA.** Ela devolve o link, e quem manda
+    e a pessoa, escrevendo. Mensagem ao cliente e irreversivel, e a regua da
+    casa e confirmacao antes de enviar -- entao o gesto fica com quem fala.
+
+    ⚠️ **As sugestoes saem do CADASTRO, nao da conversa lida.** Nada e
+    adivinhado do texto das mensagens; fato que nao esta no cadastro nasce
+    vazio, como hoje.
+    """
+    conversa = banco.um("SELECT id FROM conversa WHERE id = %s",
+                        (int(conversa_id),))
+    if not conversa:
+        raise HTTPException(status_code=404, detail="Esta conversa não existe.")
+    try:
+        fatos = formularios_mod.fatos_da_conversa(conversa_id)
+        sugeridos = formularios_mod.valores_sugeridos(corpo.slug, fatos)
+        return formularios_mod.criar_convite(
+            corpo.slug, sugeridos, conversa_id=conversa_id,
+            criado_por=usuario.get("id"))
+    except formularios_mod.FormularioNaoExiste:
+        # ⚠️ A frase diz o que resolve: formulario desligado volta com o
+        # interruptor da `FRM_1.1`, e isso e gesto de owner, nao erro de quem
+        # clicou.
+        raise HTTPException(
+            status_code=404,
+            detail="Este formulário não está publicado agora.")
+
+
+@app.get("/api/conversas/{conversa_id}/links-de-formulario")
+def convites_desta_conversa(
+        conversa_id: int,
+        usuario: dict = Depends(auth.requer_tela("ATD_1.2"))):
+    """Os convites que sairam desta conversa, do mais novo para o mais velho.
+
+    ⚠️ **Sem os valores**: a tela nao precisa deles, e mostra-los poria a
+    ficha do cliente numa lista. O que volta e qual formulario, quando, quem,
+    e se ja foi aberto ou enviado.
+    """
+    return {"convites": formularios_mod.convites_da_conversa(conversa_id)}
 
 
 @app.post("/api/conversas/{conversa_id}/orcamento")
@@ -3288,7 +3341,20 @@ def processar_agora(usuario: dict = Depends(auth.requer_tela("ATD_1.1"))):
 @app.exception_handler(operacao.DadoInvalido)
 async def _dado_invalido(request: Request, exc: operacao.DadoInvalido):
     """400 com a frase que o usuário lê. A validação mora no módulo, não na
-    rota: assim o teste cobre a regra sem subir HTTP."""
+    rota: assim o teste cobre a regra sem subir HTTP.
+
+    🚨 E A FRASE VAI PARA O LOG, porque sem ela não há como saber o que uma
+    pessoa leu. Medido em 11/11: ele relatou *"estava dando erro sem placa"*, o
+    log tinha `POST /api/publico/formulario/suporte -> 400 em 36ms` e **nada
+    sobre o motivo** -- a varredura conseguiu provar que enviar sem placa
+    funciona (o 201 oito segundos depois, sem placa nenhuma), mas não qual foi
+    aquela recusa. Relato de formulário sem o motivo no log é indecidível.
+
+    ⚠️ VAI A FRASE, NUNCA OS VALORES ENVIADOS. As frases são nossas; o corpo do
+    envio tem CNPJ, telefone e e-mail, e log não é lugar de dado de cliente.
+    """
+    log.warning("recusado 400 em %s %s: %s", request.method,
+                request.url.path, exc)
     return JSONResponse(status_code=400, content={"detail": str(exc)},
                         headers={"X-Request-Id": getattr(request.state, "req_id", "")})
 
@@ -5393,15 +5459,64 @@ def mover_card_do_painel(
     🚨 **O LOG SAI ANTES DA RESPOSTA**, e inclusive quando o ERP recusa: é o
     *"SEMPRE"* dele. Escrita negada sem rastro é o que ninguém descobre depois.
     """
-    return passagem.mover(
+    # 🔵 11/11: SE A OS ESTAVA NUMA ETAPA NOSSA, ela sai dela ao voltar para uma
+    # coluna do ERP -- é a saída da `Serviço Realizado` para `Atendimento
+    # finalizado`, que é o fluxo que ele descreveu.
+    #
+    # 🚨 A ORDEM IMPORTA: solta DEPOIS de a escrita no ERP dar certo. Soltar
+    # antes deixaria o card fora da etapa nossa e ainda na situação velha do
+    # ERP se o Harmonit recusasse -- ou seja, o card sumiria das duas colunas.
+    aba_nossa = pipeline.aba_por_codigo(pipeline.ABA_DA_OPERACAO)
+    estava_em_etapa_nossa = bool(
+        aba_nossa and pipeline.por_os(aba_nossa["id"], dados.numero_os))
+
+    r = passagem.mover(
         dados.numero_os, dados.para_situacao,
         atendente_id=usuario.get("id"),
         situacao_esperada=dados.situacao_esperada)
+
+    # ⚠️ So quando a escrita no ERP deu certo. Card recusado continua na etapa
+    # nossa, que e onde ele de fato esta.
+    if estava_em_etapa_nossa and r.get("ok"):
+        pipeline.soltar_os(aba_nossa["id"], dados.numero_os,
+                           usuario.get("id"))
+        r["saiu_da_etapa_nossa"] = True
+    return r
 
 
 class ObservacaoDoCard(BaseModel):
     numero_os: int
     texto: str
+
+
+class PousarNaEtapaNossa(BaseModel):
+    numero_os: int = Field(..., ge=1)
+    etapa_id: int = Field(..., ge=1)
+
+
+@app.post("/api/paineis/operacao/etapa-nossa")
+def pousar_os_na_etapa_nossa(
+        dados: PousarNaEtapaNossa,
+        usuario: dict = Depends(auth.requer_tela("PNL_1.1"))):
+    """Põe uma OS numa etapa NOSSA — hoje, a `Serviço Realizado`.
+
+    🔵 Dele (11/11): *"a coluna nova é para evitar reverificação de item
+    esquecido, então moverão para la e depois auditarão o card e por fim,
+    atendimento finalizado"*.
+
+    🚨 **NÃO ESCREVE NO HARMONIT**, e é o ponto inteiro: a OS fica na situação
+    em que está (1316) e o card passa a morar aqui. Quem escreve no ERP é a
+    SAÍDA desta etapa, pela rota de mover de sempre.
+    ⚠️ Por isso esta rota é separada da `/mover`: a `/mover` grava `situacaoId`
+    no ERP, e duas rotas é o que impede o caminho errado.
+    """
+    aba = pipeline.aba_por_codigo(pipeline.ABA_DA_OPERACAO)
+    if not aba:
+        raise HTTPException(status_code=500,
+                            detail="a aba da Operação não está no banco.")
+    card = pipeline.pousar_os(aba["id"], dados.etapa_id, dados.numero_os,
+                              usuario.get("id"))
+    return {"ok": True, "card": card}
 
 
 @app.post("/api/paineis/operacao/observacao")
@@ -5497,6 +5612,78 @@ def modelos_do_checklist(
             "etapas": sorted(checklist.etapas_com_modelo())}
 
 
+@app.get("/api/config/disparos-operacao")
+def ver_disparos_da_operacao(
+        usuario: dict = Depends(auth.requer_tela("CFG_16.1"))):
+    """A `CFG_16.1`: a mensagem de cada etapa, e o interruptor.
+
+    🚨 DEVOLVE AS 17, e todas nascem **sem texto e desligadas** -- é o tempo 1
+    que ele pediu: *"inicialmente todo o painel pronto com interuptor
+    desligado, depois será validado em tela as mensagens"*.
+
+    ⚠️ Devolve também as **variáveis** com a grafia dele, para a tela oferecer o
+    nome exato: variável escrita diferente não resolve e sai crua ao cliente.
+    """
+    return {
+        "etapas": disparo_etapa.todos(),
+        "variaveis": [{"chave": k, "o_que_e": v}
+                      for k, v in disparo_etapa.VARIAVEIS.items()],
+        "teto": disparo_etapa.TETO_TEXTO,
+        # 🔵 *"por hora só whatsapp"* e *"por enquanto somente cliente deixe no
+        # painel de disparos uma nota que nenhuma vai ao tecnico"*. Os dois
+        # fatos vêm do servidor para a tela não afirmá-los por conta própria.
+        "canal": "whatsapp",
+        "vai_para": "cliente",
+    }
+
+
+class DisparoDaEtapa(BaseModel):
+    texto: str | None = Field(default=None, max_length=disparo_etapa.TETO_TEXTO)
+    ativo: bool = False
+
+
+@app.put("/api/config/disparos-operacao/{situacao_id}")
+def definir_disparo_da_etapa(
+        situacao_id: int, dados: DisparoDaEtapa,
+        usuario: dict = Depends(auth.requer_tela("CFG_16.1"))):
+    """Guarda o texto e o interruptor de uma etapa.
+
+    🚨 LIGAR SEM TEXTO É RECUSADO com frase (400), e o banco recusa de novo --
+    a garantia que não depende de ninguém ter lembrado.
+    """
+    return disparo_etapa.definir(situacao_id, dados.texto, dados.ativo,
+                                 usuario.get("id"))
+
+
+@app.get("/api/config/checklist-de-cards")
+def ver_checklist_de_cards(
+        usuario: dict = Depends(auth.requer_tela("CFG_17.1"))):
+    """A `CFG_17.1`: as 17 etapas do painel com a lista fixa de cada uma.
+
+    🔵 11/11: *"pode fazer uma outra aba só para isso de 'Checklist de Cards'
+    vamos centralizar os fixos ali"*.
+
+    🚨 DEVOLVE AS 17, INCLUSIVE AS VAZIAS. Uma tela que só mostra etapa com
+    lista não deixa ACRESCENTAR na que está vazia -- e são justamente as vazias
+    que ele precisa preencher. A coluna `Chamados` não entra: não é situação do
+    ERP, e `checklist._etapa_conhecida` recusaria o item.
+
+    ⚠️ Traz o item DESATIVADO também, marcado: ele continua no card de quem já o
+    tinha (regra da 090), então esconder aqui faria a tela mentir sobre o que
+    existe.
+    """
+    por_etapa: dict = {}
+    for m in checklist.modelos(incluir_inativos=True):
+        por_etapa.setdefault(m["situacao_id"], []).append(m)
+    return {
+        "etapas": [
+            {"situacao_id": sid, "nome": nome,
+             "itens": por_etapa.get(sid, [])}
+            for sid, nome in paineis.SITUACOES
+        ],
+    }
+
+
 class ModeloDoChecklist(BaseModel):
     situacao_id: int
     texto: str = Field(min_length=1, max_length=200)
@@ -5507,10 +5694,14 @@ class ModeloDoChecklist(BaseModel):
 @app.post("/api/paineis/operacao/checklist/modelo", status_code=201)
 def criar_modelo_do_checklist(
         dados: ModeloDoChecklist,
-        usuario: dict = Depends(auth.requer_tela("CFG_7.1"))):
+        usuario: dict = Depends(auth.requer_tela("CFG_17.1"))):
     """🚨 MEXER NA LISTA DA ETAPA É CONFIGURAÇÃO, e muda o card de todo mundo —
-    por isso a permissão é a da Geral (`CFG_7.1`), não a do painel. Ler
-    continua sendo de quem opera."""
+    por isso a permissão é a da aba de configuração, não a do painel. Ler
+    continua sendo de quem opera.
+
+    ⚠️ ERA a da Geral até 11/11, quando a `CFG_17.1` (Checklist de Cards)
+    passou a existir -- antes dela não havia tela nenhuma para esta rota, e a
+    Geral era o lugar menos errado."""
     return checklist.criar_modelo(dados.situacao_id, dados.texto,
                                   dados.ordem or None)
 
@@ -5518,7 +5709,7 @@ def criar_modelo_do_checklist(
 @app.put("/api/paineis/operacao/checklist/modelo/{modelo_id}")
 def atualizar_modelo_do_checklist(
         modelo_id: int, dados: ModeloDoChecklist,
-        usuario: dict = Depends(auth.requer_tela("CFG_7.1"))):
+        usuario: dict = Depends(auth.requer_tela("CFG_17.1"))):
     """⚠️ Mexer aqui NÃO reescreve card nenhum: o item já copiado segue com o
     texto que tinha. O card é registro, não espelho."""
     return checklist.atualizar_modelo(modelo_id, dados.texto, dados.ordem,
@@ -5566,6 +5757,35 @@ async def anexar_na_observacao(
                                   arquivo.content_type)
 
 
+@app.post("/api/paineis/operacao/observacao/{observacao_id}/apagar")
+def apagar_observacao_do_card(
+        observacao_id: int,
+        usuario: dict = Depends(auth.requer_tela("PNL_1.1"))):
+    """Apaga a observação, mantendo o log.
+
+    🔵 Decisão dele (11/11): quem pode apagar são *"todos que tem acesso a
+    visualização do painel"* — por isso a permissão é **a da tela**, e não a do
+    autor nem a do owner. ⚠️ É mais aberto que o chat interno de propósito: lá
+    só o autor apaga.
+
+    🚨 **SEM JANELA DE TEMPO** (*"pode ser apagada conforme disponivel mesmo"*),
+    ao contrário das 48 h do chat.
+
+    ⚠️ Devolve as duas listas possíveis já ESCONDIDAS para quem pediu, para a
+    tela não precisar de uma segunda leitura e nunca receber conteúdo que não
+    pode mostrar.
+    """
+    r = passagem.apagar_observacao(observacao_id, usuario.get("id"))
+    eu = usuario.get("id")
+    resposta = {"ok": True, "id": r["id"]}
+    if r.get("numero_os"):
+        resposta["observacoes"] = _recados_com_anexos(r["numero_os"], eu=eu)
+    elif r.get("solicitacao_id"):
+        resposta["observacoes"] = _recados_do_chamado(r["solicitacao_id"],
+                                                      eu=eu)
+    return resposta
+
+
 @app.get("/api/paineis/operacao/anexo/{anexo_id}")
 def baixar_anexo_da_observacao(
         anexo_id: int, usuario: dict = Depends(auth.requer_tela("PNL_1.1"))):
@@ -5580,6 +5800,14 @@ def baixar_anexo_da_observacao(
     achado = passagem.anexo(anexo_id)
     if not achado:
         raise HTTPException(status_code=404, detail="Anexo não encontrado.")
+    # 🚨 ANEXO DE RECADO APAGADO NÃO SAI, a não ser para o owner -- a mesma
+    # régua da lista, e sem isto o apagar seria de mentira (o id do anexo
+    # esteve na tela de quem viu o recado antes).
+    # ⚠️ **404, e não 403**: 403 confirmaria que o arquivo existe, que é
+    # metade do que o apagar esconde.
+    if (passagem.anexo_e_de_apagada(anexo_id)
+            and not passagem.eh_owner(usuario.get("id"))):
+        raise HTTPException(status_code=404, detail="Anexo não encontrado.")
     caminho = pathlib.Path(achado["caminho"])
     if not caminho.is_file():
         raise HTTPException(
@@ -5590,17 +5818,22 @@ def baixar_anexo_da_observacao(
                         media_type=achado["mime"] or "application/octet-stream")
 
 
-def _recados_com_anexos(numero_os: int) -> list:
+def _recados_com_anexos(numero_os: int, eu: int | None = None) -> list:
     """As observacoes de uma OS, cada uma com os seus anexos.
 
     ⚠️ UMA consulta para os anexos da lista toda, e o `caminho` de disco NAO
     sai daqui -- a tela baixa pelo id.
+
+    🚨 `eu` DECIDE SE O APAGADO MOSTRA O CONTEUDO (so o owner ve). Os anexos
+    sao pendurados ANTES de esconder, de proposito: o `_esconder_apagados`
+    precisa zerar a lista ja montada -- deixar o nome do arquivo ao lado de
+    "Observacao excluida" devolveria pela legenda o que o apagar tirou.
     """
-    recados = passagem.observacoes(numero_os)
+    recados = passagem.observacoes(numero_os, eu=eu)
     anexos = passagem.anexos_de([o["id"] for o in recados])
     for o in recados:
         o["anexos"] = anexos.get(o["id"], [])
-    return recados
+    return passagem._esconder_apagados(recados, eu)
 
 
 @app.get("/api/paineis/operacao/observacoes")
@@ -5619,7 +5852,8 @@ def observacoes_do_card(numero_os: int = Query(..., ge=1),
     depende do ERP -- a tela usa este quando a ficha falha.
     """
     return {"numero_os": numero_os,
-            "observacoes": _recados_com_anexos(numero_os)}
+            "observacoes": _recados_com_anexos(numero_os,
+                                               eu=usuario.get("id"))}
 
 
 # ----------------------------------------------------------------------------
@@ -5758,13 +5992,15 @@ def ficha_do_chamado(card_id: int,
         "card": card,
         "chamado": chamado,
         "etapas": pipeline.etapas(card["aba_id"]),
-        "observacoes": _recados_do_chamado(card["solicitacao_id"]),
+        "observacoes": _recados_do_chamado(card["solicitacao_id"],
+                                           eu=usuario.get("id")),
         "historico": pipeline.historico(card_id),
         "desfechos": pipeline.DESFECHOS,
     }
 
 
-def _recados_do_chamado(solicitacao_id: int | None) -> list:
+def _recados_do_chamado(solicitacao_id: int | None,
+                        eu: int | None = None) -> list:
     """Os recados de um chamado, com os anexos.
 
     ⚠️ Mesma forma do `_recados_com_anexos` da OS, e de proposito: a tela
@@ -5774,16 +6010,11 @@ def _recados_do_chamado(solicitacao_id: int | None) -> list:
     """
     if not solicitacao_id:
         return []
-    recados = banco.varios(
-        """SELECT o.id, o.texto, o.em, a.nome AS quem
-             FROM os_observacao o
-             LEFT JOIN atendente a ON a.id = o.atendente_id
-            WHERE o.solicitacao_id = %s
-            ORDER BY o.em DESC, o.id DESC""", (int(solicitacao_id),))
+    recados = passagem.observacoes_da_solicitacao(solicitacao_id, eu=eu)
     anexos = passagem.anexos_de([o["id"] for o in recados])
     for o in recados:
         o["anexos"] = anexos.get(o["id"], [])
-    return recados
+    return passagem._esconder_apagados(recados, eu)
 
 
 @app.post("/api/paineis/operacao/chamado/observacao")
@@ -5809,7 +6040,52 @@ def observar_chamado(dados: ObservacaoDoChamado,
            VALUES (%s, %s, %s) RETURNING id""",
         (dados.solicitacao_id, texto, usuario.get("id")))
     return {"id": linha["id"],
-            "observacoes": _recados_do_chamado(dados.solicitacao_id)}
+            "observacoes": _recados_do_chamado(dados.solicitacao_id,
+                                               eu=usuario.get("id"))}
+
+
+class CampoDaEtapa(BaseModel):
+    numero_os: int = Field(..., ge=1)
+    chave: str = Field(..., min_length=1, max_length=40)
+    valor: str = Field(..., min_length=1, max_length=campo_etapa.TETO)
+
+
+@app.post("/api/paineis/operacao/campo-da-etapa")
+def gravar_campo_da_etapa(
+        dados: CampoDaEtapa,
+        usuario: dict = Depends(auth.requer_tela("PNL_1.1"))):
+    """O campo de texto da etapa: Rastreamento (677) e Devolução (15696).
+
+    🔵 *"criar um campo de texto chamado 'Rastreamento' que é onde a operadora
+    irá colocar o código de rastreamento"*.
+
+    🚨 GRAVA SÓ AQUI, nunca no Harmonit: escrever na OS exigiria
+    `SalvarOrdemServico` -- a OS inteira --, que é a armadilha do endereço.
+    🚨 E GERA OBSERVAÇÃO (pedido dele no mesmo bloco), com o código e o autor.
+    """
+    novo = campo_etapa.gravar(dados.numero_os, dados.chave, dados.valor,
+                              usuario.get("id"))
+    # A tela redesenha as duas coisas de uma vez: o campo e a linha do tempo.
+    return {"campo": novo,
+            "campos_da_etapa": campo_etapa.atuais(dados.numero_os),
+            "observacoes": _recados_com_anexos(dados.numero_os,
+                                               eu=usuario.get("id"))}
+
+
+@app.get("/api/paineis/operacao/campo-da-etapa/historico")
+def historico_do_campo_da_etapa(
+        numero_os: int = Query(..., ge=1),
+        chave: str = Query(..., min_length=1, max_length=40),
+        usuario: dict = Depends(auth.requer_tela("PNL_1.1"))):
+    """Tudo o que já foi escrito naquela chave.
+
+    ⚠️ Existe porque o código trocado PODE JÁ TER IDO para o cliente: saber o
+    anterior é o que permite dizer "mandei o errado".
+    """
+    if chave not in campo_etapa.CAMPOS:
+        raise HTTPException(status_code=404,
+                            detail=f"O campo '{chave}' não existe.")
+    return {"historico": campo_etapa.historico(numero_os, chave)}
 
 
 @app.get("/api/paineis/operacao/ficha")
@@ -5859,7 +6135,17 @@ def ficha_do_card(numero_os: int = Query(..., ge=1),
     # banco seria ida por nada.
     # ⚠️ E a mesma funcao que a rota `/observacoes` usa -- duas leituras do
     # mesmo dado em dois lugares divergiriam na primeira mudanca.
-    ficha["observacoes"] = _recados_com_anexos(numero_os)
+    ficha["observacoes"] = _recados_com_anexos(numero_os,
+                                               eu=usuario.get("id"))
+    # 🔵 11/11: o campo de texto que a etapa pede (Rastreamento / Devolução).
+    # ⚠️ VAI NA MESMA LEITURA, pelo mesmo motivo das observações: o card aberto
+    # já faz uma ida ao ERP, e uma segunda chamada para ler o nosso banco seria
+    # ida por nada.
+    # 🚨 Vão OS VALORES de toda chave que a OS tenha (não só a da etapa atual):
+    # o rastreio escrito na 677 é justamente o que alguém quer ler depois, na
+    # 15747 (Aguardando recebimento), quando o cliente pergunta onde está.
+    ficha["campos_da_etapa"] = campo_etapa.atuais(numero_os)
+    ficha["campos"] = campo_etapa.CAMPOS
     ficha["prioridades"] = passagem.PRIORIDADES
     ficha["chamado"] = None
     if linha:
@@ -6054,12 +6340,38 @@ def desafio_publico():
     return formularios_mod.novo_desafio()
 
 
+@app.get("/api/publico/convite/{bilhete}")
+def convite_publico(bilhete: str):
+    """Os valores sugeridos daquele convite. 🔵 Pedido dele, 11/11:
+    formularios *"pre-preenchidos quando abertos pelo botao dentro do chat"*.
+
+    🚨 **E O UNICO JEITO DE O DADO DO CLIENTE CHEGAR A PAGINA**, e e de
+    proposito: o que viaja na URL e um bilhete opaco. CNPJ e telefone na query
+    string entrariam no `access.log`, no historico do navegador e em qualquer
+    repasse do link -- ver a `migracoes/107_convite_de_formulario.sql`.
+
+    ⚠️ **Nao exige o carimbo de abertura**, ao contrario das rotas de CNPJ e
+    de placa: esta rode roda ANTES de a pagina ter carimbo, porque e ela que
+    enche os campos na primeira pintura.
+
+    ⚠️ **Bilhete que nao existe, vencido, ou de formulario desligado devolvem
+    404 com a MESMA frase.** Distinguir contaria de fora quais convites
+    existiram.
+    """
+    c = formularios_mod.convite(bilhete)
+    if not c:
+        raise HTTPException(status_code=404,
+                            detail="Este link não vale mais.")
+    return c
+
+
 @app.post("/api/publico/formulario/{slug}", status_code=201)
 async def enviar_formulario_publico(
         slug: str, request: Request,
         valores: str = Form("{}"),
         abertura: str = Form(""),
         isca: str = Form(""),
+        convite: str = Form(""),
         desafio_token: str = Form(""),
         desafio_resposta: str = Form(""),
         campos: list[str] = Form(default=[]),
@@ -6130,6 +6442,12 @@ async def enviar_formulario_publico(
     r = formularios_mod.registrar(d, limpo, guardados, ip=ip,
                                   placas_conferidas=conferidas)
     formularios_mod.registrar_envio(ip)
+    # 🔵 11/11: se este envio veio de um convite, o convite fica marcado.
+    # ⚠️ NAO invalida o convite nem apaga nada: o rastro de quem convidou quem
+    # e o que explica, depois, de onde saiu a solicitacao. E a propria funcao
+    # engole o proprio erro -- marca de rastro que quebra o envio seria pior
+    # que marca que falta.
+    formularios_mod.marcar_convite_usado(convite, r["id"])
 
     # 🔵 05/11, DECISAO DELE: o envio NAO ABRE MAIS OS. A D4 de 29/10
     # (*"todo chamado de suporte abrira uma OS"*) foi invertida por ele no
@@ -6152,13 +6470,32 @@ async def enviar_formulario_publico(
     # recebido, entao um erro meu aqui nao pode virar HTTP 500 num chamado
     # que esta no banco.
     try:
-        etapa = pipeline.etapa_dos_chamados()
-        if etapa and d["slug"] in chamado_os.PROBLEMA_POR_FORMULARIO:
-            # ⚠️ O MESMO PORTAO DE ANTES, e de proposito: so entra na
-            # coluna o formulario que ele mapeou. Os outros 8 continuam
-            # parando na Caixa de Solicitacoes -- abrir chamado para eles
-            # e decisao dele.
-            pipeline.criar(etapa["aba_id"], etapa["id"],
+        # 🚨 O PORTAO AGORA E A ETAPA DE DESTINO DO FORMULARIO (migracao 106),
+        # e nao mais o `PROBLEMA_POR_FORMULARIO`.
+        #
+        # 🔵 Dele, 11/11: *"fiz teste com form de aditivo e não abriu card no
+        # contratual como foi pedido"*. 📏 Medido: o envio de aditivo dele
+        # gerou a solicitacao 3437 e **nenhum card**, porque o portao exigia
+        # estar no mapa de PROBLEMA do Harmonit -- que tem um slug so
+        # (`suporte`). E card nao precisa de OS: a coluna `Chamados` existe
+        # desde 29/10 para card SEM OS.
+        #
+        # 🚨 SAO DUAS COISAS DIFERENTES, e misturadas era o defeito:
+        #   · abrir OS no Harmonit  -> `PROBLEMA_POR_FORMULARIO` (segue igual)
+        #   · abrir CARD numa fila  -> `formulario.etapa_destino_id` (isto)
+        #
+        # ⚠️ Formulario SEM destino nao cria card, e isso e decisao dele por
+        # formulario: o Contato e o `IDEIAS` nao tem fila.
+        # 🚨 `formularios_mod`, E NAO `formularios`: neste arquivo o modulo entra com
+        # outro NOME. O `try` que protege o envio ENGOLIU o NameError, entao a
+        # rota respondia **201** e o card **nao nascia** -- o mesmo
+        # silencio que o `try` existe para causar de proposito, agora
+        # escondendo um erro meu em vez de um erro do banco.
+        # ⚠️ QUEM ACHOU FOI A SUITE, nao a tela: na tela isso e um card
+        # que simplesmente falta, e ninguem sabe que deveria estar la.
+        destino = formularios_mod.etapa_de_destino(d["slug"])
+        if destino:
+            pipeline.criar(destino["aba_id"], destino["id"],
                            solicitacao_id=r["id"],
                            cliente_id=chamado_os.cliente_do_chamado(d, limpo),
                            atendente_id=None)

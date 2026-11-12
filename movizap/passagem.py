@@ -25,7 +25,7 @@ import logging
 import pathlib
 import uuid
 
-from . import banco, checklist, fpsl_ponte, paineis
+from . import (banco, checklist, disparo_etapa, fpsl_ponte, paineis)
 from .operacao import DadoInvalido
 
 log = logging.getLogger("movizap.passagem")
@@ -113,6 +113,43 @@ def mover(numero_os: int, para_situacao: int, atendente_id: int | None,
         except Exception:
             log.exception("OS %s: nao consegui guardar o checklist da etapa %s",
                           numero_os, de_onde)
+
+    # 🔵 11/11: O DISPARO DA ETAPA DE DESTINO (`CFG_16.1`). *"ao ligar o
+    # interruptor, sairá automaticamente como na regra"*.
+    #
+    # 🚨 DEPOIS DA ESCRITA NO ERP, E SÓ QUANDO ELA DEU CERTO. Mensagem ao
+    # cliente é irreversível: mandar "seu equipamento foi enviado" num mover que
+    # o ERP recusou seria afirmar ao cliente um fato que não aconteceu.
+    #
+    # 🚨 E NUNCA DERRUBA O MOVER -- nem o `enviar_da_etapa`, que não levanta,
+    # nem este `try`, que é a segunda rede. O card já mudou de situação; falhar
+    # o clique por causa do WhatsApp seria trocar um problema pequeno por um
+    # grande.
+    #
+    # ⚠️ TUDO DESLIGADO HOJE: as 17 linhas da `etapa_mensagem` nascem sem texto
+    # e com `ativo = false`, então este bloco devolve "desligado" e não fala com
+    # ninguém. É o tempo 1 que ele pediu.
+    if resposta.get("ok"):
+        try:
+            envio = disparo_etapa.enviar_da_etapa(numero_os, para_situacao,
+                                                  atendente_id)
+            # ⚠️ O QUE FOI ENVIADO FICA NO CARD, e o que NÃO foi também: sem
+            # isto, quem opera não tem como saber se o cliente foi avisado --
+            # e é a primeira coisa que alguém pergunta.
+            if envio.get("enviou"):
+                observar(numero_os,
+                         f"[sistema] mensagem da etapa enviada ao cliente "
+                         f"({envio.get('telefone')}): {envio.get('texto')}",
+                         atendente_id)
+            elif envio.get("motivo") and envio["motivo"] != "desligado":
+                observar(numero_os,
+                         f"[sistema] a mensagem desta etapa NÃO foi enviada: "
+                         f"{envio['motivo']}",
+                         atendente_id)
+        except Exception:
+            log.exception("OS %s: falhou o disparo da etapa %s",
+                          numero_os, para_situacao)
+
     log.info("OS %s: %s -> %s por %s (ok=%s, passagem %s)", numero_os,
              resposta.get("de"), para_situacao, atendente_id,
              resposta.get("ok"), passagem)
@@ -290,9 +327,13 @@ def etapa_desde(numeros: list[int]) -> dict:
 # 🔵 *"observação do painel, com autor e hora, **no MoviZap**. Não vai para a
 # `solucaoTecnica`"*.
 #
-# 🚨 NÃO SE APAGA E NÃO SE EDITA, e não há coluna para isso: reescrever recado é
-# reescrever a história que a operação leu. É a mesma régua do *"log de quem faz
-# o que SEMPRE"*.
+# 🚨 NÃO SE EDITA, e não há coluna para isso: reescrever recado é reescrever a
+# história que a operação leu. É a mesma régua do *"log de quem faz o que
+# SEMPRE"*.
+#
+# ⚠️ APAGAR passou a existir em 11/11, por decisão dele -- e **apagar não
+# destrói o texto**: quem esconde é a leitura. Ver `apagar_observacao` e
+# `_esconder_apagados` abaixo.
 
 PRIORIDADES = {381: "Baixa", 382: "Normal", 383: "Alta", 384: "Urgente"}
 
@@ -312,14 +353,136 @@ def observar(numero_os: int, texto: str, atendente_id: int | None) -> dict:
     return {"id": linha["id"], "em": linha["em"]}
 
 
-def observacoes(numero_os: int) -> list[dict]:
-    """As observações desta OS, da mais nova para a mais velha."""
-    return banco.varios(
-        """SELECT o.id, o.texto, o.em, a.nome AS quem
+def eh_owner(atendente_id: int | None) -> bool:
+    """🚨 Quem vê o conteúdo de um recado apagado. **Só o owner.**
+
+    🔵 Decisão dele (11/11): *"somente owner pode visualizar o exlcuido, com
+    botão, como no chat interno, sem que vejam essa informação"*.
+
+    ⚠️ É a mesma consulta do `chat._eh_owner`, e **não** importo o `chat` para
+    isto: aquele módulo é sobre salas e mensagens entre atendentes, e acoplar o
+    painel a ele por causa de um `SELECT` de uma coluna faria o painel carregar
+    o chat inteiro. Duas linhas iguais custam menos que essa dependência.
+    """
+    if not atendente_id:
+        return False
+    r = banco.um("SELECT owner FROM atendente WHERE id = %s",
+                 (int(atendente_id),))
+    return bool(r and r["owner"])
+
+
+def _esconder_apagados(recados: list[dict], eu: int | None) -> list[dict]:
+    """Tira o conteúdo do que foi apagado — para quem não é owner.
+
+    🚨 **QUEM ESCONDE É A LEITURA, NÃO O BANCO.** O texto continua gravado
+    (senão o owner não teria o que ver), e é isto que torna a decisão
+    reversível. Molde exato do `chat.py:421-444`.
+
+    🔵 E A AUTORIA FICA VISÍVEL PARA TODOS, por pedido dele: *"deve ter
+    disponivel exibição da autoria sim, é um dos objetivos, rastreabilidade"*.
+    Então quem não é owner continua lendo **quem escreveu**, **quando**, **quem
+    apagou** e **quando apagou** — o que some é só o que o recado dizia.
+
+    ⚠️ **O ANEXO SOME DA LISTA JUNTO.** Deixar o nome do arquivo
+    (`comprovante-pix-joao.pdf`) ao lado de "Observação excluída" devolveria
+    pela legenda o que o apagar tirou do texto. É o vazamento que o chat já
+    tinha corrigido em 07/10, na mensagem citada.
+    """
+    sou_owner = eh_owner(eu)
+    for o in recados:
+        if o.get("apagada_em") and not sou_owner:
+            o["texto"] = None
+            o["anexos"] = []
+    return recados
+
+
+def observacoes(numero_os: int, eu: int | None = None) -> list[dict]:
+    """As observações desta OS, da mais nova para a mais velha.
+
+    ⚠️ `eu` NASCE NULO e nulo não é owner: quem chamar sem passar quem está
+    lendo recebe a versão **mais fechada**, não a mais aberta. Falha no lado
+    seguro, que é o único lado aceitável aqui.
+    """
+    recados = banco.varios(
+        """SELECT o.id, o.texto, o.em, a.nome AS quem,
+                  o.apagada_em, q.nome AS apagada_por_nome
              FROM os_observacao o
              LEFT JOIN atendente a ON a.id = o.atendente_id
+             LEFT JOIN atendente q ON q.id = o.apagada_por
             WHERE o.numero_os = %s
             ORDER BY o.em DESC, o.id DESC""", (int(numero_os),))
+    return _esconder_apagados(recados, eu)
+
+
+def observacoes_da_solicitacao(solicitacao_id: int,
+                               eu: int | None = None) -> list[dict]:
+    """O mesmo, para o recado de CHAMADO (dono duplo, migração 092).
+
+    ⚠️ Esta função nasceu movendo a consulta que estava dentro da rota: com o
+    apagar, a regra de esconder passou a ser obrigatória nos DOIS caminhos, e
+    regra que mora na rota é regra que o segundo caminho esquece.
+    """
+    if not solicitacao_id:
+        return []
+    recados = banco.varios(
+        """SELECT o.id, o.texto, o.em, a.nome AS quem,
+                  o.apagada_em, q.nome AS apagada_por_nome
+             FROM os_observacao o
+             LEFT JOIN atendente a ON a.id = o.atendente_id
+             LEFT JOIN atendente q ON q.id = o.apagada_por
+            WHERE o.solicitacao_id = %s
+            ORDER BY o.em DESC, o.id DESC""", (int(solicitacao_id),))
+    return _esconder_apagados(recados, eu)
+
+
+def anexo_e_de_apagada(anexo_id: int) -> bool:
+    """O anexo pertence a um recado que foi apagado?
+
+    🚨 Molde do `chat._eh_de_apagada`. A lista de recados já esconde o anexo de
+    quem não é owner, mas **a rota de download aceita um id** -- e esse id
+    esteve na tela de quem viu o recado antes de alguém apagar. Esconder na
+    lista e deixar baixar seria apagar de mentira.
+    """
+    r = banco.um(
+        """SELECT 1 FROM os_observacao_arquivo a
+             JOIN os_observacao o ON o.id = a.observacao_id
+            WHERE a.id = %s AND o.apagada_em IS NOT NULL""", (int(anexo_id),))
+    return bool(r)
+
+
+def apagar_observacao(observacao_id: int, atendente_id: int | None) -> dict:
+    """Marca o recado como apagado. **Não destrói o texto.**
+
+    🔵 Decisões dele (11/11): apagar é de *"todos que tem acesso a visualização
+    do painel"* — não só do autor, como no chat interno —, e **sem janela de
+    tempo**: *"pode ser apagada conforme disponivel mesmo"*.
+
+    🚨 **POR ISSO EXISTE `apagada_por`**: com qualquer pessoa podendo apagar o
+    recado de qualquer um, "quem apagou" deixa de ser dedutível do autor. No
+    chat interno a coluna não existe porque lá só o autor apaga.
+
+    ⚠️ **Apagar duas vezes não reescreve a primeira** (`AND apagada_em IS
+    NULL`): a hora e o autor do apagar são do primeiro, e um segundo clique não
+    pode roubar a autoria de quem apagou de fato.
+    """
+    observacao_id = int(observacao_id)
+    atual = banco.um(
+        "SELECT id, numero_os, solicitacao_id, apagada_em FROM os_observacao "
+        "WHERE id = %s", (observacao_id,))
+    if not atual:
+        raise DadoInvalido("Esta observação não existe mais.")
+    if atual["apagada_em"]:
+        raise DadoInvalido("Esta observação já estava excluída.")
+
+    banco.executar(
+        "UPDATE os_observacao SET apagada_em = now(), apagada_por = %s "
+        "WHERE id = %s AND apagada_em IS NULL",
+        (atendente_id, observacao_id))
+    log.info("observacao %s apagada por %s (OS %s, solicitacao %s)",
+             observacao_id, atendente_id, atual["numero_os"],
+             atual["solicitacao_id"])
+    return {"id": observacao_id, "numero_os": atual["numero_os"],
+            "solicitacao_id": atual["solicitacao_id"]}
 
 
 def quantas_observacoes(numeros: list[int]) -> dict:

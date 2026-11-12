@@ -56,6 +56,14 @@ vi.mock('./api/cliente.js', () => ({
     put: async () => ({ itens: estado.checklist }),
     del: async () => ({ itens: estado.checklist }),
   },
+  /* 🚨 O QUE O `estado/sessao.js` IMPORTA. A tela passou a ler quem está
+     logado (para o `souOwner` do apagar), e sem estes três o import do módulo
+     estoura na COLETA -- a suíte inteira cai antes do primeiro teste.
+     ⚠️ Molde do `abas_do_painel_0611.teste.js`, que já os declarava. */
+  quandoPerderSessao: () => {},
+  definirToken: () => {},
+  temToken: () => false,
+  relatarErroDeBotao: () => {},
   ErroDeApi: class extends Error {},
 }))
 

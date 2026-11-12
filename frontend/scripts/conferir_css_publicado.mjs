@@ -253,6 +253,109 @@ function osControlesDeRolagemFicamNaCamadaCerta(css) {
   }
 }
 
+
+/* ------------------------------------------------------------------ 7 */
+function oAvisoDaEtapaEhCurtoEComBotaoNoCentro(css) {
+  /* 🔵 11/11, dele: *"Reduzir o tamanho do modal e centralizar botão"*.
+     🚨 AS DUAS COISAS SÃO CSS E NENHUM TESTE DE TELA AS VÊ -- o jsdom não faz
+     layout, então um `max-width` perdido ou um rodapé que volta ao
+     `space-between` passam verdes na suíte e aparecem na cara dele.
+     ⚠️ O botão à esquerda não era um `text-align` esquecido: é o
+     `justify-content: space-between` do rodapé da casa, que com UM filho
+     encosta o único botão na borda. */
+  const r = regra(css, '.modal__caixa--curta');
+  if (!r) {
+    return falhar('.modal__caixa--curta não existe no CSS publicado — o aviso '
+                  + 'da etapa herdaria os 420px da .modal__caixa da casa.');
+  }
+  const mw = prop(r.corpo, 'max-width');
+  if (!mw || !mw.includes('22rem')) {
+    falhar(`.modal__caixa--curta max-width = ${mw} — tem de ser 22rem: é o `
+           + 'tamanho que ele pediu, e sem declarar vale o teto da casa.');
+  }
+  const rod = regra(css, '.modal--aviso .modal__rodape');
+  if (!rod) {
+    return falhar('.modal--aviso .modal__rodape não existe no CSS publicado — '
+                  + 'o rodapé da casa é `space-between` e, com um botão só, '
+                  + 'joga o Ok para a esquerda.');
+  }
+  const jc = prop(rod.corpo, 'justify-content');
+  if (jc !== 'center') {
+    falhar(`.modal--aviso .modal__rodape justify-content = ${jc} — tem de ser `
+           + 'center, senão o Ok volta para a borda esquerda.');
+  }
+}
+
+
+/* ------------------------------------------------------------------ 8 */
+function todaVarianteDePilulaTemAPilulaBase(css) {
+  /* 🚨 NASCEU DE UM DEFEITO MEU EM 11/11. A `.pilula` é **scoped por
+     componente** nesta casa -- ela não existe em `estilo/*.css`, e cada tela que
+     a usa declara a sua. Publiquei a `ChecklistDeCards` usando a classe sem
+     declarar: o selo saiu **sem forma, sem fundo e sem raio**. Não quebra, não
+     avisa, e nenhum teste de tela alcança -- o jsdom não faz layout.
+
+     A invariante que dá para medir no CSS publicado: todo escopo que declara uma
+     VARIANTE (`--alerta`, `--pronto`, `--neutra`, `--forte`, `--origem`) tem de
+     declarar também a BASE no mesmo escopo. Variante sem base é cor sem selo. */
+  const escoposComVariante = new Set();
+  const escoposComBase = new Set();
+  const re = /\.pilula(--[a-z]+)?\[data-v-([0-9a-f]+)\]/g;
+  let m;
+  while ((m = re.exec(css)) !== null) {
+    if (m[1]) escoposComVariante.add(m[2]);
+    else escoposComBase.add(m[2]);
+  }
+  if (!escoposComBase.size) {
+    return falhar('.pilula não aparece no CSS publicado — ou a classe mudou de '
+                  + 'nome, ou nenhuma tela a declara (e todas que a usam estão '
+                  + 'com o selo sem estilo).');
+  }
+  for (const escopo of escoposComVariante) {
+    if (!escoposComBase.has(escopo)) {
+      falhar(`o escopo data-v-${escopo} declara uma VARIANTE de .pilula e não `
+             + 'declara a base — o selo fica com cor e sem forma. A `.pilula` é '
+             + 'scoped por componente: cada tela que a usa declara a sua.');
+    }
+  }
+}
+
+/* ------------------------------------------------------------------ 9 */
+function aBarraDeEtapasRolaENaoQuebra(css) {
+  /* 🔵 11/11, dele: *"a barra interna de mudar etapa nos cards dessas
+     etapas"*.
+     🚨 A BARRA É UMA LINHA QUE ROLA, E ISSO É SÓ CSS. Com as 10 etapas do
+     Financeiro, um `flex-wrap` que volte a `wrap` quebra a barra em três
+     fileiras e empurra o corpo do card para fora da tela -- e a trava de
+     tela fica VERDE, porque o jsdom não faz layout e `scrollWidth` é sempre
+     0 lá. */
+  const r = regra(css, '.trilha');
+  if (!r) {
+    return falhar('.trilha não existe no CSS publicado — a barra de mudar '
+                  + 'etapa ficaria sem forma nenhuma dentro do card.');
+  }
+  const wrap = prop(r.corpo, 'flex-wrap');
+  if (wrap !== 'nowrap') {
+    falhar(`.trilha flex-wrap = ${wrap} — tem de ser nowrap: com as 10 etapas `
+           + 'do Financeiro, quebrar em fileiras empurra o corpo do card '
+           + 'fora da tela.');
+  }
+  const ox = prop(r.corpo, 'overflow-x');
+  if (ox !== 'auto') {
+    falhar(`.trilha overflow-x = ${ox} — tem de ser auto, senão os passos que `
+           + 'não cabem ficam inalcançáveis (nowrap sem rolagem é pior que '
+           + 'quebrar).');
+  }
+  /* ⚠️ E a etapa atual precisa ter FORMA própria, não só cor: a distinção
+     estrutural (`<strong>` × `<button>`) é da tela, mas se esta regra
+     desaparecer o passo atual fica igual aos outros para quem olha. */
+  if (!regra(css, '.trilha__passo--atual')) {
+    falhar('.trilha__passo--atual não existe no CSS publicado — a etapa atual '
+           + 'ficaria indistinguível das outras na barra.');
+  }
+}
+
+
 /* ------------------------------------------------------------------ */
 const css = cssPublicado()
 if (!erros.length) {
@@ -262,6 +365,9 @@ if (!erros.length) {
   osTresDialogosNaoEmpatamNoZIndex(css)
   oDialogoDoChamadoTemTetoProprioENaoEmpata(css)
   osControlesDeRolagemFicamNaCamadaCerta(css)
+  oAvisoDaEtapaEhCurtoEComBotaoNoCentro(css)
+  todaVarianteDePilulaTemAPilulaBase(css)
+  aBarraDeEtapasRolaENaoQuebra(css)
 }
 
 if (erros.length) {
@@ -269,6 +375,9 @@ if (erros.length) {
   erros.forEach((e, i) => console.error(`  ${i + 1}. ${e}\n`))
   process.exit(1)
 }
-console.log('CSS publicado: as 6 conferências passaram (teto do diálogo, '
+console.log('CSS publicado: as 9 conferências passaram (teto do diálogo, '
             + 'ordem da cascata, tokens no :root, empilhamento dos diálogos, '
-            + 'teto e empilhamento do diálogo do chamado, camada dos controles de rolagem)')
+            + 'teto e empilhamento do diálogo do chamado, camada dos controles '
+            + 'de rolagem, forma do aviso da etapa, barra de etapas que rola, '
+            + 'pílula com base no mesmo '
+            + 'escopo)')

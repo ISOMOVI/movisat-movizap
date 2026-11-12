@@ -96,7 +96,7 @@ aparecem todos.
 | `ATD_5.1` | Histórico | `/atendimento/historico` | `equipe` | 1 |
 | `ATD_6.1` | Chat interno | `/chat` | `atendimento` | 1 |
 | `EML_1.1` | E-mail | `/email` | `atendimento` | 1 |
-| `FRM_1.1` | Solicitações | `/solicitacoes` | `equipe` | 1 |
+| `FRM_1.1` | Solicitações | `/solicitacoes` | `owner` | 1 |
 | `PNL_1.1` | Operação | `/paineis/operacao` | `owner` | 1 |
 | `PNL_1.4` | Financeiro | `/paineis/financeiro` | `owner` | 1 |
 | `PNL_1.5` | Contratual | `/paineis/contratual` | `owner` | 1 |
@@ -209,6 +209,8 @@ e duplicá-los quebraria a tela quando o tema mudar.
 | `CFG_13.1` | Orçamento (numeração) | `/config/orcamento` | `owner` | 1 |
 | `CFG_14.1` | Vínculo dos técnicos | `/config/vinculo-tecnicos` | `owner` | 1 |
 | `CFG_15.1` | Permissão dos painéis | `/config/permissao-paineis` | `owner` | 1 |
+| `CFG_17.1` | Checklist de Cards | `/config/checklist-de-cards` | `owner` | 1 |
+| `CFG_16.1` | Disparos Operação | `/config/disparos-operacao` | `owner` | 1 |
 | `TEC_1.1` | Técnicos | `/tecnicos` | `atendimento` | 1 |
 | `TEC_1.2` | Credenciamento de técnicos | `/tecnicos/credenciar` | `equipe` | 1 |
 | `REL_1.1` | Relatórios | `/relatorios` | `owner` | 3 |
@@ -275,6 +277,8 @@ O campo **`icone`** deste registro é o que o menu desenha, e ele é **a fonte
 | `CFG_13.1` Orçamento | `bi-receipt` | aba |
 | `CFG_14.1` Vínculo dos técnicos | `bi-person-vcard` | aba |
 | `CFG_15.1` Permissão dos painéis | `bi-shield-lock` | aba |
+| `CFG_17.1` Checklist de Cards | `bi-list-check` | aba |
+| `CFG_16.1` Disparos Operação | `bi-send` | aba |
 | `TEC_1.1` Técnicos | `bi-person-badge` | menu |
 | `TEC_1.2` Credenciamento de técnicos | `bi-patch-check` | aba (sem tela própria) |
 | `ATD_3.1` Informativos | `bi-megaphone` | menu |
@@ -482,7 +486,7 @@ Fixa no rodapé de **toda** tela principal. Modelo mental: barra do Excel / bloc
 | Perfil | Permissões | Telas na prática |
 |---|---|---|
 | `owner` | todas | tudo, inclusive o que é exclusivo do owner |
-| `admin` | `atendimento` `equipe` | as de `atendimento` + `ATD_1.3` `ATD_5.1` `CAD_2.1` `CAD_2.2` `FRM_1.1` `TEC_1.2` (as seis de `equipe`); no `/config`, só `CFG_10.1`, `CFG_11.1` e `CFG_12.1` (25/09: *"Owner e admin criam"* os Padrões e Formulários) |
+| `admin` | `atendimento` `equipe` | as de `atendimento` + `ATD_1.3` `ATD_5.1` `CAD_2.1` `CAD_2.2` `TEC_1.2` (as cinco de `equipe` -- a `FRM_1.1` saiu em 11/11, por decisao dele: *"deixe exclusiva ao owner mesmo assim"*); no `/config`, só `CFG_10.1`, `CFG_11.1` e `CFG_12.1` (25/09: *"Owner e admin criam"* os Padrões e Formulários) |
 | `atendimento` | `atendimento` | `INI_1.1` `ATD_1.*` `ATD_6.1` `ATD_7.1` `LIG_1.1` `ORC_1.1` `TEC_1.1` `EML_1.1` `CFG_0.1` › `CFG_10.1` `CFG_11.1` `CFG_12.1` |
 | `cadastro` | `cadastro` | `CAD_1.1` `CAD_1.2` |
 
@@ -746,3 +750,83 @@ dois arquivos de teste — e a do Financeiro teve de ser **consertada**: a prime
 versão fixava a lista inteira de painéis e ficou vermelha quando o Contratual
 entrou, meia hora depois. Teste que existe para provar que *"painel novo entra
 sozinho"* não pode ser o que obriga a editar teste quando um painel novo entra.
+
+
+## 11/11 — `CFG_17.1` Checklist de Cards: a PORTA que faltava
+
+🔵 Sugestão minha que ele aceitou: *"boa sugestão, pode fazer uma outra aba só
+para isso de 'Checklist de Cards' vamos centralizar os fixos ali"*.
+
+🚨 **AS ROTAS JÁ ESTAVAM NO AR DESDE 04/11, SEM TELA E SEM TRAVA.** As três de
+modelo do checklist (`GET /checklist/modelos`, `POST` e `PUT`
+`/checklist/modelo`) existiam com permissão da Geral (`CFG_7.1`) e
+**ninguém nunca pôde usá-las**: não havia tela, e `grep` por
+`checklist/modelo` nos testes dava **zero**. Acrescentar item na lista de uma
+etapa só era possível escrevendo migração.
+⚠️ **Código no ar sem porta e sem trava é pior que código ausente: parece
+pronto.**
+
+| o quê | onde |
+|---|---|
+| a aba | `CFG_17.1`, `aba_de: CFG_0.1`, **só owner**, depois da Permissão dos painéis |
+| a leitura | `GET /api/config/checklist-de-cards` — as **17 etapas**, inclusive as vazias |
+| a escrita | `POST`/`PUT /api/paineis/operacao/checklist/modelo` — passou de `CFG_7.1` para **`CFG_17.1`** |
+| a tela | `frontend/src/telas/ChecklistDeCards.vue` |
+
+🚨 **A LEITURA DEVOLVE AS 17, INCLUSIVE AS VAZIAS.** Uma tela que só mostrasse
+etapa com lista não deixaria acrescentar na que está vazia -- e são as vazias que
+ele precisa preencher. A coluna `Chamados` **não entra**: não é situação do
+ERP, e `checklist._etapa_conhecida` recusaria o item.
+
+⚠️ **O item DESATIVADO aparece, marcado.** Ele continua no card de quem já o
+tinha (regra da 090), então esconder aqui faria a tela mentir sobre o que existe.
+E a ação se chama **"Desativar"**, por extenso: um ✕ pareceria apagar, e apagar
+é o que esta tela não faz.
+
+✅ **Acrescentar é ADITIVO:** o item novo entra no card na próxima abertura
+daquela etapa, inclusive em card que já estava aberto, sem tocar no que está
+marcado (`do_card`, `NOT EXISTS ... de_modelo_id`).
+
+⚠️ **Ler continua sendo de quem opera** (`PNL_1.1`): o card precisa saber onde
+há checklist, para mostrar o botão e dar o aviso ao entrar.
+
+
+## 11/11 — `CFG_16.1` Disparos Operação: a primeira que fala com o cliente
+
+🔵 Dele: *"Em configurações tela nova de 'Disparos Operação' -> Deixar o campo de
+menagens que são enviadas em cada etapa do fluxo com interruptor de 'ligado e
+desligado'"* · *"nasce em branco e com interruptor desligado ainda, na tela de
+config exclusiva owner"* · *"por hora só whatsapp"* · *"por enquanto somente
+cliente deixe no painel de disparos uma nota que nenhuma vai ao tecnico"*.
+
+🚨 **ATÉ AQUI NADA NO PAINEL ENVIAVA NADA SEM ALGUÉM CLICAR.** Com o interruptor
+ligado, mover um card para a etapa **envia**, sem outra confirmação -- e isso
+afrouxa, por decisão dele, a régua da ÁREA F de 04/11.
+
+**As quatro coisas que protegem, no lugar da confirmação:**
+
+1. **nasce vazia e desligada** (as 17 linhas da migração 102), e o
+   `CHECK etapa_mensagem_ligada_tem_texto` **não deixa ligar sem texto** -- nem
+   pela tela, nem por `UPDATE` à mão;
+2. **nunca vai ao técnico:** o destinatário é DERIVADO da OS
+   (`ficha.cliente_telefone`), não escolhido -- não existe caminho no código
+   para mandar a outro alguém;
+3. **falhar não desfaz o mover**, e o motivo da falha vira **observação do
+   sistema no card** -- quem opera precisa saber se o cliente foi avisado;
+4. **só canal de ATENDIMENTO:** o informativo é de campanha, e usá-lo mostraria
+   ao cliente o número errado.
+
+⚠️ **O envio passa pelo `conversas.iniciar_conversa`**, nunca pelo
+`evolution` cru: ele confere se o número tem WhatsApp, reusa a conversa aberta e
+**grava a mensagem na conversa**. Enviar por fora deixaria o cliente com uma
+mensagem que a operação não vê.
+
+⚠️ **NENHUM TEXTO FOI SEMEADO, e é um fato, não esquecimento:** o texto que ele
+passou em 04/11 **não sobreviveu em documento nenhum** -- do bloco daquele dia
+restaram só as três variáveis (`{{Contato: Primeiro nome}}`, `{{Nome}}`,
+`{{Código de envio/acompanhamento transporte}}`). Semear um texto inventado
+seria pôr palavra dele na boca do sistema. Ele disse *"depois colo"*.
+
+🚨 **A tela mostra o texto RESOLVIDO com valores de exemplo**, e é o que a torna
+uma conferência de verdade: ler `{{Nome}}` não diz nada sobre o que o cliente
+vê. Variável desconhecida **sai fora** do texto final, nunca crua.

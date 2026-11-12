@@ -316,6 +316,105 @@ def historico(card_id: int) -> list[dict]:
             ORDER BY p.em DESC, p.id DESC""", (int(card_id),))
 
 
+def etapas_nossas_da_operacao() -> list[dict]:
+    """As etapas NOSSAS da aba da Operação, com onde cada uma entra entre as 17.
+
+    🔵 11/11: a `Serviço Realizado` tem de aparecer **entre a 1316 e a 15694**,
+    e "entre" não se diz com um número solto -- por isso a etapa carrega
+    `depois_da_situacao` (migração 105).
+
+    ⚠️ `depois_da_situacao` NULO = na frente de todas, que é a `Chamados`.
+    """
+    return banco.varios(
+        """SELECT e.id, e.titulo, e.ordem, e.depois_da_situacao
+             FROM pipeline_etapa e JOIN painel_aba a ON a.id = e.aba_id
+            WHERE a.codigo_tela = %s AND e.ativo
+            ORDER BY e.ordem, e.id""", (ABA_DA_OPERACAO,))
+
+
+def cards_por_os(aba_id: int) -> dict:
+    """`numero_os` -> a etapa nossa em que aquela OS está. UMA consulta.
+
+    🚨 É O QUE FAZ UM CARD TER DUAS POSIÇÕES. A OS segue em 1316 no Harmonit e o
+    card aparece na nossa etapa -- então o quadro precisa saber, antes de
+    distribuir, quais OS não vão para a coluna da situação delas.
+
+    ⚠️ Card com desfecho NÃO conta: card finalizado volta para a coluna da
+    situação dele, que é o estado real no ERP.
+    """
+    return {r["numero_os"]: r["etapa_id"] for r in banco.varios(
+        """SELECT numero_os, etapa_id FROM pipeline_card
+            WHERE aba_id = %s AND numero_os IS NOT NULL
+              AND desfecho IS NULL""", (int(aba_id),))}
+
+
+def por_os(aba_id: int, numero_os: int) -> dict | None:
+    return banco.um(
+        """SELECT id, aba_id, etapa_id, numero_os FROM pipeline_card
+            WHERE aba_id = %s AND numero_os = %s AND desfecho IS NULL""",
+        (int(aba_id), int(numero_os)))
+
+
+def pousar_os(aba_id: int, etapa_id: int, numero_os: int,
+              atendente_id: int | None = None) -> dict:
+    """Põe uma OS numa etapa NOSSA (ou a move entre etapas nossas).
+
+    🚨 NÃO FALA COM O HARMONIT, e é o ponto inteiro: a OS fica onde está no ERP
+    (1316) e o card passa a morar aqui. Quem escreve no ERP é a saída desta
+    etapa, pela `passagem.mover` de sempre.
+
+    ⚠️ Idempotente: pousar duas vezes na mesma etapa não duplica card nem grava
+    passagem -- o índice único já proíbe o duplo, e um clique repetido no arrasto
+    não é uma passagem.
+    """
+    atual = por_os(aba_id, numero_os)
+    if atual and atual["etapa_id"] == int(etapa_id):
+        return atual
+    if atual:
+        return mover(atual["id"], etapa_id, atendente_id)
+
+    etapa = banco.um(
+        "SELECT id, aba_id, titulo FROM pipeline_etapa WHERE id = %s",
+        (int(etapa_id),))
+    if not etapa or etapa["aba_id"] != int(aba_id):
+        raise DadoInvalido("Esta etapa não é desta aba.")
+
+    linha = banco.um(
+        """INSERT INTO pipeline_card (aba_id, etapa_id, numero_os, criado_por)
+           VALUES (%s, %s, %s, %s) RETURNING id""",
+        (int(aba_id), int(etapa_id), int(numero_os), atendente_id))
+    banco.executar(
+        """INSERT INTO pipeline_passagem (card_id, de_etapa, para_etapa,
+                                          de_titulo, para_titulo, quem)
+           VALUES (%s, NULL, %s, NULL, %s, %s)""",
+        (linha["id"], int(etapa_id), etapa["titulo"], atendente_id))
+    log.info("pipeline: OS %s pousou na etapa %s (card %s)",
+             numero_os, etapa_id, linha["id"])
+    return por_os(aba_id, numero_os)
+
+
+def soltar_os(aba_id: int, numero_os: int,
+              atendente_id: int | None = None) -> bool:
+    """Tira a OS da etapa nossa — ela volta para a coluna da situação dela.
+
+    🚨 **NÃO APAGA O CARD: FINALIZA.** O histórico de passagens é o registro de
+    que a auditoria aconteceu, e apagar a linha levaria isso junto
+    (`pipeline_passagem` tem `ON DELETE CASCADE` no card).
+    ⚠️ O desfecho é `resolvido`, que é o que o `DESFECHOS` já conhece -- inventar
+    um valor novo exigiria migração e não diria mais nada.
+    """
+    atual = por_os(aba_id, numero_os)
+    if not atual:
+        return False
+    banco.executar(
+        """UPDATE pipeline_card SET desfecho = 'resolvido', desfecho_em = now(),
+               desfecho_por = %s WHERE id = %s""",
+        (atendente_id, atual["id"]))
+    log.info("pipeline: OS %s saiu da etapa nossa (card %s)",
+             numero_os, atual["id"])
+    return True
+
+
 def cards_da_aba(aba_id: int, teto: int = 200) -> list[dict]:
     """Os cards de uma aba, com o que o card fechado precisa mostrar.
 
@@ -330,12 +429,24 @@ def cards_da_aba(aba_id: int, teto: int = 200) -> list[dict]:
     """
     return banco.varios(
         """SELECT c.id, c.aba_id, c.etapa_id, c.solicitacao_id, c.cliente_id,
+                  c.numero_os,
                   c.criado_em, c.desfecho, c.desfecho_em,
                   qa.nome AS desfecho_por_nome,
                   s.valores, s.criada_em AS solicitada_em,
                   f.titulo AS formulario, f.slug,
                   (SELECT count(*) FROM os_observacao o
-                    WHERE o.solicitacao_id = c.solicitacao_id) AS observacoes
+                    WHERE o.solicitacao_id = c.solicitacao_id) AS observacoes,
+                  -- 🚨 QUANDO A ETAPA ATUAL COMEÇOU, e é o que faz o contador
+                  -- do card parar de dizer "não medido". O dado sempre
+                  -- existiu: a `pipeline_passagem` ganha linha na CRIAÇÃO
+                  -- (`de_etapa` nulo) e em cada movimento, então o máximo é a
+                  -- entrada na etapa de agora -- e no card recém-criado é o
+                  -- próprio `criado_em`, que é a verdade.
+                  -- ⚠️ SUBCONSULTA, e não `JOIN` com `GROUP BY`: o `JOIN`
+                  -- multiplicaria as linhas e a contagem de observações acima
+                  -- passaria a contar errado.
+                  (SELECT max(p.em) FROM pipeline_passagem p
+                    WHERE p.card_id = c.id) AS etapa_desde
              FROM pipeline_card c
              LEFT JOIN atendente qa ON qa.id = c.desfecho_por
              LEFT JOIN formulario_solicitacao s ON s.id = c.solicitacao_id
@@ -343,3 +454,76 @@ def cards_da_aba(aba_id: int, teto: int = 200) -> list[dict]:
             WHERE c.aba_id = %s
             ORDER BY (c.desfecho IS NOT NULL), c.criado_em DESC, c.id DESC
             LIMIT %s""", (int(aba_id), int(teto)))
+
+
+def etapas_que_recebem() -> list[dict]:
+    """As etapas que RECEBEM OS de uma situacao do ERP (migracao 106).
+
+    🔵 Dele (11/11): a OS financeira *"deveria ter nascido no painel
+    Financeiro, na etapa correta 'Nova solicitação'"*.
+
+    🚨 Isto e o que substitui as tres colunas que sairam da Operacao
+    (15746 Financeiro, 15695 Pos venda, 16492 Contratual). A OS continua na
+    situacao dela no Harmonit -- o que muda e ONDE o card aparece.
+    """
+    return banco.varios(
+        """SELECT e.id, e.aba_id, e.titulo, e.recebe_situacao,
+                  a.codigo_tela, a.painel
+             FROM pipeline_etapa e
+             JOIN painel_aba a ON a.id = e.aba_id
+            WHERE e.recebe_situacao IS NOT NULL AND e.ativo AND a.ativo
+            ORDER BY e.recebe_situacao""")
+
+
+def semear_os(os_do_erp: list[dict]) -> int:
+    """Cria o card das OS cujas situacoes tem etapa de destino. Devolve quantos.
+
+    🚨 O CARD E MATERIALIZADO, NAO CALCULADO NA HORA, e a escolha e deliberada:
+    se o quadro daquele painel fosse montado lendo a ponte, ele ficaria VAZIO
+    quando o FPSL ou o Harmonit caissem -- e o `quadro_da_aba` existe
+    justamente com a promessa oposta (*"este quadro nao pode ficar vazio porque
+    um terceiro caiu"*). Materializado, a queda de um terceiro impede card
+    NOVO de aparecer, e nunca apaga o que ja esta na tela.
+
+    🚨 IDEMPOTENTE PELO INDICE, nao por consulta: o
+    `idx_pipeline_card_os_unica (aba_id, numero_os)` da migracao 105 e quem
+    garante que a mesma OS nao entre duas vezes. Conferir antes com um SELECT
+    deixaria uma janela entre a conferencia e a escrita, e duas pessoas abrindo
+    o painel ao mesmo tempo e o caso comum, nao o raro.
+
+    ⚠️ CARD FINALIZADO NAO RENASCE: o indice unico so vale para
+    `desfecho IS NULL`, entao uma OS ja tratada e movida para fora voltaria a
+    nascer a cada leitura da ponte. Por isso a guarda extra olha TAMBEM o card
+    com desfecho -- e, se ele existir, nao recria.
+    """
+    destinos = {e["recebe_situacao"]: e for e in etapas_que_recebem()}
+    if not destinos:
+        return 0
+    criados = 0
+    for o in os_do_erp:
+        numero = o.get("numero_os")
+        destino = destinos.get(o.get("situacao_id"))
+        if not numero or destino is None:
+            continue
+        # ⚠️ A guarda do card JA TRATADO (ver o docstring): aqui um SELECT e
+        # correto, porque o que ele evita e RESSUSCITAR, nao duplicar.
+        ja = banco.um(
+            """SELECT 1 FROM pipeline_card
+                WHERE aba_id = %s AND numero_os = %s LIMIT 1""",
+            (destino["aba_id"], numero))
+        if ja:
+            continue
+        try:
+            banco.executar(
+                """INSERT INTO pipeline_card
+                       (aba_id, etapa_id, numero_os, cliente_id, criado_por)
+                   VALUES (%s, %s, %s, %s, NULL)
+                   ON CONFLICT DO NOTHING""",
+                (destino["aba_id"], destino["id"], numero,
+                 o.get("cliente_id")))
+            criados += 1
+        except Exception:  # noqa: BLE001
+            # 🚨 UMA OS QUE NAO ENTRA NAO PODE DERRUBAR O QUADRO: quem abriu o
+            # painel veria uma tela de erro em vez da fila inteira.
+            log.exception("nao deu para semear o card da OS %s", numero)
+    return criados

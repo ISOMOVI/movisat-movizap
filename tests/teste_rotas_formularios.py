@@ -352,7 +352,7 @@ class TestRotasDoPainelDeSolicitacoes:
 # A rota do painel
 # ============================================================================
 class TestRotaDoPainel:
-    def test_o_painel_da_operacao_responde_com_as_17_colunas(self, cliente, token):
+    def test_o_painel_da_operacao_responde_com_as_colunas_do_ERP(self, cliente, token):
         """🔵 29/10: as colunas passaram a ser EXATAMENTE as 17 situacoes dele.
 
         ⚠️ Eram 13 ate 28/10 -- as 11 situacoes de entao mais "Sem OS" e "Sem
@@ -363,11 +363,13 @@ class TestRotaDoPainel:
         r = cliente.get("/api/paineis/operacao",
                         headers={"Authorization": f"Bearer {token}"})
         assert r.status_code == 200
-        assert len(paineis.SITUACOES) == 17
+        assert len(paineis.SITUACOES) == 14
         # 🔵 05/11: 18 colunas -- as 17 situações mais a `Chamados`, que é
         # etapa nossa e vem na frente. ⚠️ A `SITUACOES` segue com 17, e é o
         # que impede o checklist de tratar a coluna nova como etapa do ERP.
-        assert len(r.json()["colunas"]) == 18
+        # 🔵 11/11: 19 — as 17, a `Chamados` e a `Serviço Realizado`.
+        # 11/11: 16 = as 14 do ERP + Chamados + Servico Realizado.
+        assert len(r.json()["colunas"]) == 16
         assert r.json()["colunas"][0]["chave"] == "chamados"
         # 🚨 A QUARTA TRAVA MINHA DO DIA a guardar a verdade antiga, e
         # as quatro no mesmo recurso. Mover passou a existir no Bloco D

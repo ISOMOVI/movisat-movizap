@@ -325,11 +325,11 @@ class TestPortaDoConfig:
         # elas deixaram de entrar por `de_atendimento`, e por isso vêm
         # nomeadas aqui. O conjunto segue FECHADO: é esta linha que tem de
         # mudar quando a decisão dele mudar, não o assert.
-        # 🔵 22/10: a FRM_1.1 (Solicitações) nasceu `equipe`, pela mesma
-        # régua da Fila e do Histórico -- a solicitação traz dado de cadastro
-        # (CNPJ, endereço, valor) de quem ainda não é cliente. O admin a vê
-        # porque tem `equipe`, e por isso vem nomeada aqui: o conjunto segue
-        # FECHADO, e é esta linha que muda quando a decisão dele muda.
+        # 🔵 22/10: a FRM_1.1 (Solicitações) nasceu `equipe`...
+        # 🔵 ...e em 11/11 ELE A APERTOU PARA `owner`: *"deixe exclusiva ao
+        # owner mesmo assim"*. Então ela SAIU deste conjunto -- e é exatamente
+        # o que o comentário acima prometia: *"é esta linha que tem de mudar
+        # quando a decisão dele mudar, não o assert"*. Mudou a linha.
         # 🔵 04/11: a TEC_1.2 nasceu `equipe` por decisão dele sobre a tela
         # de técnicos -- *"Ler todo atendente, escrever owner e admin"*. Ela
         # não é tela: é a CHAVE que as rotas de gravar ficha, preço e
@@ -341,7 +341,7 @@ class TestPortaDoConfig:
         # três coisas (Times/Atendentes, Fila/Histórico/Solicitações e preço de
         # técnico). Hoje é o mesmo conjunto de pessoas; separar é decisão dele,
         # e aí nasce permissão própria.
-        esperado = de_atendimento | {"ATD_1.3", "ATD_5.1", "FRM_1.1", "TEC_1.2",
+        esperado = de_atendimento | {"ATD_1.3", "ATD_5.1", "TEC_1.2",
                                      "CAD_2.1", "CAD_2.2", "CFG_10.1", "CFG_11.1",
                                      "CFG_12.1"}
         assert vistas == esperado

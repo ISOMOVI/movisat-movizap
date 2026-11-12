@@ -549,6 +549,18 @@ def gravar_definicao(bruto: dict, codigo: str, slug: str, setor: str,
                               for o in mudar["opcoes"]]
         if "obrigatorio" in mudar:
             campo["required"] = mudar["obrigatorio"]
+        # 🚨 O TIPO TAMBEM E AJUSTAVEL, e isto nasceu de um defeito medido em
+        # 11/11: a migracao 104 consertou no BANCO o tipo de dois campos da
+        # Rescisao (`string` -> `email`/`phone`), e a carga seguinte os
+        # devolveu a `string`, porque o tipo vem da definicao do Bitrix. O
+        # conserto durava ate a proxima rodada -- nos campos que definem o
+        # DONO DO CONTRATO.
+        #
+        # ⚠️ O tipo decide o que o SERVIDOR exige, nao so o que a tela mostra:
+        # errar aqui afrouxa a validacao sem aviso. O CHECK de
+        # `formulario_campo.tipo` barra valor desconhecido.
+        if "tipo" in mudar:
+            campo["type"] = mudar["tipo"]
         campo["_fantasma"] = mudar.get("fantasma")
         campo["_linhas"] = mudar.get("linhas")
         campo["_fonte"] = mudar.get("fonte")
@@ -593,6 +605,18 @@ def gravar_definicao(bruto: dict, codigo: str, slug: str, setor: str,
          str(bruto.get("id")), bruto.get("sec"), painel, ordem,
          formato,
          json.dumps(etapas, ensure_ascii=False) if etapas else None))
+
+    # 🚨 O DESTINO ACOMPANHA O PAINEL, e e reescrito a cada carga como ele:
+    # formulario criado depois da migracao 106 nascia com painel e SEM
+    # destino, e o envio dele nao criava card -- em silencio, com o cliente
+    # ja tendo lido "recebemos". A suite achou isso, nao a tela.
+    #
+    # ⚠️ REESCRITO, e nao "so quando esta nulo": e o mesmo contrato do
+    # `painel`. Mover um formulario de painel sem mover a fila dele deixaria
+    # o card nascendo na fila antiga, que e pior que nao nascer.
+    banco.executar(
+        "UPDATE formulario SET etapa_destino_id = %s WHERE id = %s",
+        (destino_padrao(painel, codigo), linha["id"]))
 
     banco.executar("DELETE FROM formulario_campo WHERE formulario_id = %s",
                    (linha["id"],))
@@ -1122,3 +1146,355 @@ def contar_novas() -> int:
     linha = banco.um("SELECT count(*) AS n FROM formulario_solicitacao "
                      "WHERE estado = 'nova'")
     return int(linha["n"] if linha else 0)
+
+
+# 🚨 O DESEMPATE NOMEADO DO POS-VENDA. O destino de um formulario e a
+# PRIMEIRA etapa do painel dele -- regra derivada, e nao 16 linhas escritas a
+# mao. A derivacao acerta tres paineis e empata num: o Pos-venda tem DUAS abas
+# (Treinamentos e Pos-venda), e "a primeira por ordem" entrega as duas
+# PESQUISAS na fila de Treinamentos. Pesquisa nao e treinamento.
+#
+# ⚠️ Derivacao com empate precisa de desempate NOMEADO, nao do acaso da
+# `ordem`. 🔴 E a escolha e dele: mudar e editar esta linha.
+ABA_POR_FORMULARIO = {
+    "CES": "PNL_1.3",
+    "NPS": "PNL_1.3",
+}
+
+
+def destino_padrao(painel: str | None, codigo: str | None = None) -> int | None:
+    """A etapa em que o card deste formulario deve nascer.
+
+    🚨 Derivado do `painel`, como o proprio `painel` e derivado do mapa dele:
+    mudar um formulario de fila nao pode exigir migracao nem deploy.
+
+    ⚠️ `None` quando o formulario nao tem painel -- e isso e decisao dele, nao
+    cadastro incompleto: o Contato e o `IDEIAS` nao tem fila.
+    """
+    if not painel:
+        return None
+    aba = ABA_POR_FORMULARIO.get((codigo or "").upper())
+    if aba:
+        linha = banco.um(
+            """SELECT e.id FROM pipeline_etapa e JOIN painel_aba a
+                      ON a.id = e.aba_id
+                WHERE a.codigo_tela = %s AND e.ativo AND a.ativo
+                ORDER BY e.ordem, e.id LIMIT 1""", (aba,))
+        if linha:
+            return linha["id"]
+    linha = banco.um(
+        """SELECT e.id FROM pipeline_etapa e JOIN painel_aba a
+                  ON a.id = e.aba_id
+            WHERE a.painel = %s AND e.ativo AND a.ativo
+            ORDER BY a.ordem, a.id, e.ordem, e.id LIMIT 1""", (painel,))
+    return linha["id"] if linha else None
+
+
+def etapa_de_destino(slug: str) -> dict | None:
+    """A etapa em que o card deste formulario nasce, ou `None`.
+
+    🔵 Dele, 11/11: *"fiz teste com form de aditivo e não abriu card no
+    contratual como foi pedido"*.
+
+    🚨 LIDO A CADA ENVIO, sem cache. O `_mapa_de_painel` do `paineis.py` tem
+    um comentario inteiro sobre o preco de cachear isto: com o mapa velho, um
+    formulario criado depois do primeiro acesso ficava sem card -- e card que
+    nao nasce nao da erro em lugar nenhum. Uma consulta por envio de
+    formulario e barato; o silencio nao e.
+
+    ⚠️ Devolve `None` tambem quando a etapa existe mas esta DESLIGADA: card em
+    etapa desligada nao aparece no quadro (fica em `fora_do_quadro`), e nascer
+    invisivel e pior que nao nascer.
+    """
+    return banco.um(
+        """SELECT e.id, e.aba_id, e.titulo, a.codigo_tela, a.painel
+             FROM formulario f
+             JOIN pipeline_etapa e ON e.id = f.etapa_destino_id
+             JOIN painel_aba a ON a.id = e.aba_id
+            WHERE f.slug = %s AND e.ativo AND a.ativo""", (slug,))
+
+# ---------------------------------------------------------------- o CONVITE
+#
+# 🔵 Dele, 11/11: formularios *"pre-preenchidos quando abertos pelo botao
+# dentro do chat"*.
+#
+# 🚨 O QUE VIAJA NA URL E UM BILHETE OPACO, e os valores ficam no banco. Por
+# que, esta escrito inteiro na `migracoes/107_convite_de_formulario.sql`: a
+# query string entra no `access.log`, no historico do navegador e em qualquer
+# repasse do link, e base64 esconde do olho, nao do log.
+
+CONVITE_VALE_DIAS = 7
+"""🚨 O convite VENCE. Link pre-preenchido e um ponteiro para dado de cliente:
+sem prazo, um link repassado no ano que vem ainda abriria a ficha de alguem.
+⚠️ O numero e meu, nao dele -- se ele quiser outro, e uma linha."""
+
+CONVITE_TETO_DE_VALORES = 60
+"""⚠️ Teto de campos sugeridos num convite. O maior formulario da casa tem 36
+campos; 60 e folga com fim. Sem teto, a rota aceitaria um JSON de qualquer
+tamanho vindo de quem esta autenticado -- e teto que nunca aperta nao custa
+nada."""
+
+
+def criar_convite(slug: str, valores: dict | None = None,
+                  conversa_id: int | None = None,
+                  cliente_id: int | None = None,
+                  criado_por: int | None = None) -> dict:
+    """Cria o convite e devolve `{bilhete, slug, url, expira_em}`.
+
+    🚨 CONFERE O FORMULARIO ANTES: convite para slug que nao existe ou que
+    esta desligado nasceria como um link que abre *"Formulario nao
+    encontrado"* -- e quem recebeu o link acharia que a Movisat mandou um link
+    quebrado.
+
+    ⚠️ **Guarda so os valores de campos que EXISTEM na definicao de hoje.** O
+    resto e descartado aqui, nao na leitura: convite nasce no momento em que a
+    definicao e conhecida, e guardar chave que nao existe seria guardar lixo
+    com cara de dado.
+    """
+    d = definicao(slug)  # levanta FormularioNaoExiste; `so_ativo` por padrao
+    nomes = {c["nome"] for c in d["campos"]}
+    limpos = {}
+    for nome, valor in (valores or {}).items():
+        if nome not in nomes:
+            continue
+        if valor is None or valor == "" or valor == []:
+            continue
+        limpos[nome] = valor
+    if len(limpos) > CONVITE_TETO_DE_VALORES:
+        raise DadoInvalido("Este convite tem campos demais.")
+
+    bilhete = secrets.token_urlsafe(16)
+    linha = banco.um(
+        """INSERT INTO formulario_convite
+               (bilhete, slug, valores, conversa_id, cliente_id, criado_por,
+                expira_em)
+           VALUES (%s, %s, %s::jsonb, %s, %s, %s,
+                   now() + make_interval(days => %s))
+           RETURNING id, bilhete, slug, expira_em""",
+        (bilhete, d["slug"], json.dumps(limpos, ensure_ascii=False),
+         conversa_id, cliente_id, criado_por, CONVITE_VALE_DIAS))
+    log.info("convite %s do formulario %s por %s (%d campo(s))",
+             linha["id"], d["slug"], criado_por, len(limpos))
+    return {
+        "id": linha["id"],
+        "bilhete": linha["bilhete"],
+        "slug": linha["slug"],
+        "titulo": d["titulo"],
+        "campos_sugeridos": len(limpos),
+        "expira_em": linha["expira_em"],
+        "url": f"{_base_publica()}/f/{linha['slug']}?c={linha['bilhete']}",
+    }
+
+
+def _base_publica() -> str:
+    """O endereco publico dos formularios, sem barra no fim.
+
+    ⚠️ Vem da configuracao, com o dominio de hoje como queda: link montado com
+    o host errado e um link que nao abre, e isso nao pode depender de alguem
+    lembrar de uma variavel de ambiente.
+    """
+    from .config import settings
+    bruto = (getattr(settings, "formularios_base_url", "") or "").strip()
+    return (bruto or "https://forms.movisat.com.br").rstrip("/")
+
+
+def convite(bilhete: str) -> dict | None:
+    """O convite daquele bilhete: `{slug, valores}`, ou `None`.
+
+    🚨 **Marca a abertura e NAO gasta o convite.** Recarregar a pagina, perder
+    a aba, voltar no dia seguinte: gastar no primeiro `GET` viraria *"o link
+    nao funciona mais"*, que e o pior jeito de proteger.
+
+    ⚠️ **Vencido devolve `None`, igual a inexistente.** A pagina ja tem a
+    frase certa para "nao achei" e ela nao distingue os casos, de proposito --
+    e um convite vencido nao deve contar que existiu.
+
+    ⚠️ **E filtra pelos campos da definicao de HOJE:** campo que saiu do
+    formulario desde que o convite nasceu nao e sugerido. O convite guarda o
+    retrato; a leitura obedece a definicao viva.
+    """
+    bilhete = (bilhete or "").strip()
+    if not bilhete:
+        return None
+    linha = banco.um(
+        """SELECT id, slug, valores
+             FROM formulario_convite
+            WHERE bilhete = %s AND expira_em > now()""", (bilhete,))
+    if not linha:
+        return None
+    try:
+        d = definicao(linha["slug"])
+    except FormularioNaoExiste:
+        # ⚠️ O formulario foi desligado depois do convite. O link deixa de
+        # pre-preencher, e a pagina dira que nao achou o formulario -- o que e
+        # a verdade.
+        return None
+    nomes = {c["nome"] for c in d["campos"]}
+    valores = {k: v for k, v in (linha["valores"] or {}).items() if k in nomes}
+    banco.executar(
+        """UPDATE formulario_convite
+              SET aberto_em = coalesce(aberto_em, now()),
+                  aberturas = aberturas + 1
+            WHERE id = %s""", (linha["id"],))
+    return {"slug": linha["slug"], "valores": valores}
+
+
+def marcar_convite_usado(bilhete: str, solicitacao_id: int) -> None:
+    """O convite virou solicitacao.
+
+    ⚠️ NAO apaga nem invalida: o rastro de quem convidou quem fica, e apagar
+    deixaria a solicitacao sem origem. ⚠️ E nao derruba o envio se falhar --
+    marca de rastro que quebra o envio seria pior que marca que falta.
+    """
+    bilhete = (bilhete or "").strip()
+    if not bilhete:
+        return
+    try:
+        banco.executar(
+            """UPDATE formulario_convite
+                  SET usado_em = coalesce(usado_em, now()),
+                      solicitacao_id = coalesce(solicitacao_id, %s)
+                WHERE bilhete = %s""", (solicitacao_id, bilhete))
+    except Exception:  # noqa: BLE001 -- ver o docstring
+        log.warning("nao deu para marcar o convite como usado", exc_info=True)
+
+
+def convites_da_conversa(conversa_id: int, teto: int = 20) -> list[dict]:
+    """Os convites que sairam daquela conversa, do mais novo para o mais velho.
+
+    ⚠️ **Nao devolve os VALORES** -- a tela do chat nao precisa deles e
+    mostra-los poria a ficha do cliente numa lista. O que ela mostra e qual
+    formulario, quando, quem, e se ja foi aberto ou enviado.
+    """
+    return banco.varios(
+        """SELECT c.id, c.bilhete, c.slug, f.titulo, c.criado_em, c.expira_em,
+                  c.aberto_em, c.aberturas, c.usado_em, c.solicitacao_id,
+                  q.nome AS criado_por_nome,
+                  (c.expira_em <= now()) AS vencido
+             FROM formulario_convite c
+             LEFT JOIN formulario f ON f.slug = c.slug
+             LEFT JOIN atendente q ON q.id = c.criado_por
+            WHERE c.conversa_id = %s
+            ORDER BY c.criado_em DESC
+            LIMIT %s""", (int(conversa_id), int(teto)))
+
+# 🚨 O MAPA DO CONVITE: de fato conhecido -> rotulo do campo, **exato**.
+#
+# Medido em 11/11, lendo as 16 definicoes: mapear por TIPO parece obvio e e
+# errado. `rescisao` tem dois `phone` e dois `email`, e os segundos sao
+# *"... do novo titular"*; `ficha-cadastral` tem dois `phone`; e `double` e
+# CNPJ, CPF, **RG** e *"Quantidade de veiculos"* -- quatro significados no
+# mesmo tipo.
+#
+# ⚠️ Sugerir o telefone do cliente no campo do **novo titular** de uma
+# rescisao nao e defeito de tela: e escrever a pessoa errada num termo. Por
+# isso aqui e lista fechada de rotulos, e o que nao esta nela nao e sugerido.
+#
+# ⚠️ E a ordem de cada tupla IMPORTA: vale o primeiro rotulo que o formulario
+# tiver. *"Nome completo"* e *"Primeiro Nome"* pedem coisas diferentes, e e por
+# isso que sao dois fatos e nao um.
+SUGESTAO_POR_ROTULO = {
+    "cnpj": ("CNPJ",),
+    "cpf": ("CPF",),
+    "empresa": ("Empresa", "Nome da Empresa", "Nome Fantasia"),
+    "nome_completo": ("Nome completo",),
+    "primeiro_nome": ("Primeiro Nome", "Nome"),
+    "sobrenome": ("Sobrenome",),
+    "email": ("E-mail",),
+    "telefone": ("Telefone",),
+}
+
+
+def valores_sugeridos(slug: str, fatos: dict) -> dict:
+    """De `{cnpj, cpf, empresa, nome_completo, primeiro_nome, sobrenome,
+    email, telefone}` para `{nome_do_campo: valor}` naquele formulario.
+
+    🚨 **So o PRIMEIRO campo de cada rotulo**, e so rotulo que bate **exato**
+    (sem acento e sem caixa). *"Telefone com DDD do novo titular"* nao bate com
+    *"Telefone"*, e e exatamente isso que o exato protege.
+
+    ⚠️ Campo escondido pelas regras do formulario tambem recebe sugestao: a
+    regra pode revela-lo depois (o CNPJ do Suporte nasce escondido e aparece
+    quando a pessoa diz que e empresa), e deixar o valor pronto e o que faz o
+    campo aparecer **ja preenchido**.
+
+    ⚠️ **Um campo recebe UMA sugestao.** Se o formulario tem *"Nome completo"*
+    e nada mais, o primeiro nome nao entra em cima dele.
+    """
+    d = definicao(slug)
+    por_rotulo = {}
+    for c in d["campos"]:
+        chave = _sem_acento((c.get("rotulo") or "").strip()).lower()
+        # ⚠️ `setdefault`: o PRIMEIRO campo com aquele rotulo ganha.
+        por_rotulo.setdefault(chave, c["nome"])
+
+    saida = {}
+    usados = set()
+    for fato, rotulos in SUGESTAO_POR_ROTULO.items():
+        valor = (fatos or {}).get(fato)
+        if valor is None or str(valor).strip() == "":
+            continue
+        for rotulo in rotulos:
+            nome = por_rotulo.get(_sem_acento(rotulo).lower())
+            if nome and nome not in usados:
+                saida[nome] = str(valor).strip()
+                usados.add(nome)
+                break
+    return saida
+
+
+# 🔵 `cadastro.TIPO_PESSOA`, repetido aqui como NUMERO porque e o numero que
+# decide: 1 = Juridica, 2 = Fisica. ⚠️ `0` e `3` (Estrangeiro) nao sugerem
+# documento nenhum -- documento no campo errado e pior que campo vazio.
+_PJ, _PF = 1, 2
+
+
+def fatos_da_conversa(conversa_id: int) -> dict:
+    """O que a casa sabe do cliente daquela conversa, para sugerir.
+
+    ⚠️ **Nao inventa nada.** Fato que nao existe no cadastro simplesmente nao
+    volta, e campo sem sugestao nasce vazio -- que e o estado de hoje.
+
+    🚨 **O telefone e o da CONVERSA**, nao o do cadastro: e o numero por onde a
+    pessoa esta falando agora, e e o que ela espera ver escrito.
+
+    🚨 **A conversa nao tem `cliente_id`** (medido): o cliente vem por
+    `contato.cliente_id`. Conversa sem contato associado devolve so o telefone
+    -- e o nome do WhatsApp, quando houver, que e o unico nome que a casa tem
+    de quem ainda nao esta no cadastro.
+    """
+    linha = banco.um(
+        """SELECT cv.telefone_e164, cv.nome_whatsapp, cv.contato_id,
+                  ct.nome AS contato_nome, ct.email AS contato_email,
+                  ct.cliente_id,
+                  cl.nome AS cliente_nome, cl.nome_fantasia, cl.documento,
+                  cl.tipo_pessoa, cl.email AS cliente_email
+             FROM conversa cv
+             LEFT JOIN contato ct ON ct.id = cv.contato_id
+             LEFT JOIN cliente cl ON cl.id = ct.cliente_id
+            WHERE cv.id = %s""", (int(conversa_id),))
+    if not linha:
+        return {}
+
+    nome = (linha.get("contato_nome") or linha.get("nome_whatsapp") or "").strip()
+    primeiro, _, resto = nome.partition(" ")
+    fatos = {
+        "telefone": linha.get("telefone_e164"),
+        "empresa": (linha.get("nome_fantasia") or linha.get("cliente_nome")),
+        "nome_completo": nome or None,
+        "primeiro_nome": primeiro.strip() or None,
+        "sobrenome": resto.strip() or None,
+        "email": (linha.get("contato_email") or linha.get("cliente_email")),
+    }
+
+    # ⚠️ O documento e UM campo no cadastro e DOIS no formulario (CNPJ e CPF).
+    # Quem decide qual e o `tipo_pessoa`, **nunca o comprimento do texto**:
+    # cadastro com documento pela metade existe, e adivinhar pelo tamanho
+    # poria CNPJ no campo de CPF.
+    doc = (linha.get("documento") or "").strip()
+    if doc and linha.get("tipo_pessoa") == _PJ:
+        fatos["cnpj"] = doc
+    elif doc and linha.get("tipo_pessoa") == _PF:
+        fatos["cpf"] = doc
+
+    return {k: v for k, v in fatos.items() if v}

@@ -47,6 +47,14 @@ vi.mock('./api/cliente.js', () => ({
     put: async () => ({ itens: [] }),
     del: async () => ({ itens: [] }),
   },
+  /* 🚨 O QUE O `estado/sessao.js` IMPORTA. A tela passou a ler quem está
+     logado (para o `souOwner` do apagar), e sem estes três o import do módulo
+     estoura na COLETA -- a suíte inteira cai antes do primeiro teste.
+     ⚠️ Molde do `abas_do_painel_0611.teste.js`, que já os declarava. */
+  quandoPerderSessao: () => {},
+  definirToken: () => {},
+  temToken: () => false,
+  relatarErroDeBotao: () => {},
   ErroDeApi: class extends Error {},
 }))
 
@@ -179,12 +187,23 @@ describe('a coluna Chamados', () => {
     expect(titulos.join(' | ')).toContain('Novo Solicitação 1ª')
   })
 
-  it('🚨 NÃO diz "situação N no Harmonit" — a etapa é nossa', async () => {
+  it('🚨 NÃO atribui situação do ERP à coluna Chamados — a etapa é nossa', async () => {
+    /* ⚠️ ESTA TRAVA MUDOU DE ALVO EM 11/11, E NAO DE REGRA. Ela comparava a
+       `Chamados` com as colunas de OS pela frase *"situacao N no Harmonit"*; ele
+       mandou tirar a frase da tela inteira, entao o controle deixou de existir.
+       🚨 A REGRA E A MESMA: a `Chamados` nao e situacao do ERP, e a tela nao
+       pode lhe atribuir uma. Agora isso se mede na ESTRUTURA -- `situacao_id`
+       nulo na coluna -- e no fato de a frase nao estar em lugar nenhum. */
     const tela = await montar()
     const col = colunaDosChamados(tela)
     expect(col.text()).not.toMatch(/situação\s+\d+\s+no Harmonit/i)
-    /* ⚠️ E a coluna de OS continua dizendo: a informação não sumiu da tela. */
-    expect(tela.text()).toMatch(/situação\s+\d+\s+no Harmonit/i)
+    expect(tela.text()).not.toMatch(/situação\s+\d+\s+no Harmonit/i)
+    /* A coluna da Operação tem `situacao_id`; a `Chamados` nao -- e e isso que
+       o arrasto usa para recusar card de OS nela. */
+    const chamados = estado.quadro.colunas.find((c) => c.chave === 'chamados')
+    expect(chamados.situacao_id).toBe(null)
+    expect(estado.quadro.colunas.filter((c) => c.situacao_id).length)
+      .toBeGreaterThan(0)
   })
 })
 
@@ -414,5 +433,132 @@ describe('a guarda do arrasto entre os dois mundos', () => {
     await flushPromises()
     expect(estado.postado).toEqual([])
     expect(tela.text()).toContain('ainda não é uma OS')
+  })
+})
+
+/* ============================================================================
+   O CARD NÃO NASCE INERTE — 11/11
+   ----------------------------------------------------------------------------
+   🔵 Ele, exercitando no navegador: *"Card já nasceu esmaecido e portanto sem
+   permitir interação *erro*. Precisa nascer aberto para tratativa."*
+
+   🚨 A CAUSA ERA `null === null`. `movendo` nasce nulo e todo card de chamado
+   tem `numero_ordem` nulo, então `movendo === card.numero_ordem` era verdadeiro
+   desde a montagem — e `.card--movendo` é `opacity: .55` MAIS
+   `pointer-events: none`.
+
+   ⚠️ ESTAS TRAVAS OLHAM A CLASSE, E NÃO O CLIQUE, de propósito: o jsdom não faz
+   layout e `pointer-events: none` não impede `dispatchEvent`. Um teste que
+   clicasse passaria com o card morto na tela — foi exatamente por isso que as
+   22 travas de 05/11 ficaram verdes enquanto a coluna estava inutilizável.
+   ========================================================================== */
+describe('o card não nasce esmaecido', () => {
+  it('🚨 card de CHAMADO recém-listado não tem a classe card--movendo', async () => {
+    const tela = await montar([cardDeChamado()], {})
+    const card = colunaDosChamados(tela).find('.card')
+    expect(card.exists()).toBe(true)
+    expect(card.classes()).not.toContain('card--movendo')
+  })
+
+  it('⚠️ card de OS também não, e é a mesma comparação', async () => {
+    const tela = await montar([], { 251: [cardDeOs()] })
+    expect(tela.find('.card').classes()).not.toContain('card--movendo')
+  })
+
+  it('🚨 nenhum card do quadro nasce com a classe, nem com os dois mundos juntos', async () => {
+    const tela = await montar([cardDeChamado()], { 251: [cardDeOs()] })
+    const marcados = tela.findAll('.card--movendo')
+    expect(marcados.length).toBe(0)
+  })
+
+  it('depois de mover, a classe sai de todos os cards', async () => {
+    const tela = await montar([cardDeChamado()], { 251: [cardDeOs()] })
+    const col = tela.findAll('.coluna')
+      .find((c) => c.text().includes('Novo Solicitação 1ª'))
+    const osNaTela = tela.findAll('.card')
+      .find((c) => c.text().includes('17081'))
+    await osNaTela.trigger('dragstart')
+    await col.trigger('drop')
+    await flushPromises()
+    await flushPromises()
+    /* 🚨 O `finally` do `mover` devolve `movendo` para nulo -- e é esse nulo que
+       antes acendia a classe em todo card de chamado. */
+    expect(tela.findAll('.card--movendo').length).toBe(0)
+  })
+})
+
+/* ============================================================================
+   O CONTADOR DE ETAPA E O PRAZO DE 24 HORAS ÚTEIS — 11/11
+   ----------------------------------------------------------------------------
+   🔵 *"Abrirá com prazo de 24hrs uteis (08:00 - 18:00) para conclusão, apenas
+   informativo do card e controle de atraso o contador de tempo de etapa"*, com
+   a janela que ele fixou no mesmo dia: 08:30-17:00.
+
+   🚨 O CONTADOR SEMPRE ESTEVE NA TELA E NUNCA TINHA O QUE MOSTRAR: o backend
+   mandava `etapa_desde: null` fixo para todo card de chamado, e a tela escrevia
+   `não medido`. A trava do "não medido" guarda o caso legítimo (card sem
+   passagem); a do tempo guarda o caso que estava quebrado.
+   ========================================================================== */
+describe('o tempo e o prazo no card de chamado', () => {
+  it('🚨 com etapa_desde, o card mostra o tempo em vez de "não medido"', async () => {
+    const tela = await montar([cardDeChamado({ etapa_desde: ha(3) })], {})
+    const texto = colunaDosChamados(tela).text()
+    expect(texto).toContain('nesta etapa')
+    expect(texto).not.toContain('não medido')
+    expect(texto).toContain('3h')
+  })
+
+  it('⚠️ sem etapa_desde continua dizendo "não medido", e não um zero', async () => {
+    /* Card sem passagem nenhuma existe: a tela não pode inventar "0min", que
+       diria que o card acabou de chegar. */
+    const tela = await montar([cardDeChamado({ etapa_desde: null })], {})
+    expect(colunaDosChamados(tela).text()).toContain('não medido')
+  })
+
+  it('🔵 o prazo aparece com "vence em" e a palavra úteis', async () => {
+    const tela = await montar([cardDeChamado({
+      prazo: { vence_em: '2026-11-12T16:00:00-03:00', horas: 24,
+               atrasado: false, segundos_uteis: 7 * 3600 + 1800,
+               janela: '08:30-17:00' },
+    })], {})
+    const texto = colunaDosChamados(tela).text()
+    expect(texto).toContain('vence em')
+    expect(texto).toContain('7h 30min')
+    /* ⚠️ "úteis" escrito: 7h30 de prazo numa sexta às 16h não são 7h30 de
+       relógio, e sem a palavra o número parece errado. */
+    expect(texto).toContain('úteis')
+  })
+
+  it('🚨 atrasado DIZ "atrasado", não só fica vermelho', async () => {
+    const tela = await montar([cardDeChamado({
+      prazo: { vence_em: '2026-11-10T15:30:00-03:00', horas: 24,
+               atrasado: true, segundos_uteis: -5400,
+               janela: '08:30-17:00' },
+    })], {})
+    const col = colunaDosChamados(tela)
+    expect(col.text()).toContain('atrasado há')
+    expect(col.text()).toContain('1h 30min')
+    /* Cor sozinha não é portador -- a classe existe, E a frase existe. */
+    expect(col.find('.card__prazo--atrasado').exists()).toBe(true)
+  })
+
+  it('⚠️ card sem prazo não desenha o selo (nem vazio)', async () => {
+    const tela = await montar([cardDeChamado({ prazo: null })], {})
+    expect(colunaDosChamados(tela).find('.card__prazo').exists()).toBe(false)
+  })
+
+  it('🚨 o prazo NÃO esmaece e NÃO bloqueia o card — é informativo', async () => {
+    const tela = await montar([cardDeChamado({
+      prazo: { vence_em: '2026-01-01T09:00:00-03:00', horas: 24,
+               atrasado: true, segundos_uteis: -999999,
+               janela: '08:30-17:00' },
+    })], {})
+    const card = colunaDosChamados(tela).find('.card')
+    expect(card.classes()).not.toContain('card--movendo')
+    /* E continua abrindo: prazo estourado não tranca a tratativa. */
+    await colunaDosChamados(tela).find('.card__os').trigger('click')
+    await flushPromises()
+    await flushPromises()
+    expect(tela.find('.modal--chamado').exists()).toBe(true)
   })
 })

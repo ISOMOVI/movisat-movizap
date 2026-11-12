@@ -151,6 +151,13 @@ class Settings:
     # novo, e recurso novo não pode impedir o serviço de subir.
     formularios_segredo: str = _ler("MOVIZAP_FORMULARIOS_SEGREDO", "")
 
+    # 🔵 11/11: o CONVITE de formulario monta um link para o cliente abrir, e
+    # link precisa de host. ⚠️ A queda e o dominio de hoje, de proposito: link
+    # montado com o host errado e link que nao abre, e isso nao pode depender
+    # de alguem lembrar de uma variavel de ambiente.
+    formularios_base_url: str = _ler("MOVIZAP_FORMULARIOS_BASE_URL",
+                                     "https://forms.movisat.com.br")
+
     # 🔵 15/10: *"Rotina da VPS verifica se os envios estão sendo feito
     # corretamente"*. Quem recebe o aviso do vigia (`scripts/agentes_mudos.py
     # --avisar-whatsapp`, no cron das 08:10 e 18:10). Vazio = não envia, só

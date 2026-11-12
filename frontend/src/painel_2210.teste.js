@@ -66,6 +66,14 @@ vi.mock('./api/cliente.js', () => ({
       return estado.resposta ?? { ok: true }
     },
   },
+  /* 🚨 O QUE O `estado/sessao.js` IMPORTA. A tela passou a ler quem está
+     logado (para o `souOwner` do apagar), e sem estes três o import do módulo
+     estoura na COLETA -- a suíte inteira cai antes do primeiro teste.
+     ⚠️ Molde do `abas_do_painel_0611.teste.js`, que já os declarava. */
+  quandoPerderSessao: () => {},
+  definirToken: () => {},
+  temToken: () => false,
+  relatarErroDeBotao: () => {},
   ErroDeApi: class extends Error {},
 }))
 
@@ -226,9 +234,16 @@ describe('as colunas', () => {
     const tela = await abrir(quadro())
     const vazia = tela.findAll('.coluna').find((c) => c.text().includes('Contratual'))
     expect(vazia.classes()).not.toContain('coluna--fechada')
-    expect(vazia.text()).toContain('situação 16492 no Harmonit')
+    /* ⚠️ ESTA TRAVA MEDIA A COLUNA ABERTA PELO TEXTO *"situação N no
+       Harmonit"*, e em 11/11 ele mandou tirar essa frase (*"voltou a aparecr
+       generico"*). Medir estado pela REDAÇÃO de um texto didático é frágil
+       exatamente por isto: o texto sai e a trava cai sem nada estar quebrado.
+       Agora mede a ESTRUTURA -- o corpo da coluna existe quando ela está
+       aberta. */
+    expect(vazia.find('.coluna__corpo').exists()).toBe(true)
     await vazia.find('.coluna__botao').trigger('click')
     expect(vazia.classes()).toContain('coluna--fechada')
+    expect(vazia.find('.coluna__corpo').exists()).toBe(false)
   })
 
   it('🚨 o alvo da coluna vazia CONVIDA a soltar quando se pode mover', async () => {
@@ -331,7 +346,13 @@ describe('mover o card — Bloco D (29/10)', () => {
 
   it('a recusa do servidor e DITA, com papel de alerta', async () => {
     /* 🚨 Falha silenciosa aqui faria a pessoa pensar que gravou. */
-    estado.resposta = { ok: false, motivo: 'a OS esta na situacao 1316 no Harmonit' }
+    /* ⚠️ FIXTURE ATUALIZADA EM 11/11: o FPSL passou a mandar o NOME da
+       etapa entre aspas, por pedido dele. A frase antiga virou irreal,
+       e fixture irreal e o defeito que a casa ja catalogou -- ela faz a
+       trava passar sobre algo que o servidor nao diz mais. */
+    estado.resposta = { ok: false,
+      motivo: 'a OS 17056 esta em "Servico Agendado" no Harmonit, '
+        + 'e a tela carregou "Novo Solicitacao 1a"' }
     const tela = await abrir(comCard())
     await tela.find('.card__os').trigger('click')
     await flushPromises()
@@ -617,14 +638,20 @@ describe('os efeitos do mockup', () => {
     },
   })
 
-  it('🚨 a cor NAO e o unico portador: o nome da etapa e a situacao vem escritos',
+  it('🚨 a cor NAO e o unico portador: o NOME da etapa vem escrito',
      async () => {
+    /* ⚠️ ESTA TRAVA PEDIA TAMBEM O NUMERO DA SITUACAO, e o comentario dizia
+       *"no card"* -- mas o texto vinha da linha da COLUNA, que ele mandou tirar
+       em 11/11 (*"voltou a aparecr generico"*). O comentario descrevia o alvo
+       errado, e isso quase me fez consertar o card.
+       🚨 A REGRA QUE A TRAVA GUARDA CONTINUA INTEIRA: o portador da etapa e o
+       NOME escrito, nao a cor da coluna. O numero da situacao nunca foi
+       portador de nada para quem opera -- era depuracao. */
     const tela = await abrir(comCard())
     const texto = tela.text()
-    /* O nome da etapa, na coluna. */
     expect(texto).toContain('Novo Solicitação 1ª')
-    /* E o número da situação, no card. */
-    expect(texto).toContain('situação 38')
+    /* E o numero NAO volta: e informacao de depuracao, e ele a tirou. */
+    expect(texto).not.toMatch(/situação\s+\d+\s+no Harmonit/i)
   })
 
   it('a OS vem na frente do card, nao o formulario', async () => {

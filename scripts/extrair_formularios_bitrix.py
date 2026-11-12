@@ -15,7 +15,7 @@ script a arranca com `raw_decode` -- não é JSON puro num arquivo, é JS.
 Como reobter os loaders (se o Bitrix mudar algum formulário):
 
     cd dados/formularios_bitrix
-    for id in 30 220 96 32 98 14 16 10 36 34 164 184 238 64 70; do
+    for id in 30 220 96 32 98 14 16 10 36 34 164 184 238 64 70 38; do
       curl -s "https://cdn.bitrix24.com.br/b20668843/crm/form/loader_$id.js" \
            -o "loader_$id.js"
     done
@@ -40,9 +40,11 @@ NOMES = {
     "16": "substituicao", "10": "rescisao", "36": "adm", "34": "financeiro",
     "164": "credenciamento-tecnico", "184": "pagamento-tecnicos",
     "238": "fornecedores", "64": "NPS", "70": "CES",
+    # 🔵 11/11: o 16o, achado medindo o SAC -- o 7o cartao da pagina.
+    "38": "ideias-sugestoes",
 }
 ORDEM = ["30", "220", "96", "32", "98", "14", "16", "10", "36", "34", "164",
-         "184", "238", "64", "70"]
+         "184", "238", "64", "70", "38"]
 
 MARCA = "window.b24form.Loader.run("
 

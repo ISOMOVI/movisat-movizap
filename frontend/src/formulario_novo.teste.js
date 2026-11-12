@@ -113,6 +113,30 @@ describe('a conferência diz a frase, e aceita os dois padrões de placa', () =>
     expect(conferir('placa', 'SAVEIRO BRANCA')).toContain('Informe a placa')
   })
 
+  it('🔵 placa com hífen e com espaço DENTRO do padrão — 11/11', () => {
+    /* 🔵 Ele: *"Formato de placas com hife, espaço, etc além do atual"*.
+       🚨 O buraco era só no MERCOSUL: `ABC-1234` já passava porque `ABC1234`
+       não é o que casa ali -- casava por acidente de outro pedaço --, e
+       `ABC-1D23` não passava de jeito nenhum, porque quebra em `ABC` + `1D23`
+       e nenhum dos dois é placa. É o par vizinho colado que conserta. */
+    expect(placaVale('ABC-1D23')).toBe(true)
+    expect(placaVale('ABC 1D23')).toBe(true)
+    expect(placaVale('ABC-1234')).toBe(true)
+    expect(placaVale('ABC 1234')).toBe(true)
+    expect(placaVale('abc-1d23')).toBe(true)
+    expect(placaVale('ABC.1D23')).toBe(true)
+    expect(conferir('placa', 'SAVEIRO ABC-1D23')).toBe('')
+
+    /* ⚠️ E NÃO SE COLA O TEXTO INTEIRO: se colasse, `SAVEIRO ABC1234` viraria
+       `SAVEIROABC1234` e o que hoje é resposta certa passaria a ser recusa. */
+    expect(placaVale('SAVEIRO ABC1234')).toBe(true)
+
+    /* O que continua fora, e de propósito. */
+    expect(placaVale('SAVEIRO BRANCA')).toBe(false)
+    expect(placaVale('AB-12345')).toBe(false)
+    expect(placaVale('')).toBe(false)
+  })
+
   it('telefone é 10 ou 11 dígitos, e o campo vazio NÃO é erro aqui', () => {
     expect(conferir('telefone', '(18) 99811-6168')).toBe('')
     expect(conferir('telefone', '(18) 9981')).toContain('10 ou 11')

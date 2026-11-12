@@ -327,8 +327,16 @@ function pedeConferencia(campo) {
           {{ campo.rotulo || campo.nome }}
           <span v-if="campo.obrigatorio" class="campo__obrigatorio" aria-hidden="true">*</span>
         </span>
+        <!-- 🔵 11/11, o texto é dele, literal. ⚠️ ENTRA COMO AJUDA DO CAMPO,
+             e não como mensagem de recusa: ele decidiu no mesmo dia que a
+             placa SEGUE OPCIONAL (*"pode nascer sem a placa neste momento
+             mesmo"*), então o envio sem veículo continua passando. Se a frase
+             virasse erro de envio, a tela diria "é necessário" sobre algo que
+             não é. -->
         <span class="campo__ajuda">
-          Marque os veículos deste chamado.
+          Para abertura de chamado é necessário informar o veículo que deseja
+          suporte, por gentileza selecione na lista acima. Caso o veículo não
+          apareça na listagem, entrar em contato via whatsapp
         </span>
 
         <label v-for="v in sugestoes[campo.nome]" :key="v.placa" class="frota">
@@ -552,7 +560,11 @@ function pedeConferencia(campo) {
 
 /* ---- o repetidor ---- */
 .campo--multiplo { display: flex; flex-direction: column; gap: var(--e-2); }
-/* ⚠️ No celular a linha EMPILHA, e o `×` continua alcançável com o polegar. */
+/* ⚠️ NO CELULAR A LINHA NAO EMPILHA -- ela ENCOLHE, e esta certo assim: o
+   campo e `flex: 1; min-width: 0` e o `×` guarda os 44px fixos do alvo de
+   toque. Empilhar poria o `×` embaixo do campo, longe do que ele apaga.
+   🚨 Este comentario dizia *a linha EMPILHA* e era mentira (`M12`): nao ha
+   `@media` nem `flex-wrap` aqui, e nunca houve. Medido em 11/11. */
 .linha { display: flex; gap: var(--e-2); align-items: center; }
 .linha .campo__entrada { flex: 1; min-width: 0; }
 .linha__tirar {

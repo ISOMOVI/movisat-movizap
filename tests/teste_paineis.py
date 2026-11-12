@@ -105,8 +105,18 @@ def teste_o_mapa_dos_quatro_paineis_esta_no_banco():
     assert por_painel.get("pos_venda") == 2
     assert por_painel.get("contratual") == 4
     assert por_painel.get("financeiro") == 4
-    # 🚨 "SEM PAINEL — Contato" é decisão dele, não cadastro incompleto.
-    assert por_painel.get("sem_painel") == 1
+    # 🚨 "SEM PAINEL" é decisão dele, não cadastro incompleto -- e em 11/11
+    # passaram a ser DOIS: o Contato e o 16º formulário, "Ideias e sugestões"
+    # (Bitrix 38). Ideia de melhoria não é ordem de serviço nem cobrança: não
+    # pertence a nenhum dos quatro painéis de hoje.
+    #
+    # ⚠️ A trava NOMEIA os dois em vez de contar: contar deixaria um terceiro
+    # formulário sem painel passar, e formulário sem painel é exatamente o que
+    # some de toda fila sem ninguém notar.
+    assert por_painel.get("sem_painel") == 2
+    sem = sorted(r["codigo"] for r in banco.varios(
+        "SELECT codigo FROM formulario WHERE painel IS NULL"))
+    assert sem == ["CONTATO", "IDEIAS"], sem
     assert banco.um("SELECT painel FROM formulario WHERE codigo = 'CONTATO'")["painel"] is None
 
 
@@ -142,19 +152,41 @@ def teste_recarregar_nao_muda_o_painel_nem_liga_formulario(formulario_de_operaca
 def teste_as_colunas_sao_exatamente_as_dezessete_dele():
     """🔵 29/10: *"qualquer aba fora dessas não deve estar no painel"*."""
     q = paineis.quadro("operacao")
-    assert len(paineis.SITUACOES) == 17
+    # 🔵 11/11, MAIS TARDE: SAO 14. As tres do fim (15746 Financeiro, 15695
+    # Pos venda, 16492 Contratual) sairam por decisao dele -- *"essas etapas
+    # finais do OP devem ser excluídas e deveria ter nascido no painel
+    # Financeiro, na etapa correta 'Nova solicitação'"*.
+    # 🚨 ELAS NAO FORAM APAGADAS: foram REENDERECADAS para os paineis
+    # Financeiro, Pos-venda e Contratual (migracao 106), e ha trava propria
+    # para isso em `teste_destino_do_card.py` -- inclusive a que garante que
+    # nenhuma delas fique SEM destino, que e o caso em que a OS desapareceria
+    # de todas as telas.
+    assert len(paineis.SITUACOES) == 14
     # 🔵 05/11: SÃO 18, e a 18ª é a `Chamados` -- *"vamos criar uma coluna
     # nova antes de 'Nova solicitação', chamada 'Chamados'"*.
     # 🚨 As 17 DELE continuam 17: a `Chamados` não entra na `SITUACOES`, e é
     # essa separação que mantém esta trava dizendo o que ele pediu em 29/10
     # (*"qualquer aba fora dessas não deve estar no painel"*) sobre as colunas
     # do ERP, que são as únicas de que aquela frase falava.
-    assert len(q["colunas"]) == 18
+    # 🔵 11/11: SÃO 19 — as 17 do ERP, a `Chamados` na frente e a
+    # `Serviço Realizado` (etapa NOSSA, migração 105) depois da 1316.
+    # ⚠️ `len(SITUACOES)` continua 17: as nossas não entram na tupla.
+    # 🔵 11/11, mais tarde: 16 = as 14 do ERP + `Chamados` + `Servico
+    # Realizado`.
+    assert len(q["colunas"]) == 16
     # 🚨 Toda coluna de SITUAÇÃO é uma situação; a `Chamados` é etapa nossa,
     # e `situacao_id` nulo é o que a marca como tal.
-    do_erp = [c for c in q["colunas"] if c["chave"] != "chamados"]
-    assert len(do_erp) == 17
-    assert all(c["situacao_id"] for c in do_erp)
+    # 🚨 "DO ERP" DEIXOU DE SER "TUDO MENOS CHAMADOS" EM 11/11. Com a
+    # `Serviço Realizado`, há DUAS etapas nossas, e o que as separa das do ERP
+    # é o `situacao_id` nulo -- não o nome de uma delas. Esta linha dizia
+    # `chave != "chamados"` e, com a etapa nova, passou a contar 18 "do ERP".
+    do_erp = [c for c in q["colunas"] if c["situacao_id"] is not None]
+    nossas = [c for c in q["colunas"] if c["situacao_id"] is None]
+    assert len(do_erp) == 14
+    assert len(nossas) == 2, [c["titulo"] for c in nossas]
+    assert {c["titulo"] for c in nossas} == {"Chamados", "Serviço Realizado"}
+    # ⚠️ E toda etapa nossa traz `etapa_id`: é por ele que o arrasto posta.
+    assert all(c.get("etapa_id") for c in nossas)
     assert q["colunas"][0]["chave"] == "chamados"
     assert q["colunas"][0]["situacao_id"] is None
 
@@ -170,12 +202,26 @@ def teste_a_ordem_das_colunas_e_a_dele_e_nao_alfabetica_nem_por_id():
     # 🔵 A `Chamados` vem ANTES de todas, e a ordem das 17 do ERP não se
     # mexeu: a análise do chamado acontece antes de existir OS.
     assert [c["titulo"] for c in q["colunas"]][0] == "Chamados"
-    titulos = [c["titulo"] for c in q["colunas"] if c["chave"] != "chamados"]
+    # 🔵 11/11: e a `Serviço Realizado` entra LOGO DEPOIS de `Serviço
+    # Agendado`, que é a ordem que ele descreveu -- não no fim, nem por id.
+    titulos = [c["titulo"] for c in q["colunas"]]
+    assert titulos[titulos.index("Serviço Realizado") - 1] == "Serviço Agendado"
+    # 🚨 A SEPARAÇÃO É POR `situacao_id` NULO, e não pelo nome de uma das
+    # etapas nossas: desde 11/11 são duas (`Chamados` e `Serviço
+    # Realizado`), e filtrar por `chave != "chamados"` deixava um nulo
+    # entrar na comparação -- o `sorted()` estourava com `None < int`.
+    do_erp = [c for c in q["colunas"] if c["situacao_id"] is not None]
+    titulos = [c["titulo"] for c in do_erp]
     assert titulos[0] == "Novo Solicitação 1ª"
     assert titulos[1] == "Pendente de ação da Movisat"
-    assert titulos[-1] == "Contratual"
+    # 🔵 11/11: a ultima coluna do ERP deixou de ser `Contratual` -- ela saiu
+    # da Operacao. A ultima agora e `Não atendido`, que era a penultima.
+    # ⚠️ O que esta trava mede continua sendo a ORDEM DELE: a primeira, a
+    # segunda e a ultima, e que a lista nao esta em ordem alfabetica nem por
+    # id. Trocar o nome do fim nao afrouxa nada.
+    assert titulos[-1] == "Não atendido"
     assert titulos != sorted(titulos)
-    ids = [c["situacao_id"] for c in q["colunas"] if c["chave"] != "chamados"]
+    ids = [c["situacao_id"] for c in do_erp]
     assert ids != sorted(ids)
     # E o começo do fluxo é a situação em que a OS nasce.
     assert ids[0] == 38
@@ -205,11 +251,12 @@ def teste_situacao_fora_das_dezessete_e_contada_com_o_numero_cru(
 
 
 def teste_situacao_conhecida_vai_para_a_coluna_dela(formulario_de_operacao):
-    ident = solicitar(formulario_de_operacao, os_id=99902, situacao_id=15746)
+    ident = solicitar(formulario_de_operacao, os_id=99902, situacao_id=16488)
     q = paineis.quadro("operacao")
-    coluna = next(c for c in q["colunas"] if c["situacao_id"] == 15746)
+    coluna = next(c for c in q["colunas"] if c["situacao_id"] == 16488)
     assert ident in [c["id"] for c in coluna["cards"]]
-    assert coluna["titulo"] == "Financeiro"
+    # 11/11: o cenario deixou de ser a 15746, que saiu da Operacao.
+    assert coluna["titulo"] == "Entrega de materiais prontos"
 
 
 def teste_o_card_leva_a_os_e_a_situacao_crua(formulario_de_operacao):
@@ -220,12 +267,12 @@ def teste_o_card_leva_a_os_e_a_situacao_crua(formulario_de_operacao):
     não teria coluna nenhuma.
     """
     ident = solicitar(formulario_de_operacao, os_id=99903, numero_ordem="17042",
-                      situacao_id=15746)
+                      situacao_id=16488)
     q = paineis.quadro("operacao")
     card = next(c for coluna in q["colunas"] for c in coluna["cards"]
                 if c["id"] == ident)
     assert card["numero_ordem"] == "17042"
-    assert card["situacao_id"] == 15746
+    assert card["situacao_id"] == 16488
 
 
 def teste_solicitacao_de_outro_painel_nao_entra(formulario_de_operacao):
@@ -498,7 +545,7 @@ class TestOTermoNoCard:
         o que o nosso banco "acha" seria inventar estado do ERP."""
         # ⚠️ Com uma situação DAS 17, senão o card não tem coluna nenhuma.
         ident = solicitar(formulario_de_operacao, os_id=927001,
-                          numero_ordem="17901", situacao_id=15746)
+                          numero_ordem="17901", situacao_id=16488)
         q = paineis.quadro("operacao")
         card = next(c for col in q["colunas"] for c in col["cards"]
                     if c["id"] == ident)

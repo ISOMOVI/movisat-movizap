@@ -265,7 +265,8 @@ class TestOQuadro:
                       "ponte_respondeu", "fora_do_quadro", "pode_mover"):
             assert chave in q, chave
         # 🔵 05/11: 18 -- a `Chamados` entrou na frente das 17 situações.
-        assert len(q["colunas"]) == 18
+        # 🔵 11/11: 19 (ver a migração 105).
+        assert len(q["colunas"]) == 16
         # 🚨 ESTA LINHA AFIRMAVA O CONTRARIO HA UMA HORA, e e o segundo teste
         # meu de hoje a guardar a verdade antiga (o primeiro exigia a palavra
         # "Harmonit" numa frase errada). Mover passou a existir no Bloco D:
