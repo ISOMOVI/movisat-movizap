@@ -27,6 +27,7 @@ import { linkificar, marcar, partir } from '../util/destaque.js'
 import { corDaInicial, iniciais } from '../util/avatar.js'
 import { corDoEstado, rotuloDoEstado } from '../util/estado.js'
 import AjudaDaTela from '../componentes/AjudaDaTela.vue'
+import BotaoFormulario from '../componentes/BotaoFormulario.vue'
 import BotaoMensagensRapidas from '../componentes/BotaoMensagensRapidas.vue'
 import ModalAgendar from '../componentes/ModalAgendar.vue'
 
@@ -4618,6 +4619,16 @@ function carregarMidiasDaConversa(c) {
                   <i class="bi bi-calendar-plus" aria-hidden="true"></i>
                   <span>Agendar</span>
                 </button>
+
+                <!-- 🔵 12/11: o quinto item do menu. ⚠️ ÍCONE **E**
+                     PALAVRA, pela régua desta tela: "ganha palavra o que age
+                     sobre a conversa".
+                     🚨 ELE NÃO ENVIA NADA: escreve o link no campo, e o envio
+                     continua sendo o botão verde. A rota do servidor também
+                     não manda mensagem, de propósito -- mensagem ao cliente é
+                     irreversível. -->
+                <BotaoFormulario :conversa-id="aberta?.id"
+                                 @inserir="inserirNoCampo($event); outroAberto = false" />
 
                 <label class="botao botao--contorno botao--icone"
                        :title="`Anexar arquivo (até ${TETO_ANEXOS})`">

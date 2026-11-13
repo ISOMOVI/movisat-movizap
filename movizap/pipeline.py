@@ -102,8 +102,22 @@ def aba_por_codigo(codigo_tela: str) -> dict | None:
 
 
 def etapas(aba_id: int, incluir_inativas: bool = False) -> list[dict]:
-    """As colunas de uma aba, na ordem dele."""
-    sql = ["""SELECT id, aba_id, titulo, ordem, ativo, final
+    """As colunas de uma aba, na ordem dele.
+
+    🚨 `recebe_situacao` ESTA AQUI DESDE 12/11, e a falta dele era um defeito
+    silencioso: o `quadro_da_aba` decide semear os cards de OS daquela aba com
+    `any(e.get('recebe_situacao') for e in etapas)`, e a chave nunca vinha na
+    consulta. O `.get()` devolvia None sem reclamar, o `any` era sempre falso,
+    e o bloco de semear NUNCA rodou -- os cards do Financeiro nasciam so
+    quando alguem abria a OPERACAO, que e exatamente o acoplamento invisivel
+    que aquele bloco existe para evitar.
+
+    ⚠️ Nao havia como um teste de unidade pegar: nao e erro de sintaxe nem de
+    import, e a estrutura devolvida continuava valida. So medindo o VALOR em
+    producao.
+    """
+    sql = ["""SELECT id, aba_id, titulo, ordem, ativo, final,
+                     recebe_situacao, depois_da_situacao
                 FROM pipeline_etapa WHERE aba_id = %s"""]
     if not incluir_inativas:
         sql.append("AND ativo")
@@ -434,8 +448,20 @@ def cards_da_aba(aba_id: int, teto: int = 200) -> list[dict]:
                   qa.nome AS desfecho_por_nome,
                   s.valores, s.criada_em AS solicitada_em,
                   f.titulo AS formulario, f.slug,
+                  -- 🚨 POR SOLICITACAO **OU** POR OS. Ate 12/11 contava so
+                  -- por `solicitacao_id`, e o card nascido de OS -- as
+                  -- reenderecadas para Financeiro, Pos-venda e Contratual --
+                  -- dizia "0 observacoes" com observacao gravada. 📏 Medido no
+                  -- card 1301 (OS 17120): a observacao 1523 existia e a tela
+                  -- mostrava zero.
+                  -- ⚠️ `apagada_em IS NULL`: observacao apagada nao conta,
+                  -- senao o numero no card nunca diminui.
                   (SELECT count(*) FROM os_observacao o
-                    WHERE o.solicitacao_id = c.solicitacao_id) AS observacoes,
+                    WHERE o.apagada_em IS NULL
+                      AND ((c.solicitacao_id IS NOT NULL
+                            AND o.solicitacao_id = c.solicitacao_id)
+                           OR (c.numero_os IS NOT NULL
+                               AND o.numero_os = c.numero_os))) AS observacoes,
                   -- 🚨 QUANDO A ETAPA ATUAL COMEÇOU, e é o que faz o contador
                   -- do card parar de dizer "não medido". O dado sempre
                   -- existiu: a `pipeline_passagem` ganha linha na CRIAÇÃO

@@ -40,7 +40,7 @@ import pytest
 sys.path.insert(0, "/home/claude/movizap_painel")
 pytest.importorskip("psycopg")
 
-from movizap import banco, formularios, paineis, telas  # noqa: E402
+from movizap import banco, formularios, paineis, pipeline, telas  # noqa: E402
 from movizap.operacao import DadoInvalido  # noqa: E402
 
 RAIZ = Path("/home/claude/movizap_painel")
@@ -97,27 +97,41 @@ def solicitar(d, **campos):
 # ============================================================================
 def teste_o_mapa_dos_quatro_paineis_esta_no_banco():
     """🔵 O mapa dele (plano, §2.1), e ele vive em coluna -- mover um
-    formulário de painel não pode exigir deploy."""
+    formulário de painel não pode exigir deploy.
+
+    🚨 O MAPA MUDOU EM 12/11, e o registro da mudança é esta trava. Até 11/11
+    valia *"o Contato e o IDEIAS não têm painel, e isso é decisão dele"*. Em
+    12/11 ele decidiu o contrário: *"pode gerar card para Pós-venda"* e, sobre
+    a etapa, *"isso, nova solicitação"*. A migração 108 é quem mudou o banco.
+    O pós-venda passou de 2 para 4, e ninguém mais fica de fora.
+    """
     por_painel = {
         (r["painel"] or "sem_painel"): r["n"] for r in banco.varios(
             "SELECT painel, count(*) AS n FROM formulario GROUP BY painel")}
     assert por_painel.get("operacao") == 4
-    assert por_painel.get("pos_venda") == 2
+    assert por_painel.get("pos_venda") == 4
     assert por_painel.get("contratual") == 4
     assert por_painel.get("financeiro") == 4
-    # 🚨 "SEM PAINEL" é decisão dele, não cadastro incompleto -- e em 11/11
-    # passaram a ser DOIS: o Contato e o 16º formulário, "Ideias e sugestões"
-    # (Bitrix 38). Ideia de melhoria não é ordem de serviço nem cobrança: não
-    # pertence a nenhum dos quatro painéis de hoje.
+
+    # 🚨 A GUARDA SIMÉTRICA, que substitui a de "nomear os dois sem painel":
+    # agora NENHUM formulário pode ficar sem painel. 🔵 12/11: *"a ideia é que
+    # os formulários virem cards em todas as pipelines e não os mesmo"*.
     #
-    # ⚠️ A trava NOMEIA os dois em vez de contar: contar deixaria um terceiro
-    # formulário sem painel passar, e formulário sem painel é exatamente o que
-    # some de toda fila sem ninguém notar.
-    assert por_painel.get("sem_painel") == 2
-    sem = sorted(r["codigo"] for r in banco.varios(
-        "SELECT codigo FROM formulario WHERE painel IS NULL"))
-    assert sem == ["CONTATO", "IDEIAS"], sem
-    assert banco.um("SELECT painel FROM formulario WHERE codigo = 'CONTATO'")["painel"] is None
+    # ⚠️ Formulário sem painel é exatamente o que some de toda fila sem
+    # ninguém notar: o envio entra na lista de Solicitações e não nasce card
+    # em lugar nenhum. Se um formulário novo nascer assim, fica vermelho aqui.
+    assert por_painel.get("sem_painel") is None, (
+        "formulario sem painel: "
+        + str(sorted(r["codigo"] for r in banco.varios(
+            "SELECT codigo FROM formulario WHERE painel IS NULL"))))
+
+    # ⚠️ Os dois que mudaram, nomeados: contar sozinho deixaria passar uma
+    # troca que levasse o Contato para outro painel sem ninguém decidir isso.
+    for codigo in ("CONTATO", "IDEIAS"):
+        linha = banco.um(
+            "SELECT painel, ativo FROM formulario WHERE codigo = %s",
+            (codigo,))
+        assert linha["painel"] == "pos_venda", (codigo, linha["painel"])
 
 
 def teste_os_quatro_da_operacao_sao_os_que_ele_nomeou():
@@ -598,3 +612,45 @@ class TestABuscaPorTermo:
         ponte_de_os(_duble_de_os(numero_os=8937, termo="8937"))
         q = paineis.quadro("operacao", busca="8937")
         assert q["filtro_casou_por"] == ["OS", "termo"]
+
+
+# ============================================================================
+# O FILTRO "SÓ AS ABERTAS" E O CARD DE CHAMADO
+# ============================================================================
+def teste_o_filtro_de_abertas_alcanca_o_card_de_CHAMADO():
+    """🔵 12/11, dele, depois de ver dois concluídos no topo da coluna
+    Chamados: *"por estarem inativos, o filtro na tela não deveria exibi-los,
+    pois só exibe abertos"*.
+
+    🚨 AS TRAVAS QUE EXISTIAM PROVAVAM OUTRA COISA: que o `so_abertas`
+    atravessa até a ponte. A ponte filtra as OS do ERP — e o card de chamado
+    vem do NOSSO banco, por outro caminho, onde ninguém olhava o desfecho.
+    📏 Medido antes do conserto: ligado ou desligado, a coluna devolvia os
+    mesmos 5 cards, 2 deles concluídos.
+
+    ⚠️ FILTRA, NÃO APAGA: com o interruptor desligado o card volta — e no
+    fim da fila, pela régua dele de 11/11.
+    """
+    aba = pipeline.aba_por_codigo("PNL_1.1")
+    etapa = [e for e in pipeline.etapas(aba["id"])
+             if e["titulo"] == "Chamados"][0]
+    velho = pipeline.criar(aba["id"], etapa["id"], atendente_id=None)
+    pipeline.finalizar(velho["id"], "resolvido", atendente_id=None)
+    novo = pipeline.criar(aba["id"], etapa["id"], atendente_id=None)
+    try:
+        q = paineis.quadro("operacao", so_abertas=True)
+        col = q["colunas"][0]
+        ids = [c.get("id") for c in col["cards"]]
+        assert novo["id"] in ids, "o card ABERTO sumiu junto com o filtro"
+        assert velho["id"] not in ids, (
+            "o concluído continua na coluna com o filtro de abertas ligado")
+
+        q = paineis.quadro("operacao", so_abertas=False)
+        col = q["colunas"][0]
+        ids = [c.get("id") for c in col["cards"]]
+        assert velho["id"] in ids, "o concluído sumiu de vez, e devia só sair da fila"
+        assert ids.index(novo["id"]) < ids.index(velho["id"]), (
+            "o concluído não foi para o fim da fila")
+    finally:
+        banco.executar("DELETE FROM pipeline_card WHERE id IN (%s, %s)",
+                       (velho["id"], novo["id"]))

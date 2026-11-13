@@ -1359,6 +1359,24 @@ def marcar_convite_usado(bilhete: str, solicitacao_id: int) -> None:
         log.warning("nao deu para marcar o convite como usado", exc_info=True)
 
 
+def ativos_para_convite() -> list[dict]:
+    """Os formularios que podem virar link, para a tela da conversa.
+
+    🚨 So os ATIVOS. Formulario desligado nesta lista viraria um link que abre
+    *"Formulario nao encontrado"* na cara do cliente -- e quem mandou nao teria
+    como saber antes de mandar.
+
+    ⚠️ So `slug`, `titulo` e `setor`: quem monta um link nao precisa de
+    contagem de solicitacoes nem de formato, e cada campo a mais aqui e um
+    campo a mais exposto a quem so atende.
+    """
+    return banco.varios(
+        """SELECT slug, titulo, setor
+             FROM formulario
+            WHERE ativo
+            ORDER BY ordem, lower(titulo)""")
+
+
 def convites_da_conversa(conversa_id: int, teto: int = 20) -> list[dict]:
     """Os convites que sairam daquela conversa, do mais novo para o mais velho.
 

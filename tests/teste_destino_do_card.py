@@ -133,11 +133,38 @@ class TestOFormularioDizOndeOCardNasce:
             d = formularios.etapa_de_destino(codigo)
             assert d["codigo_tela"] == "PNL_1.3", codigo
 
-    def test_SEM_PAINEL_e_SEM_DESTINO_e_isso_e_decisao_dele(self):
-        """⚠️ `None` não é defeito: o Contato e o `IDEIAS` não têm fila, e
-        inventar uma os colocaria numa coluna que ninguém olha."""
-        assert formularios.etapa_de_destino("contato") is None
-        assert formularios.etapa_de_destino("ideias-sugestoes") is None
+    def test_o_CONTATO_e_o_IDEIAS_vao_para_a_fila_do_Pos_venda(self):
+        """🚨 ESTA TRAVA FOI INVERTIDA EM 12/11, e a inversão é o registro de
+        uma decisão dele, não um conserto.
+
+        Até 11/11 ela afirmava o contrário -- *"`None` não é defeito: o
+        Contato e o IDEIAS não têm fila, e inventar uma os colocaria numa
+        coluna que ninguém olha"*. 🔵 Em 12/11 ele decidiu: *"pode gerar card
+        para Pós-venda"* e, sobre a etapa, *"isso, nova solicitação"*. A
+        migração 108 é quem mudou o banco.
+
+        ⚠️ Inverti em vez de apagar: sem trava, o destino podia voltar a ser
+        nulo por descuido e ninguém veria -- o envio entraria na lista de
+        Solicitações e não nasceria card em painel nenhum.
+        """
+        for codigo in ("contato", "ideias-sugestoes"):
+            d = formularios.etapa_de_destino(codigo)
+            assert d is not None, codigo
+            assert d["codigo_tela"] == "PNL_1.3", codigo
+            assert d["titulo"] == "Nova solicitação", codigo
+
+    def test_o_IDEIAS_tem_destino_mesmo_DESLIGADO(self):
+        """⚠️ Destino e interruptor são coisas separadas, e confundi-los seria
+        o defeito: o `ideias-sugestoes` está `ativo = false` até ele ligar, e
+        isso NÃO pode apagar o destino. Se apagasse, ligar o formulário um dia
+        o faria nascer sem fila outra vez."""
+        linha = banco.um(
+            "SELECT ativo, painel, etapa_destino_id FROM formulario "
+            " WHERE slug = %s", ("ideias-sugestoes",))
+        assert linha["ativo"] is False, (
+            "ligar o formulario e ato dele; se ja esta ligado, atualize esta trava")
+        assert linha["painel"] == "pos_venda"
+        assert linha["etapa_destino_id"] is not None
 
     def test_todo_formulario_COM_painel_tem_destino(self):
         """🚨 A trava simétrica: formulário com painel e sem destino é uma
@@ -253,3 +280,81 @@ class TestOQuadroDizAVERDADE:
         finally:
             banco.executar("DELETE FROM pipeline_card WHERE numero_os = %s",
                            (numero,))
+
+
+# ===========================================================================
+# 🔵 12/11, dele sobre os formularios virarem card em todas as pipelines:
+#     *"estao ok, mas nao percamos o rastreio desse dado"*.
+#
+# O rastreio e a cadeia  card -> solicitacao -> formulario  (pelo
+# `pipeline_card.solicitacao_id`) ou, para card nascido de OS, o
+# `pipeline_card.numero_os`. Um card sem nenhum dos dois e um card que
+# ninguem sabe de onde veio -- e, pior, que ninguem sabe a quem responder.
+#
+# 🚨 NAO HA RESTRICAO NO BANCO que impeca isso: as duas colunas sao
+# anulaveis, porque card de chamado nasce sem OS e card de OS nasce sem
+# solicitacao. Quem guarda a regra "pelo menos um dos dois" e esta trava.
+# ===========================================================================
+class TestORastreioDaOrigemNaoSePerde:
+    def test_todo_card_sabe_de_onde_veio(self):
+        orfaos = banco.varios(
+            """SELECT id, aba_id, etapa_id, criado_em
+                 FROM pipeline_card
+                WHERE solicitacao_id IS NULL
+                  AND numero_os IS NULL
+                ORDER BY id""")
+        assert not orfaos, (
+            "card sem origem: nem solicitacao nem OS -- "
+            + ", ".join(str(c["id"]) for c in orfaos))
+
+    def test_a_cadeia_ate_o_formulario_fecha(self):
+        """Card com `solicitacao_id` tem de chegar a um formulario de verdade.
+
+        ⚠️ Nao basta a coluna estar preenchida: se a solicitacao apontar para
+        formulario apagado, o card continua "com origem" e a origem nao diz
+        nada.
+        """
+        quebrados = banco.varios(
+            """SELECT c.id
+                 FROM pipeline_card c
+                 LEFT JOIN formulario_solicitacao s ON s.id = c.solicitacao_id
+                 LEFT JOIN formulario f ON f.id = s.formulario_id
+                WHERE c.solicitacao_id IS NOT NULL
+                  AND f.id IS NULL
+                ORDER BY c.id""")
+        assert not quebrados, (
+            "card aponta para solicitacao que nao chega a formulario: "
+            + ", ".join(str(c["id"]) for c in quebrados))
+
+    def test_TODO_formulario_tem_para_onde_mandar_o_card(self):
+        """🔵 12/11: *"a ideia e que os formularios virem cards em todas as
+        pipelines e nao os mesmo"*.
+
+        📏 Ate a migracao 108, `contato` e `ideias-sugestoes` tinham `painel` e
+        `etapa_destino_id` NULOS: o envio entrava na lista de Solicitacoes e
+        nao nascia card em painel nenhum. Esta trava e o que impede um
+        formulario novo de nascer com o mesmo buraco.
+        """
+        sem_destino = banco.varios(
+            """SELECT slug FROM formulario
+                WHERE painel IS NULL OR etapa_destino_id IS NULL
+                ORDER BY slug""")
+        assert not sem_destino, (
+            "formulario sem destino de card: "
+            + ", ".join(f["slug"] for f in sem_destino))
+
+    def test_o_destino_de_cada_formulario_e_uma_etapa_QUE_EXISTE(self):
+        """Apontar para etapa apagada e pior que nao apontar: o envio tenta
+        criar card, falha dentro do `try` que protege o cliente, e o card
+        simplesmente nao nasce -- sem erro em lugar nenhum."""
+        soltos = banco.varios(
+            """SELECT f.slug, f.etapa_destino_id
+                 FROM formulario f
+                 LEFT JOIN pipeline_etapa e ON e.id = f.etapa_destino_id
+                                           AND e.ativo
+                WHERE f.etapa_destino_id IS NOT NULL
+                  AND e.id IS NULL
+                ORDER BY f.slug""")
+        assert not soltos, (
+            "formulario aponta para etapa inexistente ou desativada: "
+            + ", ".join(f"{f['slug']}->{f['etapa_destino_id']}" for f in soltos))

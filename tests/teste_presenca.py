@@ -280,11 +280,33 @@ class TestRegraDeTempo:
         presenca.aplicar_regra(forcar=True, somente=[aid])
         assert estado_de(aid)["estado"] == "offline"
 
+    def _fuso_da_pessoa(self, aid):
+        """🚨 O MESMO FUSO QUE `operacao.em_jornada` USA, e não o do processo.
+
+        📏 Em 12/11, varrendo as 24 h pelo `TZ`, a trava abaixo reprovou com
+        `TZ=UTC` e `TZ=Europe/Lisbon` e passou nas outras: ela montava a
+        janela em `datetime.now(timezone.utc).astimezone()` -- hora local do
+        PROCESSO -- e o código resolve em `atendente.fuso`, com
+        `America/Sao_Paulo` como padrão. Quando os dois coincidem passa;
+        quando divergem, a janela que devia estar fechada ainda está aberta e
+        a regra para em `ausente` em vez de `offline`.
+
+        ⚠️ É a mesma família do defeito de 11/11 no `teste_agendamento`
+        (`a.inicio::date` resolvido no fuso da sessão e a pergunta feita em
+        UTC), e a mesma cura: tirar a medida de onde o código a tira.
+        """
+        from zoneinfo import ZoneInfo
+        linha = banco.um("SELECT fuso FROM atendente WHERE id = %s", (aid,))
+        try:
+            return ZoneInfo((linha or {}).get("fuso") or "America/Sao_Paulo")
+        except Exception:  # noqa: BLE001
+            return ZoneInfo("America/Sao_Paulo")
+
     def test_fora_da_jornada_cai_mesmo_com_painel_aberto(self, monkeypatch):
         """Jornada que não contém a hora de agora: sem proteção nenhuma."""
         config_falsa(monkeypatch)
         aid = novo_atendente(parado_ha_min=300)
-        agora = datetime.now(timezone.utc).astimezone()
+        agora = datetime.now(timezone.utc).astimezone(self._fuso_da_pessoa(aid))
         fim = (agora - timedelta(minutes=10)).time().replace(microsecond=0)
         if fim.hour == 0 and fim.minute < 20:
             pytest.skip("virada do dia: a janela de teste não cabe")

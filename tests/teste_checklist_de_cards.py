@@ -23,6 +23,23 @@ pytest.importorskip("psycopg")
 from movizap import banco, checklist, paineis  # noqa: E402
 from movizap import telas as registro  # noqa: E402
 from movizap.operacao import DadoInvalido  # noqa: E402
+from fastapi.testclient import TestClient  # noqa: E402
+from movizap import auth, main  # noqa: E402
+from movizap.config import settings  # noqa: E402
+
+
+# TestClient de MODULO: um segundo no mesmo `app` da "Event is bound
+# to a different event loop".
+@pytest.fixture(scope="module")
+def cliente():
+    with TestClient(main.app) as c:
+        yield c
+
+
+@pytest.fixture(scope="module")
+def token_owner():
+    return auth.criar_token(settings.admin_login)
+
 
 ENV = Path("/home/claude/movizap_painel/.env")
 pytestmark = pytest.mark.skipif(
@@ -187,3 +204,40 @@ class TestAcrescentarEDesativar:
         with pytest.raises(DadoInvalido) as e:
             checklist.criar_modelo(999_999, MARCA + " fora")
         assert "não é uma das 17" in str(e.value)
+
+
+# ===========================================================================
+# 🚨 A TRAVA QUE FALTAVA: CHAMAR A ROTA, NAO REMONTAR A ROTA
+# ===========================================================================
+# Em 12/11 a aba "Checklist de Cards" abriu EM BRANCO com "Erro interno." e
+# "0 de 0 etapas". A causa era uma palavra: `main.py` importa o modulo como
+# `paineis_mod` e a rota escrevia `paineis.SITUACOES` -- `NameError` em tempo
+# de execucao, 500 na tela.
+#
+# 🚨 E HAVIA 19 TRAVAS VERDES SOBRE ESSA TELA. O `TestOQueARotaDaAbaDevolve`
+# REMONTA a resposta "com as mesmas pecas da rota" em vez de chamar a rota:
+# monta a lista usando `paineis.SITUACOES` importado no PROPRIO TESTE, onde o
+# nome existe. Nenhuma trava nunca executou a funcao da rota.
+#
+# ⚠️ `py_compile` tambem nao pega: nome inexistente nao e erro de sintaxe, e
+# so estoura quando a linha roda.
+#
+# A trava abaixo faz a unica coisa que prova: uma chamada HTTP real, com
+# sessao de owner, exigindo 200 e as 14 etapas no corpo.
+class TestARotaRESPONDE:
+    def test_a_rota_de_config_responde_200_com_as_etapas(
+            self, cliente, token_owner):
+        r = cliente.get("/api/config/checklist-de-cards",
+                        headers={"Authorization": f"Bearer {token_owner}"})
+        assert r.status_code == 200, (
+            f"a aba abre em branco: {r.status_code} {r.text[:200]}")
+        etapas = r.json()["etapas"]
+        assert len(etapas) == len(paineis.SITUACOES) == 14
+        assert all(e["nome"] for e in etapas)
+        assert all(isinstance(e["itens"], list) for e in etapas)
+
+    def test_sem_credencial_a_rota_RECUSA(self, cliente):
+        """⚠️ 401/403 e recusa; 500 e defeito. A trava separa os dois, porque
+        foi um 500 que apareceu como tela em branco."""
+        r = cliente.get("/api/config/checklist-de-cards")
+        assert r.status_code in (401, 403), r.status_code

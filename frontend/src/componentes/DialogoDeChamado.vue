@@ -238,7 +238,24 @@ async function salvarRecado() {
       <div class="modal__faixa">
         <div class="faixa__medida faixa__medida--etapa">
           <span class="faixa__rotulo">Etapa</span>
-          <strong>
+          <!-- 🔵 12/11, dele: *"pode ocultar essa barra ou transformá-la em
+               lista, como no OP"* → *"A"*. A barra de passos numerados de
+               11/11 saiu: 📏 com as 10 etapas do Financeiro sobravam 6 ou 7
+               letras por passo, e ele leu "1. Nova s…" na tela.
+               ⚠️ Um card arquivado não se move: reabrir primeiro é o gesto, e
+               oferecer os dois ao mesmo tempo deixaria o estado ambíguo —
+               por isso o `<strong>` no `v-else`, que continua DIZENDO a etapa
+               mesmo quando não deixa mudar. -->
+          <select v-if="etapas.length > 1 && !card.desfecho"
+                  class="campo faixa__select" :disabled="movendo"
+                  aria-label="Mover de etapa"
+                  :value="etapaAtual"
+                  @change="mover($event.target.value)">
+            <option v-for="e in etapas" :key="e.id" :value="e.id">
+              {{ e.titulo }}
+            </option>
+          </select>
+          <strong v-else>
             {{ etapas.find((e) => e.id === etapaAtual)?.titulo || '—' }}
           </strong>
         </div>
@@ -251,21 +268,6 @@ async function salvarRecado() {
           <strong>{{ quando(card.desfecho_em) }}</strong>
         </div>
       </div>
-
-      <!-- ⚠️ Um card arquivado não se move: reabrir primeiro é o gesto, e
-           oferecer os dois ao mesmo tempo deixaria o estado ambíguo. -->
-      <nav v-if="etapas.length > 1 && !card.desfecho"
-           class="trilha" aria-label="Mover de etapa">
-        <template v-for="(e, i) in etapas" :key="e.id">
-          <strong v-if="e.id === etapaAtual"
-                  class="trilha__passo trilha__passo--atual"
-                  aria-current="step">{{ i + 1 }}. {{ e.titulo }}</strong>
-          <button v-else type="button" class="trilha__passo"
-                  :disabled="movendo"
-                  :title="`Mover para ${e.titulo}`"
-                  @click="mover(e.id)">{{ i + 1 }}. {{ e.titulo }}</button>
-        </template>
-      </nav>
 
       <p v-if="erro" class="aviso aviso--erro" role="alert">{{ erro }}</p>
 
@@ -446,40 +448,10 @@ async function salvarRecado() {
   font-size: var(--txt-xs); color: var(--texto-fraco);
   text-transform: uppercase; letter-spacing: .04em;
 }
-/* 🚨 UMA linha que ROLA, e nao quebra: com as 10 etapas do Financeiro,
-   quebrar em tres fileiras faria a barra empurrar o corpo do card para fora
-   da tela. `flex-wrap: nowrap` + rolagem horizontal mantem a sequencia
-   legivel como sequencia. */
-.trilha {
-  display: flex; flex-wrap: nowrap; gap: var(--e-2);
-  align-items: stretch;
-  padding: var(--e-2) var(--e-5);
-  background: var(--superficie-2);
-  border-bottom: var(--borda-fina) solid var(--borda);
-  overflow-x: auto;
-}
-.trilha__passo {
-  flex: 0 0 auto;
-  font-size: var(--txt-sm); line-height: 1.2;
-  padding: var(--e-2) var(--e-3);
-  border: var(--borda-fina) solid var(--borda);
-  border-radius: var(--r-sm);
-  background: var(--superficie);
-  color: var(--texto-fraco);
-  text-align: left;
-  white-space: nowrap;
-}
-button.trilha__passo { cursor: pointer; }
-button.trilha__passo:hover:not(:disabled) {
-  border-color: var(--acento); color: var(--texto);
-}
-button.trilha__passo:disabled { opacity: .55; cursor: default; }
-/* 🚨 A etapa atual NAO e botao -- e `<strong>`. A diferenca e estrutural e
-   nao depende da cor. */
-.trilha__passo--atual {
-  background: var(--acento); color: var(--acento-texto);
-  border-color: var(--acento);
-}
+/* ⚠️ 190px: largura do `<select>` de etapas. Sem um mínimo, ele encolhe para
+   o tamanho da opção escolhida e muda de largura a cada troca -- a faixa
+   inteira dançava. */
+.faixa__select { min-width: 190px; }
 
 /* 🚨 UMA rolagem só, e é esta: duas rolagens empilhadas (o palco e o corpo)
    foi um dos defeitos de 05/11. */

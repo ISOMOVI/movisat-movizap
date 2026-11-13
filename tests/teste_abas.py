@@ -172,10 +172,21 @@ def teste_o_quadro_da_aba_nao_tem_coluna_do_ERP():
     assert all(c["etapa_id"] for c in q["colunas"])
 
 
-def teste_o_quadro_da_aba_NAO_chama_a_ponte(monkeypatch):
-    """🚨 A trava central: dublê que CONTA as chamadas, e exige zero.
+def teste_a_aba_LE_a_ponte_mas_NUNCA_escreve(monkeypatch):
+    """🚨 ESTA TRAVA FOI REESCRITA EM 12/11, e o motivo vale mais que ela.
 
-    ⚠️ Contar é mais forte que estourar: um dublê que explode só prova que
+    Até aqui ela se chamava `teste_o_quadro_da_aba_NAO_chama_a_ponte` e exigia
+    ZERO chamadas. Foi escrita antes da migração 106 -- quando aba nenhuma
+    recebia situação do ERP e a afirmação era verdadeira.
+
+    A 106 acrescentou ao `quadro_da_aba` o bloco que semeia os cards de OS da
+    própria aba, e esse bloco **chama** `os_por_situacao`. A trava continuou
+    verde por dois meses porque `pipeline.etapas()` não devolvia
+    `recebe_situacao`: o `any(...)` era sempre falso e o bloco nunca rodava.
+    ➡️ Ela não provava a promessa, provava o defeito -- e ficou vermelha no
+    dia em que o defeito foi consertado.
+
+    ⚠️ Dublê que CONTA, e não que estoura: um dublê que explode só prova que
     algum `try` segurou.
     """
     chamadas = []
@@ -183,10 +194,40 @@ def teste_o_quadro_da_aba_NAO_chama_a_ponte(monkeypatch):
         if hasattr(paineis.fpsl_ponte, nome):
             monkeypatch.setattr(
                 paineis.fpsl_ponte, nome,
-                lambda *a, nome=nome, **k: chamadas.append(nome) or [])
+                lambda *a, nome=nome, **k: chamadas.append(nome) or {"os": []})
+
+    # PNL_1.2 (Treinamentos) NÃO recebe situação de ninguém: tem de ler ZERO.
     paineis.quadro_da_aba("PNL_1.2")
+    assert chamadas == [], (
+        "Treinamentos não recebe situação do ERP e mesmo assim foi à ponte: "
+        + str(chamadas))
+
+    # PNL_1.3 (Pós-venda) recebe a 15695 na primeira etapa: lê UMA vez.
     paineis.quadro_da_aba("PNL_1.3")
-    assert chamadas == []
+    assert chamadas == ["os_por_situacao"], str(chamadas)
+
+    # 🚨 O QUE NUNCA PODE ACONTECER, e é a parte que protege de verdade: a aba
+    # move card no NOSSO banco. Uma escrita no ERP a partir daqui mudaria a
+    # situação de uma OS de verdade sem ninguém ter pedido.
+    assert "gravar_situacao_da_os" not in chamadas
+    assert "criar_os" not in chamadas
+
+
+def teste_ponte_CAIDA_nao_esvazia_o_quadro_da_aba(monkeypatch):
+    """🚨 A promessa do cabeçalho do `quadro_da_aba`: *"este quadro não pode
+    ficar vazio porque um terceiro caiu"*.
+
+    ⚠️ O card é materializado -- é linha no nosso banco. Ponte fora do ar
+    impede card NOVO de nascer e não apaga nenhum dos que já estão lá.
+    """
+    def estoura(*a, **k):
+        raise RuntimeError("ponte fora do ar, de propósito")
+
+    monkeypatch.setattr(paineis.fpsl_ponte, "os_por_situacao", estoura)
+    q = paineis.quadro_da_aba("PNL_1.3")
+    assert q is not None, "a aba sumiu porque a ponte caiu"
+    assert len(q["colunas"]) == 4
+    assert all(c["situacao_id"] is None for c in q["colunas"])
 
 
 def teste_aba_que_nao_existe_devolve_None():
@@ -336,19 +377,40 @@ def teste_o_quadro_da_aba_mostra_o_card_na_coluna_certa():
                        (card["id"],))
 
 
-def teste_o_arquivado_vem_no_fim_da_coluna():
-    """🔵 *"ele esmaece e fica no fim da fila arquivado com status de
-    concluído"*."""
+def teste_o_arquivado_SOME_com_o_filtro_e_vem_no_FIM_sem_ele():
+    """As duas metades do contrato, e elas são de dias diferentes.
+
+    🔵 11/11: *"ele esmaece e fica no fim da fila arquivado com status de
+    concluído"*.
+    🔵 12/11, depois de ver dois concluídos no TOPO da primeira coluna do
+    painel: *"por estarem inativos, o filtro na tela não deveria exibi-los,
+    pois só exibe abertos, talvez mantê-los ali mas inativos seria o ideal
+    para uso do filtro e não mexer muito na tela"*.
+
+    ⚠️ Até 12/11 esta trava só perguntava a ORDEM, e o `quadro_da_aba` nem
+    tinha filtro. Perguntar as duas é o que impede de consertar uma metade e
+    quebrar a outra sem ninguém ver.
+    """
     aba = pipeline.aba_por_codigo("PNL_1.2")
     etapa = pipeline.etapas(aba["id"])[0]
     velho = pipeline.criar(aba["id"], etapa["id"], atendente_id=None)
     pipeline.finalizar(velho["id"], "resolvido", atendente_id=None)
     novo = pipeline.criar(aba["id"], etapa["id"], atendente_id=None)
     try:
+        # ---- filtro LIGADO (o padrão da tela): o concluído não aparece ----
         q = paineis.quadro_da_aba("PNL_1.2")
         col = [c for c in q["colunas"] if c["etapa_id"] == etapa["id"]][0]
         ids = [c["id"] for c in col["cards"]]
-        assert ids.index(novo["id"]) < ids.index(velho["id"])
+        assert novo["id"] in ids, "o card ABERTO sumiu junto com o filtro"
+        assert velho["id"] not in ids, (
+            "o concluído continua na fila com o filtro de abertas ligado")
+
+        # ---- filtro DESLIGADO: ele volta, no FIM, dizendo o desfecho ----
+        q = paineis.quadro_da_aba("PNL_1.2", so_abertas=False)
+        col = [c for c in q["colunas"] if c["etapa_id"] == etapa["id"]][0]
+        ids = [c["id"] for c in col["cards"]]
+        assert ids.index(novo["id"]) < ids.index(velho["id"]), (
+            "o concluído não foi para o fim da fila")
         arquivado = [c for c in col["cards"] if c["id"] == velho["id"]][0]
         # 🚨 E o selo diz QUAL desfecho foi: opacidade não carrega informação.
         assert arquivado["desfecho_rotulo"] == "Resolvido"

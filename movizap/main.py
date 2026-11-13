@@ -967,8 +967,18 @@ def convites_desta_conversa(
     ⚠️ **Sem os valores**: a tela nao precisa deles, e mostra-los poria a
     ficha do cliente numa lista. O que volta e qual formulario, quando, quem,
     e se ja foi aberto ou enviado.
+
+    🚨 **DEVOLVE TAMBEM OS FORMULARIOS ATIVOS**, e e de proposito: a lista
+    tambem existe em `/api/formularios`, mas aquela rota pede `FRM_1.1`, que e
+    tela **owner**. O botao mora na conversa, cuja permissao e `ATD_1.2`
+    (atendimento). Mandar a tela buscar la deixaria NOVE DE DEZ atendentes com
+    a lista vazia ou com 403 -- a porta trancada de sempre: tela certa,
+    permissao de outro. Uma chamada so, pela permissao de quem atende.
     """
-    return {"convites": formularios_mod.convites_da_conversa(conversa_id)}
+    return {
+        "convites": formularios_mod.convites_da_conversa(conversa_id),
+        "formularios": formularios_mod.ativos_para_convite(),
+    }
 
 
 @app.post("/api/conversas/{conversa_id}/orcamento")
@@ -5679,7 +5689,7 @@ def ver_checklist_de_cards(
         "etapas": [
             {"situacao_id": sid, "nome": nome,
              "itens": por_etapa.get(sid, [])}
-            for sid, nome in paineis.SITUACOES
+            for sid, nome in paineis_mod.SITUACOES
         ],
     }
 
@@ -5898,6 +5908,7 @@ def _exigir_aba(codigo_tela: str | None, usuario: dict) -> None:
 
 @app.get("/api/paineis/aba/{codigo_tela}")
 def ver_aba(codigo_tela: str,
+            so_abertas: int = Query(1, ge=0, le=1),
             usuario: dict = Depends(auth.get_usuario)):
     """O quadro de uma aba de pipeline (Pos-venda, e os proximos).
 
@@ -5910,7 +5921,11 @@ def ver_aba(codigo_tela: str,
     dinamico nao cabe nela. ⚠️ Confere ANTES de ler o banco.
     """
     _exigir_aba(codigo_tela, usuario)
-    quadro = paineis_mod.quadro_da_aba(codigo_tela)
+    # 🔵 12/11: o mesmo interruptor "so as abertas" da Operacao, que ate aqui
+    # nao existia nas abas novas. ⚠️ Padrao LIGADO, como no outro quadro: quem
+    # abre a tela quer a fila de trabalho, nao o historico.
+    quadro = paineis_mod.quadro_da_aba(codigo_tela,
+                                       so_abertas=bool(so_abertas))
     if quadro is None:
         raise HTTPException(status_code=404,
                             detail="Esta aba não existe.")

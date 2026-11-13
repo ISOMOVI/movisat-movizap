@@ -643,6 +643,19 @@ def quadro(painel: str, so_abertas: bool = True,
                                            teto=TETO_CARDS_POR_COLUNA):
                 if c.get("numero_os"):
                     continue
+                # 🚨 O FILTRO "SO AS ABERTAS" ALCANCA O CHAMADO desde 12/11.
+                # 🔵 Dele: *"por estarem inativos, o filtro na tela nao deveria
+                # exibi-los, pois so exibe abertos"*.
+                # 📏 Medido antes: ligado ou desligado, a coluna devolvia os
+                # MESMOS 5 cards, com 2 concluidos no meio -- o `so_abertas`
+                # ia so na leitura da ponte e filtrava as OS do ERP; o card de
+                # chamado vem do nosso banco por outro caminho e ninguem olhava
+                # o desfecho dele.
+                # ⚠️ FILTRA, NAO APAGA: com o interruptor desligado o card
+                # volta, esmaecido e no fim da fila. Sumir de vez tiraria o
+                # caminho de reabrir.
+                if so_abertas and c.get("desfecho"):
+                    continue
                 etapa = por_etapa.get(c["etapa_id"])
                 if not etapa:
                     continue
@@ -814,7 +827,7 @@ def _etapa_dos_chamados() -> dict | None:
     return pipeline.etapa_dos_chamados()
 
 
-def _card_do_chamado(c: dict, nomes: dict) -> dict:
+def _card_do_chamado(c: dict, nomes: dict, da_os: dict | None = None) -> dict:
     """O card de um chamado, no MESMO contrato de chaves do card de OS.
 
     🚨 O CONTRATO E UNICO DE PROPOSITO: a tela desenha um card so, e um
@@ -857,17 +870,32 @@ def _card_do_chamado(c: dict, nomes: dict) -> dict:
         # mover. Reusar o `numero_ordem` para exibir ligaria o arrasto para o
         # ERP numa aba cujo mover escreve so no nosso banco.
         "numero_os": c.get("numero_os"),
-        # ⚠️ OS NULOS QUE FAZEM O CARD SER UM CHAMADO:
+        # ⚠️ OS DOIS NULOS QUE FAZEM O CARD SER DA ABA, e eles ficam:
+        # `numero_ordem` e `situacao_id` sao o que as guardas da tela leem
+        # para manter o card nao-arrastavel e sem `<select>` de mover. A aba
+        # move no NOSSO banco; encher qualquer um dos dois ligaria o arrasto
+        # ao Harmonit.
         "os_id": None,
         "numero_ordem": None,
         "situacao_id": None,
         "situacao_em": None,
-        "tipo_nome": None,
-        "status_str": None,
-        "finalizada": None,
-        "placas": [],
-        "tecnicos": [],
-        "visto_em": None,
+        # 🔵 12/11, dele: *"nos cards do financeiro, faltam informacoes sobre
+        # o tipo do termo, numero do termo"* e *"igual da OP"*.
+        #
+        # 🚨 ESTES VINHAM NULOS SEM MOTIVO. O card da Operacao (`origem: erp`)
+        # ja mostrava todos, e a leitura da ponte que os traz JA ERA FEITA
+        # pelo `quadro_da_aba` para semear -- e jogada fora depois. Nenhuma
+        # chamada nova: so parei de descartar o que ja estava na mao.
+        #
+        # ⚠️ `da_os` e None quando o card nao tem OS (o chamado de verdade) ou
+        # quando a ponte nao respondeu. Nos dois casos volta a ser nulo, que e
+        # o que a tela ja sabe desenhar.
+        "tipo_nome": (da_os or {}).get("tipo_nome"),
+        "status_str": (da_os or {}).get("status_str"),
+        "finalizada": (da_os or {}).get("finalizada"),
+        "placas": (da_os or {}).get("placas") or [],
+        "tecnicos": (da_os or {}).get("tecnicos") or [],
+        "visto_em": (da_os or {}).get("visto_em"),
         # 🔵 11/11: *"controle de atraso o contador de tempo de etapa"*.
         # 🚨 ERA `None` FIXO, E A TELA DIZIA "não medido" EM TODO CARD DE
         # CHAMADO -- o contador existia no `PainelOperacao.vue` desde o Bloco C
@@ -880,9 +908,16 @@ def _card_do_chamado(c: dict, nomes: dict) -> dict:
         # ⚠️ INFORMATIVO: nada no card depende disto para funcionar.
         "prazo": horas_uteis.prazo_do_chamado(c.get("criado_em")),
         "observacoes": c.get("observacoes") or 0,
-        "prioridade": None,
-        "prioridade_nome": None,
-        "termo": None,
+        "prioridade": (da_os or {}).get("prioridade"),
+        "prioridade_nome": passagem.PRIORIDADES.get(
+            (da_os or {}).get("prioridade")),
+        # 🔵 ÁREA E (05/11): *"termo no card e busca por termo"*. 🚨 O termo
+        # NAO e campo da OS no Harmonit -- ele vive dentro do texto da
+        # descricao e quem o extrai e o FPSL. Chega pronto na ponte.
+        # ⚠️ E NORMAL vir nulo: 📏 medido em 12/11 nas 19 OS do Financeiro,
+        # 17 tem termo e 2 nao -- e as duas sem termo sao exatamente as de
+        # RESSARCIMENTO (`problema 7524`). Card sem termo mostra so a OS.
+        "termo": (da_os or {}).get("termo"),
         # 🔵 O DESFECHO, que e o que faz o card esmaecer e ir para o fim:
         # *"Resolvido encerra o card e ele esmaece e fica no fim da fila
         # arquivado com status de concluido"*.
@@ -917,7 +952,8 @@ def _telefone_do_chamado(valores: dict) -> str | None:
     return v.strip() if isinstance(v, str) and v.strip() else None
 
 
-def quadro_da_aba(codigo_tela: str) -> dict | None:
+def quadro_da_aba(codigo_tela: str,
+                  so_abertas: bool = True) -> dict | None:
     """O quadro de uma aba de pipeline -- as colunas sao as etapas DELA.
 
     🔵 05/11: *"a aba 'Operacao' do Movizap e a mesma logica para os
@@ -945,11 +981,21 @@ def quadro_da_aba(codigo_tela: str) -> dict | None:
     # 🚨 A PROMESSA DO CABECALHO CONTINUA VALENDO: o card e materializado, e a
     # leitura da ponte esta dentro de `try`. Ponte caida = nenhum card NOVO, e
     # nunca quadro vazio -- os cards que ja existem sao linhas no nosso banco.
+    # 🚨 O QUE A PONTE DEVOLVE E GUARDADO, nao so usado para semear. 🔵 12/11,
+    # dele: *"nos cards do financeiro, faltam informacoes sobre o tipo do
+    # termo, numero do termo"*. Esses campos sempre vieram nesta mesma
+    # resposta e eram descartados -- o card ficava nulo de graca.
+    # ⚠️ Fica VAZIO quando a ponte nao responde, e o card volta a ser o de
+    # antes. Nunca quadro vazio: essa promessa e do cabecalho.
+    por_os: dict = {}
     if any(e.get('recebe_situacao') for e in etapas):
         try:
             resposta = fpsl_ponte.os_por_situacao(data_matriz(),
                                                   so_abertas=True)
-            pipeline.semear_os(resposta.get('os') or [])
+            do_erp = resposta.get('os') or []
+            pipeline.semear_os(do_erp)
+            por_os = {o.get('numero_os'): o for o in do_erp
+                      if o.get('numero_os')}
         except Exception as e:  # noqa: BLE001
             log.warning('aba %s: a ponte nao respondeu ao semear: %s',
                         codigo_tela, e)
@@ -960,6 +1006,13 @@ def quadro_da_aba(codigo_tela: str) -> dict | None:
     por_etapa = {c['etapa_id']: c for c in colunas}
 
     cards = pipeline.cards_da_aba(aba['id'], teto=TETO_CARDS_POR_COLUNA * 4)
+    # 🚨 O MESMO FILTRO DA OPERACAO, e pelo mesmo motivo: card concluido numa
+    # aba tambem e card inativo. Hoje ha 1 so em producao, entao nao doi --
+    # mas o Financeiro tem 10 etapas e duas finais, e sem isto a fila
+    # encheria de concluido com o tempo.
+    # ⚠️ Filtra, nao apaga: `so_abertas=False` devolve todos.
+    if so_abertas:
+        cards = [c for c in cards if not c.get('desfecho')]
     nomes = _nomes_de_cliente({c.get('cliente_id') for c in cards
                               if c.get('cliente_id')})
     for c in cards:
@@ -967,8 +1020,11 @@ def quadro_da_aba(codigo_tela: str) -> dict | None:
         # ⚠️ CARD EM ETAPA DESLIGADA NAO SOME EM SILENCIO: ele fica fora do
         # quadro e CONTADO, que e a regua do `fora_do_quadro` (M12).
         if destino is not None:
-            destino['cards'].append(_card_do_chamado(c, nomes))
+            destino['cards'].append(
+                _card_do_chamado(c, nomes, por_os.get(c.get('numero_os'))))
     for col in colunas:
+        # 🚨 O concluido no FIM tambem aqui, pela mesma regua de 11/11.
+        col['cards'] = _ordenar(col['cards'], 'prazo')
         col['total'] = len(col['cards'])
 
     desenhados = sum(c['total'] for c in colunas)
@@ -1100,7 +1156,26 @@ def _onde_casa(card: dict, alvo: str) -> set:
 
 
 def _ordenar(cards: list, ordem: str) -> list:
-    """Ordena os cards de uma coluna. ⚠️ Ordem desconhecida cai no padrão."""
+    """Ordena os cards de uma coluna. ⚠️ Ordem desconhecida cai no padrão.
+
+    🚨 O CONCLUIDO VAI SEMPRE PARA O FIM, qualquer que seja a ordem escolhida.
+    🔵 Regua dele de 11/11: *"Resolvido encerra o card e ele esmaece e fica no
+    fim da fila arquivado com status de concluido"*.
+
+    📏 Ela NAO estava valendo, e foi ele quem viu: o `cards_da_aba` ja devolvia
+    os arquivados por ultimo, mas esta funcao reordenava tudo e perdia isso --
+    os dois concluidos, por serem os mais antigos, iam parar no COMECO da
+    coluna.
+
+    ⚠️ E por isso o desfecho entra como PRIMEIRA chave de toda ordem, e nao
+    como uma ordem a parte: "mais proximo do vencimento" e "concluido no fim"
+    sao duas perguntas diferentes, e a segunda vale sempre.
+    """
+    def arquivado(c):
+        """🚨 `bool`, e nao o texto: `False` ordena antes de `True`, entao o
+        aberto vem primeiro sem depender de qual desfecho foi dado."""
+        return bool(c.get("desfecho"))
+
     def numero(c):
         try:
             return int(c.get("numero_ordem") or 0)
@@ -1130,19 +1205,23 @@ def _ordenar(cards: list, ordem: str) -> list:
         return f
 
     if ordem == "os_asc":
-        return sorted(cards, key=numero)
+        return sorted(cards, key=lambda c: (arquivado(c), numero(c)))
     if ordem == "cliente":
-        return sorted(cards, key=lambda c: (not c.get("cliente"),
+        return sorted(cards, key=lambda c: (arquivado(c),
+                                            not c.get("cliente"),
                                             _normalizar(c.get("cliente") or "")))
     if ordem in ("prazo", "antiga"):
         # 🔵 O padrão. ⚠️ "antiga" segue aceito para não quebrar link salvo --
         # é o mesmo campo, e o rótulo antigo sumiu da tela.
-        return sorted(cards, key=por_data("criada_em"))
+        return sorted(cards, key=lambda c: (arquivado(c),
+                                            por_data("criada_em")(c)))
     if ordem == "parado":
         # 🔵 Usa o Bloco C: quanto mais antiga a última passagem, mais parado.
         # ⚠️ Card SEM passagem vai para o fim, porque "não medido" não é "parado
         # há mais tempo" -- afirmar isso seria inventar.
-        return sorted(cards, key=por_data("etapa_desde"))
+        return sorted(cards, key=lambda c: (arquivado(c),
+                                            por_data("etapa_desde")(c)))
     # ⚠️ Ordem desconhecida cai no PADRAO dele, que e o prazo -- nao no
     # numero da OS. O padrao e um so, em um lugar so.
-    return sorted(cards, key=por_data("criada_em"))
+    return sorted(cards, key=lambda c: (arquivado(c),
+                                        por_data("criada_em")(c)))

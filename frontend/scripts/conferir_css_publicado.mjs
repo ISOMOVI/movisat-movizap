@@ -329,32 +329,36 @@ function aBarraDeEtapasRolaENaoQuebra(css) {
      fileiras e empurra o corpo do card para fora da tela -- e a trava de
      tela fica VERDE, porque o jsdom não faz layout e `scrollWidth` é sempre
      0 lá. */
-  const r = regra(css, '.trilha');
-  if (!r) {
-    return falhar('.trilha não existe no CSS publicado — a barra de mudar '
-                  + 'etapa ficaria sem forma nenhuma dentro do card.');
+  /* 🔵 12/11, dele: *"pode ocultar essa barra ou transformá-la em lista,
+     como no OP"* → *"A"*. A `.trilha` saiu do componente, então a conferência
+     dela foi TROCADA, não apagada: apagar deixaria o controle de mover etapa
+     sem nenhuma guarda de CSS publicado, e foi uma falta de forma que fez a
+     barra nascer em 11/11.
+     📏 O que a lista precisa é uma coisa só, com motivo medido: sem
+     `min-width`, o `<select>` encolhe para o tamanho da opção escolhida e
+     muda de largura a cada troca — a faixa inteira dançava. */
+  const s = regra(css, '.faixa__select');
+  if (!s) {
+    return falhar('.faixa__select não existe no CSS publicado — a lista de '
+                  + 'mudar etapa mudaria de largura a cada escolha.');
   }
-  const wrap = prop(r.corpo, 'flex-wrap');
-  if (wrap !== 'nowrap') {
-    falhar(`.trilha flex-wrap = ${wrap} — tem de ser nowrap: com as 10 etapas `
-           + 'do Financeiro, quebrar em fileiras empurra o corpo do card '
-           + 'fora da tela.');
+  const largura = (prop(s.corpo, 'min-width') || '').trim();
+  if (!largura || largura === '0' || largura === 'auto') {
+    falhar(`.faixa__select min-width = ${largura || '(nenhum)'} — sem largura `
+           + 'mínima o select encolhe para o tamanho da opção escolhida e a '
+           + 'faixa dança a cada troca de etapa.');
   }
-  const ox = prop(r.corpo, 'overflow-x');
-  if (ox !== 'auto') {
-    falhar(`.trilha overflow-x = ${ox} — tem de ser auto, senão os passos que `
-           + 'não cabem ficam inalcançáveis (nowrap sem rolagem é pior que '
-           + 'quebrar).');
-  }
-  /* ⚠️ E a etapa atual precisa ter FORMA própria, não só cor: a distinção
-     estrutural (`<strong>` × `<button>`) é da tela, mas se esta regra
-     desaparecer o passo atual fica igual aos outros para quem olha. */
-  if (!regra(css, '.trilha__passo--atual')) {
-    falhar('.trilha__passo--atual não existe no CSS publicado — a etapa atual '
-           + 'ficaria indistinguível das outras na barra.');
+
+  /* 🚨 E a barra NÃO pode voltar sem decisão: classe morta no CSS publicado
+     significa que alguém reconstruiu o controle antigo sem tirar o novo, e os
+     dois juntos deixariam o estado ambíguo — dois caminhos para o mesmo ato
+     foi o motivo de o `<select>` ter saído em 11/11. */
+  if (regra(css, '.trilha') || regra(css, '.trilha__passo')) {
+    falhar('.trilha voltou ao CSS publicado — a barra de passos foi trocada '
+           + 'pela lista em 12/11 a pedido dele. Dois controles para o mesmo '
+           + 'ato deixam o estado ambíguo.');
   }
 }
-
 
 /* ------------------------------------------------------------------ */
 const css = cssPublicado()
@@ -378,6 +382,6 @@ if (erros.length) {
 console.log('CSS publicado: as 9 conferências passaram (teto do diálogo, '
             + 'ordem da cascata, tokens no :root, empilhamento dos diálogos, '
             + 'teto e empilhamento do diálogo do chamado, camada dos controles '
-            + 'de rolagem, forma do aviso da etapa, barra de etapas que rola, '
+            + 'de rolagem, forma do aviso da etapa, lista de etapas com largura estável, '
             + 'pílula com base no mesmo '
             + 'escopo)')
