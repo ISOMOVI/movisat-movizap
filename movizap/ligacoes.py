@@ -140,6 +140,43 @@ def pastas_extra(agente_id: int) -> list[str]:
     return list(linha["pastas_extra"]) if linha else []
 
 
+def _anotar_mudancas(agente_id: int, pc=None, versao=None, ip=None,
+                     pasta=None) -> None:
+    """Grava em `agente_ligacao_evento` o que MUDOU neste batimento.
+
+    🚨 ENGOLE O PRÓPRIO ERRO. Isto é memória, não é o batimento: se a escrita
+    falhar, o agente não pode perder a passada -- o PC está do outro lado, sem
+    ninguém olhando, e o que importa é o `ultimo_contato_em` continuar certo.
+    """
+    try:
+        antes = banco.um(
+            """SELECT ultimo_pc, ultima_versao, ultimo_ip, pasta
+                 FROM agente_ligacao WHERE id = %s""", (agente_id,))
+        if not antes:
+            return
+        novos = {"pc": (pc or "")[:100] or None,
+                 "versao": (versao or "")[:20] or None,
+                 "ip": (ip or "")[:45] or None,
+                 "pasta": (pasta or "")[:400] or None}
+        velhos = {"pc": antes["ultimo_pc"], "versao": antes["ultima_versao"],
+                  "ip": antes["ultimo_ip"], "pasta": antes["pasta"]}
+        for campo, novo in novos.items():
+            # ⚠️ `None` NÃO É MUDANÇA: o agente 0.4 não manda pasta nem versão
+            # nova, e o `COALESCE` do UPDATE preserva o que havia. Anotar aqui
+            # criaria uma "mudança para vazio" que nunca aconteceu.
+            if novo is None or novo == velhos[campo]:
+                continue
+            banco.executar(
+                """INSERT INTO agente_ligacao_evento
+                       (agente_id, campo, valor_antes, valor_depois)
+                   VALUES (%s, %s, %s, %s)""",
+                (agente_id, campo, velhos[campo], novo))
+            log.info("agente %s: %s mudou de %r para %r",
+                     agente_id, campo, velhos[campo], novo)
+    except Exception:                                          # noqa: BLE001
+        log.exception("nao consegui anotar a mudanca do agente %s", agente_id)
+
+
 def batimento(agente: dict, pc: str | None, versao: str | None,
               pendentes: int | None, erro: str | None,
               ip: str | None = None, aviso: str | None = None,
@@ -161,6 +198,15 @@ def batimento(agente: dict, pc: str | None, versao: str | None,
     batimento falhar -- perder a gravação é pior que perder o rótulo.
     """
     origem = pasta_origem if pasta_origem in ORIGENS_DA_PASTA else None
+    # 🔵 13/11, DELE: *"quando eles atualizarem ou mudar a pasta não perdermos
+    # de vista"*. A linha do agente só guarda o ÚLTIMO valor de cada coisa:
+    # trocar a pasta de gravação apagava o caminho antigo, e com ele a chance de
+    # achar as gravações que ficaram lá.
+    # ⚠️ SÓ MUDANÇA, NUNCA BATIMENTO: são 8 agentes falando 2× por dia, e
+    # gravar cada passada seria um log de ruído escondendo as poucas linhas que
+    # interessam. A conta é feita ANTES do UPDATE, que é quando ainda dá para
+    # saber o que havia.
+    _anotar_mudancas(agente["id"], pc=pc, versao=versao, ip=ip, pasta=pasta)
     banco.executar(
         """UPDATE agente_ligacao
               SET ultimo_contato_em = now(), ultimo_pc = %s, ultima_versao = %s,

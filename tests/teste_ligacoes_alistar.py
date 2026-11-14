@@ -263,3 +263,64 @@ class TestSenhaDeUmDia:
         assert ligacoes_alistar.alistar(
             "99133", ligacoes_alistar.senha_da_janela("99133", anterior),
             pedido("99133"), pc="PC-B")["ok"]
+
+
+# ── 13/11: A SENHA FIXA ──────────────────────────────────────────────────────
+#
+# 🔵 Dele: *"deixar senha padrão de 'movicall' (essa senha não há muita
+# exigência de segredo)"*. Ela é um ATALHO, não uma substituição -- e estes
+# testes existem para as duas metades disso continuarem verdadeiras.
+
+
+def test_a_senha_fixa_alista():
+    """O caminho novo: a pessoa aperta Enter no instalador e o PC entra."""
+    pessoa("99300")
+    r = ligacoes_alistar.alistar("99300", ligacoes_alistar.senha_fixa(),
+                                 pedido("99300"), ip="10.0.0.30")
+    assert r["ok"] is True
+    assert r["ramal"] == "99300"
+
+
+def test_a_senha_fixa_NAO_QUEIMA_e_serve_em_varios_PCs():
+    """🚨 ESTE É O PONTO DO RECURSO. A senha derivada serve UMA vez porque
+    `UNIQUE (ramal, janela)` a trava. Se a fixa queimasse junto, o primeiro PC
+    a usá-la trancaria todos os outros -- o oposto do que ele pediu, que é
+    poder sair instalando nas máquinas."""
+    pessoa("99310")
+    fixa = ligacoes_alistar.senha_fixa()
+    primeiro = ligacoes_alistar.alistar("99310", fixa, pedido("99310"),
+                                        pc="PC-UM", ip="10.0.0.31")
+    segundo = ligacoes_alistar.alistar("99310", fixa, pedido("99310"),
+                                       pc="PC-DOIS", ip="10.0.0.31")
+    assert primeiro["ok"] and segundo["ok"]
+    assert segundo["pc_anterior"] == "PC-UM"
+
+
+def test_a_senha_derivada_continua_valendo_com_a_fixa_ligada():
+    """⚠️ A fixa não pode ter desligado o caminho de 15/10: quem receber a
+    senha do dia continua entrando por ela, e gastando a janela dela."""
+    pessoa("99320")
+    senha = senha_de("99320")
+    r = ligacoes_alistar.alistar("99320", senha, pedido("99320"), ip="10.0.0.32")
+    assert r["ok"] is True
+    with pytest.raises(ligacoes_alistar.SenhaInvalida):
+        ligacoes_alistar.alistar("99320", senha, pedido("99320"), ip="10.0.0.32")
+
+
+def test_a_senha_fixa_nao_alista_ramal_que_nao_existe():
+    """🚨 A senha ser conhecida não abre ramal nenhum: o ramal tem de existir e
+    estar ativo. Sem esta trava, `movicall` viraria uma porta para inventar
+    agente de ramal que não é da casa."""
+    with pytest.raises(ligacoes_alistar.SenhaInvalida):
+        ligacoes_alistar.alistar("99999", ligacoes_alistar.senha_fixa(),
+                                 pedido("99999"), ip="10.0.0.33")
+
+
+def test_senha_fixa_vazia_desliga_o_atalho(monkeypatch):
+    """⚠️ `config.ligacoes_senha_fixa` vazio é como ele desfaz isto sem mexer
+    em código -- e aí só a senha derivada entra."""
+    pessoa("99340")
+    monkeypatch.setattr(ligacoes_alistar, "senha_fixa", lambda: "")
+    with pytest.raises(ligacoes_alistar.SenhaInvalida):
+        ligacoes_alistar.alistar("99340", "movicall", pedido("99340"),
+                                 ip="10.0.0.34")

@@ -1,8 +1,13 @@
-<#
+﻿<#
   MoviZap - Ligacoes | instalar o agente neste PC (usuario atual, sem administrador)
-  versao 0.4 (15/10/2026)
+  versao 0.8 (13/11/2026)
 
-  UM PASSO SO, com a senha que o Iago dita na hora:
+  NOVO NA 0.8: a SENHA PADRAO. Pedido dele em 13/11: *"deixar senha padrao de
+  'movicall' (essa senha nao ha muita exigencia de segredo)"*. Basta apertar
+  Enter na pergunta da senha -- a senha ditada na hora continua funcionando,
+  para quem preferir.
+
+  UM PASSO SO, com a senha padrao (ou a que o Iago dita na hora):
     - le o ramal do proprio MicroSIP deste PC;
     - gera o PEDIDO de certificado (a chave privada nasce aqui e NAO e
       exportavel: nunca sai deste PC);
@@ -16,7 +21,13 @@
     - roda uma vez, para provar que falou com a VPS;
     - apaga o instalador, se tudo deu certo.
 
-  A senha vale 10 minutos e serve UMA vez. Se vencer, pedir outra.
+  A senha PADRAO (movicall) vale sempre e serve em quantos PCs precisar.
+  A senha DITADA continua valendo 10 minutos e servindo UMA vez.
+
+  O que a senha padrao custa, dito em voz alta: quem souber 'movicall' e um
+  ramal consegue alistar um PC naquele ramal. As outras travas continuam de
+  pe -- limite de tentativas por IP na VPS, ramal que precisa existir e estar
+  ativo, e certificado de cliente emitido so para este PC.
 
   NADA SECRETO FICA NESTA PASTA. A chave do ramal nasce na VPS, vem nesta
   unica resposta e e gravada cifrada em %LOCALAPPDATA%\MoviZapLigacoes.
@@ -27,12 +38,16 @@
 [CmdletBinding()]
 param(
     [string]$Senha = '',        # se vier por parametro, nao pergunta
+    # 13/11: a senha padrao. Fica em parametro, e nao cravada no meio do
+    # codigo, para o dia em que ele quiser outra -- e para o teste poder
+    # passar uma diferente sem editar o arquivo.
+    [string]$SenhaPadrao = 'movicall',
     [switch]$NaoApagar,         # mantem o instalador na pasta (para teste)
     [switch]$NaoRodarAgora      # nao dispara a primeira passada
 )
 
 $ErrorActionPreference = 'Stop'
-$VERSAO = '0.7'
+$VERSAO = '0.8'
 $AQUI = Split-Path -Parent $MyInvocation.MyCommand.Path
 $DADOS = Join-Path $env:LOCALAPPDATA 'MoviZapLigacoes'
 $CONFIG = Join-Path $DADOS 'config.json'
@@ -86,11 +101,14 @@ Diga "Agente copiado .... $DADOS"
 # ---------------------------------------------------------------- 2. a senha
 if (-not $Senha) {
     Diga ''
-    Diga 'Peca a senha de uso ao Iago (ela vale 10 minutos e serve uma vez).' 'Yellow'
-    # A senha NAO vai escondida de proposito: ela e ditada em voz alta, dura
-    # 10 minutos e morre no uso. Esconder o que a pessoa esta digitando so
-    # produziria erro de digitacao e uma senha queimada por engano.
-    $Senha = Read-Host 'Senha de uso'
+    Diga ("Aperte ENTER para usar a senha padrao ({0})." -f $SenhaPadrao) 'Yellow'
+    Diga 'Ou digite a senha de uso que o Iago ditar (vale 10 min, serve uma vez).' 'Yellow'
+    # A senha NAO vai escondida de proposito: ela e ditada em voz alta (ou e a
+    # padrao, que ninguem esconde), dura 10 minutos e morre no uso. Esconder o
+    # que a pessoa digita so produziria erro de digitacao e senha queimada por
+    # engano.
+    $Senha = Read-Host 'Senha (Enter = padrao)'
+    if (-not $Senha.Trim()) { $Senha = $SenhaPadrao }
 }
 if (-not $Senha.Trim()) { throw 'Sem senha nao da para alistar este PC.' }
 

@@ -50,15 +50,20 @@ def pool():
 _seq = [0]
 
 
-def pessoa(estado="disponivel", painel_ha_min=0):
-    """🚨 19/10: O CARIMBO DO PAINEL ENTROU NO FIXTURE, e sem ele cinco
-    testes deste arquivo reprovariam -- não por defeito, por omissão do
-    cenário. Desde 19/10 a distribuição automática só entrega a quem está com
-    o painel aberto (`presenca.painel_aberto_agora`), e `painel_visto_em NULL`
-    conta como fechado. Atendente criado agora nasce com NULL, então "pessoa
-    disponível" sem carimbo não é mais uma pessoa que recebe.
+def pessoa(estado="disponivel", painel_ha_min=0, logou_ha_dias=0):
+    """🚨 13/11: O CARIMBO DO LOGIN ENTROU NO FIXTURE, no lugar do painel.
 
-    `painel_ha_min` existe para o caso contrário: quem fechou o painel.
+    Ate 13/11 a trava da fila era "o painel esta aberto nos ultimos 15 min"
+    (`painel_aberto_agora`). 🔵 Decisao dele: *"logado e logado ... o foco e
+    evitar enviar conversa para operadora que nao logou hoje"*, porque o
+    carimbo do painel prova ABA ABERTA, nao pessoa -- medido no dia: o carimbo
+    de quem estava afastada era de um minuto antes, com a maquina ligada.
+
+    `logou_ha_dias=None` e "nunca logou" (coluna nula, o estado de quem nao
+    apareceu desde a migracao 109); `1` e "logou ontem", que tambem nao vale --
+    o token morre na virada do dia.
+    `painel_ha_min` fica porque `painel_aberto_agora` continua existindo e
+    continua sendo testada: ela so deixou de mandar na fila.
     """
     _seq[0] += 1
     a = operacao.criar_atendente(f"Zz Dist {_seq[0]}", f"{LOGIN}{_seq[0]}",
@@ -66,8 +71,11 @@ def pessoa(estado="disponivel", painel_ha_min=0):
     banco.executar(
         """UPDATE atendente
               SET estado = %s,
-                  painel_visto_em = now() - make_interval(mins => %s)
-            WHERE id = %s""", (estado, painel_ha_min, a["id"]))
+                  painel_visto_em = now() - make_interval(mins => %s),
+                  logou_em = CASE WHEN %s::int IS NULL THEN NULL
+                                  ELSE now() - make_interval(days => %s::int) END
+            WHERE id = %s""",
+        (estado, painel_ha_min, logou_ha_dias, logou_ha_dias, a["id"]))
     return a["id"]
 
 
@@ -94,10 +102,17 @@ def mensagem(cid, ha_min, direcao="entrada"):
          "cliente" if direcao == "entrada" else "atendente", ha_min))
 
 
-def cfg(primeiro, reserva=None, ligada_ha_min=60, minutos=10):
+def cfg(primeiro, reserva=None, ligada_ha_min=60, minutos=10, *extras):
+    """🔵 13/11: a cadeia. `cfg(a, b, 60, 10, c)` poe um terceiro na fila.
+
+    ⚠️ `primeiro_id` e `reserva_id` continuam aqui porque a tela de hoje ainda
+    os usa -- e porque e por eles que `config()` monta a ordem quando a lista
+    esta vazia, em base vinda de antes da 109.
+    """
     marco = datetime.now(timezone.utc) - timedelta(minutes=ligada_ha_min)
+    ordem = [x for x in (primeiro, reserva, *extras) if x]
     return {"ligada": True, "ligada_em": marco.isoformat(), "primeiro_id": primeiro,
-            "reserva_id": reserva, "minutos": minutos}
+            "reserva_id": reserva, "ordem": ordem, "minutos": minutos}
 
 
 def dono(cid):
@@ -208,18 +223,20 @@ def test_quem_assumiu_no_mesmo_segundo_ganha():
 # era o que tirava alguém da fila -- e, como ele deixou de existir dentro da
 # jornada, a fila entregaria conversa das 08h às 18h a quem foi embora às 15h.
 
-def test_painel_fechado_sai_da_fila_e_a_conversa_vai_para_a_reserva():
-    a = pessoa(painel_ha_min=90)       # foi embora e fechou o painel
-    b = pessoa()                       # painel aberto agora
+def test_quem_nao_logou_hoje_sai_da_fila_e_a_conversa_vai_para_a_reserva():
+    """🔵 13/11: *"se nao logar, as novas conversas precisam seguir para
+    Erika"*. Faltou hoje -- nao logou -- e a fila passa por cima."""
+    a = pessoa(logou_ha_dias=1)        # logou ontem, nao hoje
+    b = pessoa()                       # logou hoje
     cid = conversa()
     mensagem(cid, 15)
     passar(cfg(a, b), [cid])
     assert dono(cid) == b
 
 
-def test_as_duas_com_painel_fechado_deixa_na_fila():
-    a = pessoa(painel_ha_min=90)
-    b = pessoa(painel_ha_min=90)
+def test_as_duas_sem_logar_deixa_na_fila():
+    a = pessoa(logou_ha_dias=1)
+    b = pessoa(logou_ha_dias=1)
     cid = conversa()
     mensagem(cid, 15)
     r = passar(cfg(a, b), [cid])
@@ -227,12 +244,11 @@ def test_as_duas_com_painel_fechado_deixa_na_fila():
     assert r["paradas_sem_destino"] == 1
 
 
-def test_quem_nunca_abriu_o_painel_nao_recebe():
-    """`painel_visto_em IS NULL` conta como fechado, e isto é decisão
-    declarada: a coluna nasceu em 19/10. O contrário entregaria conversa a quem
-    nunca apareceu."""
-    a = pessoa()
-    banco.executar("UPDATE atendente SET painel_visto_em = NULL WHERE id = %s", (a,))
+def test_quem_nunca_logou_nao_recebe():
+    """`logou_em IS NULL` conta como NAO LOGOU, e isto e decisao declarada: a
+    coluna nasceu na migracao 109. O contrario entregaria conversa a quem nunca
+    apareceu -- que e exatamente o que ele viu acontecer."""
+    a = pessoa(logou_ha_dias=None)
     b = pessoa()
     cid = conversa()
     mensagem(cid, 15)
@@ -240,9 +256,39 @@ def test_quem_nunca_abriu_o_painel_nao_recebe():
     assert dono(cid) == b
 
 
-def test_a_tela_diz_painel_fechado_e_nao_offline():
+def test_a_CADEIA_passa_do_segundo_para_o_TERCEIRO():
+    """🔵 13/11, DELE: *"se nao logar, as novas conversas precisam seguir para
+    Erika, se a mesma logar e se nao, para a Claudia"*.
+
+    🚨 Ate aqui a fila tinha DOIS lugares (`primeiro_id`, `reserva_id`) e
+    simplesmente parava quando os dois nao podiam. O terceiro nome nao cabia no
+    modelo -- por isso a ordem virou lista na migracao 109.
+    """
+    a = pessoa(logou_ha_dias=1)
+    b = pessoa(logou_ha_dias=1)
+    c = pessoa()
+    cid = conversa()
+    mensagem(cid, 15)
+    passar(cfg(a, b, 60, 10, c), [cid])
+    assert dono(cid) == c
+
+
+def test_painel_fechado_NAO_tira_mais_ninguem_da_fila():
+    """⚠️ O QUE DEIXOU DE VALER, dito em teste: aba fechada nao barra mais.
+    Quem esta logado hoje e disponivel recebe, mesmo com o painel fechado ha
+    90 min -- porque a pergunta passou a ser sobre a PESSOA ter entrado no dia,
+    nao sobre a aba estar viva neste minuto."""
+    a = pessoa(painel_ha_min=90)
+    b = pessoa()
+    cid = conversa()
+    mensagem(cid, 15)
+    passar(cfg(a, b), [cid])
+    assert dono(cid) == a
+
+
+def test_a_tela_diz_que_nao_logou_e_nao_que_esta_offline():
     """🚨 `M12`: "parada porque as duas estão offline" e "parada porque
-    ninguém está com o painel aberto" não podem sair com a mesma frase.
+    ninguém logou hoje" não podem sair com a mesma frase.
 
     🚨 E A LIÇÃO DE COMO ESTE TESTE NASCEU: a primeira versão chamou
     `distribuicao.definir_config`, que grava na `config` DE PRODUÇÃO -- a fila
@@ -250,11 +296,11 @@ def test_a_tela_diz_painel_fechado_e_nao_offline():
     restaurar do dump das 02:40. O cabeçalho deste arquivo avisa em maiúsculas,
     e o aviso estava certo. `situacao(cfg=...)` é a porta de teste que faltava.
     """
-    a = pessoa(painel_ha_min=90)
-    b = pessoa(painel_ha_min=90)
+    a = pessoa(logou_ha_dias=1)
+    b = pessoa(logou_ha_dias=1)
     sit = distribuicao.situacao(cfg=cfg(a, b))
     assert sit["parada"] is True
-    assert sit["parada_motivo"] == "painel fechado"
+    assert sit["parada_motivo"] == "não logou hoje"
     assert sit["primeiro_disponivel"] is False
 
 
@@ -283,7 +329,7 @@ def test_nenhum_teste_deste_arquivo_escreve_na_config_real():
     assert antes == depois, "um teste escreveu na configuração real da distribuição"
 
 
-def test_painel_fechado_nao_impede_transferencia_a_mao():
+def test_nao_ter_logado_nao_impede_transferencia_a_mao():
     """A trava é **só** da fila. Transferência à mão passa por
     `conversas.transferir`, que olha offline e afastamento -- nunca o painel."""
     a = pessoa(painel_ha_min=600)

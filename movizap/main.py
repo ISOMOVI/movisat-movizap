@@ -281,6 +281,13 @@ def login(dados: Credenciais, request: Request):
         )
 
     ratelimit.registrar_sucesso(chave)
+    # 🔵 13/11: O LOGIN PASSA A SER FATO GRAVADO. Até aqui o sistema não sabia
+    # quem tinha entrado -- o token é JWT e não há tabela de sessão --, e por
+    # isso a fila entregava conversa a quem nem tinha aparecido no dia.
+    # ⚠️ Dentro da jornada isto põe a pessoa disponível; fora dela, só carimba a
+    # hora. É a decisão dele: *"logar fora do turno não disponibiliza status e
+    # nem conversas"*.
+    presenca.registrar_login(_atendente_do_usuario(usuario))
     # 🔵 15/10: a sessão é do DIA. A resposta devolve a hora exata do fim, não
     # "quantas horas" -- "10 horas" não dizia nada a quem entrou às 17h.
     token, expira = auth.criar_token_e_expiracao(usuario["login"])
@@ -2265,6 +2272,8 @@ def listar_conversas(estado: str | None = None, sem_dono: bool = False,
                      bloqueados: bool = False,
                      em_nome: bool = True,
                      em_mensagens: bool = False,
+                     ultima_do_cliente: bool = False,
+                     todas_encerradas: bool = False,
                      escopo: str = "tudo",
                      usuario: dict = Depends(auth.requer_tela("ATD_1.1"))):
     """A lista da caixa: conversa direta e grupo juntos, como no WhatsApp.
@@ -2304,6 +2313,13 @@ def listar_conversas(estado: str | None = None, sem_dono: bool = False,
         # DESLIGADO aqui (decisão dele): o conteúdo das mensagens entrava
         # sempre e era o que trazia volume sem relação com o que se procurava.
         em_nome=em_nome, em_mensagens=em_mensagens,
+        # 🔵 13/11: o flag "Última do cliente" da aba Todos. Nasce DESLIGADO --
+        # é filtro que a pessoa liga, não comportamento novo da lista.
+        ultima_do_cliente=ultima_do_cliente,
+        # 🔵 13/11: o chip "Encerradas antigas" -- a janela de 30 dias vale na
+        # lista parada, e este parâmetro é como ela sai do caminho quando ele
+        # quer ver o que está atrás dela.
+        todas_encerradas=todas_encerradas,
         escopo=escopo if escopo in ("tudo", "contatos", "grupos") else "tudo")
 
 
@@ -3882,15 +3898,18 @@ def minhas_notificacoes(usuario: dict = Depends(auth.get_usuario)):
         # 🔵 22/10: o terceiro selo do menu. Sai daqui, e nao de rota
         # propria, porque esta rota ja bate em toda tela -- um ritmo so.
         "email_nao_lidos": _email_nao_lidos(eu),
-        # 🔵 22/10: o QUARTO selo -- solicitacoes de formulario ainda novas.
-        # 🚨 Duas travas no mesmo numero: so quem tem a FRM_1.1 e so quem nao
-        # desligou o aviso na CFG_11.1. Sem a primeira, o selo contaria para
-        # quem clicaria e tomaria 403; sem a segunda, o pedido dele de
-        # *"controle de notificações... igual as demais"* nao existiria.
-        "solicitacoes_novas": (
-            formularios_mod.contar_novas()
-            if registro_telas.pode_acessar(usuario, "FRM_1.1")
-            and preferencia.aviso_solicitacao(eu) else 0),
+        # 🔵 13/11, DELE: *"a aba Solicitações continua gerando ícone de
+        # notificação de novos formulários, o que não precisa, pois já abrem
+        # card. Como ela é só owner, não preciso saber disso."*
+        #
+        # 🚨 O SELO SAIU, E O NÚMERO CONTINUA ZERADO AQUI DE PROPÓSITO: a tela
+        # lê `solicitacoes_novas` desde 22/10, e devolver a chave com 0 mantém
+        # o contrato enquanto o front não é publicado. Tirar a chave no mesmo
+        # minuto quebraria a Caixa de quem estivesse com a aba aberta.
+        # ⚠️ `formularios_mod.contar_novas()` FICA: a tela de Solicitações conta
+        # pela mesma função, e é essa fonte única que impediu, em 22/10, o selo
+        # discordar da lista.
+        "solicitacoes_novas": 0,
         # Todas as que são MINHAS (lidas ou não): é o que separa "uma conversa
         # minha voltou a ter mensagem" de "chegou uma conversa NOVA para mim"
         # -- a nova toca mesmo acima do teto de 4 (decisão dele).
@@ -4853,7 +4872,11 @@ class EstadoDoTecnico(BaseModel):
 
 class TecnicoNovo(BaseModel):
     nome: str = Field(min_length=2, max_length=120)
-    telefone: str | None = None
+    # 🔵 13/11, DELE: *"então telefone deve passar a ser obrigatório"*.
+    # 🚨 É A CHAVE DO CRUZAMENTO COM O HARMONIT, onde o e-mail do técnico É o
+    # telefone dele (`997394026@movisat.com.br`). Sem telefone o cadastro nasce
+    # órfão: a varredura diária nunca o encontra, e ninguém percebe.
+    telefone: str = Field(min_length=8, max_length=30)
 
 
 class ServicoDoTecnico(BaseModel):

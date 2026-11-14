@@ -360,9 +360,12 @@ def salas(eu: int) -> list[dict]:
     com_fotos = {r["id"] for r in banco.varios(
         "SELECT id FROM atendente WHERE id = ANY(%s) AND foto IS NOT NULL",
         (list(comids),))} if comids else set()
+    # 🔵 13/11: os minutos do estado de quem esta do outro lado da sala direta.
+    com_minutos = minutos_no_estado(comids) if comids else {}
     for l in linhas:
         l["com_em_jornada"] = l.get("com_id") in em_turno
         l["com_tem_foto"] = l.get("com_id") in com_fotos
+        l["com_estado_minutos"] = com_minutos.get(l.get("com_id"))
     # 🔵 05/10: a prévia não pode mostrar o texto de uma última mensagem
     # apagada para quem não é owner.
     if not _eh_owner(eu):
@@ -910,13 +913,44 @@ def nao_lidas(eu: int) -> int:
     return (linha or {}).get("n", 0)
 
 
+def minutos_no_estado(ids) -> dict[int, int]:
+    """Ha quantos minutos o estado de cada um destes esta valendo.
+
+    🔵 13/11, DELE: *"na conversa interna, pode colocar a frente do nome
+    'status a x minutos'"*, arredondado em multiplos de 10.
+
+    🚨 QUEM ARREDONDA E A TELA, e quem conta e o SERVIDOR. O relogio do
+    navegador de quem olha nao entra na conta -- maquina com a hora errada
+    diria "online ha 3 horas" sobre quem acabou de entrar.
+
+    ⚠️ Devolve MINUTOS INTEIROS; `estado_em` nulo fica de fora do dicionario, e
+    a tela nao escreve nada -- "ha 0min" sobre uma hora que ninguem sabe seria
+    inventar.
+    """
+    ids = [int(i) for i in ids if i]
+    if not ids:
+        return {}
+    return {r["id"]: int(r["minutos"]) for r in banco.varios(
+        """SELECT id,
+                  GREATEST(0, floor(EXTRACT(EPOCH FROM (now() - estado_em)) / 60))
+                    AS minutos
+             FROM atendente
+            WHERE id = ANY(%s) AND estado_em IS NOT NULL""", (ids,))}
+
+
 def com_quem_falar(eu: int) -> list[dict]:
     """Os atendentes ativos, menos eu — a lista de quem dá para chamar.
 
     ⚠️ Exige e-mail, a mesma régua do vínculo de atendimento: quem não tem
     vínculo não aparece como destinatário, porque não teria como responder.
     """
-    return banco.varios(
-        """SELECT id, nome, login, estado FROM atendente
+    linhas = banco.varios(
+        """SELECT id, nome, login, estado, estado_automatico FROM atendente
             WHERE ativo AND id <> %s AND btrim(COALESCE(email, '')) <> ''
             ORDER BY lower(nome)""", (eu,))
+    # 🔵 13/11: ha quantos minutos cada um esta neste estado -- uma consulta so
+    # para a lista inteira, como `em_jornada_agora` faz com o turno.
+    minutos = minutos_no_estado([l["id"] for l in linhas])
+    for l in linhas:
+        l["estado_minutos"] = minutos.get(l["id"])
+    return linhas

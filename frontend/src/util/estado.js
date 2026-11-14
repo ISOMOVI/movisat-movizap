@@ -37,3 +37,26 @@ export function rotuloDoEstado(estado, { automatico = false, emJornada = false }
   if (estado === 'offline' && automatico && emJornada) return 'Ausente'
   return (ESTADO[estado] || {}).rotulo || 'sem estado'
 }
+
+/* 🔵 13/11, DELE: *"pode colocar à frente do nome, 'status a x minutos' ...
+   pode fazer em múltiplos de 10min arredondado = 'ausente há 30min'"*.
+
+   🚨 QUEM CONTA É O SERVIDOR (`chat.minutos_no_estado`); aqui só se arredonda.
+   O relógio do navegador de quem olha não entra na conta -- máquina com a hora
+   errada diria "online há 3 horas" sobre quem acabou de entrar.
+
+   ⚠️ ABAIXO DE 10 MIN É "agora", e não "há 0min": arredondar para baixo em
+   múltiplos de 10 faria todo mundo que acabou de mudar de estado aparecer com
+   zero, que é um número que não diz nada.
+   ⚠️ `null`/`undefined` devolve vazio -- é o caso de quem não tem hora de
+   estado gravada, e inventar "há 0min" seria afirmar o que ninguém sabe. */
+export function tempoNoEstado(minutos) {
+  if (minutos === null || minutos === undefined || Number.isNaN(Number(minutos))) return ''
+  const m = Math.max(0, Math.floor(Number(minutos)))
+  if (m < 10) return 'agora'
+  if (m < 60) return `há ${Math.floor(m / 10) * 10}min`
+  const h = Math.floor(m / 60)
+  if (h < 24) return `há ${h}h`
+  const d = Math.floor(h / 24)
+  return d === 1 ? 'há 1 dia' : `há ${d} dias`
+}

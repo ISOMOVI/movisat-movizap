@@ -168,16 +168,23 @@ async function criar() {
           <span class="campo__rotulo">Nome</span>
           <input v-model="novo.nome" class="campo__entrada" maxlength="120" />
         </label>
+        <!-- 🔵 13/11, DELE: *"então telefone deve passar a ser obrigatório"*.
+             🚨 É A CHAVE DO CRUZAMENTO: sem telefone, a varredura diária nunca
+             encontra este técnico no Harmonit (lá o e-mail dele É o telefone) e
+             o cadastro nasce órfão sem ninguém perceber. -->
         <label class="campo">
-          <span class="campo__rotulo">Telefone (opcional)</span>
-          <input v-model="novo.telefone" class="campo__entrada" />
+          <span class="campo__rotulo">Telefone</span>
+          <input v-model="novo.telefone" class="campo__entrada" required />
           <span class="campo__ajuda">
             É o que casa com o cadastro do Harmonit — lá o e-mail do técnico é o
-            telefone dele.
+            telefone dele. Sem ele, o cadastro não se liga ao de lá.
           </span>
         </label>
         <div class="linha">
-          <button class="botao botao--primario" type="button" :disabled="salvando"
+          <!-- ⚠️ A trava mora no backend (o campo é obrigatório na rota); aqui
+               o botão só evita a ida que já se sabe recusada. -->
+          <button class="botao botao--primario" type="button"
+                  :disabled="salvando || !novo.nome.trim() || !novo.telefone.trim()"
                   @click="criar">
             <span v-if="salvando" class="girando"></span>
             {{ salvando ? 'Criando…' : 'Criar e abrir a ficha' }}

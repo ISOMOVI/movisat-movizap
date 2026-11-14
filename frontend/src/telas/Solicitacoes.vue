@@ -208,27 +208,62 @@ onMounted(async () => {
           <p v-else-if="!solicitacoes.length" class="apagado">
             Nada chegou ainda com esses filtros.
           </p>
-          <ul v-else class="lista">
-            <li v-for="s in solicitacoes" :key="s.id">
-              <button
-                class="lista__item"
-                :class="{ 'lista__item--aberta': aberta && aberta.id === s.id }"
-                @click="abrir(s.id)"
-              >
-                <span class="lista__topo">
-                  <strong>{{ s.titulo }}</strong>
-                  <span class="etiqueta" :class="`etiqueta--${s.estado}`">
-                    {{ ESTADOS.find((e) => e.valor === s.estado)?.rotulo || s.estado }}
-                  </span>
-                </span>
-                <span class="apagado pequeno">{{ resumo(s) }}</span>
-                <span class="apagado pequeno">
-                  {{ quando(s.criada_em) }}
-                  <template v-if="s.anexos"> · {{ s.anexos }} anexo(s)</template>
-                </span>
-              </button>
-            </li>
-          </ul>
+          <!-- 🔵 13/11, DELE: *"a entrada dos cards pode ser convertida em um
+               grid de visualização na tela mesmo, para quando eu quiser"*, no
+               lugar do selo de notificação que saiu do menu.
+
+               🚨 GRID NO LUGAR DA LISTA, E SEM PERDER O QUE A LISTA FAZIA:
+               clicar na linha continua abrindo a solicitação inteira ao lado,
+               com respostas, anexos e a troca de estado. O que a grade
+               ACRESCENTA é a coluna do CARD -- a ligação que não existia em
+               tela nenhuma.
+               ⚠️ A linha inteira é clicável e a célula do card NÃO é um link:
+               o card vive noutra tela, com permissão própria, e um link que dá
+               403 é pior que um texto que informa. -->
+          <div v-else class="rolo">
+            <table class="tabela">
+              <thead>
+                <tr>
+                  <th>Quando</th>
+                  <th>Formulário</th>
+                  <th>Quem</th>
+                  <th>Card</th>
+                  <th>Estado</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr
+                  v-for="s in solicitacoes"
+                  :key="s.id"
+                  class="grade__linha"
+                  :class="{ 'grade__linha--aberta': aberta && aberta.id === s.id }"
+                  @click="abrir(s.id)"
+                >
+                  <td class="pequeno">{{ quando(s.criada_em) }}</td>
+                  <td>
+                    <strong>{{ s.titulo }}</strong>
+                    <span v-if="s.anexos" class="apagado pequeno">
+                      · {{ s.anexos }} anexo(s)
+                    </span>
+                  </td>
+                  <td class="pequeno">{{ resumo(s) }}</td>
+                  <td class="pequeno">
+                    <template v-if="s.card_id">
+                      {{ s.card_aba }} › {{ s.card_etapa }}
+                    </template>
+                    <span v-else class="apagado" title="O envio não abriu card nenhum">
+                      sem card
+                    </span>
+                  </td>
+                  <td>
+                    <span class="etiqueta" :class="`etiqueta--${s.estado}`">
+                      {{ ESTADOS.find((e) => e.valor === s.estado)?.rotulo || s.estado }}
+                    </span>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
         </div>
       </section>
 

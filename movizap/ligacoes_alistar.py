@@ -73,6 +73,28 @@ JANELA_S = 600               # 10 minutos: é de quanto em quanto tempo a senha 
 #
 # ⚠️ Para voltar a 20 minutos é esta linha, e só ela: `JANELAS_ACEITAS = 2`.
 JANELAS_ACEITAS = 288        # 288 × 10 min = 48 h (pedido dele, 15/10)
+
+# 🔵 13/11, DELE: *"deixar senha padrão de 'movicall' (essa senha não há muita
+# exigência de segredo)"*. A senha derivada por HMAC continua existindo e
+# continua valendo -- esta é um ATALHO, não uma substituição.
+#
+# 🚨 O QUE ELA CUSTA, POR ESCRITO: quem souber `movicall` e um ramal alista um
+# PC naquele ramal. Ele decidiu que o segredo aqui não é exigência, e as outras
+# travas ficam de pé: limite de tentativas por IP, ramal que tem de existir e
+# estar ativo, e certificado de cliente emitido para aquele PC.
+#
+# ⚠️ ELA NÃO QUEIMA JANELA, e isso é o ponto: a senha derivada serve UMA vez
+# porque `UNIQUE (ramal, janela)` a trava. Se a fixa queimasse, o primeiro PC a
+# usá-la trancaria todos os outros -- o oposto do pedido, que é justamente
+# poder sair instalando nas máquinas.
+CHAVE_SENHA_FIXA = "ligacoes_senha_fixa"
+
+
+def senha_fixa() -> str:
+    """A senha padrão de alistamento. Vazia DESLIGA o atalho."""
+    linha = banco.um("SELECT valor FROM config WHERE chave = %s",
+                     (CHAVE_SENHA_FIXA,))
+    return _limpar((linha or {}).get("valor") or "")
 TAMANHO = 8
 # Sem I, O, 0 e 1: a senha é DITADA por telefone, e "I" virando "1" custa uma
 # tentativa queimada de verdade.
@@ -220,19 +242,33 @@ def alistar(ramal: str, senha: str, pedido_pem: str | bytes,
             achada = janela
             break
 
-    if achada is None:
+    # 🔵 13/11: a senha fixa, se o ramal existe. Fica DEPOIS do laço de
+    # propósito: quem digitou a senha do dia continua gastando a janela dele,
+    # como sempre, e a fixa só entra quando a derivada não casou.
+    usou_fixa = False
+    if achada is None and atendente:
+        padrao = senha_fixa()
+        if padrao and secrets.compare_digest(digitada, padrao):
+            usou_fixa = True
+            log.info("alistamento do ramal %s pela senha fixa (pc=%s ip=%s)",
+                     ramal, pc, ip)
+
+    if achada is None and not usou_fixa:
         ratelimit.registrar_falha(trava)
         # Ramal sem dono e senha errada dão a MESMA resposta: dizer qual é o
         # caso entrega a lista de ramais válidos a quem está tentando adivinhar.
         log.warning("alistamento recusado: ramal %s, pc=%s, ip=%s", ramal, pc, ip)
         raise SenhaInvalida("Senha inválida ou vencida. Peça a senha de novo.")
 
+    queimado_id = None
     try:
         with banco.cursor() as cur:
-            cur.execute("""INSERT INTO alistamento_queimado (ramal, janela, pc, ip)
-                           VALUES (%s, %s, %s, %s) RETURNING id""",
-                        (ramal, achada, (pc or "")[:100] or None, (ip or "")[:45] or None))
-            queimado_id = cur.fetchone()["id"]
+            if achada is not None:
+                cur.execute("""INSERT INTO alistamento_queimado (ramal, janela, pc, ip)
+                               VALUES (%s, %s, %s, %s) RETURNING id""",
+                            (ramal, achada,
+                             (pc or "")[:100] or None, (ip or "")[:45] or None))
+                queimado_id = cur.fetchone()["id"]
     except psycopg.errors.UniqueViolation as e:
         ratelimit.registrar_falha(trava)
         log.warning("alistamento recusado (senha já usada): ramal %s, pc=%s, ip=%s",
@@ -251,8 +287,9 @@ def alistar(ramal: str, senha: str, pedido_pem: str | bytes,
                          SET ultimo_pc = %s, ultimo_ip = COALESCE(%s, ultimo_ip)
                        WHERE id = %s""",
                    ((pc or "")[:100] or None, (ip or "")[:45] or None, cert["agente_id"]))
-    banco.executar("UPDATE alistamento_queimado SET agente_id = %s WHERE id = %s",
-                   (cert["agente_id"], queimado_id))
+    if queimado_id is not None:
+        banco.executar("UPDATE alistamento_queimado SET agente_id = %s WHERE id = %s",
+                       (cert["agente_id"], queimado_id))
     ratelimit.registrar_sucesso(trava)
     log.info("ramal %s alistado no PC %s (agente %s); PC anterior: %s",
              ramal, pc, cert["agente_id"], anterior["ultimo_pc"] if anterior else "nenhum")

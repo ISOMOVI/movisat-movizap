@@ -1194,6 +1194,33 @@ const filtroAberto = ref(false)
    mencionavam a palavra. */
 const emNome = ref(true)
 const emMensagens = ref(false)
+
+/* 🔵 13/11, PEDIDO DELE: *"nos filtros, abaixo da opção 'o que foi dito na
+   conversa', criar um flag de 'última do cliente' e só vai exibir as conversas
+   em que a última mensagem foi do cliente e não houve resposta nossa"*.
+
+   🚨 É DA ABA "TODAS", E É AÍ QUE ELE TEM VALOR. Dele: *"em todos, mesmo que
+   tenham donos, podem não estar respondendo. Daí o filtro para quem quiser ver
+   essa informação"*. O "Sem dono" responde outra pergunta e NÃO foi tocado.
+
+   ⚠️ Só as NÃO encerradas (decisão dele): são 31 hoje; sem o corte seriam 207,
+   e as 106 resolvidas a mais são quase sempre um "obrigado" depois do fim.
+   ⚠️ Nota interna NÃO conta como resposta -- a conta é do backend, e sem isso
+   71 conversas sumiriam do filtro porque um colega anotou algo depois. */
+const ultimaDoCliente = ref(false)
+
+/* 🔵 13/11, DELE: *"compactar as conversas mais antigas já encerradas, para
+   que não tenhamos uma rolagem infinita"*.
+
+   📏 MEDIDO NO DIA: 1.177 conversas, 646 encerradas (55%) -- e encerrar não
+   muda `ultima_atividade_em`, então a conversa morta ficava intercalada por
+   data no meio das vivas.
+
+   🚨 ESCONDER SEM MOSTRAR O CAMINHO DE VOLTA SERIA PERDER CONVERSA DE VISTA.
+   Este flag é o caminho: liga e a janela sai. E a BUSCA nunca respeita a
+   janela -- procurar um cliente de agosto e receber "nada encontrado" seria a
+   tela mentindo sobre o que existe. */
+const verEncerradasAntigas = ref(false)
 const ESCOPOS = [
   { valor: 'tudo', rotulo: 'Tudo' },
   { valor: 'contatos', rotulo: 'Contatos' },
@@ -1219,6 +1246,24 @@ function trocarEscopo(valor) {
   carregar()
 }
 
+function alternarUltimaDoCliente() {
+  ultimaDoCliente.value = !ultimaDoCliente.value
+  carregar()
+}
+
+function alternarEncerradasAntigas() {
+  verEncerradasAntigas.value = !verEncerradasAntigas.value
+  carregar()
+}
+
+/* 🚨 FILTRO LIGADO QUE SOBREVIVE À TROCA DE ABA É FILTRO INVISÍVEL: a pessoa
+   vai para "Sem dono", vê menos conversas do que deveria e não tem como
+   descobrir por quê, porque a caixa de marcar nem aparece lá. Sai junto com a
+   aba. */
+watch(filtro, (novo) => {
+  if (novo !== 'todas' && ultimaDoCliente.value) ultimaDoCliente.value = false
+})
+
 /* Quantos filtros estão desviando do padrão -- é o número no ícone. Função e
    não `computed` para não depender de import novo neste arquivo. */
 function contaFiltros() {
@@ -1226,6 +1271,8 @@ function contaFiltros() {
   if (escopo.value !== 'tudo') n += 1
   if (emMensagens.value) n += 1
   if (!emNome.value) n += 1
+  if (ultimaDoCliente.value) n += 1
+  if (verEncerradasAntigas.value) n += 1
   return n
 }
 
@@ -1237,6 +1284,8 @@ function resumoFiltros() {
   }
   if (!emNome.value) partes.push('sem nome')
   if (emMensagens.value) partes.push('nas mensagens')
+  if (ultimaDoCliente.value) partes.push('última do cliente')
+  if (verEncerradasAntigas.value) partes.push('encerradas antigas')
   for (const t of TIPOS) {
     if (tiposMarcados.value.includes(t.valor)) partes.push(t.rotulo)
   }
@@ -1248,6 +1297,8 @@ function limparFiltros() {
   escopo.value = 'tudo'
   emNome.value = true
   emMensagens.value = false
+  ultimaDoCliente.value = false
+  verEncerradasAntigas.value = false
   carregar()
 }
 
@@ -1278,6 +1329,8 @@ function parametros() {
   /* 🔵 30/09: só vai o que DESVIA do padrão -- URL limpa diz o que foi pedido. */
   if (!emNome.value) p.set('em_nome', 'false')
   if (emMensagens.value) p.set('em_mensagens', 'true')
+  if (ultimaDoCliente.value) p.set('ultima_do_cliente', 'true')
+  if (verEncerradasAntigas.value) p.set('todas_encerradas', 'true')
   if (escopo.value !== 'tudo') p.set('escopo', escopo.value)
   return p.toString()
 }
@@ -1957,8 +2010,19 @@ function colar(evento) {
 /* 🔵 25/09: até 10 anexos por envio. O backend não trava anexo por
    mensagem (cada `POST .../arquivo` já é independente) -- então isto é
    mudança só de frontend, com um laço sequencial no envio. */
-function escolherArquivo(evento) {
-  const novos = Array.from(evento.target.files || [])
+/* 🔵 13/11, DELE: *"Arrastar arquivos como Anexo"*.
+
+   🚨 A ACEITAÇÃO MORA NUMA FUNÇÃO SÓ, e isso é o ponto: escolher pelo clipe,
+   arrastar e colar passaram a ser três portas para a MESMA régua (teto de
+   quantidade, teto de tamanho, aviso sem o nome do arquivo recusado). Três
+   cópias divergiriam na primeira mudança de teto -- e a que ficasse para trás
+   só seria descoberta por quem levasse 413 depois de subir 40 MB.
+
+   🚨 E SOLTAR NÃO ENVIA. O arquivo entra na MESMA prévia do clipe, que já tem
+   os dois botões (verde para o cliente, amarelo para nota interna). Arrastar é
+   gesto rápido demais para disparar arquivo no WhatsApp de um cliente: um
+   clique a mais é barato, um contrato na conversa errada não é. */
+function aceitarArquivos(novos) {
   erro.value = ''
   const cabem = TETO_ANEXOS - arquivos.value.length
   if (novos.length > cabem) {
@@ -1980,7 +2044,50 @@ function escolherArquivo(evento) {
     aceitos.push(f)
   }
   arquivos.value = [...arquivos.value, ...aceitos]
+}
+
+function escolherArquivo(evento) {
+  aceitarArquivos(Array.from(evento.target.files || []))
   evento.target.value = ''   // deixa escolher o mesmo arquivo de novo depois
+}
+
+/* ⚠️ `arrastando` é CONTADO, não ligado/desligado: `dragleave` dispara ao
+   passar de um filho para outro dentro da mesma área, e um booleano fazia a
+   camada piscar enquanto o arquivo ainda estava sobre a conversa. */
+const arrastando = ref(0)
+
+function temArquivoNoArraste(evento) {
+  const tipos = Array.from(evento.dataTransfer?.types || [])
+  return tipos.includes('Files')
+}
+
+function aoArrastarEntrar(evento) {
+  if (!aberta.value || !temArquivoNoArraste(evento)) return
+  evento.preventDefault()
+  arrastando.value += 1
+}
+
+function aoArrastarSobre(evento) {
+  if (!aberta.value || !temArquivoNoArraste(evento)) return
+  /* Sem isto o navegador ABRE o arquivo na aba e a conversa desaparece. */
+  evento.preventDefault()
+  if (evento.dataTransfer) evento.dataTransfer.dropEffect = 'copy'
+}
+
+function aoArrastarSair() {
+  if (arrastando.value > 0) arrastando.value -= 1
+}
+
+function aoSoltarArquivos(evento) {
+  if (!aberta.value) return
+  evento.preventDefault()
+  arrastando.value = 0
+  const soltos = Array.from(evento.dataTransfer?.files || [])
+  if (!soltos.length) return
+  aceitarArquivos(soltos)
+  /* O foco vai para o campo: quem arrasta quase sempre escreve a legenda
+     depois, e a prévia com os dois botões está logo ali. */
+  nextTick(() => campoResposta.value?.focus())
 }
 
 function limparArquivo(indice) {
@@ -2412,6 +2519,38 @@ function quem(c) {
 }
 
 const ehGrupo = computed(() => Boolean(aberta.value && aberta.value.tipo === 'grupo'))
+
+/* 🔵 13/11, DELE: *"compactar as conversas mais antigas já encerradas, para
+   que não tenhamos uma rolagem infinita"*. A janela de 30 dias tirou 372
+   conversas da vista; estes cabeçalhos são a outra metade — dizem ONDE a
+   pessoa está na rolagem do que sobrou.
+
+   🚨 MESMO DESENHO DO SEPARADOR DE DIA DO CHAT (`comecaODia`): a comparação é
+   com o item ANTERIOR, e não um agrupamento novo. Montar grupos aninhados
+   mudaria a estrutura da lista -- e com ela o teclado, a seleção e o
+   `:key` -- para resolver um problema de leitura.
+
+   ⚠️ A ordem da lista é por atividade, decrescente, e os períodos saem em
+   ordem por consequência. Se um dia a ordem mudar, isto vira enfeite errado --
+   por isso o rótulo sai da data de cada linha, nunca de uma contagem. */
+function periodoDe(iso) {
+  if (!iso) return 'Sem data'
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return 'Sem data'
+  const hoje = new Date()
+  const diaDe = (x) => new Date(x.getFullYear(), x.getMonth(), x.getDate())
+  const dias = Math.round((diaDe(hoje) - diaDe(d)) / 86400000)
+  if (dias <= 0) return 'Hoje'
+  if (dias === 1) return 'Ontem'
+  if (dias <= 7) return 'Esta semana'
+  if (dias <= 30) return 'Este mês'
+  return 'Mais antigas'
+}
+
+function comecaPeriodo(c, i) {
+  if (i === 0) return true
+  return periodoDe(c.ultima_atividade_em) !== periodoDe(lista.value[i - 1].ultima_atividade_em)
+}
 
 function quando(iso) {
   if (!iso) return ''
@@ -3017,6 +3156,31 @@ function carregarMidiasDaConversa(c) {
                     <span>O que foi dito na conversa</span>
                   </label>
 
+                  <!-- 🔵 13/11: o lugar é o que ele pediu, "abaixo da opção que
+                       dei o nome". Só aparece na aba Todas: nas outras ou é
+                       redundante (Sem dono já é isso) ou muda a pergunta da
+                       aba sem avisar. -->
+                  <label v-if="filtro === 'todas'" class="filtro__linha">
+                    <input
+                      type="checkbox"
+                      :checked="ultimaDoCliente"
+                      @change="alternarUltimaDoCliente()"
+                    />
+                    <span>Última do cliente (sem resposta nossa)</span>
+                  </label>
+
+                  <!-- 🔵 13/11: a lista mostra as vivas e as encerradas dos
+                       últimos 30 dias; esta caixa é como se vê o que está
+                       atrás disso. ⚠️ A busca já varre tudo, sempre. -->
+                  <label class="filtro__linha">
+                    <input
+                      type="checkbox"
+                      :checked="verEncerradasAntigas"
+                      @change="alternarEncerradasAntigas()"
+                    />
+                    <span>Encerradas antigas</span>
+                  </label>
+
                   <!-- 🔵 30/09: contato ou grupo. Filtro, não aba. -->
                   <p class="filtro__titulo">Onde</p>
                   <label v-for="e in ESCOPOS" :key="e.valor" class="filtro__linha">
@@ -3109,7 +3273,12 @@ function carregarMidiasDaConversa(c) {
                dentro de botão é HTML inválido, e o navegador desfaz o
                aninhamento sozinho -- o clique de dentro passa a abrir a
                conversa em vez de assumir, sem erro nenhum aparecer. -->
-          <li v-for="c in lista" :key="c.id" class="conversas__item">
+          <li v-for="(c, i) in lista" :key="c.id" class="conversas__item">
+            <!-- 🔵 13/11: onde a pessoa esta na rolagem. ⚠️ `aria-hidden`
+                 porque e marco visual: quem usa leitor de tela ja ouve a data
+                 de cada conversa dentro do proprio item. -->
+            <span v-if="comecaPeriodo(c, i)" class="conversas__periodo"
+                  aria-hidden="true">{{ periodoDe(c.ultima_atividade_em) }}</span>
             <button
               class="conversa"
               :class="{
@@ -4081,7 +4250,24 @@ function carregarMidiasDaConversa(c) {
             </p>
           </div>
 
-          <div ref="baloes" class="baloes">
+          <!-- 🔵 13/11: a conversa inteira recebe o arrasto. ⚠️ `.prevent` no
+               `dragover` é obrigatório: sem ele o navegador abre o arquivo numa
+               aba e a conversa desaparece da frente de quem estava atendendo. -->
+          <div
+            ref="baloes"
+            class="baloes"
+            :class="{ 'baloes--arrastando': arrastando > 0 }"
+            @dragenter="aoArrastarEntrar"
+            @dragover="aoArrastarSobre"
+            @dragleave="aoArrastarSair"
+            @drop="aoSoltarArquivos"
+          >
+            <!-- A camada é AVISO, não botão: ela diz o que vai acontecer e
+                 some ao soltar. O envio continua sendo o botão da prévia. -->
+            <div v-if="arrastando > 0" class="solte" aria-hidden="true">
+              <i class="bi bi-paperclip"></i>
+              <span>Solte para anexar — você escolhe o destino depois</span>
+            </div>
             <!-- 🚨 O TOPO DA CONVERSA. A tela abre com as 60 mais recentes e
                  sobe de 200 em 200: o teto de 1.000 saiu quando a maior
                  conversa da base chegou a 776. -->
@@ -6047,7 +6233,52 @@ function carregarMidiasDaConversa(c) {
   overflow: hidden;
 }
 
+/* 🔵 13/11: o alvo do arrasto. A borda tracejada é o sinal de "solte aqui"
+   que o navegador não dá sozinho. ⚠️ `position: relative` entra junto porque a
+   camada é absoluta dentro desta área. */
+/* 13/11: o marco de periodo na lista de conversas. Bloco proprio acima do
+   item, em caixa alta pequena -- e rotulo de secao, nao conteudo. */
+.conversas__periodo {
+  display: block;
+  padding: var(--e-2) var(--e-3) 2px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--texto-apagado);
+}
+
+.baloes--arrastando {
+  outline: 2px dashed var(--acento);
+  outline-offset: -4px;
+}
+
+.solte {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--e-2);
+  /* ⚠️ `color-mix` com a SUPERFICIE, e nao uma cor nova: a camada funciona
+     no tema claro e no escuro sem ganhar token proprio.
+     🚨 O token e `--superficie`. Escrevi `--fundo-cartao` na primeira volta e
+     a suite pegou: token que nao existe nao reclama, cai no valor de
+     emergencia e a camada sairia transparente, em silencio. */
+  background: color-mix(in srgb, var(--superficie) 88%, transparent);
+  color: var(--texto);
+  font-weight: 600;
+  text-align: center;
+  padding: var(--e-4);
+  pointer-events: none;
+}
+
+.solte .bi { font-size: 2rem; }
+
 .baloes {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: var(--e-2);

@@ -1,4 +1,4 @@
-// MoviZap - Backup de Ligacoes | o lancador que a tarefa executa (v0.6, 19/10/2026)
+﻿// MoviZap - Backup de Ligacoes | o lancador que a tarefa executa (v0.6, 19/10/2026)
 //
 // Por que ele existe: a tarefa chamava powershell.exe, e o Gerenciador de
 // Tarefas mostrava "Windows PowerShell". Era isso que as pessoas encerravam.
@@ -18,8 +18,8 @@ using System.Reflection;
 [assembly: AssemblyCompany("Movisat")]
 [assembly: AssemblyDescription("Backup do historico de ligacoes do MicroSIP no MoviZap.")]
 [assembly: AssemblyCopyright("Movisat")]
-[assembly: AssemblyVersion("0.7.0.0")]
-[assembly: AssemblyFileVersion("0.7.0.0")]
+[assembly: AssemblyVersion("0.8.0.0")]
+[assembly: AssemblyFileVersion("0.8.0.0")]
 
 static class Lancador
 {

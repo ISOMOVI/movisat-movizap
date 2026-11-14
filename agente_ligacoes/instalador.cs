@@ -1,4 +1,4 @@
-// MoviZap - Instalar Ligacoes | UM arquivo que a pessoa recebe (v0.6, 19/10/2026)
+﻿// MoviZap - Instalar Ligacoes | UM arquivo que a pessoa recebe (v0.6, 19/10/2026)
 //
 // Pedido dele: "eles vao precisar dar um .exe apenas para rodar tudo" e
 // "eu apagaria do PC para evitar engenharia reversa e senha do banco".
@@ -27,8 +27,8 @@ using System.Reflection;
 [assembly: AssemblyCompany("Movisat")]
 [assembly: AssemblyDescription("Instala o backup do historico de ligacoes do MicroSIP no MoviZap.")]
 [assembly: AssemblyCopyright("Movisat")]
-[assembly: AssemblyVersion("0.7.0.0")]
-[assembly: AssemblyFileVersion("0.7.0.0")]
+[assembly: AssemblyVersion("0.8.0.0")]
+[assembly: AssemblyFileVersion("0.8.0.0")]
 
 static class Instalador
 {

@@ -672,3 +672,69 @@ Recursos") afirmaria 0.6. Corrigido antes de qualquer distribuição.
 `autoRecording=1` no `.ini` **não é confiável com o MicroSIP aberto** — medido
 em 16/10: ele regrava o arquivo inteiro a partir da memória. As três saídas
 seguem não decididas por ele desde então.
+
+
+---
+
+## Agente 0.8 (13/11) — a senha padrão, e o que mudou na VPS junto
+
+🔵 Pedido dele, 13/11: *"se é preciso atualizar o agente novo MicroSIP deles, o
+ideal seria coletar IP e quando eles atualizarem ou mudar a pasta não perdermos
+de vista. Também deixar senha padrão de 'movicall' (essa senha não há muita
+exigência de segredo)."*
+
+### O `.exe`
+
+| o quê | valor |
+|---|---|
+| arquivo | `MoviZap-Instalar-Ligacoes-v0.8.exe` (entregue em `Downloads`) |
+| tamanho | 95.744 bytes |
+| sha256 | `D98C0459889A10D67CB664F62C6B442B6110C9C5931DBED48BA8321904257F3D` |
+| Windows mostra | *MoviZap - Instalar Backup de Ligacoes*, de *Movisat*, **v0.8.0.0** |
+| endereços | painel `https://movizap.movisat.com.br` · mTLS `https://ligacoesmicrosip.movisat.com.br` (os mesmos de hoje, conferidos) |
+
+⚠️ **A versão sai de QUATRO lugares, e os quatro subiram:** `AssemblyVersion` e
+`AssemblyFileVersion` dos dois `.cs` (é o que o Windows mostra), `$VERSAO` do
+`instalar.ps1` (é o que vai para *Aplicativos instalados*) e `$VERSAO` do
+`movizap-ligacoes.ps1` (é o que chega no batimento). Em 26/10 isso já mordeu:
+o `.exe` saiu `0.6.0.0` carregando scripts `0.7`.
+
+### O que muda para quem instala
+
+**Aperta ENTER e pronto.** A pergunta da senha passou a aceitar o padrão:
+
+```
+Aperte ENTER para usar a senha padrao (movicall).
+Ou digite a senha de uso que o Iago ditar (vale 10 min, serve uma vez).
+Senha (Enter = padrao):
+```
+
+🚨 **A senha ditada continua existindo e continua valendo** — a padrão é um
+atalho, não uma substituição. ⚠️ **A padrão NÃO queima janela:** se queimasse, o
+primeiro PC a usá-la trancaria todos os outros, que é o oposto do pedido.
+
+🚨 **O que ela custa, por escrito:** quem souber `movicall` e um ramal alista um
+PC naquele ramal. Seguem de pé: limite de tentativas por IP, ramal que precisa
+existir e estar ativo, e certificado de cliente emitido só para aquele PC. O
+valor vive em `config.ligacoes_senha_fixa` — **vazio desliga o atalho**, sem
+tocar em código.
+
+### O que mudou na VPS no mesmo dia
+
+- **`agente_ligacao_evento`** (migração 109) guarda **mudança** de versão,
+  pasta, IP e PC — nunca batimento. Antes só existia o último valor de cada
+  coisa: trocar a pasta de gravação apagava o caminho antigo e, com ele, a
+  pista de onde ficaram as gravações.
+- O IP já era coletado (`ultimo_ip`, desde a 060); o que faltava era **o
+  histórico**.
+
+### 📏 Por que esta atualização importa
+
+Em 13/11, **7 dos 8 agentes cadastrados ainda estavam na 0.4** — e é por isso
+que `pasta`, `pasta_origem` e `auto_gravacao` chegam vazios no painel, e os
+avisos de "pasta não existe" não têm o que dizer. Atualizar os PCs continua
+sendo passo de gente; o que mudou é que agora é *"rode o instalador e aperte
+Enter"*.
+
+🔴 **E o 0.8 não conserta a gravação automática desligada** (6 dos 7 PCs) —
+continua valendo o medido em 16/10, e as três saídas seguem não decididas.

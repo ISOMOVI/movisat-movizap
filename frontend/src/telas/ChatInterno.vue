@@ -17,7 +17,7 @@ import { corDaInicial, iniciais } from '../util/avatar.js'
 import { partesDoTexto } from '../util/mencao.js'
 import { marcar } from '../util/destaque.js'
 import { reagirOtimista, acertosForaDaTela } from '../util/reacao_chat.js'
-import { corDoEstado, rotuloDoEstado } from '../util/estado.js'
+import { corDoEstado, rotuloDoEstado, tempoNoEstado } from '../util/estado.js'
 import BotaoMensagensRapidas from '../componentes/BotaoMensagensRapidas.vue'
 
 const salas = ref([])
@@ -589,8 +589,12 @@ function colar(evento) {
 
 /* 🔵 25/09: até 10 anexos por envio -- mudança só de frontend, o backend já
    trata cada `POST .../arquivo` como independente. */
-function escolherArquivo(evento) {
-  const novos = Array.from(evento.target.files || [])
+/* 🔵 13/11, DELE: *"Arrastar arquivos como Anexo"*. Mesma régua do clipe, em
+   uma função só -- duas cópias divergiriam na primeira mudança de teto.
+   🚨 SOLTAR NÃO ENVIA: o arquivo entra na prévia, e o envio continua sendo o
+   botão. Aqui é chat interno, mas o gesto é o mesmo da conversa com cliente, e
+   gesto que envia sozinho num lugar e não no outro é armadilha. */
+function aceitarArquivos(novos) {
   erro.value = ''
   const cabem = TETO_ANEXOS - arquivos.value.length
   if (novos.length > cabem) {
@@ -610,7 +614,46 @@ function escolherArquivo(evento) {
     aceitos.push(f)
   }
   arquivos.value = [...arquivos.value, ...aceitos]
+}
+
+function escolherArquivo(evento) {
+  aceitarArquivos(Array.from(evento.target.files || []))
   evento.target.value = ''
+}
+
+/* ⚠️ CONTADO, não ligado/desligado: `dragleave` dispara ao passar de um filho
+   para outro dentro da mesma área, e um booleano faria a camada piscar. */
+const arrastando = ref(0)
+
+function temArquivoNoArraste(evento) {
+  return Array.from(evento.dataTransfer?.types || []).includes('Files')
+}
+
+function aoArrastarEntrar(evento) {
+  if (!sala.value || !temArquivoNoArraste(evento)) return
+  evento.preventDefault()
+  arrastando.value += 1
+}
+
+function aoArrastarSobre(evento) {
+  if (!sala.value || !temArquivoNoArraste(evento)) return
+  /* Sem isto o navegador ABRE o arquivo na aba e o chat some da frente. */
+  evento.preventDefault()
+  if (evento.dataTransfer) evento.dataTransfer.dropEffect = 'copy'
+}
+
+function aoArrastarSair() {
+  if (arrastando.value > 0) arrastando.value -= 1
+}
+
+function aoSoltarArquivos(evento) {
+  if (!sala.value) return
+  evento.preventDefault()
+  arrastando.value = 0
+  const soltos = Array.from(evento.dataTransfer?.files || [])
+  if (!soltos.length) return
+  aceitarArquivos(soltos)
+  nextTick(() => campoTexto.value?.focus())
 }
 
 function limparArquivo(indice) {
@@ -1187,7 +1230,7 @@ function quando(iso) {
                 <template v-else>{{ iniciais(sl.com) }}</template>
                 <span class="ci__estado"
                       :style="{ background: corDoEstado(sl.com_estado) }"
-                      :title="rotuloDoEstado(sl.com_estado, { automatico: sl.com_estado_auto, emJornada: sl.com_em_jornada })"></span>
+                      :title="`${rotuloDoEstado(sl.com_estado, { automatico: sl.com_estado_auto, emJornada: sl.com_em_jornada })} ${tempoNoEstado(sl.com_estado_minutos)}`.trim()"></span>
               </span>
               <span class="ci__corpo">
                 <span class="ci__topo1">
@@ -1251,8 +1294,15 @@ function quando(iso) {
               </span>
               <span class="ci__corpo">
                 <span class="ci__nome">{{ c.nome }}</span>
+                <!-- 🔵 13/11: o estado E HA QUANTO TEMPO ele vale. A pergunta
+                     que se faz antes de chamar alguem nao e so "qual o status",
+                     e "adianta chamar AGORA" -- e "em pausa ha 3h" responde
+                     isso, enquanto "em pausa" sozinho nao. -->
                 <span class="ci__previa pequeno apagado">
                   {{ rotuloDoEstado(c.estado) }}
+                  <span v-if="tempoNoEstado(c.estado_minutos)">
+                    {{ tempoNoEstado(c.estado_minutos) }}
+                  </span>
                 </span>
               </span>
             </button>
@@ -1403,7 +1453,22 @@ function quando(iso) {
             <p v-else class="apagado pequeno">Todo mundo já está no grupo.</p>
           </div>
 
-          <div ref="baloes" class="baloes">
+          <!-- 🔵 13/11: a sala inteira recebe o arrasto. ⚠️ `.prevent` no
+               `dragover` é obrigatório: sem ele o navegador abre o arquivo numa
+               aba e o chat desaparece. -->
+          <div
+            ref="baloes"
+            class="baloes"
+            :class="{ 'baloes--arrastando': arrastando > 0 }"
+            @dragenter="aoArrastarEntrar"
+            @dragover="aoArrastarSobre"
+            @dragleave="aoArrastarSair"
+            @drop="aoSoltarArquivos"
+          >
+            <div v-if="arrastando > 0" class="solte" aria-hidden="true">
+              <i class="bi bi-paperclip"></i>
+              <span>Solte para anexar — o envio continua sendo o botão</span>
+            </div>
             <p v-if="!mensagens.length" class="apagado pequeno cartao__corpo">
               Nenhuma mensagem ainda. Escreva a primeira.
             </p>
@@ -2061,6 +2126,8 @@ function quando(iso) {
 }
 
 .baloes {
+  /* 13/11: a camada de arrastar e absoluta dentro desta area. */
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: var(--e-2);
@@ -2068,6 +2135,33 @@ function quando(iso) {
   max-height: 52vh;
   overflow-y: auto;
 }
+
+/* 13/11: o alvo do arrasto -- a borda tracejada e o sinal de "solte aqui" que
+   o navegador nao da sozinho. Mesma forma da Caixa de entrada, de proposito:
+   mesmo gesto, mesmo desenho. */
+.baloes--arrastando {
+  outline: 2px dashed var(--acento);
+  outline-offset: -4px;
+}
+
+.solte {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--e-2);
+  background: color-mix(in srgb, var(--superficie) 88%, transparent);
+  color: var(--texto);
+  font-weight: 600;
+  text-align: center;
+  padding: var(--e-4);
+  pointer-events: none;
+}
+
+.solte .bi { font-size: 2rem; }
 /* 🔵 25/09 (item G): visual igual ao da Caixa de entrada, pedido dele --
    "ajustar o painel interno visualmente igual ao do externo e as
    confirmações de envio e leitura tbm". Isto substitui a cor de acento

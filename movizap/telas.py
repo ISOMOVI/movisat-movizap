@@ -733,12 +733,24 @@ TELAS = [
         # Aqui não tranca: a TEC_1.1 é `atendimento` e abre para todos. O que
         # falta a quem não tem esta chave são os BOTÕES, e a tela diz em texto
         # o que acontece -- não quem decidiu.
+        # 🔵 13/11, DECISÃO DELE: *"a aba 'tecnicos' do MoviZap precisa aparecer
+        # para todos e todos ter permissão de editar as fichas dos técnicos,
+        # bem como o botão '+ novo tecnico'"* -- e, perguntado sobre o alcance,
+        # *"sim, todos editam tudo"*.
+        #
+        # 🚨 O QUE ISSO ABRE, POR ESCRITO: todo atendente passa a poder mexer no
+        # PREÇO DE CUSTO do técnico, credenciar e criar técnico novo. Era de
+        # owner e admin (`equipe`) desde 04/11, pela regra dele de então: *"Ler
+        # todo atendente, escrever owner e admin"*. A decisão de hoje substitui
+        # aquela -- não é engano, é troca com autorização.
+        # ⚠️ A chave CONTINUA existindo: ela é o código que as rotas de escrita
+        # exigem. O que mudou foi quem a tem.
         "codigo": "TEC_1.2",
         "titulo": "Credenciamento de técnicos",
         "rota": "/tecnicos/credenciar",
         "icone": "bi-patch-check",
         "descricao": "Quem pode cadastrar técnico, mexer no valor dos serviços e credenciar.",
-        "permissao": "equipe",
+        "permissao": "atendimento",
         "grupo": "Atendimento",
         "fase": 1,
         "aba_de": "TEC_1.1",

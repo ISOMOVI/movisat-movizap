@@ -75,6 +75,17 @@ def config_falsa(monkeypatch, **extra):
 _seq = [0]
 
 
+def dar_login(aid, quando):
+    """Carimba `logou_em` (migracao 109) na hora que o teste quiser.
+
+    🔵 13/11: a borda da jornada deixou de acordar quem nao logou -- *"o foco
+    e evitar enviar conversa para operadora que nao logou hoje"*. Sem este
+    carimbo, todo teste de borda passaria a provar o caso "nao logou".
+    """
+    banco.executar("UPDATE atendente SET logou_em = %s WHERE id = %s",
+                   (quando, aid))
+
+
 def novo_atendente(parado_ha_min=None, estado="disponivel", automatico=False):
     _seq[0] += 1
     a = operacao.criar_atendente(f"Zz Pres {_seq[0]}", f"{LOGIN}{_seq[0]}",
@@ -584,8 +595,10 @@ class TestJornadaControlaEstado:
 
     def test_o_inicio_do_turno_poe_disponivel_e_zera_o_relogio(self):
         # Entrou a noite offline/parado; ao cruzar as 08:00, volta disponível.
+        # 🔵 13/11: **e logou hoje** -- sem isso a borda nao acorda mais ninguem.
         aid = novo_atendente(parado_ha_min=600, estado="offline", automatico=True)
         _dar_jornada(aid, _SEG)
+        dar_login(aid, _INICIO_Z - timedelta(minutes=10))
         r = presenca.aplicar_jornada(agora=_INICIO_Z, desde=_INICIO_Z - _UM_MIN,
                                      forcar=True, somente=[aid])
         assert aid in r["ligados"]
@@ -593,6 +606,33 @@ class TestJornadaControlaEstado:
         # Relógio zerado: a inatividade logo depois NÃO o derruba.
         r2 = presenca.aplicar_regra(agora=_INICIO_Z, forcar=True, somente=[aid])
         assert aid not in r2["offline"] and aid not in r2["ausentes"]
+
+    def test_quem_NAO_logou_hoje_nao_e_acordado_pela_borda(self):
+        """🔵 13/11, DECISAO DELE: *"a regra precisa verificar se esta logada de
+        fato"*.
+
+        🚨 ESTE E O CASO QUE ELE VIU NA TELA: a Ludmila faltou e apareceu
+        online assim mesmo, porque a borda das 08:00 punha `disponivel` em todo
+        mundo que tinha jornada cadastrada. Agora nao poe -- e e este teste que
+        impede a regra de voltar.
+        """
+        aid = novo_atendente(parado_ha_min=600, estado="offline", automatico=True)
+        _dar_jornada(aid, _SEG)
+        # Sem `dar_login`: `logou_em` NULO, que e "nao logou desde a 109".
+        r = presenca.aplicar_jornada(agora=_INICIO_Z, desde=_INICIO_Z - _UM_MIN,
+                                     forcar=True, somente=[aid])
+        assert aid not in r["ligados"]
+        assert estado_de(aid)["estado"] == "offline"
+
+    def test_quem_logou_ONTEM_tambem_nao_e_acordado(self):
+        """⚠️ O token do MoviZap morre na virada do dia: login de ontem nao e
+        sessao de hoje. Sem esta trava, bastaria ter logado uma vez na vida."""
+        aid = novo_atendente(parado_ha_min=600, estado="offline", automatico=True)
+        _dar_jornada(aid, _SEG)
+        dar_login(aid, _INICIO_Z - timedelta(days=1))
+        r = presenca.aplicar_jornada(agora=_INICIO_Z, desde=_INICIO_Z - _UM_MIN,
+                                     forcar=True, somente=[aid])
+        assert aid not in r["ligados"]
 
     def test_o_fim_do_turno_poe_offline(self):
         aid = novo_atendente(estado="disponivel")

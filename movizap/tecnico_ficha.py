@@ -403,17 +403,34 @@ def _solicitacao(solicitacao_id) -> dict | None:
 
 
 def _e_tecnico(contato_id: int) -> None:
-    linha = banco.um("SELECT relacao FROM contato WHERE id = %s", (contato_id,))
+    """Garante que este contato é do tipo técnico — PROMOVENDO, se preciso.
+
+    🔵 13/11, DECISÃO DELE: *"os telefones da ficha dos técnicos já mudam o tipo
+    no MoviZap automaticamente quando cadastrado"*.
+
+    🚨 ISTO SUBSTITUI, COM AUTORIZAÇÃO, A REGRA DE 04/11, que era o oposto: a
+    ficha RECUSAVA contato de outro tipo, e o comentário dizia *"criar ficha de
+    técnico em cima de um contato de cliente mudaria o tipo dele pela porta de
+    trás"*. A porta de trás virou a porta da frente por pedido dele — está
+    escrito aqui para ninguém "consertar" de volta achando que é engano.
+    🚨 E a varredura de vínculo (`tecnico_vinculo`) CONTINUA sem mexer no tipo:
+    ela é automática e sem autor. Aqui há gente clicando, e fica no log.
+
+    ⚠️ O QUE ISSO CUSTA: quem tem a `TEC_1.2` (desde hoje, todo atendente) passa
+    a poder transformar um contato de cliente em técnico abrindo a ficha dele.
+    Contato que vira técnico sai das listas de cliente — é mudança de regra de
+    negócio, não de etiqueta.
+    """
+    linha = banco.um("SELECT relacao, nome FROM contato WHERE id = %s",
+                     (contato_id,))
     if not linha:
         raise DadoInvalido("Contato não encontrado.")
     if linha["relacao"] != "tecnico":
-        # 🚨 A FICHA NÃO MUDA O TIPO DO CONTATO. Quem é técnico se decide na
-        # ficha da conversa (`PUT /api/conversas/{id}/tipo`), e essa decisão
-        # tem travas próprias — criar ficha de técnico em cima de um contato
-        # de cliente mudaria o tipo dele pela porta de trás.
-        raise DadoInvalido(
-            "Este contato não é do tipo técnico. Mude o tipo na ficha da "
-            "conversa antes de credenciar.")
+        banco.executar(
+            "UPDATE contato SET relacao = 'tecnico', atualizado_em = now() "
+            " WHERE id = %s", (contato_id,))
+        log.info("contato %s (%s) virou tecnico: era %r e ganhou ficha",
+                 contato_id, linha["nome"], linha["relacao"])
 
 
 def salvar(contato_id: int, dados: dict) -> dict:

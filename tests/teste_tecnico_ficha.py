@@ -274,15 +274,19 @@ class TestFicha:
             f"{sorted(tecnico_ficha.FORMAS_DE_PAGAMENTO)}")
         assert campo["rotulo"] == "Forma de pagamento"
 
-    def test_a_ficha_nao_muda_o_tipo_do_contato(self, base):
-        """🚨 Quem é técnico se decide na ficha da conversa, que tem travas
-        próprias. Criar ficha em cima de um contato de cliente mudaria o tipo
-        dele pela porta de trás."""
-        with pytest.raises(DadoInvalido) as e:
-            tecnico_ficha.salvar(base["nao_tecnico"], {"cidade": "Presidente Prudente"})
-        assert "não é do tipo técnico" in str(e.value)
+    def test_a_ficha_MUDA_o_tipo_do_contato(self, base):
+        """🔵 13/11, DECISAO DELE: *"os telefones da ficha dos tecnicos ja
+        mudam o tipo no MoviZap automaticamente quando cadastrado"*.
+
+        🚨 ESTE TESTE TROCOU DE SINAL COM AUTORIZACAO. Ate 04/11 ele guardava o
+        oposto -- a ficha RECUSAVA contato de outro tipo, *"senao mudaria o tipo
+        dele pela porta de tras"*. A porta de tras virou a porta da frente por
+        pedido dele, e o teste tem de dizer isso, senao o proximo que passar por
+        aqui "conserta" o codigo achando que e defeito.
+        """
+        tecnico_ficha.salvar(base["nao_tecnico"], {"cidade": "Presidente Prudente"})
         assert banco.um("SELECT relacao FROM contato WHERE id = %s",
-                        (base["nao_tecnico"],))["relacao"] == "cliente"
+                        (base["nao_tecnico"],))["relacao"] == "tecnico"
 
     def test_contato_inexistente_recusa(self):
         with pytest.raises(DadoInvalido):
@@ -762,27 +766,40 @@ class TestRotas:
         assert resposta.json()["precos"]
 
     @pytest.mark.parametrize("metodo,caminho,corpo", [
+        # ⚠️ CORPO INVALIDO E ALVO INEXISTENTE DE PROPOSITO. O que se prova aqui
+        # e que a PERMISSAO deixou passar -- e ela e conferida ANTES do corpo e
+        # antes do banco. Com corpo valido, este teste criaria tecnico e servico
+        # DE VERDADE: a suite roda no banco de producao, e teste que suja
+        # producao para provar permissao e pior que nao ter o teste.
+        # Sem telefone -> 422, que so acontece DEPOIS da permissao passar.
         ("post", "/api/tecnicos", {"nome": "Zz Teste Tecnico Intruso"}),
-        ("put", "/api/tecnicos/{id}", {"cidade": "Lugar Nenhum"}),
-        ("put", "/api/tecnicos/{id}/precos", {"precos": {}}),
-        ("put", "/api/tecnicos/{id}/estado", {"estado": "credenciado"}),
-        ("post", "/api/tecnicos/servicos", {"nome": "Zz Servico De Teste Intruso"}),
-        # ⚠️ Id inexistente de propósito: a permissão é conferida ANTES do
-        # corpo, então o 403 se prova sem apontar para um serviço real. Com
-        # `1` aqui, este teste renomearia "Instalação" no dia em que a trava
-        # falhasse — e um teste que estraga produção quando acha o defeito é
-        # pior que não ter o teste.
+        ("put", "/api/tecnicos/0", {"cidade": "Lugar Nenhum"}),
+        ("put", "/api/tecnicos/0/precos", {"precos": {}}),
+        ("put", "/api/tecnicos/0/estado", {"estado": "credenciado"}),
+        # Nome de uma letra -> 422 pelo `min_length`, sem criar servico nenhum.
+        ("post", "/api/tecnicos/servicos", {"nome": "Z"}),
         ("put", "/api/tecnicos/servicos/999999", {"nome": "Zz Servico De Teste Intruso",
                                                   "ordem": 1, "ativo": True}),
     ])
-    def test_atendente_NAO_ESCREVE_nada(self, cliente, token_atendente, base,
-                                        metodo, caminho, corpo):
-        """🚨 A metade que decide. *"Ler todo atendente, escrever owner e
-        admin"* — e é aqui que isso ou é verdade ou não é."""
+    def test_atendente_AGORA_ESCREVE(self, cliente, token_atendente, base,
+                                     metodo, caminho, corpo):
+        """🔵 13/11, DECISAO DELE: *"a aba 'tecnicos' do MoviZap precisa
+        aparecer para todos e todos ter permissao de editar as fichas dos
+        tecnicos, bem como o botao '+ novo tecnico'"* e, sobre o alcance,
+        *"sim, todos editam tudo"*.
+
+        🚨 ESTE TESTE TROCOU DE SINAL COM AUTORIZACAO. Ate 13/11 ele guardava
+        a regra de 04/11 (*"Ler todo atendente, escrever owner e admin"*), e a
+        `TEC_1.2` era `equipe`. Agora ela e `atendimento`: o que se exige aqui e
+        que o atendente comum NAO tome mais 403.
+
+        ⚠️ O QUE ISSO ABRE, POR ESCRITO: preco de custo, credenciamento e
+        criacao de tecnico passam a ser de todo atendente.
+        """
         resposta = getattr(cliente, metodo)(
             caminho.format(id=base["tecnico"]), json=corpo,
             headers={"Authorization": f"Bearer {token_atendente}"})
-        assert resposta.status_code == 403, f"{metodo} {caminho} passou!"
+        assert resposta.status_code != 403, f"{metodo} {caminho} ainda barra!"
 
     def test_o_intruso_nao_deixou_rastro(self):
         """⚠️ 403 que grava é pior que 500: prova que nada entrou."""

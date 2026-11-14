@@ -719,10 +719,33 @@ def listar_solicitacoes(slug: str | None = None, estado: str | None = None,
                    f.slug, f.titulo, f.setor,
                    a.nome AS lida_por_nome, s.lida_em,
                    (SELECT count(*) FROM formulario_arquivo x
-                     WHERE x.solicitacao_id = s.id) AS anexos
+                     WHERE x.solicitacao_id = s.id) AS anexos,
+                   -- 🔵 13/11: O CARD QUE NASCEU, na mesma linha da
+                   -- solicitação. Dele: *"a entrada dos cards pode ser
+                   -- convertida em um grid de visualização na tela mesmo, para
+                   -- quando eu quiser"*.
+                   -- 🚨 É ISSO QUE O SELO NUNCA DISSE: desde a migração 106 o
+                   -- envio abre card, e a solicitação e o card viviam em telas
+                   -- diferentes, sem nada ligando os dois no olho. Card que não
+                   -- nasceu (o `try` do envio engole o erro de propósito) fica
+                   -- NULO aqui -- e é assim que ele aparece.
+                   c.id   AS card_id,
+                   e.titulo AS card_etapa,
+                   ab.titulo AS card_aba,
+                   ab.codigo_tela AS card_tela
               FROM formulario_solicitacao s
               JOIN formulario f ON f.id = s.formulario_id
               LEFT JOIN atendente a ON a.id = s.lida_por
+              -- ⚠️ LATERAL com LIMIT 1: uma solicitação pode ter mais de um
+              -- card se alguém regerar, e o grid mostra o primeiro -- somar ou
+              -- repetir a linha faria a contagem da tela discordar da lista.
+              LEFT JOIN LATERAL (
+                    SELECT p.id, p.etapa_id FROM pipeline_card p
+                     WHERE p.solicitacao_id = s.id
+                     ORDER BY p.id LIMIT 1
+              ) c ON true
+              LEFT JOIN pipeline_etapa e ON e.id = c.etapa_id
+              LEFT JOIN painel_aba ab ON ab.id = e.aba_id
              WHERE {' AND '.join(where)}
              ORDER BY s.id DESC
              LIMIT %s""", tuple(params))

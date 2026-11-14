@@ -3581,3 +3581,77 @@ assina.
 `idx_convite_da_conversa (conversa_id, criado_em DESC) WHERE conversa_id IS NOT
 NULL` — a pergunta da tela do chat: *"quais convites desta conversa?"*. A busca
 pelo bilhete usa o `UNIQUE`.
+
+
+---
+
+## 🆕 109 — o login do dia, a hora do estado e a memória do agente (13/11)
+
+🔵 Três pedidos dele no mesmo dia: *"a regra precisa verificar se está logada de
+fato"*, *"status a x minutos"* no chat interno, e *"coletar IP e quando eles
+atualizarem ou mudar a pasta não perdermos de vista"*.
+
+### `atendente.logou_em` — o login vira fato gravado
+
+🚨 **Até 13/11 o sistema não sabia quem tinha logado.** O token é JWT e morre na
+virada do dia; não existe tabela de sessão. O único sinal de presença era o
+`painel_visto_em` (migração 067), que prova **aba aberta, não pessoa** — medido
+no dia: o carimbo de quem estava **afastada** era de um minuto antes, com a
+máquina ligada e ninguém na frente.
+
+Quem carimba é `presenca.registrar_login`, nos **dois** caminhos de entrada
+(senha e Google). Dentro da jornada o login põe `disponivel`; **fora do turno
+só carimba a hora** — decisão dele: *"logar fora do turno não disponibiliza
+status e nem conversas"*.
+
+⚠️ **Nulo quer dizer "não logou desde a migração"**, e a fila lê isso como "não
+logou hoje". Quem já estava dentro no dia da migração foi carimbado uma vez a
+partir de `painel_visto_em` — um painel que falou hoje só pode estar usando um
+token de hoje.
+
+**Quem lê:** `presenca.logaram_hoje` (a trava da fila, no lugar de "o painel
+está aberto") e a borda de início da jornada, que deixou de acordar quem não
+logou.
+
+### `atendente.estado_em` — a hora em que o estado mudou
+
+Alimenta o *"ausente há 30min"* do chat interno (`chat.minutos_no_estado`).
+
+🚨 **Por que coluna nova e não `atualizado_em`:** aquela é carimbada por nome,
+foto, times e afastamento — usá-la faria a tela dizer "online há 2min" porque
+alguém salvou o cadastro da pessoa. Carimbam-na todos os caminhos que escrevem
+`estado`: borda da jornada, régua de inatividade, curativo, escolha manual,
+afastamento e retorno, e o login.
+
+⚠️ **Só muda quando o estado muda.** Em `registrar_acao` e no retorno de
+afastamento a hora é condicional (`IS DISTINCT FROM`), senão cada mensagem
+enviada reiniciaria o relógio de quem já estava disponível.
+
+### `config.distribuicao_ordem` — a fila vira cadeia
+
+A ordem como lista (`"28581,123,124"` = Ludmila, Erika, Claudia), no lugar dos
+dois campos. 🚨 **`distribuicao_primeiro` e `distribuicao_reserva` continuam
+existindo e continuam sendo escritos pela tela de hoje**: a lista nasce deles
+quando está vazia, e `definir_config` **preserva a cauda** ao salvar — sem isso,
+salvar na tela antiga apagaria o terceiro nome em silêncio.
+
+### `config.ligacoes_senha_fixa` — o atalho do alistamento
+
+A senha padrão (`movicall`) aceita **além** da derivada por HMAC, que continua
+valendo. ⚠️ **Não queima janela**, senão o primeiro PC a usá-la trancaria os
+outros. 🚨 Custo declarado por ele: quem souber a senha e um ramal alista um PC
+naquele ramal; limite de tentativas por IP e certificado do PC continuam de pé.
+
+### `agente_ligacao_evento` — o que mudou no PC do ramal
+
+`agente_id` · `criado_em` · `campo` (`versao`, `pasta`, `ip`, `pc`) ·
+`valor_antes` · `valor_depois`.
+
+🚨 **Só mudança, nunca batimento.** A linha do agente guarda apenas o último
+valor de cada coisa: trocar a pasta de gravação apagava o caminho antigo e, com
+ele, a chance de achar as gravações que ficaram lá. São 8 agentes falando 2× por
+dia — gravar cada passada seria ruído escondendo as poucas linhas que importam.
+
+⚠️ **`None` não é mudança:** o agente 0.4 não manda pasta nem versão nova, e o
+`COALESCE` do batimento preserva o que havia; anotar aqui criaria uma "mudança
+para vazio" que nunca aconteceu. 📏 Em 13/11, **7 dos 8 agentes estavam na 0.4**.

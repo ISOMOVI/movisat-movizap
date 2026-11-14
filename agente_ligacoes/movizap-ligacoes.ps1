@@ -1,4 +1,4 @@
-<#
+﻿<#
   MoviZap - Ligacoes  |  agente do MicroSIP  |  versao 0.6 (19/10/2026)
   --------------------------------------------------------------------------
   Le as gravacoes e o historico do MicroSIP deste PC e sobe para a VPS o que
@@ -63,7 +63,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$VERSAO = '0.7'
+$VERSAO = '0.8'
 $AQUI = Split-Path -Parent $MyInvocation.MyCommand.Path
 $RELATORIO = Join-Path $AQUI 'relatorio-simulacao.txt'
 $DADOS = if ($PastaDados) { $PastaDados } else { Join-Path $env:LOCALAPPDATA 'MoviZapLigacoes' }

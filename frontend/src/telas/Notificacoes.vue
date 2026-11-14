@@ -28,13 +28,11 @@ async function ativarBalao() {
 
 const souOwner = computed(() => Boolean(sessao.usuario?.owner))
 
-/* 🔵 22/10: o aviso de solicitação de formulário, por pessoa -- como o tom
-   e o volume. ⚠️ O interruptor só aparece para quem TEM a FRM_1.1: esconder
-   um selo é uma coisa, oferecer ajuste de um aviso que nunca vai chegar seria
-   a tela mentindo. E nasce LIGADO, porque o aviso é o que ele pediu. */
-const temSolicitacoes = computed(
-  () => (sessao.telas || []).some((t) => t.codigo === 'FRM_1.1'))
-const avisoSolicitacao = ref(true)
+/* 🔵 13/11: o aviso de solicitação de formulário SAIU -- selo e interruptor.
+   Decisão dele: *"já abrem card ... como ela é só owner, não preciso disso"*.
+   ⚠️ A rota `/api/eu/aviso-solicitacao` continua no backend por enquanto, para
+   não dar 404 em aba que já estava aberta na hora da publicação; ela não tem
+   mais leitor e sai na próxima limpeza. */
 /* 🔵 28/10: o aviso de NOTA INTERNA do colega. Nasce `true` porque ele pediu o
    recurso -- e o estado de verdade vem de `/api/eu/avisos` no `onMounted`, para
    a tela não mostrar "Avisar" a quem desligou. */
@@ -55,22 +53,6 @@ async function alternarAvisoNota() {
   }
 }
 
-async function alternarAvisoSolicitacao() {
-  salvando.value = true
-  erro.value = ''
-  recado.value = ''
-  try {
-    const r = await api.put('/api/eu/aviso-solicitacao',
-                            { ligado: !avisoSolicitacao.value })
-    avisoSolicitacao.value = r.aviso_solicitacao
-    if (r.aviso_nota !== undefined) avisoNota.value = r.aviso_nota
-    recado.value = 'Salvo.'
-  } catch (e) {
-    erro.value = e instanceof ErroDeApi ? e.message : 'Não consegui salvar.'
-  } finally {
-    salvando.value = false
-  }
-}
 const minha = ref(null)
 const equipe = ref([])
 const erro = ref('')
@@ -236,21 +218,14 @@ async function alternarPessoa(p) {
            ⚠️ Só aparece para quem TEM a tela: o interruptor esconde um selo,
            nunca dá acesso. Quem não tem a FRM_1.1 recebe zero de qualquer
            forma, e ver aqui um aviso que nunca vai chegar seria `M12`. -->
-      <section v-if="temSolicitacoes" class="cartao tela__bloco">
-        <div class="cartao__corpo pilha">
-          <h2 class="cartao__titulo">Solicitações de formulário</h2>
-          <label class="interruptor">
-            <input type="checkbox" :checked="avisoSolicitacao"
-                   :disabled="salvando" @change="alternarAvisoSolicitacao" />
-            <span>{{ avisoSolicitacao ? 'Avisar' : 'Não avisar' }}</span>
-          </label>
-          <p class="apagado pequeno">
-            Ligado, o menu mostra quantas solicitações chegaram pelos
-            formulários e ainda estão como novas. Desligado, o número não
-            aparece para você — a tela Solicitações continua lá.
-          </p>
-        </div>
-      </section>
+      <!-- 🔵 13/11, DELE: *"a aba Solicitações continua gerando ícone de
+           notificação de novos formulários, o que não precisa, pois já abrem
+           card. Como ela é só owner, não preciso saber disso."*
+
+           🚨 O INTERRUPTOR SAIU PORQUE O SELO SAIU. Interruptor de um aviso que
+           não existe mais é tela que mente (`M12`): a pessoa marca "Avisar" e
+           nada acontece, para sempre. A entrada das solicitações agora se vê no
+           GRID da própria tela de Solicitações, quando ele quiser. -->
 
       <!-- 🔵 28/10: o aviso de NOTA INTERNA. Cartão próprio, porque é outro
            evento: o de cima é o cliente, este é um colega. -->

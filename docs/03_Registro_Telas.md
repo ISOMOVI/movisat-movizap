@@ -212,7 +212,7 @@ e duplicá-los quebraria a tela quando o tema mudar.
 | `CFG_17.1` | Checklist de Cards | `/config/checklist-de-cards` | `owner` | 1 |
 | `CFG_16.1` | Disparos Operação | `/config/disparos-operacao` | `owner` | 1 |
 | `TEC_1.1` | Técnicos | `/tecnicos` | `atendimento` | 1 |
-| `TEC_1.2` | Credenciamento de técnicos | `/tecnicos/credenciar` | `equipe` | 1 |
+| `TEC_1.2` | Credenciamento de técnicos | `/tecnicos/credenciar` | `atendimento` | 1 |
 | `REL_1.1` | Relatórios | `/relatorios` | `owner` | 3 |
 
 🚨 **AS SEIS TELAS `CFG_*` SÃO ABAS DA `CFG_0.1` DESDE 27/08** (decisão do

@@ -294,6 +294,16 @@ def registrar_acao(atendente_id: int | None) -> None:
                                   AND ({_DENTRO_DA_JORNADA})
                                   THEN 'disponivel'
                              ELSE estado END,
+                  -- ⚠️ `IS DISTINCT FROM` e nao `<>`: a hora so muda quando o
+                  -- estado muda de verdade, senao a tela diria "online ha 1min"
+                  -- a cada mensagem enviada por quem ja estava disponivel.
+                  estado_em = CASE
+                             WHEN estado IS DISTINCT FROM 'disponivel'
+                                  AND (estado_automatico
+                                       OR (estado = 'offline'
+                                           AND afastamento_motivo IS NULL
+                                           AND ({_DENTRO_DA_JORNADA})))
+                             THEN now() ELSE estado_em END,
                   estado_automatico = false
             WHERE id = %(id)s""",
         {"id": atendente_id, "agora": datetime.now(timezone.utc)})
@@ -351,6 +361,7 @@ def definir_estado_manual(atendente_id: int, estado: str) -> None:
     banco.executar(
         """UPDATE atendente
               SET estado = %s, estado_automatico = false,
+                  estado_em = now(),
                   ultima_acao_em = now(), atualizado_em = now()
             WHERE id = %s""", (estado, atendente_id))
 
@@ -431,7 +442,7 @@ def aplicar_regra(agora: datetime | None = None, forcar: bool = False,
         cur.execute(
             f"""UPDATE atendente
                   SET estado = 'offline', estado_automatico = true,
-                      atualizado_em = now()
+                      estado_em = now(), atualizado_em = now()
                 WHERE ativo AND estado <> 'offline'
                   AND ultima_acao_em < %(agora)s - make_interval(mins => %(mins)s)
                   AND NOT (id = ANY(%(protegidos)s::bigint[]))
@@ -459,7 +470,7 @@ def aplicar_regra(agora: datetime | None = None, forcar: bool = False,
         cur.execute(
             f"""UPDATE atendente
                   SET estado = 'disponivel', estado_automatico = true,
-                      atualizado_em = now()
+                      estado_em = now(), atualizado_em = now()
                 WHERE ativo AND estado = 'offline'
                   AND afastamento_motivo IS NULL
                   AND (%(somente)s::bigint[] IS NULL OR id = ANY(%(somente)s::bigint[]))
@@ -469,7 +480,7 @@ def aplicar_regra(agora: datetime | None = None, forcar: bool = False,
         cur.execute(
             """UPDATE atendente
                   SET estado = 'ausente', estado_automatico = true,
-                      atualizado_em = now()
+                      estado_em = now(), atualizado_em = now()
                 WHERE ativo AND estado = 'disponivel'
                   AND ultima_acao_em < %s - make_interval(mins => %s)
                   AND NOT (id = ANY(%s::bigint[]))
@@ -521,11 +532,25 @@ WITH alvo AS (
      -- offline de novo. Com "dentro da jornada nunca vai a offline", ela deixou
      -- de corrigir -- e o afastado ficaria `disponivel` o dia inteiro.
      AND a.afastamento_motivo IS NULL
+     -- 🔵 13/11, DECISAO DELE: *"a regra precisa verificar se esta logada de
+     -- fato"* e *"o foco e evitar enviar conversa para operadora que nao logou
+     -- hoje"*. Ate aqui a borda punha DISPONIVEL todo mundo que tinha jornada,
+     -- tivesse aberto o painel ou nao -- foi assim que a Ludmila apareceu
+     -- online no dia em que faltou.
+     -- 🚨 LOGOU HOJE, NO FUSO DA PESSOA. Comparar em UTC erraria por 3 h, o
+     -- mesmo tropeco que `em_jornada` teve em 24/09.
+     -- ⚠️ `logou_em` NULO e "nao logou": a coluna nasceu na migracao 109, entao
+     -- quem nunca logou desde ela fica de fora ate logar. Errar para este lado
+     -- e o pedido dele; o contrario poria online quem nunca apareceu.
+     AND a.logou_em IS NOT NULL
+     AND (a.logou_em AT TIME ZONE {_FUSO})::date
+         = (%(agora)s AT TIME ZONE {_FUSO})::date
      AND (%(somente)s::bigint[] IS NULL OR a.id = ANY(%(somente)s::bigint[]))
    GROUP BY a.id
 )
 UPDATE atendente a
    SET estado = 'disponivel', estado_automatico = true,
+       estado_em = now(),
        ultima_acao_em = %(agora)s, atualizado_em = now()
   FROM alvo
  WHERE a.id = alvo.id
@@ -548,7 +573,8 @@ WITH alvo AS (
    GROUP BY a.id
 )
 UPDATE atendente a
-   SET estado = 'offline', estado_automatico = true, atualizado_em = now()
+   SET estado = 'offline', estado_automatico = true,
+       estado_em = now(), atualizado_em = now()
   FROM alvo
  WHERE a.id = alvo.id
    AND a.estado <> 'offline'
@@ -636,6 +662,73 @@ def conversas_abertas(atendente_id: int) -> list[int]:
         """SELECT id FROM conversa
             WHERE atendente_id = %s AND estado <> 'resolvida'
             ORDER BY id""", (atendente_id,))]
+
+
+# 🔵 13/11 — O LOGIN DE VERDADE, pedido dele: *"logado e logado"* e *"o foco e
+# evitar enviar conversa para operadora que nao logou hoje"*.
+#
+# 🚨 POR QUE ISTO PRECISOU NASCER: ate 13/11 o sistema nao sabia quem tinha
+# logado. O token e JWT (morre na virada do dia) e nao ha tabela de sessao; o
+# unico sinal era o `painel_visto_em`, que prova ABA ABERTA e nao pessoa --
+# medido no dia: o carimbo dela era de um minuto antes, AFASTADA, com a maquina
+# ligada e ninguem na frente.
+
+def registrar_login(atendente_id: int | None) -> None:
+    """Esta pessoa ACABOU de entrar no painel.
+
+    🚨 CARIMBA SEMPRE, MAS SO LIGA DENTRO DA JORNADA. Fora do turno o login nao
+    poe ninguem disponivel nem faz chegar conversa -- decisao dele, 13/11:
+    *"se ela alterar a jornada e logar, ok. Se nao, nao"*.
+
+    ⚠️ AFASTADO NAO VOLTA POR LOGAR. Quem esta de ferias continua logando -- e
+    o caminho do `definir_minha_volta` -- e por aqui segue offline.
+    """
+    if not atendente_id:
+        return
+    banco.executar(
+        f"""UPDATE atendente
+              SET logou_em = now(),
+                  estado = CASE
+                             WHEN afastamento_motivo IS NULL
+                                  AND ({_DENTRO_DA_JORNADA})
+                             THEN 'disponivel' ELSE estado END,
+                  estado_em = CASE
+                             WHEN afastamento_motivo IS NULL
+                                  AND ({_DENTRO_DA_JORNADA})
+                                  AND estado IS DISTINCT FROM 'disponivel'
+                             THEN now() ELSE estado_em END,
+                  estado_automatico = CASE
+                             WHEN afastamento_motivo IS NULL
+                                  AND ({_DENTRO_DA_JORNADA})
+                             THEN true ELSE estado_automatico END,
+                  ultima_acao_em = CASE
+                             WHEN afastamento_motivo IS NULL
+                                  AND ({_DENTRO_DA_JORNADA})
+                             THEN now() ELSE ultima_acao_em END,
+                  atualizado_em = now()
+            WHERE id = %(id)s""",
+        {"id": atendente_id, "agora": datetime.now(timezone.utc)})
+
+
+def logaram_hoje(ids) -> set[int]:
+    """Quais destes atendentes logaram HOJE -- em uma consulta so.
+
+    🚨 E A TRAVA DA FILA desde 13/11, no lugar de "o painel esta aberto". A
+    pergunta mudou porque a resposta antiga era a ABA, e nao a pessoa.
+
+    ⚠️ HOJE E NO FUSO DE CADA UM (`atendente.fuso`), como todo o resto deste
+    modulo. `logou_em IS NULL` conta como NAO LOGOU.
+    """
+    ids = [int(i) for i in ids if i]
+    if not ids:
+        return set()
+    return {r["id"] for r in banco.varios(
+        """SELECT id FROM atendente
+            WHERE id = ANY(%s)
+              AND logou_em IS NOT NULL
+              AND (logou_em AT TIME ZONE COALESCE(fuso, 'America/Sao_Paulo'))::date
+                  = (now() AT TIME ZONE COALESCE(fuso, 'America/Sao_Paulo'))::date""",
+        (ids,))}
 
 
 def painel_aberto_agora(ids, minutos: int | None = None) -> set[int]:
@@ -839,6 +932,7 @@ def _comecar(atendente_id: int, motivo: str, de: date, ate: date) -> None:
     banco.executar(
         """UPDATE atendente
               SET estado = 'offline', estado_automatico = false,
+                  estado_em = now(),
                   afastamento_motivo = %s, afastado_de = %s, afastado_ate = %s,
                   afasta_em = NULL, afasta_ate = NULL, afasta_motivo = NULL,
                   afasta_substituto_id = NULL,
@@ -895,6 +989,10 @@ def retornar(atendente_id: int) -> dict:
         """UPDATE atendente
               SET estado = CASE WHEN afastamento_motivo IS NOT NULL
                                 THEN 'disponivel' ELSE estado END,
+                  -- ⚠️ A hora so muda se o estado mudou: carimbar sempre faria
+                  -- a tela dizer "online ha 1min" para quem nao saiu do lugar.
+                  estado_em = CASE WHEN afastamento_motivo IS NOT NULL
+                                   THEN now() ELSE estado_em END,
                   afastamento_motivo = NULL, afastado_de = NULL, afastado_ate = NULL,
                   afasta_em = NULL, afasta_ate = NULL, afasta_motivo = NULL,
                   afasta_substituto_id = NULL,

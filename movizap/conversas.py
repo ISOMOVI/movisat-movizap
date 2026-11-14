@@ -1257,6 +1257,50 @@ def _trechos_achados(ids: list[int], termo: str) -> dict[int, str]:
     return {l["conversa_id"]: l["conteudo"] for l in linhas}
 
 
+# 🔵 13/11, DELE: *"uma forma de compactar as conversas mais antigas ja
+# encerradas, para que nao tenhamos uma rolagem infinita"*.
+#
+# 📏 MEDIDO NO DIA: 1.177 conversas, 646 delas RESOLVIDAS (55%). Encerrar nao
+# toca em `ultima_atividade_em`, entao a conversa morta continua intercalada
+# por data no meio das vivas -- e e isso que faz a lista nao acabar nunca.
+#
+# 🚨 E JANELA DE VISTA, NAO ARQUIVO MORTO. Nada e apagado, nada muda de tabela,
+# e a BUSCA IGNORA a janela (ver `_janela_das_encerradas`): procurar um cliente
+# de agosto e achar "nada" seria a tela mentindo sobre o que existe.
+CHAVE_JANELA_ENCERRADAS = "caixa_dias_encerradas"
+PADRAO_DIAS_ENCERRADAS = 30
+
+
+def dias_de_encerradas() -> int:
+    """Quantos dias de conversa ENCERRADA a lista mostra por padrao.
+
+    ⚠️ Zero ou negativo DESLIGA a janela (mostra tudo), e e assim que ele
+    desfaz isto sem mexer em codigo.
+    """
+    linha = banco.um("SELECT valor FROM config WHERE chave = %s",
+                     (CHAVE_JANELA_ENCERRADAS,))
+    try:
+        return int((linha or {}).get("valor") or PADRAO_DIAS_ENCERRADAS)
+    except (TypeError, ValueError):
+        return PADRAO_DIAS_ENCERRADAS
+
+
+# 🚨 A MESMA SUBCONSULTA EM UM LUGAR SO. Ela ja existia escrita a mao no filtro
+# "Sem dono"; repetir o texto e como as duas contas do selo de e-mail de 22/10,
+# que discordaram no mesmo dia em que a segunda nasceu.
+#
+# ⚠️ `direcao <> 'interna'`: NOTA NAO E RESPOSTA AO CLIENTE. Medido em 13/11:
+# 81 conversas tem nota como ultima linha; sem este corte, 71 delas sumiriam do
+# filtro novo como se alguem tivesse respondido.
+_ULTIMA_FALA = """
+    (SELECT m.direcao FROM mensagem m
+      WHERE m.conversa_id = c.id AND m.evento IS NULL
+        AND m.direcao <> 'interna'
+      ORDER BY m.criada_em DESC, m.id DESC
+      LIMIT 1)
+"""
+
+
 def listar(estado: str | None = None, atendente_id: int | None = None,
            sem_dono: bool = False, busca: str = "", limite: int = 100,
            relacoes: list[str] | None = None,
@@ -1267,6 +1311,8 @@ def listar(estado: str | None = None, atendente_id: int | None = None,
            so_nao_lidas: bool = False,
            em_nome: bool = True,
            em_mensagens: bool = False,
+           ultima_do_cliente: bool = False,
+           todas_encerradas: bool = False,
            escopo: str = "tudo") -> list[dict]:
     """As conversas para a lista da caixa de entrada.
 
@@ -1385,6 +1431,32 @@ def listar(estado: str | None = None, atendente_id: int | None = None,
         condicoes.append("c.grupo_jid IS NOT NULL")
     elif escopo == "contatos":
         condicoes.append("c.grupo_jid IS NULL")
+
+    # 🔵 13/11, PEDIDO DELE: *"um flag de 'ultima do cliente' e so vai exibir as
+    # conversas em que a ultima mensagem foi do cliente e nao houve resposta
+    # nossa"*.
+    #
+    # 🚨 E DA ABA "TODOS", E E AI QUE ELE TEM VALOR. Dele: *"em todos, mesmo que
+    # tenham donos, podem nao estar respondendo"* -- o "Sem dono" responde outra
+    # pergunta e NAO FOI TOCADO, por decisao dele no mesmo dia.
+    #
+    # 🔵 SO AS NAO ENCERRADAS, tambem decisao dele: sao 31 hoje. Sem o corte
+    # seriam 207, e as 106 resolvidas a mais sao quase sempre um "obrigado"
+    # depois do fim -- ninguem deve resposta a elas.
+    if ultima_do_cliente:
+        condicoes.append(f"c.estado <> 'resolvida' AND {_ULTIMA_FALA} = 'entrada'")
+
+    # A JANELA DAS ENCERRADAS (13/11). ⚠️ So vale na lista parada: com busca
+    # digitada, a varredura e a base inteira.
+    # 🚨 O CAMINHO DE VOLTA É PARTE DO RECURSO. Esconder sem oferecer como ver
+    # seria perder conversa de vista -- o chip "Encerradas antigas" manda
+    # `todas_encerradas` e a janela sai do caminho.
+    dias = dias_de_encerradas()
+    if dias > 0 and not todas_encerradas and not busca.strip():
+        condicoes.append(
+            "(c.estado <> 'resolvida'"
+            " OR c.ultima_atividade_em >= now() - make_interval(days => %s))")
+        params.append(dias)
 
     onde_busca, params_busca = _condicao_busca(
         busca, em_nome=em_nome, em_mensagens=em_mensagens)

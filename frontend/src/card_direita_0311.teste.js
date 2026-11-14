@@ -22,9 +22,13 @@ const fonte = readFileSync(
 
 /* Só o <li> da lista: o cabeçalho da conversa aberta tem peças de nome
    parecido, e medir o arquivo inteiro confundiria os dois. */
+// 13/11: a lista passou a expor o INDICE (`(c, i)`) porque o cabecalho
+// de periodo compara cada conversa com a anterior. A ancora deste teste
+// e o texto do `v-for`, entao ela mudou junto -- o que o teste exige
+// continua igual.
 const item = fonte.slice(
-  fonte.indexOf('<li v-for="c in lista"'),
-  fonte.indexOf('</ul>', fonte.indexOf('<li v-for="c in lista"')))
+  fonte.indexOf('<li v-for="(c, i) in lista"'),
+  fonte.indexOf('</ul>', fonte.indexOf('<li v-for="(c, i) in lista"')))
 
 describe('o selo e a hora saíram da linha do nome', () => {
   it('a coluna da direita existe, e o selo e a hora estão nela', () => {

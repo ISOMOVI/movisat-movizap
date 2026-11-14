@@ -28,6 +28,16 @@ CHAVE_LIGADA_EM = "distribuicao_ligada_em"
 CHAVE_PRIMEIRO = "distribuicao_primeiro"
 CHAVE_RESERVA = "distribuicao_reserva"
 CHAVE_MINUTOS = "distribuicao_minutos"
+# 🔵 13/11, DELE: *"se nao logar, as novas conversas precisam seguir para Erika,
+# se a mesma logar e se nao, para a Claudia"*. Dois campos nao cabem numa
+# cadeia de tres, entao a ordem virou LISTA (migracao 109).
+#
+# 🚨 AS DUAS CHAVES ANTIGAS CONTINUAM. `distribuicao_primeiro` e
+# `distribuicao_reserva` seguem gravadas e seguem sendo escritas pela tela de
+# hoje: a lista nasce delas quando esta vazia, e `definir_config` preserva a
+# cauda da lista ao salvar -- senao salvar na tela velha apagaria a Claudia em
+# silencio.
+CHAVE_ORDEM = "distribuicao_ordem"
 PADRAO_MINUTOS = 10
 
 
@@ -43,12 +53,34 @@ def _int(valor: str | None) -> int | None:
         return None
 
 
+def _lista(valor: str | None) -> list[int]:
+    """A ordem gravada como texto: "28581,123,124" -> [28581, 123, 124].
+
+    ⚠️ Ignora pedaco vazio e repetido, mantendo a PRIMEIRA aparicao: a ordem e
+    o que esta regra tem de proprio, e um id repetido faria a fila tentar duas
+    vezes a mesma pessoa.
+    """
+    fora: list[int] = []
+    for pedaco in (valor or "").split(","):
+        n = _int(pedaco.strip())
+        if n and n not in fora:
+            fora.append(n)
+    return fora
+
+
 def config() -> dict:
+    primeiro = _int(_ler(CHAVE_PRIMEIRO))
+    reserva = _int(_ler(CHAVE_RESERVA))
+    ordem = _lista(_ler(CHAVE_ORDEM))
+    if not ordem:
+        # Base vinda de antes da 109: a cadeia e o que os dois campos diziam.
+        ordem = [a for a in (primeiro, reserva) if a]
     return {
         "ligada": _ler(CHAVE_LIGADA) == "true",
         "ligada_em": _ler(CHAVE_LIGADA_EM),
-        "primeiro_id": _int(_ler(CHAVE_PRIMEIRO)),
-        "reserva_id": _int(_ler(CHAVE_RESERVA)),
+        "primeiro_id": primeiro,
+        "reserva_id": reserva,
+        "ordem": ordem,
         "minutos": _int(_ler(CHAVE_MINUTOS)) or PADRAO_MINUTOS,
     }
 
@@ -81,6 +113,14 @@ def definir_config(ligada: bool, primeiro_id: int | None, reserva_id: int | None
         gravar(CHAVE_PRIMEIRO, str(primeiro_id or ""), "Quem recebe a conversa parada.")
         gravar(CHAVE_RESERVA, str(reserva_id or ""), "Quem recebe se o primeiro estiver offline.")
         gravar(CHAVE_MINUTOS, str(int(minutos)), "Minutos sem ninguém assumir.")
+        # 🚨 A TELA DE HOJE TEM DOIS CAMPOS, A CADEIA TEM TRES. Os dois que ela
+        # manda vao para a frente da lista; quem ja estava na cauda e nao e
+        # nenhum deles CONTINUA LA. Sem isto, salvar a configuracao antiga
+        # apagaria o terceiro nome sem ninguem perceber.
+        cauda = [a for a in config()["ordem"] if a not in (primeiro_id, reserva_id)]
+        nova_ordem = [a for a in (primeiro_id, reserva_id) if a] + cauda
+        gravar(CHAVE_ORDEM, ",".join(str(a) for a in nova_ordem),
+               "A cadeia da fila, em ordem: para no primeiro que pode receber.")
         if ligada and not estava:
             # 🔵 1a: o que já estava parado ao ligar NÃO entra. O marco é este.
             cur.execute("SELECT now()::text AS agora")
@@ -127,13 +167,21 @@ def paradas(cfg: dict | None = None, somente: list[int] | None = None) -> list[d
     return linhas
 
 
-def _pode_receber_da_fila(aid: int, abertos: set[int]) -> tuple[bool, str]:
+def _pode_receber_da_fila(aid: int, logados_hoje: set[int]) -> tuple[bool, str]:
     """A régua da FILA, que é mais estreita que a da transferência à mão.
 
     🔵 19/10, decisão dele: dentro da jornada ninguém aparece como "fora do
     expediente" -- o máximo é "em pausa" --, **mas quem está com o painel
     fechado para de receber distribuição automática**. Separa o que a tela diz
     de quem recebe conversa.
+
+    🚨 13/11, A TRAVA MUDOU DE PERGUNTA: não é mais "o painel está aberto nos
+    últimos 15 min", é **"logou hoje"**. 🔵 Dele: *"logado é logado"* e *"o foco
+    é evitar enviar conversa para operadora que não logou hoje"*. 📏 O motivo é
+    medido: `painel_visto_em` prova ABA ABERTA, não pessoa -- em 13/11 o carimbo
+    de quem estava AFASTADA era de um minuto antes, com a máquina ligada.
+    ⚠️ `painel_aberto_agora` continua existindo e continua testada: ela responde
+    "a aba está aberta agora", que é outra pergunta e serve à tela.
 
     🚨 POR QUE AQUI E NÃO EM `presenca.pode_receber`: aquela função tem
     quatro chamadores, e três não são fila -- `transferir_abertas`, `afastar`
@@ -151,17 +199,18 @@ def _pode_receber_da_fila(aid: int, abertos: set[int]) -> tuple[bool, str]:
     ok, motivo = pode_receber(aid)
     if not ok:
         return False, motivo
-    if aid not in abertos:
-        return False, "painel fechado"
+    if aid not in logados_hoje:
+        return False, "não logou hoje"
     return True, ""
 
 
 def _destino(cfg: dict) -> int | None:
-    from .presenca import painel_aberto_agora
-    candidatos = [a for a in (cfg["primeiro_id"], cfg["reserva_id"]) if a]
-    abertos = painel_aberto_agora(candidatos)
+    """O primeiro da CADEIA que pode receber. Para no primeiro que serve."""
+    from .presenca import logaram_hoje
+    candidatos = list(cfg["ordem"])
+    logados = logaram_hoje(candidatos)
     for aid in candidatos:
-        if _pode_receber_da_fila(aid, abertos)[0]:
+        if _pode_receber_da_fila(aid, logados)[0]:
             return aid
     return None
 
@@ -217,23 +266,22 @@ def situacao(cfg: dict | None = None) -> dict:
     até eu restaurar do dump das 02:40. Função que lê `config()` sem porta de
     teste é convite para o teste escrever em produção.
     """
-    from .presenca import painel_aberto_agora
+    from .presenca import logaram_hoje
 
     cfg = cfg or config()
     if not cfg["ligada"]:
         return {"ligada": False}
+    candidatos = list(cfg["ordem"])
     nomes = {r["id"]: r["nome"] for r in banco.varios(
-        "SELECT id, nome FROM atendente WHERE id = ANY(%s)",
-        ([x for x in (cfg["primeiro_id"], cfg["reserva_id"]) if x],))}
-    candidatos = [x for x in (cfg["primeiro_id"], cfg["reserva_id"]) if x]
-    abertos = painel_aberto_agora(candidatos)
+        "SELECT id, nome FROM atendente WHERE id = ANY(%s)", (candidatos,))}
+    logados = logaram_hoje(candidatos)
     destino = _destino(cfg)
     primeiro_ok = False
     motivo_parada = ""
-    if cfg["primeiro_id"]:
-        primeiro_ok = _pode_receber_da_fila(cfg["primeiro_id"], abertos)[0]
+    if candidatos:
+        primeiro_ok = _pode_receber_da_fila(candidatos[0], logados)[0]
     if destino is None and candidatos:
-        motivos = {aid: _pode_receber_da_fila(aid, abertos)[1] for aid in candidatos}
+        motivos = {aid: _pode_receber_da_fila(aid, logados)[1] for aid in candidatos}
         # Se todos pararam pelo mesmo motivo, a frase é esse motivo; se
         # pararam por motivos diferentes, a tela diz "ninguém disponível" em vez
         # de escolher um deles e mentir sobre o outro.
@@ -242,8 +290,13 @@ def situacao(cfg: dict | None = None) -> dict:
     return {
         "ligada": True,
         "minutos": cfg["minutos"],
-        "primeiro": nomes.get(cfg["primeiro_id"]),
-        "reserva": nomes.get(cfg["reserva_id"]),
+        "primeiro": nomes.get(candidatos[0]) if candidatos else None,
+        "reserva": nomes.get(candidatos[1]) if len(candidatos) > 1 else None,
+        # 🔵 13/11: a cadeia inteira, em ordem, para a tela parar de falar de
+        # "primeiro e reserva" quando ha tres. As duas chaves acima ficam
+        # enquanto a tela velha existir -- tirar sem trocar a tela deixaria a
+        # Fila sem dizer para quem vai.
+        "ordem": [{"id": a, "nome": nomes.get(a)} for a in candidatos],
         "destino_agora": nomes.get(destino),
         "parada": destino is None,
         "esperando": len(paradas(cfg)) if destino is None else 0,

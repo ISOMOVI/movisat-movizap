@@ -276,5 +276,11 @@ def entrar(codigo: str, state: str) -> dict:
         " WHERE id = %s AND google_sub IS DISTINCT FROM %s",
         (dados.get("sub"), linha["id"], dados.get("sub")))
 
+    # 🚨 O CARIMBO DO LOGIN TEM DE ESTAR NOS DOIS CAMINHOS. Quem entra pelo
+    # Google nunca passa pela rota de senha -- e sem esta linha a fila trataria
+    # metade da casa como "não logou hoje". É o mesmo tropeço que a sessão do
+    # dia teve em 15/10, quando só a resposta do login sabia a hora do fim.
+    from . import presenca
+    presenca.registrar_login(linha["id"])
     log.info("entrada pelo Google: %s (atendente %s)", email, linha["id"])
     return {"token": auth.criar_token(linha["login"]), "nome": linha["nome"]}

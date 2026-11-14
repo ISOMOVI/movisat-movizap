@@ -402,6 +402,44 @@ function escolherAnexo(evento) {
   anexoEscolhido.value = evento.target.files?.[0] || null
 }
 
+/* 🔵 13/11, DELE: *"Arrastar arquivos como Anexo"*.
+
+   ⚠️ AQUI É UM ARQUIVO SÓ, e não uma fila como na conversa: a observação sobe
+   um anexo por recado (`subirAnexo`). Arrastar dois substitui pelo primeiro e
+   a tela diz qual ficou -- inventar fila aqui mudaria a regra do recado, que é
+   dele.
+   🚨 SOLTAR NÃO ENVIA: o arquivo só fica ESCOLHIDO, com o nome à vista, e o
+   recado continua indo pelo botão. */
+const arrastandoAnexo = ref(0)
+
+function temArquivoNoArraste(evento) {
+  return Array.from(evento.dataTransfer?.types || []).includes('Files')
+}
+
+function aoArrastarEntrarAnexo(evento) {
+  if (!temArquivoNoArraste(evento)) return
+  evento.preventDefault()
+  arrastandoAnexo.value += 1
+}
+
+function aoArrastarSobreAnexo(evento) {
+  if (!temArquivoNoArraste(evento)) return
+  /* Sem isto o navegador abre o arquivo na aba e o painel some. */
+  evento.preventDefault()
+  if (evento.dataTransfer) evento.dataTransfer.dropEffect = 'copy'
+}
+
+function aoArrastarSairAnexo() {
+  if (arrastandoAnexo.value > 0) arrastandoAnexo.value -= 1
+}
+
+function aoSoltarAnexo(evento) {
+  evento.preventDefault()
+  arrastandoAnexo.value = 0
+  const arquivo = evento.dataTransfer?.files?.[0]
+  if (arquivo) anexoEscolhido.value = arquivo
+}
+
 async function subirAnexo(observacaoId, arquivo) {
   /* ⚠️ `fetch` cru, não `api.post`: arquivo vai por `FormData`, e o navegador
      precisa montar o `Content-Type` com o boundary. Definir o cabeçalho aqui
@@ -1564,7 +1602,20 @@ onBeforeUnmount(() => {
             <p v-else class="nota pequeno">Nenhuma observação ainda.</p>
           </div>
 
-          <div class="modal__rodape modal__rodape--escrever">
+          <!-- 🔵 13/11: a área de escrever recebe o arrasto. ⚠️ `.prevent` no
+               `dragover` é obrigatório: sem ele o navegador abre o arquivo numa
+               aba e o painel desaparece. -->
+          <div
+            class="modal__rodape modal__rodape--escrever"
+            :class="{ 'escrever--arrastando': arrastandoAnexo > 0 }"
+            @dragenter="aoArrastarEntrarAnexo"
+            @dragover="aoArrastarSobreAnexo"
+            @dragleave="aoArrastarSairAnexo"
+            @drop="aoSoltarAnexo"
+          >
+            <p v-if="arrastandoAnexo > 0" class="nota pequeno">
+              Solte para anexar — o recado continua indo pelo botão.
+            </p>
             <textarea v-model="recado" rows="2" :disabled="enviandoRecado"
                       placeholder="o que a operação precisa saber sobre esta OS"
                       aria-label="Escrever observação"></textarea>
@@ -2532,6 +2583,14 @@ onBeforeUnmount(() => {
 }
 .recados { list-style: none; margin: 0; padding: 0; }
 .modal__rodape--escrever { display: grid; gap: var(--e-2); }
+
+/* 13/11: o alvo do arrasto na observacao. Mesma forma da Caixa e do chat
+   interno -- mesmo gesto, mesmo desenho, para a pessoa nao ter de aprender
+   duas vezes. */
+.escrever--arrastando {
+  outline: 2px dashed var(--acento);
+  outline-offset: -4px;
+}
 
 /* 🚨 O DIALOGO DOS RECADOS DECLARA A PROPRIA FORMA, e isto era o defeito
    que ele viu como *"o layout esta errado ainda, sobreposto e sem tabulacao"*:
