@@ -526,6 +526,85 @@ function fecharAvisoDaEtapa() {
   } catch { /* sem localStorage o aviso volta na próxima — e tudo bem */ }
 }
 
+/* ---- A CAIXA DO AVISO AO CLIENTE (17/11) ---------------------------------
+   🔵 Dele: *"quando o card for movido e houver disparo de mensagens perguntar
+   em caixa de diálogo (se tiver ligado o interruptor) 'Deseja enviar aviso ao
+   cliente?' Se Sim = abre a mensagem que será enviada e permite edição rápida
+   dela e o botão enviar envia (...) Se clicar não, não envia nada."*
+
+   🚨 ISTO INVERTE, COM AUTORIZAÇÃO, O *"sairá automaticamente"* DE 11/11. O
+   interruptor da `CFG_16.1` passa a significar **"pergunta"**, não **"manda"**,
+   e com isso volta a régua da Área F de 04/11: confirmar antes de cada envio.
+
+   🚨 A CAIXA VEM DEPOIS DO MOVER, NUNCA ANTES -- a mesma régua do aviso de
+   etapa logo acima. O card já mudou de situação no ERP quando ela abre; pedir
+   confirmação antes faria o arrasto parecer travado, e ofereceria avisar de um
+   fato que ainda não aconteceu.
+
+   🚨 DOIS PASSOS, porque ele pediu dois: primeiro a pergunta, e só quem
+   responde "Sim" vê a mensagem. Mostrar o texto já na pergunta tiraria o
+   sentido do "Não" -- quem só quer fechar não precisa ler nada.
+
+   ⚠️ FECHAR SEM RESPONDER NÃO ENVIA E NÃO REGISTRA. O servidor só decide no
+   POST: sem clique, a passagem fica sem decisão, e "sem decisão" é
+   exatamente "ninguém foi avisado". O que NÃO acontece é o card afirmar que
+   alguém escolheu -- porque não escolheu. */
+const disparoAberto = ref(null)       // { passagem_id, texto, telefone, ... }
+const passoDoDisparo = ref('perguntar')   // 'perguntar' | 'editar'
+const textoDoDisparo = ref('')
+const enviandoDisparo = ref(false)
+const erroDoDisparo = ref('')
+const caixaDoDisparo = ref(null)
+
+const TETO_DO_DISPARO = 2000          // o mesmo do servidor (`disparo_etapa`)
+
+function abrirDisparo(disparo) {
+  guardarFoco()
+  disparoAberto.value = disparo
+  passoDoDisparo.value = 'perguntar'
+  textoDoDisparo.value = disparo.texto || ''
+  erroDoDisparo.value = ''
+  focarCaixa(caixaDoDisparo)
+}
+
+function fecharDisparo() {
+  disparoAberto.value = null
+  passoDoDisparo.value = 'perguntar'
+  textoDoDisparo.value = ''
+  erroDoDisparo.value = ''
+  devolverFoco()
+}
+
+/* 🚨 O NÚMERO NÃO VIAJA DAQUI. Só `passagem_id`, `enviar` e o texto: quem
+   decide para quem a mensagem vai é o servidor, derivando da OS. É o que
+   garante o *"por enquanto somente cliente"* sem depender desta tela. */
+async function responderDisparo(enviar) {
+  if (!disparoAberto.value) return
+  enviandoDisparo.value = true
+  erroDoDisparo.value = ''
+  try {
+    const r = await api.post('/api/paineis/operacao/disparo', {
+      passagem_id: disparoAberto.value.passagem_id,
+      enviar,
+      texto: enviar ? textoDoDisparo.value : '',
+    })
+    /* ⚠️ `enviou: false` com motivo NÃO é erro de tela: o servidor soltou a
+       reserva e o operador pode tentar de novo. Fechar aqui esconderia o
+       motivo justo de quem precisa decidir se tenta. */
+    if (enviar && !r.enviou) {
+      erroDoDisparo.value = r.motivo || 'Não consegui enviar.'
+      return
+    }
+    fecharDisparo()
+    await carregar()
+  } catch (e) {
+    erroDoDisparo.value = e instanceof ErroDeApi
+      ? e.message : 'Não consegui registrar esta decisão.'
+  } finally {
+    enviandoDisparo.value = false
+  }
+}
+
 const checklist = ref([])
 const carregandoCheck = ref(false)
 const erroDoCheck = ref('')
@@ -759,6 +838,10 @@ async function moverDoModal(paraSituacao) {
 async function mover(card, paraSituacao) {
   erroDeMover.value = ''
   movendo.value = card.numero_ordem
+  /* 🔵 17/11: o que o servidor preparou para perguntar, se preparou. Fica numa
+     variável porque a caixa só abre no fim, depois do `carregar()`: aberta
+     antes, ela ficaria na frente de um quadro que ainda vai se redesenhar. */
+  let aPerguntar = null
   try {
     const r = await api.post('/api/paineis/operacao/mover', {
       numero_os: card.numero_ordem,
@@ -768,6 +851,17 @@ async function mover(card, paraSituacao) {
     })
     if (!r.ok) {
       erroDeMover.value = r.motivo || 'Não consegui mover este card.'
+    } else if (r.disparo && r.disparo.pergunta && r.passagem_id) {
+      /* 🚨 `passagem_id` É A IDENTIDADE DA DECISÃO (migração 111): é por ele
+         que o mesmo aviso não sai duas vezes. Sem ele, não pergunta. */
+      aPerguntar = {
+        passagem_id: r.passagem_id,
+        texto: r.disparo.texto || '',
+        telefone: r.disparo.telefone || '',
+        destinatario: r.disparo.destinatario || '',
+        titulo: ((quadro.value?.colunas || []).find(
+          (c) => c.situacao_id === paraSituacao)?.titulo) || '',
+      }
     }
   } catch (e) {
     erroDeMover.value = e instanceof ErroDeApi
@@ -779,6 +873,7 @@ async function mover(card, paraSituacao) {
     /* 🚨 RECARREGA SEMPRE, deu certo ou não: a verdade é o que o ERP
        confirmou, nunca o que a tela achou que ia acontecer. */
     await carregar()
+    if (aPerguntar) abrirDisparo(aPerguntar)
   }
 }
 
@@ -1092,6 +1187,10 @@ const pilhaDeFoco = []
 
 function aoTeclar(evento) {
   if (evento.key !== 'Escape') return
+  /* 🆕 17/11: a caixa do aviso ao cliente é a primeira, porque é a que está por
+     cima (`.modal--disparo`, +30). ⚠️ Fechar por aqui NÃO envia e NÃO
+     registra -- ver o comentário do bloco. */
+  if (disparoAberto.value) { fecharDisparo(); return }
   if (avisoDaEtapa.value) { fecharAvisoDaEtapa(); return }
   if (recadosAbertos.value) { fecharRecados(); return }
   if (chamadoAberto.value) { fecharChamado(); return }
@@ -1673,6 +1772,74 @@ onBeforeUnmount(() => {
           </div>
         </div>
       </div>
+
+      <!-- ====== A CAIXA DO AVISO AO CLIENTE (17/11) ======
+           🚨 POR CIMA DE TODOS (`.modal--disparo`, +30): é a única caixa desta
+           tela que manda mensagem irreversível, e uma caixa invisível atrás de
+           outra já foi defeito aqui em 05/11. -->
+    <div v-if="disparoAberto" class="modal modal--disparo" role="dialog"
+         aria-modal="true" aria-label="Aviso ao cliente">
+      <div ref="caixaDoDisparo" tabindex="-1"
+           class="modal__caixa painel__dialogo--disparo">
+        <header class="modal__topo">
+          <strong>Deseja enviar aviso ao cliente?</strong>
+          <span v-if="disparoAberto.titulo" class="pequeno fraco">
+            {{ disparoAberto.titulo }}
+          </span>
+        </header>
+
+        <div class="modal__corpo">
+          <template v-if="passoDoDisparo === 'perguntar'">
+            <p>
+              Esta etapa tem mensagem para o cliente. Nada foi enviado ainda.
+            </p>
+          </template>
+
+          <template v-else>
+            <!-- ⚠️ PARA QUEM VAI, À VISTA: quem envia precisa ver o
+                 destinatário, e o número não é editável de propósito. -->
+            <p class="pequeno fraco">
+              Vai para <strong>{{ disparoAberto.telefone }}</strong>
+              <span v-if="disparoAberto.destinatario">
+                ({{ disparoAberto.destinatario }})
+              </span>
+            </p>
+            <textarea v-model="textoDoDisparo" rows="6"
+                      :maxlength="TETO_DO_DISPARO"
+                      :disabled="enviandoDisparo"
+                      aria-label="Mensagem que será enviada ao cliente"></textarea>
+            <p class="pequeno fraco">
+              {{ textoDoDisparo.length }}/{{ TETO_DO_DISPARO }}
+            </p>
+          </template>
+
+          <p v-if="erroDoDisparo" class="aviso aviso--erro">{{ erroDoDisparo }}</p>
+        </div>
+
+        <div class="modal__rodape">
+          <template v-if="passoDoDisparo === 'perguntar'">
+            <!-- 🔵 *"Se clicar não, não envia nada"* -- e o card registra que
+                 ninguém foi avisado, por decisão dele. -->
+            <button class="botao botao--contorno" type="button"
+                    :disabled="enviandoDisparo"
+                    @click="responderDisparo(false)">Não enviar</button>
+            <button class="botao botao--primario" type="button"
+                    :disabled="enviandoDisparo"
+                    @click="passoDoDisparo = 'editar'">Sim, ver a mensagem</button>
+          </template>
+          <template v-else>
+            <button class="botao botao--contorno" type="button"
+                    :disabled="enviandoDisparo"
+                    @click="passoDoDisparo = 'perguntar'">Voltar</button>
+            <button class="botao botao--primario" type="button"
+                    :disabled="enviandoDisparo || !textoDoDisparo.trim()"
+                    @click="responderDisparo(true)">
+              {{ enviandoDisparo ? 'Enviando…' : 'Enviar' }}
+            </button>
+          </template>
+        </div>
+      </div>
+    </div>
 
       <!-- ============ O AVISO AO ENTRAR NA ETAPA (Área B) ============ -->
     <div v-if="avisoDaEtapa" class="modal modal--aviso" role="dialog"
@@ -2773,6 +2940,17 @@ onBeforeUnmount(() => {
    dois -- a mesma ordem da pilha de foco e do `Escape`. */
 .modal--recados { z-index: calc(var(--z-modal, 50) + 10); }
 .modal--aviso { z-index: calc(var(--z-modal, 50) + 20); }
+/* 🚨 A CAIXA DO AVISO AO CLIENTE É A DE CIMA (17/11). Ela manda mensagem
+   irreversível: aberta atrás de outra, alguém digitaria no escuro ou acharia
+   que nada abriu -- que foi o defeito de 05/11. A conferência de CSS publicado
+   guarda esta soma. */
+.modal--disparo { z-index: calc(var(--z-modal, 50) + 30); }
+/* 🚨 E DECLARA A PRÓPRIA LARGURA: a `.modal__caixa` da casa impõe 420px, e
+   teto não se vence com especificidade -- só redeclarando. Com 420px a caixa
+   de editar a mensagem fica estreita demais para ler o que vai ao cliente.
+   ⚠️ `min()` segura a tela estreita, como no diálogo do chamado. */
+.painel__dialogo--disparo { width: min(640px, 100%); max-width: 640px; }
+.modal--disparo textarea { width: 100%; font: inherit; }
 /* 🚨 O BOTÃO ESTAVA À ESQUERDA POR CAUSA DO `space-between` DO RODAPÉ DA CASA:
    com um filho só, `space-between` encosta o único botão na borda. Centralizar
    aqui, e NÃO no `.modal__rodape` geral -- os outros modais têm dois botões,

@@ -6,10 +6,15 @@ no fim. Marcas deste teste: contatos cujo nome começa com `Zz Teste Tecnico`,
 login `zz_teste_tec_`, serviço `Zz Servico De Teste`, telefone
 `+5518977770001`.
 
-🚨 **O CATÁLOGO DOS DEZ NÃO É TOCADO.** Ele é dado de produção (migração 085), e
-um teste que renomeasse ou desativasse "Instalação" mudaria a ficha de todos os
-técnicos. Para exercitar criar/atualizar serviço, o teste cria um **décimo
-primeiro**, com nome marcado, e o apaga.
+🚨 **O CATÁLOGO NÃO É TOCADO.** Ele é dado de produção (migrações 085 e 110), e
+um teste que renomeasse ou desativasse "INSTALAÇÃO SIMPLES" mudaria a ficha de
+todos os técnicos. Para exercitar criar/atualizar serviço, o teste cria um
+serviço **a mais**, com nome marcado, e o apaga.
+
+🚨 **17/11: SÃO QUINZE, E OS NOMES SÃO OUTROS** (migração 110, decisão dele).
+As travas abaixo trocaram de sinal com autorização: os seis genéricos foram
+RENOMEADOS -- e renomear preservou o preço, porque ele mora no `servico_id` e
+não no nome.
 
 O que estes testes guardam:
   · técnico SEM ficha continua aparecendo na lista (eram 303 contatos e 0
@@ -98,25 +103,50 @@ def base():
 # O CATÁLOGO
 # ---------------------------------------------------------------------------
 
+# 🔵 OS QUINZE, na ordem dele (17/11, migração 110). Escritos aqui UMA VEZ: a
+# lista repetida em cada teste divergiria no primeiro serviço novo.
+OS_QUINZE = [
+    "INSTALAÇÃO SIMPLES",
+    "INSTALAÇÃO COM BLOQUEIO",
+    "INSTALAÇÃO COM LEITOR RFID",
+    "INSTALAÇÃO COM LEITOR BUTTON",
+    "INSTALAÇÃO CÂMERA",
+    "RETIRADA SIMPLES",
+    "RETIRADA COM ACESSORIO",
+    "MANUTENÇÃO COM TROCA",
+    "MANUTENÇÃO SEM TROCA",
+    "SUBSTITUIÇÃO VEÍCULO PARA OUTRO - RETIRADA",
+    "SUBSTITUIÇÃO VEÍCULO PARA OUTRO - INSTALAÇÃO",
+    "Socorro",
+    "Laudo Técnico",
+    "Treinamento",
+    "Acompanhamento",
+]
+
+
 class TestCatalogo:
-    def test_os_dez_estao_no_ar_na_ordem_dele(self):
-        """🔵 A lista e a ordem são dele (04/11), com `Substituição R.` e
-        `Substituição I.` escritas por extenso como ele confirmou."""
-        nomes = [s["nome"] for s in tecnico_ficha.servicos()]
-        for esperado in ("Instalação", "Retirada", "Manutenção Local",
-                         "Manutenção Troca", "Substituição Retirada",
-                         "Substituição Instalação", "Socorro", "Laudo Técnico",
-                         "Treinamento", "Acompanhamento"):
+    def test_os_quinze_estao_no_ar_na_ordem_dele(self):
+        """🔵 A lista e a ordem são dele (17/11, migração 110): as cinco
+        instalações, as duas retiradas, as duas manutenções (COM antes de SEM,
+        como ele listou), as duas pernas da substituição, e por último os
+        quatro que ele mandou ficar.
+
+        🔵 Perguntado, ele decidiu os três pontos que a lista deixava abertos:
+        `Socorro`, `Laudo Técnico`, `Treinamento` e `Acompanhamento` **ficam**;
+        a substituição **mantém as duas pernas** (o FPSL gera DUAS OS por placa
+        e o orçamento precisa precificar cada uma); e as cinco variantes de
+        instalação **entram**, mesmo RFID e i-BUTTON já existirem como material
+        da OS no Harmonit.
+
+        ⚠️ A CAIXA MISTA É DE PROPÓSITO: a grafia dele é em maiúsculas, e os
+        quatro que ficaram continuam como nasceram. "Melhorar" o nome que ele
+        escreveu é adivinhação.
+        """
+        nomes = [s["nome"] for s in tecnico_ficha.servicos()
+                 if not s["nome"].startswith("Zz")]
+        for esperado in OS_QUINZE:
             assert esperado in nomes, f"{esperado} saiu do catálogo"
-        dele = [n for n in nomes if n.startswith(("Instalação", "Retirada",
-                                                  "Manutenção", "Substituição",
-                                                  "Socorro", "Laudo",
-                                                  "Treinamento",
-                                                  "Acompanhamento"))]
-        assert dele[:10] == ["Instalação", "Retirada", "Manutenção Local",
-                             "Manutenção Troca", "Substituição Retirada",
-                             "Substituição Instalação", "Socorro",
-                             "Laudo Técnico", "Treinamento", "Acompanhamento"]
+        assert nomes[:15] == OS_QUINZE
 
     def test_nome_repetido_recusa_com_frase(self):
         assert tecnico_ficha.criar_servico(SERVICO + " A")["nome"] == SERVICO + " A"
@@ -348,7 +378,7 @@ class TestPrecos:
     def test_o_que_nao_veio_na_chamada_nao_e_apagado(self, base):
         """🚨 Enviar a ficha inteira para corrigir uma linha é o caminho mais
         curto para zerar nove preços sem perceber."""
-        a, b = self._id("Instalação"), self._id("Retirada")
+        a, b = self._id("INSTALAÇÃO SIMPLES"), self._id("RETIRADA SIMPLES")
         tecnico_ficha.definir_precos(base["tecnico"], {str(a): 15000, str(b): 9000})
         tecnico_ficha.definir_precos(base["tecnico"], {str(a): 16000})
         precos = {p["servico_id"]: p["custo_centavos"]
@@ -396,7 +426,7 @@ class TestCredenciamento:
         tecnico_ficha.salvar(contato, {"nome_fantasia": NOME + " Tres Ltda"})
         tecnico_ficha.definir_precos(
             contato, {str(next(s["id"] for s in tecnico_ficha.servicos()
-                               if s["nome"] == "Instalação")): 10000})
+                               if s["nome"] == "INSTALAÇÃO SIMPLES")): 10000})
         with pytest.raises(DadoInvalido) as e:
             tecnico_ficha.definir_estado(contato, "credenciado")
         assert "rua e cidade" in str(e.value)
@@ -416,7 +446,7 @@ class TestCredenciamento:
         tecnico_ficha.definir_precos(
             base["tecnico"],
             {str(next(s["id"] for s in tecnico_ficha.servicos()
-                      if s["nome"] == "Instalação")): 12000})
+                      if s["nome"] == "INSTALAÇÃO SIMPLES")): 12000})
         depois = tecnico_ficha.definir_estado(
             base["tecnico"], "credenciado", nota="conferido no teste",
             atendente_id=base["pessoa"]["id"])
@@ -560,11 +590,11 @@ class TestPrecosParaOOrcamento:
         um serviço que ele não faz é convidar ao erro."""
         contato = _contato(NOME + " Quinze")
         tecnico_ficha.definir_precos(contato, {
-            str(self._id("Instalação")): 18000,
+            str(self._id("INSTALAÇÃO SIMPLES")): 18000,
             str(self._id("Socorro")): None,
         })
         oferece = {i["servico"] for i in tecnico_ficha.precos_para_orcamento(contato)}
-        assert oferece == {"Instalação"}
+        assert oferece == {"INSTALAÇÃO SIMPLES"}
 
     def test_ZERO_aparece_porque_e_cortesia(self, base):
         """🔵 Decisão dele em 04/11: *"zero pode ir ao orçamento"*. Na ficha,
@@ -581,7 +611,8 @@ class TestPrecosParaOOrcamento:
         consumir. Traduzir num lugar só evita que o `orcamento.py` aprenda o
         esquema da ficha."""
         contato = _contato(NOME + " Dezessete")
-        tecnico_ficha.definir_precos(contato, {str(self._id("Retirada")): 9000})
+        tecnico_ficha.definir_precos(contato,
+                                     {str(self._id("RETIRADA SIMPLES")): 9000})
         item = tecnico_ficha.precos_para_orcamento(contato)[0]
         assert set(item) == {"servico", "unidade", "preco_unit_centavos"}
         assert item["unidade"] == "un"
@@ -604,11 +635,11 @@ class TestPrecosParaOOrcamento:
     def test_a_ordem_e_a_do_catalogo(self, base):
         contato = _contato(NOME + " Dezenove")
         tecnico_ficha.definir_precos(contato, {
-            str(self._id("Acompanhamento")): 1000,   # ordem 10
-            str(self._id("Instalação")): 2000,       # ordem 1
+            str(self._id("Acompanhamento")): 1000,        # ordem 15
+            str(self._id("INSTALAÇÃO SIMPLES")): 2000,    # ordem 1
         })
         nomes = [i["servico"] for i in tecnico_ficha.precos_para_orcamento(contato)]
-        assert nomes == ["Instalação", "Acompanhamento"]
+        assert nomes == ["INSTALAÇÃO SIMPLES", "Acompanhamento"]
 
     def test_o_catalogo_do_orcamento_junta_as_duas_fixas_com_a_ficha(self, base):
         """🚨 O ELO ENTRE OS DOIS MÓDULOS, e o que ele pediu: *"os da ficha + as

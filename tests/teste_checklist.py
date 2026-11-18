@@ -78,18 +78,45 @@ def meus(numero_os, etapa=ETAPA):
 
 class TestOModelo:
     def test_o_seed_das_etapas_dele_esta_de_pe(self):
-        """🔵 As listas são dele, literais. Se alguém as mudar, aqui reprova.
+        """🔵 As listas são dele, literais. Se alguém APAGAR uma, aqui reprova.
 
         ⚠️ ESTA TRAVA MUDOU DE NÚMERO EM 11/11, E NÃO DE REGRA. Eram três
         etapas (090); ele escreveu mais quatro no bloco de 11/11 e a migração
-        098 as semeou. A regra continua a mesma: a lista é dele, literal.
+        098 as semeou.
+
+        🚨 **17/11: ELA DEIXOU DE CONTAR.** Contava os itens por etapa e exigia
+        o número exato -- e em 17/11, às 09:36, ele acrescentou QUINZE itens à
+        etapa 251 pela tela de Checklist (`CFG_17.1`): "Rastreador 4G (com chip
+        + bateria)", "Kit bloqueio", "Leitor RFID", "Cartões RFID", "Leitor
+        iButton", "Teclado de Jornada"... A suíte ficou vermelha por uso
+        legítimo do sistema.
+
+        🚨 O DEFEITO ERA DA TRAVA, NÃO DO DADO: a tela existe **para** ele
+        editar essa lista, e um teste que exige um total proíbe exatamente o
+        que a tela oferece. Agora a trava exige que **os itens semeados
+        continuem lá** -- que é o que ela queria dizer desde o começo -- e não
+        diz nada sobre quantos mais existem.
         """
-        por_etapa = {251: 4, 16488: 4, 677: 2,
-                     15797: 1, 890: 2, 1316: 4, 16490: 1}
-        for etapa, quantos in por_etapa.items():
-            reais = [m for m in checklist.modelos(etapa)
+        semeados = {
+            251: ["Informação do contrato sobre os equipamentos",
+                  "Cadastrar cliente e veículos",
+                  "Registrar posicionamento e dados",
+                  "Detalhes dos itens"],
+            16488: ["Verificar DataScope", "Verificar Dados OS",
+                    "Nota Fiscal (emitir e enviar)", "Itens"],
+            677: ["Enviar material", "Inserir código de rastreio"],
+            15797: ["Verificar com o Customer Success, se cliente irá "
+                    "rescindir."],
+            890: ["Agendar com Cliente", "Agendar com técnico"],
+            1316: ["Verificar OS do Harmonit", "Verificar OS do Técnico",
+                   "Verificar Checklist", "Verificar Central 24hrs"],
+            16490: ["Inserir foto do ID"],
+        }
+        for etapa, esperados in semeados.items():
+            reais = [m["texto"] for m in checklist.modelos(etapa)
                      if not m["texto"].startswith(MARCA)]
-            assert len(reais) == quantos, f"etapa {etapa}"
+            for texto in esperados:
+                assert texto in reais, f"etapa {etapa}: sumiu {texto!r}"
         textos = [m["texto"] for m in checklist.modelos(16488)]
         assert "Nota Fiscal (emitir e enviar)" in textos
         # Os itens de 11/11, com as palavras dele.
@@ -292,6 +319,55 @@ class TestComoTexto:
         assert base["pessoa"]["nome"] in texto
         # O nome da etapa vem das 17, não do id cru.
         assert dict(paineis.SITUACOES)[ETAPA] in texto
+
+    def test_TODOS_os_itens_do_MODELO_aparecem_no_card(self, base):
+        """🔵 17/11, dele: *"precisam aparecer os 19"*.
+
+        🚨 NADA FILTRA O MODELO. O card recebe UM item por item de modelo ATIVO
+        da etapa -- nem os primeiros, nem os "importantes". Ele acrescentou 15
+        itens à etapa 251 pela tela em 17/11 (Rastreador 2G e 4G, chicote, kit
+        bloqueio, Leitor RFID, cartões, iButton, buzzer, chaveiros, teclado de
+        jornada, módulo de voz, sensor e os dois fios), e a lista do card tem de
+        crescer junto -- senão o operador marca uma lista que não é a dele.
+        """
+        banco.executar("DELETE FROM checklist_item WHERE numero_os = %s", (OS2,))
+        checklist.do_card(OS2, ETAPA, base["pessoa"]["id"])
+        # ⚠️ `meus()` filtra só os itens DESTE teste -- aqui a pergunta é
+        # sobre a lista INTEIRA do card, então lê-se direto.
+        do_modelo = [m["texto"] for m in checklist.modelos(ETAPA)]
+        no_card = [i["texto"] for i in checklist.itens(OS2, ETAPA)]
+        for texto in do_modelo:
+            assert texto in no_card, f"o modelo {texto!r} não chegou ao card"
+
+    def test_MARCAR_SO_ALGUNS_e_legitimo_e_a_OBS_registra_os_dois_lados(self, base):
+        """🔵 17/11, dele: *"não necessariamente vão dar flag em todos. Não são
+        todos obrigatórios. É só para registro na OBS do que foi flegado
+        mesmo."*
+
+        🚨 ENTÃO NÃO EXISTE "CHECKLIST INCOMPLETO" AQUI, e não pode passar a
+        existir: nada bloqueia a saída da etapa, e a observação diz o que foi
+        marcado **e** o que não foi. Um dia alguém vai propor exigir a lista
+        cheia para mover -- esta trava é a resposta escrita.
+        """
+        banco.executar("DELETE FROM checklist_item WHERE numero_os = %s", (OS2,))
+        checklist.do_card(OS2, ETAPA, base["pessoa"]["id"])
+        # 🚨 A LISTA INTEIRA, não só os itens de teste: é justamente o
+        # tamanho dela que prova a regra. Em 17/11 a etapa 251 tinha 19 itens
+        # de modelo, e o card nasce com todos.
+        itens = checklist.itens(OS2, ETAPA)
+        assert len(itens) >= 2, "a etapa precisa de 2+ itens"
+        checklist.marcar(itens[0]["id"], True, base["pessoa"]["id"])
+
+        texto = checklist.como_texto(OS2, ETAPA)
+        assert texto.startswith(f"[checklist] {dict(paineis.SITUACOES)[ETAPA]} "
+                                f"— 1 de {len(itens)}")
+        assert texto.count("✓") == 1
+        assert texto.count("✗") == len(itens) - 1
+        # 🚨 E TODO item do card está na observação, marcado ou não: é o
+        # "registro do que foi flegado" que ele pediu, e metade dele é saber o
+        # que NÃO foi.
+        for i in itens:
+            assert i["texto"] in texto
 
     def test_etapa_SEM_item_nao_gera_linha(self, base):
         """🚨 Etapa sem checklist não enche a linha do tempo — a mesma régua do

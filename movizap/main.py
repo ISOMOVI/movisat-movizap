@@ -5517,6 +5517,93 @@ def mover_card_do_painel(
     return r
 
 
+class DecisaoDoDisparo(BaseModel):
+    """A resposta da caixa de diálogo do aviso ao cliente (17/11).
+
+    ⚠️ O TEXTO VEM DA TELA porque ele pediu *"permite edição rápida dela"*. O
+    NÚMERO não vem, e nunca vai vir: o destinatário é rederivado da OS no
+    servidor (`disparo_etapa.enviar_preparado`). Aceitar número da tela abriria
+    caminho para a mensagem de operação ir para qualquer um -- inclusive o
+    técnico, que o *"por enquanto somente cliente"* proíbe.
+    """
+    # 🚨 A DECISÃO É DE UM MOVIMENTO, não de uma OS: é o `passagem_id` que
+    # impede o mesmo aviso de sair duas vezes (migração 111).
+    passagem_id: int = Field(..., ge=1)
+    enviar: bool
+    texto: str = Field(default="", max_length=disparo_etapa.TETO_TEXTO)
+
+
+@app.post("/api/paineis/operacao/disparo")
+def decidir_o_disparo(dados: DecisaoDoDisparo,
+                      usuario: dict = Depends(auth.requer_tela("PNL_1.1"))):
+    """O "Sim" e o "Não" da caixa *"Deseja enviar aviso ao cliente?"* (17/11).
+
+    🔵 Dele: *"Se Sim = abre a mensagem que será enviada e permite edição
+    rápida dela e o botão enviar envia (...) Se clicar não, não envia nada"*. E,
+    perguntado, o "Não" **registra no card**.
+
+    🚨 **A PERMISSÃO É A DA TELA, a mesma do mover** (`PNL_1.1`), e de
+    propósito: quem move é quem decide avisar. Permissão separada daria o mesmo
+    alcance de hoje com duas concessões para errar depois.
+
+    🚨 **RESERVA ANTES DE ENVIAR.** O `decidir_disparo` é atômico; marcar depois
+    do envio deixaria dois cliques no mesmo instante enviarem antes de qualquer
+    um marcar -- e mensagem ao cliente é irreversível. Se o envio falhar, a
+    reserva é solta e o operador pode tentar de novo.
+    """
+    linha = passagem.disparo_da_passagem(dados.passagem_id)
+    if not linha:
+        raise HTTPException(status_code=404,
+                            detail="Não achei este movimento do card.")
+    if linha["disparo_em"] or linha["disparo_recusado_em"]:
+        # 409 e não 400: não é pedido malformado, é conflito com o que existe.
+        raise HTTPException(
+            status_code=409,
+            detail="O aviso deste movimento já foi decidido.")
+    numero_os = linha["numero_os"]
+    situacao_id = linha["para_situacao"]
+    quem = usuario.get("id")
+
+    if not dados.enviar:
+        if not passagem.decidir_disparo(dados.passagem_id, enviado=False,
+                                        texto=None, atendente_id=quem):
+            raise HTTPException(status_code=409,
+                                detail="O aviso deste movimento já foi decidido.")
+        # 🔵 17/11: o "Não" fica no card. *"o cliente foi avisado?"* é a
+        # primeira coisa que alguém pergunta depois, e silêncio total deixaria
+        # a pergunta sem resposta.
+        passagem.observar(
+            numero_os,
+            "[sistema] o operador escolheu NÃO avisar o cliente nesta etapa.",
+            quem)
+        return {"enviou": False, "recusado": True, "motivo": None}
+
+    if not passagem.decidir_disparo(dados.passagem_id, enviado=True,
+                                    texto=None, atendente_id=quem):
+        raise HTTPException(status_code=409,
+                            detail="O aviso deste movimento já foi decidido.")
+
+    envio = disparo_etapa.enviar_preparado(numero_os, situacao_id,
+                                           dados.texto, quem)
+    if not envio.get("enviou"):
+        passagem.soltar_disparo(dados.passagem_id)
+        passagem.observar(
+            numero_os,
+            f"[sistema] a mensagem desta etapa NÃO foi enviada: "
+            f"{envio.get('motivo')}", quem)
+        return {"enviou": False, "recusado": False,
+                "motivo": envio.get("motivo")}
+
+    passagem.gravar_texto_do_disparo(dados.passagem_id, envio["texto"])
+    passagem.observar(
+        numero_os,
+        f"[sistema] mensagem da etapa enviada ao cliente "
+        f"({envio.get('telefone')}): {envio.get('texto')}", quem)
+    return {"enviou": True, "recusado": False, "motivo": None,
+            "telefone": envio.get("telefone"),
+            "conversa_id": envio.get("conversa_id")}
+
+
 class ObservacaoDoCard(BaseModel):
     numero_os: int
     texto: str

@@ -157,7 +157,8 @@ function osTresDialogosNaoEmpatamNoZIndex(css) {
   if (!prop(base.corpo, 'z-index')) {
     falhar('.modal não declara z-index — os diálogos voltariam a empatar.')
   }
-  for (const [sel, soma] of [['.modal--recados', 10], ['.modal--aviso', 20]]) {
+  for (const [sel, soma] of [['.modal--recados', 10], ['.modal--aviso', 20],
+                            ['.modal--disparo', 30]]) {
     const r = regra(css, sel)
     if (!r) {
       falhar(`${sel} não existe no CSS publicado. Sem ele o diálogo empata `

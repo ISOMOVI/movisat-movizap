@@ -3655,3 +3655,83 @@ dia — gravar cada passada seria ruído escondendo as poucas linhas que importa
 ⚠️ **`None` não é mudança:** o agente 0.4 não manda pasta nem versão nova, e o
 `COALESCE` do batimento preserva o que havia; anotar aqui criaria uma "mudança
 para vazio" que nunca aconteceu. 📏 Em 13/11, **7 dos 8 agentes estavam na 0.4**.
+
+---
+
+## 🆕 17/11 — migração 110: os serviços do técnico com os nomes dele
+
+🔵 Dele: a lista em dez linhas (`INSTALAÇÃO SIMPLES`, `COM BLOQUEIO`, `COM
+LEITOR RFID`, `COM LEITOR BUTTON`, `CÂMERA`, `RETIRADA SIMPLES`, `RETIRADA COM
+ACESSORIO`, `MANUTENÇÃO COM TROCA`, `MANUTENÇÃO SEM TROCA`, `SUBSTITUIÇÃO
+VEÍCULO PARA OUTRO`), *"e tirar as redundantes"*, com as *"mesmas regras das
+demais sobre o valor zero"*. Perguntado sobre os três pontos abertos, ele
+decidiu: os quatro sem equivalente **ficam**; a substituição **mantém as duas
+pernas**; as cinco variantes de instalação **entram**. **São 15.**
+
+🚨 **RENOMEOU, NÃO RECRIOU, e é o que preservou o dinheiro:** `tecnico_preco`
+aponta para `servico_tecnico(id)`, então o preço mora no **id**, não no nome.
+Apagar e inserir de novo teria perdido os seis preços gravados. A migração põe o
+nome antigo no `WHERE` de cada `UPDATE` e tem um bloco `DO` que **derruba a
+transação** se faltar nome, sobrar nome velho ou o número de preços cair.
+
+| id | era | passou a ser |
+|---|---|---|
+| 1 | Instalação | `INSTALAÇÃO SIMPLES` |
+| 2 | Retirada | `RETIRADA SIMPLES` |
+| 3 | Manutenção Local | `MANUTENÇÃO SEM TROCA` |
+| 4 | Manutenção Troca | `MANUTENÇÃO COM TROCA` |
+| 5 | Substituição Retirada | `SUBSTITUIÇÃO VEÍCULO PARA OUTRO - RETIRADA` |
+| 6 | Substituição Instalação | `SUBSTITUIÇÃO VEÍCULO PARA OUTRO - INSTALAÇÃO` |
+| 7–10 | Socorro, Laudo Técnico, Treinamento, Acompanhamento | **inalterados** |
+| novos | — | `INSTALAÇÃO COM BLOQUEIO`, `COM LEITOR RFID`, `COM LEITOR BUTTON`, `CÂMERA`, `RETIRADA COM ACESSORIO` |
+
+📏 **Medido antes e depois:** 6 preços, todos de um técnico (contato 91041), e
+**6 depois** — os mesmos valores, agora sob os nomes novos. Ensaiado com
+`ROLLBACK` sobre o dado real antes de aplicar.
+
+⚠️ **As regras de valor zero não mudaram, e os novos entram nelas sem nada a
+mais:** linha ausente ≡ nulo ≡ *"não oferece"*; **zero ≡ cobra zero**, que é
+cortesia e é um fato; negativo recusado pelo CHECK de 085; `precos_para_orcamento`
+leva só o que tem valor, e **zero entra**. Serviço novo nasce **sem linha** em
+`tecnico_preco`, que é exatamente *"não oferece"* — ninguém ganhou preço.
+
+⚠️ **Caixa mista de propósito:** a grafia dos onze é a dele, em maiúsculas; os
+quatro que ficaram continuam como nasceram. Normalizar os quatro é decisão dele.
+
+⚠️ **Não existe tela para o catálogo** (as rotas `POST`/`PUT
+/api/tecnicos/servicos` existem e nenhum `.vue` as chama): mudar a lista é
+migração.
+
+---
+
+## 🆕 17/11 — migração 111: a decisão do disparo mora na passagem
+
+🔵 Dele: a caixa *"Deseja enviar aviso ao cliente?"* ao mover o card, e o "Não"
+**registra no card**.
+
+🚨 **A DECISÃO MORA NA `os_passagem`, e não numa tabela nova:** ela já é **uma
+linha por movimento**, e o disparo é consequência de um movimento — um para um.
+Tabela separada criaria duas versões do mesmo fato, e *"este movimento avisou o
+cliente?"* passaria a ter dois lugares para discordar.
+
+| coluna | o que guarda |
+|---|---|
+| `disparo_em` | quando o aviso foi enviado. Nulo = não foi |
+| `disparo_recusado_em` | quando o operador respondeu **Não** |
+| `disparo_texto` | o texto que **SAIU**, já editado e resolvido — não o molde |
+| `disparo_por` | quem decidiu, enviar ou não enviar |
+
+🚨 **CHECK `os_passagem_disparo_uma_decisao`:** enviado **ou** recusado, nunca
+os dois. Sem ele, uma corrida entre dois cliques deixaria a linha afirmando as
+duas coisas, e nenhuma seria confiável.
+
+🚨 **É ESTA LINHA QUE É A TRAVA DE REENVIO.** Mover duas vezes para a mesma
+etapa são **duas** passagens e podem ser dois avisos (movimento novo, fato
+novo); a **mesma** passagem decide **uma vez só**. O `decidir_disparo` é um
+`UPDATE` atômico que exige as duas colunas nulas — de dois cliques no mesmo
+instante, um só passa. Quem envia **reserva antes**: marcar depois do envio
+deixaria os dois cliques enviarem antes de qualquer um marcar.
+
+⚠️ **E solta a reserva quando o envio falha** (`soltar_disparo`), para o
+operador poder tentar de novo — mas **só enquanto `disparo_texto` é nulo**: com
+texto gravado, o aviso aconteceu e não se desfaz.

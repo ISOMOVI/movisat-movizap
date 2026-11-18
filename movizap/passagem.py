@@ -114,46 +114,127 @@ def mover(numero_os: int, para_situacao: int, atendente_id: int | None,
             log.exception("OS %s: nao consegui guardar o checklist da etapa %s",
                           numero_os, de_onde)
 
-    # 🔵 11/11: O DISPARO DA ETAPA DE DESTINO (`CFG_16.1`). *"ao ligar o
-    # interruptor, sairá automaticamente como na regra"*.
+    # 🔵 17/11, DECISÃO DELE: O DISPARO DA ETAPA PASSA A SER PERGUNTADO.
+    # *"quando o card for movido e houver disparo de mensagens perguntar em
+    # caixa de diálogo (se tiver ligado o interruptor) 'Deseja enviar aviso ao
+    # cliente?'"*
     #
-    # 🚨 DEPOIS DA ESCRITA NO ERP, E SÓ QUANDO ELA DEU CERTO. Mensagem ao
-    # cliente é irreversível: mandar "seu equipamento foi enviado" num mover que
-    # o ERP recusou seria afirmar ao cliente um fato que não aconteceu.
+    # 🚨 MOVER NÃO AVISA MAIS NINGUÉM, e é a trava mais importante deste bloco:
+    # o `preparar_da_etapa` **não fala com o cliente**. Ele monta o texto e o
+    # destinatário, e quem envia é a rota do disparo, atrás de um clique. Isto
+    # inverte, com autorização, o *"sairá automaticamente"* de 11/11 e restaura
+    # a régua da Área F de 04/11.
     #
-    # 🚨 E NUNCA DERRUBA O MOVER -- nem o `enviar_da_etapa`, que não levanta,
+    # 🚨 DEPOIS DA ESCRITA NO ERP, E SÓ QUANDO ELA DEU CERTO -- a razão não
+    # mudou: perguntar "avisar o cliente?" num mover que o ERP recusou
+    # ofereceria avisar de um fato que não aconteceu.
+    #
+    # 🚨 E NUNCA DERRUBA O MOVER -- nem o `preparar_da_etapa`, que não levanta,
     # nem este `try`, que é a segunda rede. O card já mudou de situação; falhar
-    # o clique por causa do WhatsApp seria trocar um problema pequeno por um
+    # o clique por causa do Harmonit seria trocar um problema pequeno por um
     # grande.
     #
     # ⚠️ TUDO DESLIGADO HOJE: as 17 linhas da `etapa_mensagem` nascem sem texto
-    # e com `ativo = false`, então este bloco devolve "desligado" e não fala com
-    # ninguém. É o tempo 1 que ele pediu.
+    # e com `ativo = false`, então isto devolve "desligado", a tela não pergunta
+    # nada e ninguém é avisado. É o tempo 1 que ele pediu.
+    disparo = {"pergunta": False, "motivo": None}
     if resposta.get("ok"):
         try:
-            envio = disparo_etapa.enviar_da_etapa(numero_os, para_situacao,
-                                                  atendente_id)
-            # ⚠️ O QUE FOI ENVIADO FICA NO CARD, e o que NÃO foi também: sem
-            # isto, quem opera não tem como saber se o cliente foi avisado --
-            # e é a primeira coisa que alguém pergunta.
-            if envio.get("enviou"):
+            disparo = disparo_etapa.preparar_da_etapa(numero_os, para_situacao)
+            # ⚠️ "NÃO DEU PARA PREPARAR" FICA NO CARD. Aqui ninguém foi
+            # perguntado e ninguém foi avisado, e é a primeira coisa que alguém
+            # pergunta depois. O caso comum é a ficha da OS não responder: 3 de
+            # 6 leituras falharam na medição de 17/11.
+            # ⚠️ "desligado" não vira observação: não é falha, é o estado
+            # normal de 17 das 17 etapas hoje -- e encheria o card de ruído.
+            if (not disparo.get("pergunta")
+                    and disparo.get("motivo") not in (None, "desligado")):
                 observar(numero_os,
-                         f"[sistema] mensagem da etapa enviada ao cliente "
-                         f"({envio.get('telefone')}): {envio.get('texto')}",
-                         atendente_id)
-            elif envio.get("motivo") and envio["motivo"] != "desligado":
-                observar(numero_os,
-                         f"[sistema] a mensagem desta etapa NÃO foi enviada: "
-                         f"{envio['motivo']}",
+                         f"[sistema] não deu para preparar o aviso desta "
+                         f"etapa, e ninguém foi avisado: {disparo['motivo']}",
                          atendente_id)
         except Exception:
-            log.exception("OS %s: falhou o disparo da etapa %s",
+            log.exception("OS %s: falhou ao preparar o disparo da etapa %s",
                           numero_os, para_situacao)
+            disparo = {"pergunta": False,
+                       "motivo": "não deu para preparar o aviso"}
 
     log.info("OS %s: %s -> %s por %s (ok=%s, passagem %s)", numero_os,
              resposta.get("de"), para_situacao, atendente_id,
              resposta.get("ok"), passagem)
-    return {**resposta, "passagem_id": passagem}
+    # 🚨 `passagem_id` VIAJA PORQUE A DECISÃO DO DISPARO MORA NELA (migração
+    # 111): é por ele que a rota do disparo sabe de qual movimento está falando,
+    # e é ele que impede o mesmo aviso de sair duas vezes.
+    return {**resposta, "passagem_id": passagem, "disparo": disparo}
+
+
+# ===========================================================================
+# A DECISÃO DO DISPARO — migração 111 (17/11)
+#
+# 🔵 Dele: *"Se clicar não, não envia nada"*, e, perguntado, clicar "Não"
+# **registra no card**.
+#
+# 🚨 A DECISÃO MORA NA PASSAGEM, uma por movimento. Mover duas vezes para a
+# mesma etapa são duas passagens e podem ser dois avisos (movimento novo, fato
+# novo); a MESMA passagem decide uma vez só. Sem isto, recarregar a tela ou
+# clicar duas vezes mandaria a mesma mensagem ao cliente outra vez -- e
+# mensagem é irreversível.
+# ===========================================================================
+
+def disparo_da_passagem(passagem_id: int) -> dict | None:
+    """A passagem e o que já se decidiu sobre o aviso dela."""
+    return banco.um(
+        """SELECT id, numero_os, para_situacao, ok, disparo_em,
+                  disparo_recusado_em, disparo_texto, disparo_por
+             FROM os_passagem WHERE id = %s""", (int(passagem_id),))
+
+
+def decidir_disparo(passagem_id: int, *, enviado: bool, texto: str | None,
+                    atendente_id: int | None) -> bool:
+    """Marca a decisão. Devolve False se esta passagem já tinha decidido.
+
+    🚨 É ATÔMICO E É A TRAVA: o `WHERE` exige que as duas colunas estejam
+    nulas, então de dois cliques no mesmo instante **um só** passa. Quem chama
+    usa isto para RESERVAR antes de enviar -- marcar depois do envio deixaria
+    os dois cliques enviarem antes de qualquer um marcar.
+    """
+    return banco.executar(
+        """UPDATE os_passagem
+              SET disparo_em          = CASE WHEN %s THEN now() END,
+                  disparo_recusado_em = CASE WHEN %s THEN NULL ELSE now() END,
+                  disparo_texto = %s, disparo_por = %s
+            WHERE id = %s
+              AND disparo_em IS NULL AND disparo_recusado_em IS NULL""",
+        (bool(enviado), bool(enviado), texto, atendente_id,
+         int(passagem_id))) > 0
+
+
+def gravar_texto_do_disparo(passagem_id: int, texto: str) -> None:
+    """Guarda o texto que SAIU, depois de o envio ter dado certo.
+
+    🚨 SÓ DEPOIS DO ENVIO, e é o que dá sentido ao `disparo_texto`: a coluna
+    guarda o que o cliente leu (migração 111), não o que se pretendia mandar.
+    É também por ela que o `soltar_disparo` sabe que nada saiu -- reserva sem
+    texto é reserva, com texto é mensagem entregue.
+    """
+    banco.executar(
+        "UPDATE os_passagem SET disparo_texto = %s WHERE id = %s",
+        (texto, int(passagem_id)))
+
+
+def soltar_disparo(passagem_id: int) -> None:
+    """Devolve a passagem ao estado "ninguém decidiu" — só quando o envio FALHOU.
+
+    🚨 EXISTE PARA O OPERADOR PODER TENTAR DE NOVO. A reserva é feita antes do
+    envio; se o WhatsApp estava fora do ar, nada saiu, e deixar a passagem
+    marcada afirmaria um aviso que não houve -- e trancaria a segunda tentativa.
+    ⚠️ Só solta o que ainda não foi enviado de verdade: `disparo_texto` nulo.
+    """
+    banco.executar(
+        """UPDATE os_passagem
+              SET disparo_em = NULL, disparo_recusado_em = NULL,
+                  disparo_por = NULL
+            WHERE id = %s AND disparo_texto IS NULL""", (int(passagem_id),))
 
 
 def historico(numero_os: int) -> list[dict]:

@@ -8204,3 +8204,103 @@ interruptor ligado, mover um card para a etapa **envia**, sem outra confirmaçã
 ⚠️ **Nenhuma etapa tem texto hoje**, e nenhuma está ligada: é o tempo 1 que ele
 pediu. O texto do rastreio que ele passou em 04/11 não sobreviveu em documento
 nenhum, e ele disse *"depois colo"*.
+
+---
+
+## 🆕 17/11 — O AVISO AO CLIENTE PASSA A SER PERGUNTADO (`PNL_1.1` + `CFG_16.1`)
+
+🔵 Dele: *"quando o card for movido e houver disparo de mensagens perguntar em
+caixa de diálogo (se tiver ligado o interruptor) 'Deseja enviar aviso ao
+cliente?' Se Sim = abre a mensagem que será enviada e permite edição rápida dela
+e o botão enviar envia para o numero que estiver como contato na OS e depois do
+cliente. Se clicar não, não envia nada."*
+
+🚨 **O INTERRUPTOR PASSA A SIGNIFICAR "PERGUNTA", NÃO "MANDA".** Isto **inverte,
+com autorização, a decisão de 11/11** (*"ao ligar o interruptor, sairá
+automaticamente como na regra"*) e **restaura a régua da Área F de 04/11**:
+confirmar antes de cada envio. Está escrito no `disparo_etapa.py`, no
+`passagem.py`, na migração 111 e nos testes, para ninguém "consertar" de volta
+achando que é engano.
+
+**O fluxo:** mover (arrastar ou pelo modal) → o ERP aceita → se a etapa de
+destino tem disparo **ligado e com texto**, a resposta traz
+`disparo: {pergunta, texto, telefone, destinatario}` e o `passagem_id` → a caixa
+abre → **"Sim, ver a mensagem"** mostra o texto editável, o destinatário e o
+contador → **Enviar** manda. **"Não enviar"** registra no card que ninguém foi
+avisado.
+
+🚨 **MOVER NÃO AVISA MAIS NINGUÉM.** O `passagem.mover` só chama o
+`preparar_da_etapa`, que **não fala com o cliente** — há trava no fonte provando
+que o mover não cita `enviar_preparado`, `enviar_da_etapa` nem
+`iniciar_conversa`, e a função que enviava **deixou de existir**.
+
+🚨 **A CAIXA VEM DEPOIS DO MOVER, NUNCA ANTES** — a mesma régua do aviso de
+etapa de 04/11. O card já mudou de situação no ERP quando ela abre; pedir
+confirmação antes faria o arrasto parecer travado.
+
+🚨 **DOIS PASSOS, porque ele pediu dois:** o primeiro **não mostra a mensagem**.
+Quem vai clicar "Não" não precisa ler nada.
+
+⚠️ **FECHAR SEM RESPONDER (Escape) NÃO ENVIA E NÃO REGISTRA.** O servidor só
+decide no POST: sem clique, a passagem fica sem decisão — e "sem decisão" é
+exatamente "ninguém foi avisado". O que **não** acontece é o card afirmar que
+alguém escolheu.
+
+⚠️ **O NÚMERO NÃO VIAJA DA TELA.** Só `passagem_id`, `enviar` e o texto: o
+destinatário é rederivado da OS no servidor. É o que garante o *"por enquanto
+somente cliente"* sem depender desta tela — e tem trava no teste.
+
+🚨 **A caixa é a de cima** (`.modal--disparo`, `+30` sobre o `--z-modal`), e a
+conferência de CSS publicado guarda essa soma: é a única caixa desta tela que
+manda mensagem irreversível, e caixa invisível atrás de outra já foi defeito
+aqui em 05/11.
+
+### As chaves das mensagens
+
+| chave | de onde vem |
+|---|---|
+| `{{Contato: Primeiro nome}}` | primeiro nome do contato; sem nome cai em *"tudo bem"* |
+| `{{Nome}}` | **o número da OS** (parece nome de pessoa e não é) |
+| `{{Código de envio/acompanhamento transporte}}` | o campo da etapa 677 |
+| `{{Termo}}` | 🆕 o `TERMO nnnn` da **descrição da OS** |
+| `{{Serviço Técnico}}` | 🆕 o texto **antes do primeiro `:`** da descrição |
+| `{{Veículo e Placa}}` | 🆕 `veículo - placa`, do 2º e do 1º segmento da descrição |
+
+📏 **Por que a descrição, e não a ficha:** medido em 6 OS reais em 17/11,
+`ficha.placas` veio **vazia em 6 de 6** (a placa vem da oficina, e só 236 de 572
+OS têm oficina) e `ficha.problema` veio como **número** (7502), não como nome. A
+descrição trazia tudo em texto, e o formato não é adivinhação — são os
+`descricao_template` do FPSL que o escrevem.
+
+⚠️ **MANUTENÇÃO NÃO TEM TERMO** (não vem de contrato): `{{Termo}}` sair vazio
+nela é certo, não defeito. Medido: 1 das 6 OS da amostra tinha TERMO.
+⚠️ **Risco medido:** o nome do veículo pode conter ` | ` (`M. BENZ | 314 CDIS
+TREET C`) e aí o segundo segmento perde a cauda. A placa, que é o primeiro, foi
+consistente em 3 de 3 descrições legíveis.
+⚠️ **A guarda do serviço é ESTRUTURAL:** o prefixo só vale se houver `|` depois
+dos dois pontos. Sem isso, *"Cliente pediu análise: fazer o que der"* viraria
+"Cliente pediu análise" como serviço na mensagem ao cliente.
+
+### Para quem vai
+
+Um envio, com reserva (decisão dele): **o contato da OS** manda e, faltando, **o
+telefone do cliente cadastrado**. 📏 Medido: **819 dos 960** clientes têm
+telefone por esse caminho.
+
+### Quando a caixa NÃO aparece
+
+`pergunta: false` não é erro — é "não há o que perguntar", e o motivo vai para a
+observação do card (menos "desligado", que é o estado normal de 17 das 17 etapas
+e só faria ruído). 📏 O motivo mais comum depois de "desligado" é a ficha da OS
+não responder: **3 de 6 leituras falharam** na medição de 17/11 (pool do
+Harmonit).
+
+### A ficha do técnico
+
+A tabela de preço passou a ter **15 serviços** com os nomes dele (migração 110,
+ver `02_Modelo_Dados.md`). O texto de ajuda da tela não mudou e continua certo:
+*"Campo em branco significa que ele **não oferece** o serviço — diferente de
+cobrar zero."*
+
+⚠️ **Nenhuma etapa tem texto hoje, e nenhuma está ligada.** Ligar é dele, depois
+de validar as mensagens em tela.

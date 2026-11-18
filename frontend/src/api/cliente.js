@@ -57,6 +57,17 @@ export class ErroDeApi extends Error {
   }
 }
 
+/* 🔵 17/11, TEXTO DELE: 422 sem `motivo` é a validação do servidor recusando o
+   corpo (`detail` vem como LISTA), e "Erro 422." não dizia nada a quem atende.
+   Foi assim com a D&C Refrigeração (complemento de 60 caracteres). ⚠️ 422 com
+   `detail` em TEXTO continua mostrando o texto: ele já é legível. */
+function textoDoErroSemMotivo(status) {
+  if (status === 422) {
+    return 'Há um erro de comunicação entre os servidores, reporte a iago, por favor'
+  }
+  return `Erro ${status}.`
+}
+
 async function pedir(metodo, caminho, corpo, jaRepetiu = false) {
   const cabecalhos = { Accept: 'application/json' }
   if (token) cabecalhos.Authorization = `Bearer ${token}`
@@ -123,7 +134,7 @@ async function pedir(metodo, caminho, corpo, jaRepetiu = false) {
   const ehTexto = typeof detalhe === 'string'
   throw new ErroDeApi(
     // Corpo estruturado costuma trazer `motivo`: é ele que a pessoa lê.
-    ehTexto ? detalhe : (detalhe.motivo || `Erro ${resposta.status}.`),
+    ehTexto ? detalhe : (detalhe.motivo || textoDoErroSemMotivo(resposta.status)),
     resposta.status,
     reqId,
     ehTexto ? null : detalhe,

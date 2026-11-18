@@ -354,6 +354,15 @@ function enderecoVazio() {
 }
 
 const campos = ref(enderecoVazio())
+/* 🆕 17/11: o que a OS trouxe MAIOR que o campo. A D&C Refrigeração (OS 17029
+   e 17028) tem complemento de 60 caracteres no Harmonit, o campo cabe 40, e o
+   `maxlength` só barra DIGITAÇÃO -- valor posto por código passa, e o servidor
+   devolvia 422 ("Erro 422.", sem dizer o campo).
+   🔵 DECISÃO DELE: o limite de 40 FICA, e a tela avisa o tanto de caracteres,
+   de forma sutil, na caixa do campo. ⚠️ Corta no limite E DIZ: cortar calado
+   pode tirar a instrução que leva o técnico ao lugar. O aviso some quando
+   quem atende mexe no campo -- ele já viu e decidiu. */
+const cortados = ref({})   // { complemento: 60 } = quantos tinha a OS
 const enderecoDaOs = ref(null)
 const cepEstado = ref('')   // '', 'buscando', 'achado', 'nao-existe', 'caiu'
 
@@ -385,9 +394,19 @@ async function carregarEnderecoDaOs() {
                    numero: vindo.numero, bairro: vindo.bairro,
                    cidade: vindo.cidade, uf: vindo.uf,
                    complemento: vindo.complemento }
+    const novosCortes = {}
     for (const [k, v] of Object.entries(mapa)) {
-      if (v && !campos.value[k]) campos.value[k] = String(v)
+      if (v && !campos.value[k]) {
+        let texto = String(v)
+        const limite = LIMITES[k]
+        if (limite && texto.length > limite) {
+          novosCortes[k] = texto.length
+          texto = texto.slice(0, limite)
+        }
+        campos.value[k] = texto
+      }
     }
+    cortados.value = { ...cortados.value, ...novosCortes }
   } catch (e) {
     // 🚨 Nao e erro de tela: o compromisso pode ser agendado com endereco
     // digitado. A tela diz que nao conseguiu ler o da OS.
@@ -1079,22 +1098,26 @@ onMounted(() => {
                 <label class="agm__campo agm__campo--rua">
                   <span>Rua <small>{{ campos.logradouro.length }}/{{ LIMITES.logradouro }}</small></span>
                   <input v-model="campos.logradouro" class="campo__entrada"
-                         :maxlength="LIMITES.logradouro" />
+                         :maxlength="LIMITES.logradouro" @input="delete cortados.logradouro" />
+                  <small v-if="cortados.logradouro" class="agm__corte">A OS tem {{ cortados.logradouro }} caracteres; aqui cabem {{ LIMITES.logradouro }}.</small>
                 </label>
                 <label class="agm__campo agm__campo--num">
                   <span>Número</span>
                   <input v-model="campos.numero" class="campo__entrada"
-                         :maxlength="LIMITES.numero" />
+                         :maxlength="LIMITES.numero" @input="delete cortados.numero" />
+                  <small v-if="cortados.numero" class="agm__corte">A OS tem {{ cortados.numero }} caracteres; aqui cabem {{ LIMITES.numero }}.</small>
                 </label>
                 <label class="agm__campo">
                   <span>Bairro <small>{{ campos.bairro.length }}/{{ LIMITES.bairro }}</small></span>
                   <input v-model="campos.bairro" class="campo__entrada"
-                         :maxlength="LIMITES.bairro" />
+                         :maxlength="LIMITES.bairro" @input="delete cortados.bairro" />
+                  <small v-if="cortados.bairro" class="agm__corte">A OS tem {{ cortados.bairro }} caracteres; aqui cabem {{ LIMITES.bairro }}.</small>
                 </label>
                 <label class="agm__campo">
                   <span>Cidade <small>{{ campos.cidade.length }}/{{ LIMITES.cidade }}</small></span>
                   <input v-model="campos.cidade" class="campo__entrada"
-                         :maxlength="LIMITES.cidade" />
+                         :maxlength="LIMITES.cidade" @input="delete cortados.cidade" />
+                  <small v-if="cortados.cidade" class="agm__corte">A OS tem {{ cortados.cidade }} caracteres; aqui cabem {{ LIMITES.cidade }}.</small>
                 </label>
                 <label class="agm__campo agm__campo--uf">
                   <span>UF</span>
@@ -1104,7 +1127,8 @@ onMounted(() => {
                 <label class="agm__campo">
                   <span>Complemento <small>{{ campos.complemento.length }}/{{ LIMITES.complemento }}</small></span>
                   <input v-model="campos.complemento" class="campo__entrada"
-                         :maxlength="LIMITES.complemento" />
+                         :maxlength="LIMITES.complemento" @input="delete cortados.complemento" />
+                  <small v-if="cortados.complemento" class="agm__corte">A OS tem {{ cortados.complemento }} caracteres; aqui cabem {{ LIMITES.complemento }}.</small>
                 </label>
               </div>
 
@@ -1409,6 +1433,8 @@ onMounted(() => {
 .agm__endereco { display: grid; grid-template-columns: repeat(2, minmax(160px, 1fr)); gap: var(--e-2); }
 .agm__endereco .agm__campo span small { color: var(--texto-fraco); font-weight: 400; }
 .agm__campo--rua { grid-column: span 2; }
+/* Aviso de corte: sutil de propósito (decisão dele, 17/11). */
+.agm__corte { color: var(--texto-fraco); font-size: var(--txt-xs); font-weight: 400; }
 .agm__cep-linha { display: flex; gap: var(--e-1); }
 .agm__texto { width: 100%; font-family: inherit; font-size: var(--txt-sm); }
 .agm__mensagem { display: flex; flex-direction: column; gap: var(--e-2); }
