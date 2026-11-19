@@ -8304,3 +8304,51 @@ cobrar zero."*
 
 ⚠️ **Nenhuma etapa tem texto hoje, e nenhuma está ligada.** Ligar é dele, depois
 de validar as mensagens em tela.
+
+## `PNL_1.6` — Serviço dos técnicos
+
+🔵 18/11, dele: *"Nova aba2 no painel do Financeiro Movizap: 'Serviço dos
+técnicos'"*. Cinco colunas, e a unidade que atravessa todas é o **artefato de
+pagamento**: um serviço pago a um técnico numa OS, com **Orçamento · OS ·
+TERMO · valor** — a ordem que ele escreveu.
+
+**1. Movimentação.** 🔵 *"Rotina automatizada visita todas as OS das ultimas
+24hrs e vai agrupando os dados. Cards são gerados por técnico
+automaticamente."* Um card por técnico, **permanente**, acumulando o histórico.
+Dentro dele, 🔵 *"o filtro de datas (...) só quero fechar de 16-18/11/26 filtro
+isso e flego"* — a data é a do **serviço**. Caixas de seleção e o botão
+**Preparar os marcados**.
+
+📏 No primeiro dia, medido contra o cache de 633 OS: **79 artefatos** em **9
+cards**. Franck com 40 (R$ 3.430,00 + R$ 933,10), e um card *"sem técnico
+identificado"* com **21** somando **R$ 2.581,90** sem destinatário. 🚨 Esses 21
+são o funil que ele mandou consertar em 11/11 (70 → 16 → 8 OS): aqui eles
+aparecem em vez de serem descartados, e o card **não** tem botão de preparar —
+sem técnico não há a quem pagar.
+
+**2. Preparação.** Um lote por técnico. A conferência é da situação da OS, com
+**porta dupla**: a etapa NOSSA 2322 (*Serviço Realizado*) **ou** uma das três do
+Harmonit — 15696, 16490, 15694. 🚨 O Fechamento antigo exigia **só** a 15694, e
+foi isso que derrubou 70 OS para 16. 🔵 *"confirmar 1 a 1 na tela modal"*, com
+**ciente** ou **remover** (que pede justificativa e devolve à coluna 1 em
+laranja). O botão é **Auditar**, e 🔵 *"move o card somente com os cientes"*.
+
+**3. Validação.** Traz a situação do DataScope e o campo de comprovante: 🔵
+*"Após o envio do anexo, abre o campo que pede o valor inserido no documento"*.
+O semáforo dos valores, com as três regras dele: **verde** = conformidade,
+**amarelo** = divergência ou ausência, **vermelho** = *"valor a pagar maior que
+recibo"*. 🔵 Remover aqui volta para a **coluna 1**, não para a 2. Botão
+**Montar Arquivo**, e **Atualizar** em todo card.
+
+**4. Procfy.** O `.xlsx` com as 14 colunas do modelo dele, um por técnico.
+🔵 *"pode gerar com elas em branco nesse momento, pois podem preencher a mão por
+informação confidencial ou depois nos passar"* — as quatro colunas do cadastro
+do Procfy (`Categoria`, `Contas bancárias`, `Modo de pagamento`, `Centro de
+Custo`) saem vazias e a tela **diz quais**.
+
+**5. Pagamento enviado.** O card retém os artefatos; reabrir gera um arquivo
+novo sem os removidos, e os removidos voltam à coluna 1.
+
+🚨 **Todo gesto grava evento** (`pagamento_evento`): este fluxo move dinheiro e
+avisa gente de fora (a correção no DataScope dispara os webhooks deles e manda
+push ao técnico). 🔵 *"deve ter o log de quem faz o que SEMPRE"*.

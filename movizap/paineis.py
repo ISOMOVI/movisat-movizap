@@ -549,6 +549,16 @@ def quadro(painel: str, so_abertas: bool = True,
             return
         por_chave[f"s{situacao}"]["cards"].append(card)
 
+    # 🔵 A FILA DAS PASSAGENS — migração 115, decisão dele de 18/11:
+    # *"assim op não para de trabalhar e seguimos no background com a OS"*.
+    #
+    # 🚨 É AQUI QUE O CARD ANDA ANTES DO ERP. O quadro lê o `situacao_id` do
+    # cache do FPSL, varrido a cada 5 min; a fila guarda o que o operador já
+    # decidiu. ⚠️ Sem esta linha o card voltaria para a coluna antiga na
+    # próxima abertura do painel -- e a pessoa concluiria que não gravou e
+    # moveria de novo, que é exatamente o laço de 7 cliques da OS 17133.
+    pendentes = passagem.pendentes_por_os()
+
     # ---- os cards das OS do ERP ------------------------------------------
     for o in os_do_erp:
         numero = o.get("numero_os")
@@ -625,7 +635,20 @@ def quadro(painel: str, so_abertas: bool = True,
             # A tela escreve só o número da OS -- não existe "sem termo"
             # escrito no card, que seria ruído em 85 cards.
             "termo": o.get("termo"),
-        }, o.get("situacao_id"))
+            # 🚨 O SELO, e ele é obrigatório junto com o card andar. Card que
+            # anda sem garantia e sem dizer é tela que mente (`M12`) -- pior
+            # que o erro honesto de antes, porque ninguém desconfia.
+            "passagem_pendente": numero in pendentes,
+            "pendente_desde": (pendentes.get(numero) or {}).get("pendente_desde"),
+            "pendente_tentativas": (pendentes.get(numero) or {}).get("tentativas"),
+            "pendente_erro": (pendentes.get(numero) or {}).get("pendente_erro"),
+            # ⚠️ Onde o ERP ainda está, quando diferem. A tela pode dizer as
+            # duas coisas: onde o card está e o que a OS ainda diz.
+            "situacao_do_erp": (o.get("situacao_id")
+                                if numero in pendentes else None),
+        # 🚨 A COLUNA SAI DA FILA quando há pendência, e do cache quando não há.
+        }, ((pendentes[numero]["para_situacao"]) if numero in pendentes
+            else o.get("situacao_id")))
 
     # ---- os cards de CHAMADO, que nao sao OS ----------------------------
     # 🚨 ESTES VEM DO MOTOR DE ETAPAS NOSSAS (`movizap/pipeline.py`), e nao da
@@ -844,7 +867,21 @@ def _card_do_chamado(c: dict, nomes: dict, da_os: dict | None = None) -> dict:
         # """ + S + """ O `id` aqui e o do CARD DE PIPELINE, nao o da solicitacao: e por
         # ele que a tela move, finaliza e reabre.
         "id": c["id"],
-        "origem": "chamado",
+        # 🚨 O RÓTULO DA ORIGEM DEIXOU DE MENTIR em 18/11, e isto veio de uma
+        # pergunta dele: *"Então pq os cards informam que não vem de OS no
+        # painel?"*
+        #
+        # 📏 Os 8 cards do Financeiro naquele dia eram TODOS OS (17120, 17119,
+        # 17122, 17127, 17125, 17129, 17134, 17136), e nenhum veio de
+        # formulário -- a `formulario_solicitacao` não tinha uma linha dos 4
+        # formulários que apontam a etapa 875. Quem os trouxe foi
+        # `recebe_situacao = 15746`. E ainda assim este campo dizia "chamado",
+        # e a tela usava isso para pintar a borda cujo próprio comentário
+        # afirmava *"ele não é uma OS"*.
+        #
+        # ⚠️ O NOME NOVO DIZ AS DUAS COISAS porque as duas são verdade: é uma
+        # OS do ERP **e** está numa etapa nossa. Nenhum dos dois lados some.
+        "origem": "erp_em_etapa_nossa" if c.get("numero_os") else "chamado",
         # ⚠️ A ETAPA VEM NO CARD desde 05/11: a tela das abas compara
         # `card.etapa_id` com `coluna.etapa_id` para nao chamar a rota quando o
         # card e solto na propria coluna. Sem ela a comparacao era

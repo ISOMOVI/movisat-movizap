@@ -370,7 +370,16 @@ def teste_o_grupo_paineis_deixou_de_nascer_vazio():
     # `paineis.PAINEIS` desde 22/10 passaram a ter tela. ⚠️ `COM_TELA` segue
     # sendo so `operacao`, e e certo: ele governa o `quadro()`, que fala com o
     # Harmonit -- os tres novos passam pelo `quadro_da_aba`, que nao fala.
-    assert dentro == ["PNL_1.1", "PNL_1.2", "PNL_1.3", "PNL_1.4", "PNL_1.5"]
+    # 🔵 18/11: a `PNL_1.6`, segunda aba do Financeiro -- *"Serviço dos
+    # técnicos"*, as cinco colunas do pagamento de técnico. 🚨 Ela tem TELA
+    # PRÓPRIA e não a `PainelAba`: as cinco colunas não são etapas nossas
+    # nem situações do ERP, e sim estados do artefato de pagamento, que
+    # vive no FPSL.
+    assert dentro == ["PNL_1.1", "PNL_1.2", "PNL_1.3", "PNL_1.4",
+                      "PNL_1.5", "PNL_1.6"]
+    # ⚠️ E a nova nasce SÓ OWNER como as outras, e aqui pesa mais: esta
+    # tela move dinheiro e gera o arquivo que vai ao Procfy.
+    assert telas.por_codigo("PNL_1.6")["permissao"] == "owner"
     # ⚠️ E AS DUAS NASCEM SO DO OWNER: *"todas hoje nascem somente para o
     # owner"*. Conceder e gesto dele.
     for codigo in ("PNL_1.2", "PNL_1.3"):
@@ -654,3 +663,79 @@ def teste_o_filtro_de_abertas_alcanca_o_card_de_CHAMADO():
     finally:
         banco.executar("DELETE FROM pipeline_card WHERE id IN (%s, %s)",
                        (velho["id"], novo["id"]))
+
+
+class TestAOrigemDoCardDeEtapaNossa:
+    """🚨 A pergunta dele em 18/11: *"Então pq os cards informam que não vem de
+    OS no painel?"* — e o campo `origem` respondia "chamado" para card de OS.
+
+    📏 Os 8 cards do Financeiro naquele dia eram TODOS OS (17120, 17119, 17122,
+    17127, 17125, 17129, 17134, 17136) e nenhum veio de formulário: a
+    `formulario_solicitacao` não tinha uma linha dos 4 formulários que apontam
+    a etapa 875. Quem os trouxe foi `recebe_situacao = 15746`.
+
+    ⚠️ E a tela usava esse `origem` para pintar a borda cujo comentário no CSS
+    dizia, com estas palavras, *"ele não é uma OS"*.
+
+    🚨 **O QUE NÃO MUDA, e três destes testes travam:** `numero_ordem` e
+    `situacao_id` continuam NULOS. São eles que a tela lê para manter o card sem
+    arrasto e sem `<select>` de mover — enchê-los ligaria o arrasto ao ERP numa
+    aba cujo mover grava só no nosso banco. **O que muda é o rótulo, não a
+    guarda.**
+    """
+
+    def _card(self, **extra):
+        linha = {"id": 2645, "etapa_id": 875, "solicitacao_id": None,
+                 "cliente_id": 84792, "numero_os": 17134,
+                 "criado_em": None, "desfecho": None, "desfecho_em": None,
+                 "desfecho_por_nome": None, "valores": None,
+                 "solicitada_em": None, "formulario": None, "slug": None,
+                 "observacoes": 2, "etapa_desde": None}
+        linha.update(extra)
+        return paineis._card_do_chamado(linha, {}, None)
+
+    def test_card_COM_OS_nao_se_chama_chamado(self):
+        assert self._card()["origem"] == "erp_em_etapa_nossa"
+
+    def test_card_SEM_OS_continua_chamado(self):
+        """⚠️ Guarda-de-regressão: consertar um não pode apagar o outro."""
+        assert self._card(numero_os=None)["origem"] == "chamado"
+
+    def test_os_DOIS_NULOS_da_guarda_ficam(self):
+        """🚨 O contrato que mantém o card sem arrasto para o ERP."""
+        for card in (self._card(), self._card(numero_os=None)):
+            assert card["numero_ordem"] is None
+            assert card["situacao_id"] is None
+            assert card["os_id"] is None
+
+    def test_o_numero_da_OS_continua_em_numero_os(self):
+        """⚠️ É daí que o componente do card tira a OS, justamente porque
+        `numero_ordem` é nulo de propósito."""
+        assert self._card()["numero_os"] == 17134
+
+    def test_os_campos_de_12_11_continuam_vindo(self):
+        """🔵 12/11, dele: *"nos cards do financeiro, faltam informações sobre o
+        tipo do termo, número do termo"* / *"igual da OP"*.
+
+        🚨 Eles JÁ vinham e a tela os jogava fora — o conserto de 18/11 foi na
+        tela. Este teste existe para o servidor não voltar a nulá-los."""
+        da_os = {"tipo_nome": "Instalação", "status_str": "Iniciada",
+                 "termo": "8955", "prioridade": 382,
+                 "placas": [{"placa": "UVO 8E01"}],
+                 "tecnicos": [{"nome": "Franck"}],
+                 "visto_em": "2026-11-18T12:49:21+00:00",
+                 "finalizada": False}
+        linha = {"id": 2645, "etapa_id": 875, "solicitacao_id": None,
+                 "cliente_id": 84792, "numero_os": 17134, "criado_em": None,
+                 "desfecho": None, "desfecho_em": None,
+                 "desfecho_por_nome": None, "valores": None,
+                 "solicitada_em": None, "formulario": None, "slug": None,
+                 "observacoes": 2, "etapa_desde": None}
+        card = paineis._card_do_chamado(linha, {}, da_os)
+        assert card["termo"] == "8955"
+        assert card["tipo_nome"] == "Instalação"
+        assert card["status_str"] == "Iniciada"
+        assert card["placas"] == [{"placa": "UVO 8E01"}]
+        assert card["visto_em"] == "2026-11-18T12:49:21+00:00"
+        # ...e a origem continua dizendo que é OS.
+        assert card["origem"] == "erp_em_etapa_nossa"

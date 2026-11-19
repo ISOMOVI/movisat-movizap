@@ -42,6 +42,7 @@ import ChatInterno from '../telas/ChatInterno.vue'
 import Solicitacoes from '../telas/Solicitacoes.vue'
 import PainelOperacao from '../telas/PainelOperacao.vue'
 import PainelAba from '../telas/PainelAba.vue'
+import PainelServicoDosTecnicos from '../telas/PainelServicoDosTecnicos.vue'
 import Atendentes from '../telas/Atendentes.vue'
 import Times from '../telas/Times.vue'
 import Automacao from '../telas/Automacao.vue'
@@ -256,6 +257,22 @@ const rotas = [
     component: PainelAba,
     meta: { codigo: 'PNL_1.5', aba: 'PNL_1.5',
             titulo: 'Contratual', largo: true },
+  },
+  {
+    // 🔵 18/11, ele: *"Nova aba2 no painel do Financeiro Movizap: 'Serviço dos
+    // técnicos'"*.
+    // 🚨 TELA PRÓPRIA, e não a `PainelAba`: as cinco colunas NÃO são etapas
+    // nossas nem situações do ERP -- são estados do *artefato de pagamento*,
+    // que vive no FPSL. A `PainelAba` desenharia cinco colunas vazias para
+    // sempre, porque ela lê `pipeline_etapa` e esta aba não tem nenhuma.
+    // 🚨 REGISTRO E ROTEADOR ANDAM JUNTOS: tela registrada no backend e
+    // ausente daqui aparece no menu e leva para "não encontrada" -- aconteceu
+    // em 06/08 com a ATD_5.1, e o `teste_router.py` compara os dois lados.
+    path: '/paineis/servico-dos-tecnicos',
+    name: 'PNL_1.6',
+    component: PainelServicoDosTecnicos,
+    meta: { codigo: 'PNL_1.6', aba: 'PNL_1.6',
+            titulo: 'Serviço dos técnicos', largo: true },
   },
 
   // 🔵 22/10: a FRM_1.1, o que chega pelos formularios proprios.

@@ -92,7 +92,14 @@ def teste_a_tira_so_existe_com_mais_de_uma_aba():
     for a in todas_as_abas():
         quantas[a["painel"]] = quantas.get(a["painel"], 0) + 1
     assert quantas["pos_venda"] == 2
-    assert quantas["financeiro"] == 1
+    # 🔵 18/11: o Financeiro ganhou a SEGUNDA aba -- *"Serviço dos
+    # técnicos"* (`PNL_1.6`), as cinco colunas do pagamento de técnico.
+    # ⚠️ **E ISSO LIGA A TIRA DE ABAS NO FINANCEIRO**, que até aqui não
+    # aparecia: a regra desta suíte é que a tira só existe com mais de
+    # uma aba, e agora há duas. É consequência do pedido dele, não
+    # defeito -- ele já havia dito em 06/11 que *"o financeiro tera suas
+    # proprias abas, mas por agora so 1"*.
+    assert quantas["financeiro"] == 2
     assert quantas["contratual"] == 1
 
 

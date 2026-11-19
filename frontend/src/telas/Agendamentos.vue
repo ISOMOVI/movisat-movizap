@@ -428,6 +428,20 @@ onMounted(carregar)
               </span>
               <small v-if="a.estado === 'cancelado' && a.motivo_cancelamento"
                      class="agd__motivo">{{ a.motivo_cancelamento }}</small>
+              <!-- 🚨 TELA QUE MENTE É DEFEITO (`M12`). O aviso de "não foi
+                   ao Harmonit" existia só na caixa, logo depois de agendar, e
+                   vivia um instante: dali em diante o erro ficava só na linha
+                   do banco e esta tela mostrava um compromisso que parecia
+                   inteiro. Medido em 18/11: 6 dos 10 ativos estavam assim, e
+                   nada na tela dizia.
+                   ⚠️ NÃO É ERRO DO COMPROMISSO: o dono é o MoviZap (decisão 7
+                   dele) e ele vale aqui. É por isso que o selo fica ao LADO do
+                   estado, e não no lugar dele. -->
+              <small v-if="a.estado !== 'cancelado' && !a.harmonit_agendamento_id
+                           && a.harmonit_erro"
+                     class="agd__sem-harmonit" :title="a.harmonit_erro">
+                Não foi para a OS no Harmonit
+              </small>
             </td>
             <td class="agd__acoes">
               <button v-if="a.estado !== 'cancelado'" class="botao botao--fantasma"
@@ -703,4 +717,15 @@ onMounted(carregar)
 .agd__estado--confirmado { color: var(--ok); }
 .agd__estado--aguardando { color: var(--aviso); }
 .agd__estado--cancelado { color: var(--erro); }
+/* 🚨 Classe própria no padrão `agd__` deste arquivo, e NUNCA `.pilula`:
+   `.pilula` é `scoped` por componente e não existe em `estilo/*.css` — o selo
+   nasceria sem estilo nenhum e nenhuma trava pegaria, porque o jsdom não faz
+   layout. */
+.agd__sem-harmonit {
+  display: block;
+  color: var(--aviso);
+  font-size: var(--txt-xs);
+  font-weight: var(--peso-forte);
+  cursor: help;
+}
 </style>

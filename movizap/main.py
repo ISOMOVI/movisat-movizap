@@ -1496,7 +1496,41 @@ def confirmar_agendamento(agendamento_id: int, entrada: ConfirmacaoEntrada,
     if not mudou:
         raise HTTPException(status_code=409,
                             detail="Este agendamento não está esperando confirmação.")
-    return agendamento.por_id(agendamento_id)
+
+    resposta = agendamento.por_id(agendamento_id)
+
+    # 🚨 A ESCRITA NO HARMONIT ACONTECIA UMA VEZ SÓ, NA CRIAÇÃO, e era isso
+    # que deixava o compromisso confirmado aqui e inexistente lá — a demanda
+    # dele de 17/11 (*"o agendamento confirmado no movizap, não está agendando
+    # dentro da OS"*). `levar_ao_harmonit` tinha um único chamador, a rota que
+    # cria; `confirmar()` era UPDATE local e mais nada.
+    #
+    # ⚠️ SÓ QUANDO AINDA NÃO FOI. Com `harmonit_agendamento_id` preenchido
+    # isto não roda: uma segunda chamada abriria o SEGUNDO compromisso na
+    # mesma OS — é a mesma trava de reenvio por passagem dos disparos de
+    # 17/11, e aqui ela vale ainda mais porque a escrita é num ERP.
+    #
+    # 🚨 AQUI E NÃO DENTRO DE `agendamento.confirmar()`: a função é chamada
+    # pelos testes e pelo resto do módulo, e pôr a escrita lá faria todo teste
+    # de confirmação bater no Harmonit. A rota é onde a escrita da criação já
+    # mora (`criar_agendamento`), e é onde esta fica.
+    #
+    # ⚠️ NUNCA DERRUBA A CONFIRMAÇÃO: o dono do compromisso é este lado
+    # (decisão 7 dele), e a recusa vira texto em `harmonit_erro`, legível na
+    # própria linha — mesmo desenho da criação.
+    if not resposta.get("harmonit_agendamento_id"):
+        try:
+            foi = agendamento.levar_ao_harmonit(agendamento_id)
+            # Relê: o `levar_ao_harmonit` grava o rastro no banco, e devolver
+            # a linha de antes faria a tela mostrar "não foi" logo depois de
+            # ter ido.
+            resposta = {**agendamento.por_id(agendamento_id), "harmonit": foi}
+        except Exception as e:  # noqa: BLE001
+            log.exception("agendamento %s confirmado e a retentativa no "
+                          "Harmonit falhou", agendamento_id)
+            resposta["harmonit"] = {"ligado": True, "quantas_foram": 0,
+                                    "erro": f"{type(e).__name__}: {e}"}
+    return resposta
 
 
 class CancelamentoEntrada(BaseModel):
@@ -6729,6 +6763,211 @@ def definir_desafio_do_formulario(dados: DesafioSempre,
     desligado. Ligado, a conta de somar aparece em TODO envio; desligado, só
     depois de 5 envios do mesmo IP na hora."""
     return formularios_mod.definir_desafio_sempre(dados.ligado)
+
+
+# ============================================================================
+# SERVIÇO DOS TÉCNICOS — a aba 2 do Financeiro (PNL_1.6), 18/11
+# ============================================================================
+# 🔵 *"Nova aba2 no painel do Financeiro Movizap: 'Serviço dos técnicos'"*, com
+# as cinco colunas do pagamento de técnico — da varredura automática até o
+# arquivo do Procfy.
+#
+# 🔵 *"É possível fazer tudo no FPSL com as rotas e etc, mas o painel é aqui."*
+# Os dados e os gestos moram no FPSL (3 tabelas + 12 rotas de ponte); daqui
+# saem as chamadas, o orçamento e a tela.
+#
+# 🚨 **ANTES DO BLOCO DO FRONTEND DE PROPÓSITO.** O `spa` lá embaixo é um
+# `@app.get("/{caminho:path}")`, e o FastAPI casa na ORDEM de registro: rota
+# declarada depois dele nunca seria alcançada por GET.
+#
+# 🚨 A PERMISSÃO É A DA TELA, como no painel da Operação: quem alcança a
+# `PNL_1.6` opera. ⚠️ E ela nasce **só owner** — esta tela move dinheiro e gera
+# o arquivo que vai ao Procfy.
+#
+# 🚨 NENHUMA DESTAS ROTAS TOCA O HARMONIT: elas falam com a ponte do FPSL, que
+# lê o cache de OS. O ERP esgota o pool todo dia.
+
+
+class ArtefatosMarcados(BaseModel):
+    artefatos: list[int]
+
+
+class ArtefatoDevolvido(BaseModel):
+    artefato_id: int = Field(..., ge=1)
+    # ⚠️ Pequeno de propósito: 🔵 *"abrindo um campo de justificativa com campo
+    # de texto pequeno"*. 🚨 E obrigatório — laranja sem motivo é cor sem
+    # informação.
+    justificativa: str = Field(..., min_length=1, max_length=400)
+
+
+class ComprovanteDoArtefato(BaseModel):
+    artefato_id: int = Field(..., ge=1)
+    arquivo: str | None = None
+    valor: float | None = None
+    dispensa: str | None = Field(default=None, max_length=400)
+
+
+@app.get("/api/paineis/servico-dos-tecnicos")
+def quadro_do_servico(usuario: dict = Depends(auth.requer_tela("PNL_1.6"))):
+    """As cinco colunas, com o orçamento preenchido deste lado.
+
+    🔵 A ordem no card é **Orçamento — OS — TERMO**, e o orçamento é o do
+    MoviZap (decisão dele): o FPSL não tem como sabê-lo.
+    """
+    try:
+        return fpsl_ponte.quadro_do_pagamento()
+    except fpsl_ponte.FpslIndisponivel as e:
+        # 🚨 QUADRO VAZIO NUNCA. Vazio silencioso faria o operador concluir que
+        # não há pagamento a preparar — justo quando há.
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+@app.post("/api/paineis/servico-dos-tecnicos/varrer")
+def varrer_servicos(usuario: dict = Depends(auth.requer_tela("PNL_1.6"))):
+    """A varredura à mão. 🔵 A automática roda de madrugada.
+
+    ⚠️ Sem janela de propósito: quem clica quer o que houver, não as últimas
+    24h — e a primeira rodada precisa do cache inteiro.
+    """
+    return fpsl_ponte._pagamento("/varrer", {"horas": None})
+
+
+@app.post("/api/paineis/servico-dos-tecnicos/preparar")
+def preparar_servicos(dados: ArtefatosMarcados,
+                      usuario: dict = Depends(auth.requer_tela("PNL_1.6"))):
+    """🔵 *"Os itens flegados e clicados em preparar, vão gerar novo card do
+    técnico, agora preparando para pagamento."*"""
+    return fpsl_ponte.preparar_pagamentos(dados.artefatos,
+                                          por=usuario.get("nome"))
+
+
+@app.post("/api/paineis/servico-dos-tecnicos/conferir/{artefato_id}")
+def conferir_servico(artefato_id: int,
+                     usuario: dict = Depends(auth.requer_tela("PNL_1.6"))):
+    """A situação da OS para o operador dar ciente, com a **porta dupla**:
+    a etapa NOSSA 2322 *ou* uma das três situações do Harmonit."""
+    return fpsl_ponte.conferir_situacao(artefato_id)
+
+
+@app.post("/api/paineis/servico-dos-tecnicos/ciente/{artefato_id}")
+def ciente_do_servico(artefato_id: int,
+                      usuario: dict = Depends(auth.requer_tela("PNL_1.6"))):
+    return fpsl_ponte.dar_ciente(artefato_id, por=usuario.get("nome"))
+
+
+@app.post("/api/paineis/servico-dos-tecnicos/devolver")
+def devolver_servico(dados: ArtefatoDevolvido,
+                     usuario: dict = Depends(auth.requer_tela("PNL_1.6"))):
+    """🚨 Sempre para a coluna 1, de qualquer etapa — 🔵 *"veja que aqui não
+    retorna para a anterior e sim para o 1"*."""
+    return fpsl_ponte.devolver_artefato(dados.artefato_id, dados.justificativa,
+                                        por=usuario.get("nome"))
+
+
+@app.post("/api/paineis/servico-dos-tecnicos/auditar/{lote_id}")
+def auditar_servico(lote_id: int,
+                    usuario: dict = Depends(auth.requer_tela("PNL_1.6"))):
+    """🔵 *"irá mover o card somente com os cientes de situação e não negados
+    para a próxima coluna"*."""
+    return fpsl_ponte.auditar_lote(lote_id, por=usuario.get("nome"))
+
+
+@app.post("/api/paineis/servico-dos-tecnicos/datascope/{artefato_id}")
+def datascope_do_servico(artefato_id: int,
+                         usuario: dict = Depends(auth.requer_tela("PNL_1.6"))):
+    """A situação no DataScope. ⚠️ **SÓ LEITURA** — a correção é outra rota, e
+    🔵 ele decidiu que ela abre modal antes de escrever: `change_state` dispara
+    os webhooks deles e manda push ao técnico que enviou a resposta."""
+    return fpsl_ponte.datascope_do_artefato(artefato_id)
+
+
+@app.post("/api/paineis/servico-dos-tecnicos/comprovante")
+def comprovante_do_servico(dados: ComprovanteDoArtefato,
+                           usuario: dict = Depends(auth.requer_tela("PNL_1.6"))):
+    """🔵 *"haverá campo para que em cada 1 dos artefatos de pagamento seja
+    inserido anexo que comprove o pagamento. Após o envio do anexo, abre o
+    campo que pede o valor inserido no documento."*"""
+    return fpsl_ponte.guardar_comprovante(
+        dados.artefato_id, arquivo=dados.arquivo, valor=dados.valor,
+        dispensa=dados.dispensa, por=usuario.get("nome"))
+
+
+@app.post("/api/paineis/servico-dos-tecnicos/revalidar/{lote_id}")
+def revalidar_servico(lote_id: int,
+                      usuario: dict = Depends(auth.requer_tela("PNL_1.6"))):
+    """🔵 O botão **[ atualizar ]** de todo card: *"para rodar novamente as
+    verificações daquele card, caso algum ajuste tenha sido feito depos que ele
+    nasceu"*. 🚨 Não move nada."""
+    return fpsl_ponte.revalidar_lote(lote_id, por=usuario.get("nome"))
+
+
+@app.get("/api/paineis/servico-dos-tecnicos/previa/{lote_id}")
+def previa_do_servico(lote_id: int,
+                      usuario: dict = Depends(auth.requer_tela("PNL_1.6"))):
+    """🔵 *"dentro deles um resumo dos artefatos que vão para pagamento"*.
+    ⚠️ Leitura: ver o resumo não move card."""
+    return fpsl_ponte.previa_do_arquivo(lote_id)
+
+
+@app.post("/api/paineis/servico-dos-tecnicos/montar-arquivo/{lote_id}")
+def montar_arquivo_do_servico(
+        lote_id: int, usuario: dict = Depends(auth.requer_tela("PNL_1.6"))):
+    """🔵 *"o botão de ação da vez é 'Montar Arquivo'"*.
+
+    ⚠️ Gera **mesmo com os quatro campos do Procfy em branco** — 🔵 decisão
+    dele de 18/11: *"pode gerar com elas em branco nesse momento, pois podem
+    preencher a mão por informação confidencial ou depois nos passar"*. A
+    resposta diz quais colunas saíram vazias.
+    """
+    return fpsl_ponte.montar_arquivo(lote_id, por=usuario.get("nome"))
+
+
+@app.get("/api/paineis/servico-dos-tecnicos/arquivo/{lote_id}")
+def baixar_arquivo_do_servico(
+        lote_id: int, usuario: dict = Depends(auth.requer_tela("PNL_1.6"))):
+    """O `.xlsx` do lote. 🚨 **Quem monta o binário é este lado** — a ponte do
+    FPSL fala JSON e nada mais; abrir um caminho de download lá exporia o FPSL
+    a quem só deveria falar com o painel.
+
+    ⚠️ `openpyxl` é importado AQUI e não no topo: ele só é preciso nesta rota, e
+    um import no topo faria o módulo inteiro depender dele para subir.
+    """
+    import io as _io
+
+    from fastapi.responses import StreamingResponse
+    from openpyxl import Workbook
+
+    montado = fpsl_ponte.previa_do_arquivo(lote_id)
+    if not montado.get("ok"):
+        raise HTTPException(
+            status_code=400,
+            detail=montado.get("motivo")
+            or "não deu para montar o arquivo deste lote")
+    livro = Workbook()
+    folha = livro.active
+    folha.title = "Lançamentos"
+    colunas = list(montado["linhas"][0].keys()) if montado["linhas"] else []
+    folha.append(colunas)
+    for linha in montado["linhas"]:
+        folha.append([linha[c] for c in colunas])
+    buffer = _io.BytesIO()
+    livro.save(buffer)
+    buffer.seek(0)
+    tecnico = (montado.get("tecnico") or "tecnico").replace(" ", "_")
+    return StreamingResponse(
+        buffer,
+        media_type="application/vnd.openxmlformats-officedocument."
+                   "spreadsheetml.sheet",
+        headers={"Content-Disposition":
+                 f'attachment; filename="procfy_{tecnico}.xlsx"'})
+
+
+@app.post("/api/paineis/servico-dos-tecnicos/enviar/{lote_id}")
+def enviar_do_servico(lote_id: int,
+                      usuario: dict = Depends(auth.requer_tela("PNL_1.6"))):
+    """🔵 *"Depois de ter o arquivo gerado e baixado, os artefatos de valores
+    usados nesse arquivo ficam neste card que vai para a próxima coluna."*"""
+    return fpsl_ponte.enviar_pagamento(lote_id, por=usuario.get("nome"))
 
 
 # ------------------------------------------------- a página pública do form

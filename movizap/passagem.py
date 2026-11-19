@@ -48,6 +48,37 @@ def _registrar(numero_os: int, de, para: int, atendente_id: int | None,
     return linha["id"]
 
 
+# 🔵 60 SEGUNDOS, POR OS — número dele, 18/11. ⚠️ Não é um palpite meu e não se
+# muda sem a palavra dele: limite é decisão dele.
+SEGUNDOS_ENTRE_PASSAGENS = 60
+
+
+def _passagem_recente(numero_os: int) -> int | None:
+    """Quantos segundos ainda faltam para esta OS poder ser movida de novo.
+
+    `None` quando pode mover. 🚨 A conta é feita **no banco**, com `now()`, e
+    não em Python: comparar um `timestamptz` do Postgres com a hora do processo
+    é o caminho mais curto para o vermelho intermitente de fuso que já custou
+    uma sessão em 11/11 -- `::date` resolvido no fuso da sessão fazia um teste
+    reprovar das 21h à meia-noite.
+
+    ⚠️ Olha a última passagem **confirmada**: recusa não assenta nada no ERP, e
+    travar o operador por causa de uma tentativa que não escreveu seria
+    castigá-lo pelo defeito do Harmonit.
+    """
+    linha = banco.um(
+        "SELECT CEIL(%s - EXTRACT(EPOCH FROM (now() - em)))::int AS falta "
+        "  FROM os_passagem "
+        " WHERE numero_os = %s AND ok AND de_situacao IS NOT NULL "
+        "   AND em > now() - make_interval(secs => %s) "
+        " ORDER BY em DESC, id DESC LIMIT 1",
+        (SEGUNDOS_ENTRE_PASSAGENS, numero_os, SEGUNDOS_ENTRE_PASSAGENS))
+    if not linha:
+        return None
+    # ⚠️ Nunca 0 nem negativo: 0 diria "pode mover" numa resposta que recusa.
+    return max(1, int(linha["falta"] or 1))
+
+
 def mover(numero_os: int, para_situacao: int, atendente_id: int | None,
           situacao_esperada: int | None = None) -> dict:
     """Move o card: escreve a situação no Harmonit e registra a passagem.
@@ -61,6 +92,38 @@ def mover(numero_os: int, para_situacao: int, atendente_id: int | None,
     gravada. Estourar depois perderia o registro de uma escrita que já pode ter
     chegado ao ERP.
     """
+    # 🔵 A TRAVA DE 1 MINUTO — decisão dele, 18/11: *"vamos pensar em travas de
+    # 1 minuto para poder mexer o card, com mensagem na tela, assim evitamos
+    # gravação e movimentação rápida"*. 🔵 **No servidor**, não só na tela, e
+    # **por OS** (o que assenta é a OS, não a pessoa): vale por qualquer
+    # caminho — F5, outra aba, outro operador, duplo clique.
+    #
+    # 🚨 ANTES DE QUALQUER COISA, inclusive da validação da situação de
+    # destino: a segunda passagem rápida não deve nem ser avaliada.
+    #
+    # ⚠️ E O QUE ELA NÃO RESOLVE, DITO AQUI PARA NÃO SE PERDER: as duas
+    # passagens da OS 17133, em 18/11, foram 6m35s uma da outra, e o atraso de
+    # leitura do Harmonit foi de ≈1h54. **Esta trava não teria evitado aquilo.**
+    # Quem conserta a 17133 é a causa `leitura_atrasada` e a fila. Esta trava
+    # evita o duplo clique e a corrida no instante da escrita, que são reais e
+    # são outro problema.
+    recente = _passagem_recente(numero_os)
+    if recente is not None:
+        return {
+            "ok": False, "gravou": False, "numero_os": numero_os,
+            "de": None, "para": para_situacao,
+            "causa": "passagem_muito_recente",
+            "espere_segundos": recente,
+            # 🚨 A frase diz O QUE ESTÁ ACONTECENDO e quanto falta. Botão cinza
+            # e calado é tela que mente (`M12`): quem move e não vê nada
+            # conclui que o sistema travou e clica mais.
+            "motivo": (f"esta OS acabou de ser movida (há "
+                       f"{SEGUNDOS_ENTRE_PASSAGENS - recente}s). Espere "
+                       f"{recente}s: o Harmonit ainda está assentando a "
+                       f"mudança anterior, e mover agora pode gravar sobre uma "
+                       f"leitura que ainda não a enxerga."),
+        }
+
     conhecidas = {sid for sid, _ in paineis.SITUACOES}
     if para_situacao not in conhecidas:
         # ⚠️ A frase diz o que É: id fora das 17 não é "proibido", é
@@ -77,6 +140,43 @@ def mover(numero_os: int, para_situacao: int, atendente_id: int | None,
     # aconteceu encheria a linha do tempo da OS de ruído. A resposta diz o
     # conflito, e a tela recarrega.
     if resposta.get("conflito"):
+        # 🚨 CONFLITO DEIXOU DE SER UMA COISA SÓ, em 18/11, e a OS 17133 é o
+        # porquê. A mesma rota do Harmonit devolveu 251 às 11:42:47 e 16488 às
+        # 11:43:18, sem nenhuma escrita entre as duas: das 11:17 às 11:42 ela
+        # respondia **o valor que escrevemos às 09:42**, ignorando o de 09:49.
+        # Sete recusas, todas falsas, e o operador clicando porque nada
+        # acontecia.
+        #
+        # A pergunta que separa os dois casos é uma só: **o valor que o ERP
+        # devolveu é um valor que NÓS já escrevemos nesta OS?**
+        de = resposta.get("de")
+        if de is not None and de in _ja_escrevemos(numero_os):
+            # É nosso, de antes: a leitura dele atrasou. 🔵 Ele escolheu a FILA
+            # aqui, não uma frase melhor: *"assim op não para de trabalhar e
+            # seguimos no background com a OS"*.
+            linha = _enfileirar(numero_os, de, para_situacao, atendente_id,
+                                frase=resposta.get("frase")
+                                or resposta.get("motivo"))
+            log.info("OS %s: leitura atrasada (ERP em %s, que foi nosso) -- "
+                     "card andou e a escrita entrou na fila (passagem %s)",
+                     numero_os, de, linha)
+            return {
+                # 🚨 `ok: True` PORQUE O CARD ANDA. ⚠️ E `gravou: False` junto,
+                # porque a OS **não** mudou ainda -- card que anda sem dizer
+                # isso é tela que mente (`M12`), e o selo é o que impede isso.
+                "ok": True, "gravou": False, "pendente": True,
+                "numero_os": numero_os, "de": de, "para": para_situacao,
+                "passagem_id": linha,
+                "causa": "leitura_atrasada",
+                "motivo": ("o Harmonit ainda está respondendo a situação "
+                           "anterior, que foi escrita por nós. O card andou e "
+                           "a escrita ficou na fila — ela insiste sozinha até "
+                           "o Harmonit se acertar."),
+            }
+        # Valor que nunca escrevemos: alguém mexeu na OS dentro do Harmonit, e
+        # o ERP é quem está certo. ⚠️ RECUSA, como sempre foi -- é o mesmo
+        # discernimento que a auditoria faz do outro lado (migração 114), e é o
+        # caso que o ensaio a seco encontrou nas OS 17054 e 17114.
         log.info("OS %s: conflito ao mover (ERP em %s, tela em %s)",
                  numero_os, resposta.get("de"), situacao_esperada)
         return resposta
@@ -609,3 +709,164 @@ def mudar_prioridade(numero_os: int, prioridade_id: int,
             (int(numero_os), f"[sistema] prioridade: {de} → {para}",
              atendente_id))
     return resposta
+
+
+# ===========================================================================
+# A FILA DAS PASSAGENS — migração 115, 🔵 decisão dele de 18/11
+# ===========================================================================
+# 🔵 *"assim op não para de trabalhar e seguimos no background com a OS"*.
+#
+# 🚨 A FILA SÃO LINHAS, NÃO MEMÓRIA: reinício não pode perder escrita. E ela
+# mora na própria `os_passagem`, que já é o registro de *"quem faz o que
+# SEMPRE"* -- tabela nova seria um segundo lugar para a mesma verdade.
+
+# 🔵 1 HORA — número dele, 18/11, para a pendência virar red flag.
+# ⚠️ O atraso medido na OS 17133 foi de ≈1h54 e se resolveu sozinho, então 1h
+# avisa sobre um caso que ainda poderia se resolver. Ele escolheu assim
+# sabendo: avisar mais cedo, com mais ruído.
+HORAS_PARA_A_RED_FLAG = 1
+
+
+def _ja_escrevemos(numero_os: int) -> set[int]:
+    """Toda situação que já escrevemos nesta OS, com sucesso.
+
+    🚨 É ISTO QUE DISTINGUE ATRASO DE MUDANÇA DE TERCEIRO. Se o ERP devolve um
+    valor que está aqui, ele está respondendo uma escrita nossa mais antiga --
+    a leitura dele atrasou (OS 17133, 18/11). Se devolve um valor que nunca
+    escrevemos, alguém mexeu na OS por fora, e o ERP é quem está certo.
+
+    ⚠️ Mesma pergunta que `auditoria_os._ja_escrevemos` faz do lado da
+    madrugada. Duas cópias de uma pergunta são duas chances de ela divergir --
+    mas importar a auditoria aqui criaria ciclo (`auditoria_os` importa
+    `fpsl_ponte`, que é vizinho deste módulo), e a consulta é de três linhas.
+    🚨 Se uma mudar, a outra tem de mudar: há teste que compara as duas.
+    """
+    linhas = banco.varios(
+        "SELECT DISTINCT para_situacao FROM os_passagem "
+        " WHERE numero_os = %s AND ok AND para_situacao IS NOT NULL",
+        (numero_os,))
+    return {l["para_situacao"] for l in linhas}
+
+
+def _enfileirar(numero_os: int, de, para: int, atendente_id: int | None,
+                *, frase: str | None) -> int:
+    """Grava a passagem JÁ na fila. ⚠️ `ok=False` porque a OS não mudou.
+
+    🚨 UMA PENDENTE POR OS (índice único parcial da migração 115): duas na
+    mesma OS seriam duas verdades sobre em que coluna o card está, e a tela
+    teria de escolher uma sem critério. Se já houver uma, ela é ATUALIZADA para
+    o novo destino -- o operador acabou de dizer para onde quer o card.
+    """
+    import json
+    existente = banco.um(
+        "SELECT id FROM os_passagem WHERE numero_os = %s "
+        "   AND pendente_desde IS NOT NULL AND resolvida_em IS NULL",
+        (numero_os,))
+    if existente:
+        banco.executar(
+            "UPDATE os_passagem SET para_situacao = %s, de_situacao = %s, "
+            "       atendente_id = %s, pendente_desde = now(), "
+            "       tentativas = 0, pendente_erro = %s, em = now() "
+            " WHERE id = %s",
+            (para, de, atendente_id, frase, existente["id"]))
+        return existente["id"]
+    linha = banco.um(
+        """INSERT INTO os_passagem
+               (numero_os, de_situacao, para_situacao, atendente_id, ok, erro,
+                pendente_desde, pendente_erro)
+           VALUES (%s, %s, %s, %s, false, %s, now(), %s)
+        RETURNING id""",
+        (numero_os, de, para, atendente_id,
+         "a escrita ficou na fila: a leitura do Harmonit estava atrasada",
+         frase))
+    return linha["id"]
+
+
+def pendentes_por_os() -> dict[int, dict]:
+    """A coluna que o card deve mostrar, por OS, enquanto a fila não fecha.
+
+    🚨 **É ISTO QUE FAZ O CARD ANDAR**, e é a parte que vence o cache do FPSL:
+    o quadro lê o `situacao_id` do cache, varrido a cada 5 min, e aqui está o
+    que o operador já decidiu. ⚠️ Sem isto o card voltaria para a coluna antiga
+    na próxima abertura do painel -- e a pessoa concluiria que não gravou e
+    moveria de novo, que é exatamente o laço de 7 cliques da OS 17133.
+    """
+    linhas = banco.varios(
+        "SELECT numero_os, para_situacao, pendente_desde, tentativas, "
+        "       pendente_erro FROM os_passagem "
+        " WHERE pendente_desde IS NOT NULL AND resolvida_em IS NULL")
+    return {l["numero_os"]: l for l in linhas}
+
+
+def fila() -> list[dict]:
+    """O que a fila tem para tentar, mais antigo primeiro."""
+    return banco.varios(
+        "SELECT id, numero_os, de_situacao, para_situacao, tentativas, "
+        "       pendente_desde FROM os_passagem "
+        " WHERE pendente_desde IS NOT NULL AND resolvida_em IS NULL "
+        " ORDER BY pendente_desde")
+
+
+def escoar_fila(*, gravar=None) -> dict:
+    """Uma passada na fila. 🚨 Uma tentativa por linha, por passada.
+
+    ⚠️ NÃO insiste em laço aqui: insistir dentro da mesma execução é o
+    *"só cansa a req"* dele. Quem dá o ritmo é o cron; cada passada custa uma
+    tentativa por OS pendente.
+    """
+    gravar = gravar or fpsl_ponte.gravar_situacao_da_os
+    feito = {"tentadas": 0, "resolvidas": 0, "continuam": 0, "desistiu": 0}
+    for linha in fila():
+        feito["tentadas"] += 1
+        # 🚨 `conferir_antes=False`: a trava compararia com uma
+        # `situacao_esperada` que a fila não tem, e recusaria a própria
+        # correção -- seria o conflito falso de novo, agora contra nós mesmos.
+        r = gravar(linha["numero_os"], linha["para_situacao"],
+                   conferir_antes=False)
+        if r.get("ok"):
+            banco.executar(
+                "UPDATE os_passagem SET ok = true, resolvida_em = now(), "
+                "       tentativas = tentativas + 1, erro = NULL, "
+                "       pendente_erro = NULL WHERE id = %s", (linha["id"],))
+            feito["resolvidas"] += 1
+            continue
+        frase = fpsl_ponte.frase_da_recusa(r)
+        banco.executar(
+            "UPDATE os_passagem SET tentativas = tentativas + 1, "
+            "       pendente_erro = %s WHERE id = %s", (frase, linha["id"]))
+        if not r.get("pode_retentar", True):
+            # 🔵 Recusa que não se retenta sai da fila e vira aviso: insistir
+            # colhe o mesmo não. ⚠️ `resolvida_em` aqui quer dizer "saiu da
+            # fila", não "deu certo" -- e `ok` continua falso, que é a verdade.
+            banco.executar(
+                "UPDATE os_passagem SET resolvida_em = now() WHERE id = %s",
+                (linha["id"],))
+            feito["desistiu"] += 1
+            continue
+        feito["continuam"] += 1
+    return feito
+
+
+def pendentes_para_a_red_flag() -> list[dict]:
+    """Pendência velha demais, ou que saiu da fila sem ter gravado.
+
+    🔵 1 hora, número dele. 🚨 Vazio = NENHUMA mensagem: aviso que aparece todo
+    dia vira aviso que ninguém lê.
+    """
+    return banco.varios(
+        "SELECT id, numero_os, de_situacao, para_situacao, tentativas, "
+        "       pendente_desde, pendente_erro FROM os_passagem "
+        " WHERE pendente_desde IS NOT NULL AND avisada_em IS NULL "
+        "   AND ((resolvida_em IS NULL "
+        "         AND pendente_desde < now() - make_interval(hours => %s)) "
+        "        OR (resolvida_em IS NOT NULL AND NOT ok)) "
+        " ORDER BY pendente_desde",
+        (HORAS_PARA_A_RED_FLAG,))
+
+
+def marcar_avisadas(ids: list[int]) -> None:
+    """⚠️ Para a mesma pendência não ser avisada em toda rodada do cron."""
+    if ids:
+        banco.executar(
+            "UPDATE os_passagem SET avisada_em = now() WHERE id = ANY(%s)",
+            (ids,))

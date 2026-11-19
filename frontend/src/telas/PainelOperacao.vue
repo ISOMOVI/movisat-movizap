@@ -38,6 +38,7 @@ import BalaoDeRecado from '../componentes/BalaoDeRecado.vue'
 import { sessao } from '../estado/sessao.js'
 import DialogoDeChamado from '../componentes/DialogoDeChamado.vue'
 import BarraDeRolagem from '../componentes/BarraDeRolagem.vue'
+import CorpoDoCard from '../componentes/CorpoDoCard.vue'
 import RolagemDaBorda from '../componentes/RolagemDaBorda.vue'
 
 const router = useRouter()
@@ -687,6 +688,48 @@ const arrastando = ref(null)
    ⚠️ Quem compara com isto confere o nulo primeiro, sempre. */
 const movendo = ref(null)
 const erroDeMover = ref('')
+/* 🔵 O mover otimista (18/11): o card andou e a OS ainda não confirmou. ⚠️ NÃO
+   é erro, e por isso não entra no `erroDeMover`: o operador fez a coisa certa,
+   o card está onde ele pôs, e a fila insiste sozinha. Chamar de erro faria ele
+   tentar de novo -- o *"só cansa a req"* dele. */
+const avisoDeMover = ref('')
+
+/* 🔵 A TRAVA DE 1 MINUTO (18/11). ⚠️ A guarda de verdade está no servidor
+   (`passagem.mover`); isto aqui é a contagem que a tela mostra, porque botão
+   que para de funcionar sem dizer nada é tela que mente (`M12`).
+
+   🚨 `agora` É UM TIQUE DE 1 SEGUNDO, e sem ele a contagem ficaria congelada
+   no valor do último `carregar()`: Vue só recalcula um `computed` quando uma
+   dependência REATIVA muda, e `Date.now()` não é reativo. Um contador parado
+   em "espere 43s" por minutos seria pior que nenhum. */
+const SEGUNDOS_ENTRE_PASSAGENS = 60
+const agora = ref(Date.now())
+let relogio = null
+
+function segundosDeEspera(card) {
+  /* `etapa_desde` é a última passagem desta OS -- o mesmo dado que o card já
+     usava para o tempo na etapa. ⚠️ Nulo quer dizer "nunca movida por aqui",
+     e aí não há nada assentando. */
+  if (!card || !card.etapa_desde) return 0
+  const desde = new Date(card.etapa_desde).getTime()
+  if (!Number.isFinite(desde)) return 0
+  const passou = Math.floor((agora.value - desde) / 1000)
+  if (passou < 0 || passou >= SEGUNDOS_ENTRE_PASSAGENS) return 0
+  return SEGUNDOS_ENTRE_PASSAGENS - passou
+}
+
+function tituloDaPendencia(card) {
+  /* 🚨 O MOTIVO POR EXTENSO no `title`, que é a pendência 4 dele: *"os motivos
+     de recusa deve aparecer descritos ao inves de erro generico, para que me
+     tragam o problema ja cientes"*. */
+  const partes = ['O card já está nesta coluna, e a OS no Harmonit ainda não '
+                  + 'confirmou. A escrita está na fila e insiste sozinha.']
+  if (card.situacao_do_erp) {
+    partes.push('A OS ainda diz: ' + card.situacao_do_erp + '.')
+  }
+  if (card.pendente_erro) partes.push('Último retorno: ' + card.pendente_erro)
+  return partes.join(' ')
+}
 
 /* 🚨 A MARCA DE TEMPO QUE SEPARA CLIQUE DE ARRASTO, e era A causa de o
    arrasto "não funcionar": o `.card__abrir` tem `@click`, e todo arrasto
@@ -725,8 +768,18 @@ function terminarArrasto() {
 function cliqueNoCard(card) {
   if (Date.now() - arrastouAgora < 400) return
   /* 🔵 05/11: o card de CHAMADO abre outra ficha -- ele nao tem OS, entao
-     nao ha o que ler no ERP. */
-  if (card.origem === 'chamado') return abrirChamado(card)
+     nao ha o que ler no ERP.
+     🚨 A PERGUNTA PASSOU A SER `numero_ordem`, E NAO `origem`, EM 18/11. O
+     `origem` deixou de dizer "chamado" para card de OS em etapa nossa (ele
+     achou que a tela afirmava que os cards do Financeiro nao eram OS, e
+     estava certo), mas QUEM ABRE QUAL FICHA nao muda com o rotulo: quem
+     decide e `numero_ordem`, que e nulo em toda etapa NOSSA.
+     ⚠️ E ele e nulo de proposito: e a mesma guarda que mantem o card sem
+     arrasto para o ERP. Trocar o rotulo sem trocar a guarda era a regra
+     deste conserto -- se eu tivesse deixado isto em `origem`, o card de
+     *Servico Realizado* (etapa 2322, que TEM OS) passaria a abrir a ficha
+     do ERP e perderia os campos do chamado. */
+  if (!card.numero_ordem) return abrirChamado(card)
   abrirCard(card)
 }
 
@@ -837,6 +890,7 @@ async function moverDoModal(paraSituacao) {
 
 async function mover(card, paraSituacao) {
   erroDeMover.value = ''
+  avisoDeMover.value = ''
   movendo.value = card.numero_ordem
   /* 🔵 17/11: o que o servidor preparou para perguntar, se preparou. Fica numa
      variável porque a caixa só abre no fim, depois do `carregar()`: aberta
@@ -851,6 +905,17 @@ async function mover(card, paraSituacao) {
     })
     if (!r.ok) {
       erroDeMover.value = r.motivo || 'Não consegui mover este card.'
+    } else if (r.pendente) {
+      /* 🚨 O CARD ANDOU E A OS NÃO MUDOU — e isso TEM de aparecer. 🔵 É o
+         mover otimista que ele pediu em 18/11, e o selo no card é o que
+         impede a tela de mentir (`M12`).
+
+         ⚠️ `avisoDeMover`, NÃO `erroDeMover`: não é erro. O operador fez a
+         coisa certa, o card está onde ele pôs, e a escrita está na fila -- ela
+         insiste sozinha. Chamar isso de erro faria ele tentar de novo, que é o
+         *"só cansa a req"* dele. */
+      avisoDeMover.value = r.motivo
+        || 'O card andou. A escrita na OS ficou na fila.'
     } else if (r.disparo && r.disparo.pergunta && r.passagem_id) {
       /* 🚨 `passagem_id` É A IDENTIDADE DA DECISÃO (migração 111): é por ele
          que o mesmo aviso não sai duas vezes. Sem ele, não pergunta. */
@@ -1223,11 +1288,18 @@ function devolverFoco() {
 onMounted(() => {
   carregar()
   window.addEventListener('keydown', aoTeclar)
+  /* 🔵 O tique da trava de 1 minuto. ⚠️ 1 segundo e só isso: não recarrega o
+     quadro, não fala com a rede -- só move o relógio para a contagem do selo
+     não congelar. */
+  relogio = setInterval(() => { agora.value = Date.now() }, 1000)
 })
 
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', aoTeclar)
   clearTimeout(relogioDaBusca)
+  /* 🚨 Limpar é obrigatório: `setInterval` sobrevive ao componente e seguiria
+     acordando a cada segundo depois de a tela sair. */
+  if (relogio) clearInterval(relogio)
 })
 </script>
 
@@ -1305,6 +1377,13 @@ onBeforeUnmount(() => {
     <!-- 🚨 A RECUSA DE MOVER É DITA, e com `alert`: a escrita no ERP não
          aconteceu, e o card já voltou para o lugar. Falha silenciosa aqui
          faria a pessoa pensar que gravou. -->
+    <!-- 🔵 O aviso do mover otimista (18/11). ⚠️ `role="status"`, nao
+         `alert`: e informacao, nao erro -- e leitor de tela nao deve
+         interromper quem esta trabalhando para dizer que deu tudo certo. -->
+    <p v-if="avisoDeMover" class="aviso aviso--pendente" role="status">
+      <i class="bi bi-hourglass-split" aria-hidden="true"></i>
+      {{ avisoDeMover }}
+    </p>
     <p v-if="erroDeMover" class="aviso aviso--erro" role="alert">
       {{ erroDeMover }}
     </p>
@@ -1443,7 +1522,8 @@ onBeforeUnmount(() => {
                      :key="card.numero_ordem || card.id" class="card"
                      :class="{ 'card--movendo': movendo !== null
                                 && movendo === card.numero_ordem }"
-                     :draggable="quadro.pode_mover && !!card.numero_ordem"
+                     :draggable="quadro.pode_mover && !!card.numero_ordem
+                                 && !segundosDeEspera(card)"
                      @dragstart="comecarArrasto(card, $event)"
                      @dragend="terminarArrasto">
               <!-- 🚨 ERA UM `<button>` E ISSO IMPEDIA O ARRASTO: navegador
@@ -1453,185 +1533,18 @@ onBeforeUnmount(() => {
                    impossível.
                    ⚠️ O teclado continua alcançando: o NÚMERO DA OS é o botão
                    (alvo pequeno), e o resto do card arrasta. -->
-              <div class="card__abrir"
-                   :class="{ 'card__abrir--excecao': cardEhExcecao(card),
-                             'card__abrir--chamado': card.origem === 'chamado',
-                             'card__abrir--arquivado': !!card.desfecho }"
-                   @click="cliqueNoCard(card)">
-
-                <!-- 🔵 O SELO DO DESFECHO, e e o que faz o card arquivado dizer
-                     o que foi: *"Resolvido encerra o card e ele esmaece e fica
-                     no fim da fila arquivado com status de concluido"* / *"o
-                     status de 'Virou OS'"*.
-                     ⚠️ O esmaecer sozinho nao diz QUAL dos dois foi -- cor e
-                     opacidade nao sao portadores de informacao. -->
-                <span v-if="card.desfecho" class="card__arquivado">
-                  <i class="bi bi-archive" aria-hidden="true"></i>
-                  {{ card.desfecho_rotulo || card.desfecho }}
-                  <template v-if="card.desfecho_em">
-                    &middot; {{ dataCurta(card.desfecho_em) }}
-                  </template>
-                </span>
-
-                <!-- LINHA 1 -- O CLIENTE, e nao a OS. 🔵 Variante C, escolhida por
-                     ele em 05/11. Isto muda a ordem de 29/10 (*"A OS VEM NA
-                     FRENTE"*), e mudou com a palavra dele.
-                     🚨 CORTA EM DUAS LINHAS, com o nome inteiro no `title`:
-                     medido em 05/11, **11 dos 15** nomes de cliente do quadro
-                     passam de 24 caracteres (mediana 28, o maior 56), e numa
-                     coluna de 248px com a fonte +2 cabem ~24 por linha. Sem
-                     corte, um card comia quatro linhas so de razao social. -->
-                <span class="card__linha">
-                  <span v-if="card.cliente" class="card__cliente"
-                        :title="card.cliente">{{ card.cliente }}</span>
-                  <!-- ⚠️ Cliente sem nome e DITO, nao deixado em branco: o
-                       `harmonit_id` da OS pode nao estar no nosso cadastro. -->
-                  <span v-else class="card__cliente card__cliente--sem">
-                    cliente {{ card.cliente_id || '?' }}, fora do nosso cadastro
-                  </span>
-                  <span v-if="ha(card.criada_em)" class="card__direita">
-                    {{ ha(card.criada_em) }}
-                  </span>
-                </span>
-
-                <!-- LINHA 2 -- os identificadores com que se cruza papel.
-                     ⚠️ A OS continua sendo o BOTAO (o alvo de teclado) e o unico
-                     em cor de acento; o TERMO e referencia, nao acao. -->
-                <!-- LINHA 2 -- 🔵 DUAS FAIXAS VIRARAM UMA em 05/11: com 334px de
-                     largura util, os identificadores cabem a esquerda e o tipo
-                     com a placa na borda direita. Era o *"mais retangular
-                     horizontal do que vertical"* que ele pediu -- o card desce
-                     de 5 faixas para 3. -->
-                <span class="card__linha">
-                    <span class="card__ident">
-                    <!-- ⚠️ CHAMADO NAO TEM NUMERO DE OS, e a tela nao inventa um:
-                         o que identifica o chamado e o formulario de onde ele
-                         veio. O botao continua sendo o alvo de teclado. -->
-                    <button v-if="card.origem === 'chamado'" class="card__os"
-                            type="button"
-                            @click.stop="cliqueNoCard(card)">{{ card.formulario || 'Chamado' }}</button>
-                    <button v-else class="card__os" type="button"
-                            @click.stop="cliqueNoCard(card)">OS {{ card.numero_ordem || card.os_id }}</button>
-                    <!-- ⚠️ OS SEM TERMO E 1 DE CADA 7, e a tela nao diz nada: venda,
-                         cartao RFID e manutencao nao nascem de termo. -->
-                    <span v-if="card.termo" class="card__termo">TERMO {{ card.termo }}</span>
-                  </span>
-                  <span v-if="card.tipo_nome || (card.placas && card.placas.length)"
-                        class="card__direita card__direita--dado">
-                    <template v-if="card.tipo_nome">{{ card.tipo_nome }}</template>
-                    <template v-if="card.tipo_nome && card.placas && card.placas.length"> &middot; </template>
-                    <template v-if="card.placas && card.placas.length">{{ card.placas.map((p) => p.placa).join(' &middot; ') }}</template>
-                  </span>
-                </span>
-
-                <!-- LINHA 4 -- 🔵 BLOCO C, os dois tempos, agora numa linha com o
-                     total alinhado a direita. ⚠️ "nao medido" quando nao ha
-                     passagem: a `os_passagem` comecou em 29/10, e a OS pode
-                     estar na etapa desde setembro -- mostrar "0h" seria afirmar
-                     o que ninguem mediu. -->
-                <!-- LINHA 3 -- ⚠️ OS TEMPOS E OS SELOS NA MESMA FAIXA, pelo mesmo
-                     motivo: com 334px os dois cabem, e o card deixa de ter uma
-                     faixa so para dois numeros curtos. A borda direita continua
-                     alinhada com as de cima -- e o realinhamento que ele
-                     aprovou em 05/11, com uma faixa menos. -->
-                <span class="card__linha card__dado">
-                  <span class="card__etapa"
-                        :class="{ 'card__etapa--parado': paradoDemais(card) }">
-                    nesta etapa
-                    <strong>{{ duracao(card.etapa_desde) || 'não medido' }}</strong>
-                    <template v-if="duracao(card.criada_em)">
-                      &middot; total {{ duracao(card.criada_em) }}
-                    </template>
-                  </span>
-                </span>
-
-                <!-- 🔵 O PRAZO, só onde ele existe: hoje é o card de chamado.
-                     ⚠️ O selo DIZ "atrasado" por extenso, nunca só por cor --
-                     a mesma régua da pílula do checklist. -->
-                <span v-if="prazoCurto(card.prazo)" class="card__linha card__dado">
-                  <span class="card__prazo"
-                        :class="{ 'card__prazo--atrasado': card.prazo.atrasado }">
-                    <i class="bi bi-hourglass-split" aria-hidden="true"></i>
-                    {{ prazoCurto(card.prazo) }}
-                  </span>
-                </span>
-
-                <!-- LINHA 5 -- os selos a esquerda, a data a direita.
-                     🚨 SAIRAM DAQUI, em 05/11, duas pilulas que nao informavam:
-                     o NOME DA SITUACAO (que e o titulo da coluna em que o card
-                     ja esta, e era a pilula mais comprida de todas -- em 248px
-                     *"Configurar equipamentos e Sistemas"* ocupava 3 linhas) e
-                     *"Harmonit"* (que aparecia em quase todo card, porque a
-                     origem ERP e a maioria; o que distingue e ter vindo de
-                     FORMULARIO, e so esse caso aparece agora). -->
-                <span class="card__linha">
-                  <span class="card__pistas">
-                    <span v-if="card.origem !== 'erp' && card.formulario"
-                          class="pilula pilula--origem">{{ card.formulario }}</span>
-
-                    <span v-if="card.estado" class="etiqueta"
-                          :class="`etiqueta--${card.estado}`">
-                      {{ ROTULO_ESTADO[card.estado] || card.estado }}
-                    </span>
-
-                    <span v-if="card.anexos" class="pilula">
-                      {{ card.anexos }} anexo(s)
-                    </span>
-
-                    <!-- 🔵 *"a prioridade vem escrita porque ela nasce Normal e
-                         mudar e excecao, e excecao precisa estar visivel sem
-                         abrir"*. 🚨 E AGORA SO A EXCECAO APARECE: *Normal* em
-                         todo card nao distinguia nada e gastava a linha dos
-                         selos. Nula tambem nao aparece -- nulo e "a varredura
-                         nao releu", nao "sem prioridade". -->
-                    <span v-if="prioridadeDeExcecao(card)" class="pilula pilula--alerta">
-                      {{ card.prioridade_nome }}
-                    </span>
-
-                    <!-- 🔵 04/11: o selo do checklist. ⚠️ `tem_checklist` e
-                         `checklist` sao coisas diferentes: a etapa pode TER lista
-                         e o card ainda nao a ter aberto. 🚨 Completo fica VERDE,
-                         incompleto fica ambar -- a cor acompanha o que FALTA. -->
-                    <span v-if="card.checklist" class="pilula"
-                          :class="card.checklist.feitos >= card.checklist.total
-                                  ? 'pilula--pronto' : 'pilula--alerta'">
-                      {{ card.checklist.feitos }} de {{ card.checklist.total }}
-                    </span>
-                    <span v-else-if="card.tem_checklist" class="pilula">checklist</span>
-
-                    <span v-if="card.observacoes" class="pilula">
-                      {{ card.observacoes }} obs
-                    </span>
-
-                    <!-- 🚨 FINALIZADA E AVISO, nao decoracao: ela so aparece com
-                         o interruptor desligado, e sem esta marca ficaria
-                         indistinguivel de uma OS viva na mesma coluna. -->
-                    <span v-if="card.finalizada" class="card__alerta">finalizada</span>
-                  </span>
-
-                  <!-- 🚨 *"PREVISAO"*, E NAO *"PRAZO"* -- e isto era um defeito meu
-                       de 29/10, achado em 05/11: o comentario que acompanhava
-                       esta linha dizia, com a medicao, que *"chamar de prazo
-                       seria a tela afirmando o que o ERP nao diz"*, e a linha
-                       escrevia `prazo`. O modal ja usava *"Previsao de
-                       entrega"*, o nome do campo no ERP: as duas telas do mesmo
-                       painel se contradiziam.
-                       ⚠️ MEDIDO: a OS do Harmonit tem UM campo de data,
-                       `dataPrevisao`, e NAO existe campo de prazo -- na 17055,
-                       criada em 29/10, a previsao e 29/10 11:40:19, o mesmo
-                       minuto. 🔵 Isso muda quando a frente do aviso previo
-                       entrar: ela vai mover a previsao em +90 dias. -->
-                  <span v-if="card.criada_em" class="card__direita">
-                    previsão {{ dataCurta(card.criada_em) }}
-                  </span>
-                </span>
-
-                <!-- ⚠️ Quando este dado foi lido do ERP. A varredura roda a cada
-                     5 min, e a tela nao pode deixar supor que e agora. -->
-                <span v-if="card.visto_em" class="card__visto">
-                  lido do Harmonit {{ quando(card.visto_em) }}
-                </span>
-              </div>
+              <!-- 🚨 O CORPO DO CARD VEM DO COMPONENTE ÚNICO desde 18/11.
+                   Ele nasceu de uma pergunta dele -- *"Então pq os cards
+                   informam que não vem de OS no painel?"* -- e a causa medida
+                   foi haver DOIS desenhos para a mesma caixa: este, com mais
+                   de 20 campos, e o das abas, com 6. Os campos que entraram no
+                   servidor em 12/11 a pedido dele (*"igual da OP"*) nunca
+                   apareceram lá, e nenhuma suíte reclamou.
+                   ⚠️ Os dois selos da Operação (pendência e trava de 60s) vêm
+                   por `prop`: só aqui o mover escreve no ERP. -->
+              <CorpoDoCard :card="card" mostrar-pendencia
+                           :segundos-de-espera="segundosDeEspera(card)"
+                           @abrir="cliqueNoCard" />
 
               <!-- 🔵 A CAIXA DE SELEÇÃO SAIU DAQUI, a pedido dele: *"pq ela foi
                    substituida por uma caixa de selecao?"*. Ele decidiu
@@ -2435,6 +2348,40 @@ onBeforeUnmount(() => {
   background: var(--superficie-2);
   font-size: var(--txt-xs); font-weight: var(--peso-forte);
   color: var(--texto-fraco);
+}
+
+/* 🚨 O SELO DA PENDÊNCIA E O DA TRAVA — migração 115 e a trava de 60s, 18/11.
+
+   ⚠️ CLASSES PRÓPRIAS, e NUNCA `.pilula`: ela é `scoped` por componente e não
+   existe em `estilo/*.css`. Reusar aquele nome aqui faria o selo nascer **sem
+   estilo nenhum** -- e nenhum teste pegaria, porque o jsdom não faz layout.
+   É a lição de 05–11/11 e ela custou uma tela.
+
+   🚨 E NÃO É SÓ COR: os dois selos carregam ÍCONE E TEXTO. Cor e opacidade não
+   são portadoras de informação -- quem não distingue as duas tem de conseguir
+   ler qual é qual. */
+.card__pendente,
+.card__assentando {
+  display: inline-flex; align-items: center; gap: var(--e-1);
+  align-self: flex-start;
+  padding: 1px var(--e-2);
+  border: var(--borda-fina) solid var(--borda-forte);
+  border-radius: var(--r-full);
+  font-size: var(--txt-xs); font-weight: var(--peso-forte);
+}
+.card__pendente {
+  background: var(--aviso-fundo, var(--superficie-2));
+  color: var(--aviso-texto, var(--texto-fraco));
+}
+.card__assentando {
+  background: var(--superficie-2);
+  color: var(--texto-fraco);
+}
+.aviso--pendente {
+  display: flex; align-items: center; gap: var(--e-2);
+  background: var(--aviso-fundo, var(--superficie-2));
+  color: var(--aviso-texto, var(--texto));
+  border: var(--borda-fina) solid var(--borda-forte);
 }
 
 /* ⚠️ AS TRES MEDIDAS SECUNDARIAS CAEM NA MESMA BORDA DIREITA ("ha N", "total

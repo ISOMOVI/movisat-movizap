@@ -262,6 +262,27 @@ def levar_ao_harmonit(agendamento_id: int, *, cfg: dict | None = None) -> dict:
             tecnico_nome=linha.get("tecnico_nome"),
         ))
 
+    # 🚨 O RASTRO POR OS (migração 112), e por que ele tinha de existir: um
+    # compromisso do MoviZap cobre VÁRIAS OS, e no Harmonit cada OS tem a sua
+    # linha e o seu compromisso. A coluna de 070 guarda só o primeiro id que
+    # voltou -- serve para o selo ("foi para o Harmonit?") e não serve para
+    # apagar, porque apagar com o id da OS errada arrancaria a linha errada.
+    #
+    # ⚠️ `vinculo_criado` É O CAMPO QUE DECIDE SE CANCELAR PODE: a medição na
+    # Velasco provou que o DELETE do ERP leva o compromisso **e** a linha do
+    # técnico, então só se apaga a linha que nós criamos.
+    for r in resultados:
+        if not r.get("ok"):
+            continue
+        banco.executar(
+            "UPDATE agendamento_os "
+            "   SET harmonit_agendamento_id = %s, harmonit_vinculo_id = %s, "
+            "       vinculo_criado = %s, harmonit_em = now() "
+            " WHERE agendamento_id = %s AND numero_os = %s",
+            (r.get("agendamento_id"), r.get("vinculo_id"),
+             bool(r.get("vinculo_criado")), agendamento_id,
+             r.get("numero_os")))
+
     bons = [r for r in resultados if r.get("ok")]
     # 🚨 O rastro guarda o PRIMEIRO id que voltou e TODOS os motivos de recusa:
     # dizer só "deu erro" obrigaria a abrir o log para saber em qual OS.
@@ -335,32 +356,139 @@ def confirmar(agendamento_id: int, responsavel_cliente: str) -> bool:
     ) > 0
 
 
-def cancelar(agendamento_id: int, motivo: str) -> bool:
-    """Cancela preservando o histórico -- nada é apagado.
+def _rastro_no_harmonit(agendamento_id: int) -> list[dict]:
+    """O que cada OS deste compromisso tem no Harmonit (migração 112).
+
+    ⚠️ Só as OS cujo rastro existe: sem `harmonit_vinculo_id` não há o que
+    apagar lá, e inventar um id seria apontar para a linha de outra pessoa.
+    """
+    return banco.varios(
+        "SELECT numero_os, harmonit_agendamento_id, harmonit_vinculo_id, "
+        "       vinculo_criado "
+        "  FROM agendamento_os "
+        " WHERE agendamento_id = %s AND harmonit_vinculo_id IS NOT NULL "
+        " ORDER BY numero_os", (agendamento_id,))
+
+
+def cancelar(agendamento_id: int, motivo: str, *,
+             cfg: dict | None = None) -> bool:
+    """Cancela preservando o histórico -- nada é apagado **deste lado**.
 
     A OS volta a poder ser agendada porque `cancelado` não é estado ativo.
+
+    🚨 E DESDE 18/11 O CANCELAMENTO CHEGA AO HARMONIT, 🔵 a pedido dele. Lá
+    não há "preservar": a medição na Velasco provou que o único caminho é o
+    `DELETE`, e que ele leva o compromisso **e** a linha do técnico. Então só
+    se apaga a linha que nós criamos -- 🔵 *"apaga, só se a linha for nossa"*.
+
+    🚨 O ESTADO DESTE LADO MUDA PRIMEIRO, E DE PROPÓSITO. Se a escrita no ERP
+    falhar, o compromisso continua cancelado aqui e o motivo fica gravado: é a
+    decisão 7 dele, *"o MoviZap é o dono"*. O contrário -- travar o
+    cancelamento porque o ERP não respondeu -- deixaria o operador preso a um
+    compromisso que ele já desmarcou com o cliente.
     """
-    return banco.executar(
+    mudou = banco.executar(
         "UPDATE agendamento SET estado = 'cancelado', cancelado_em = now(), "
         "       motivo_cancelamento = %s "
         " WHERE id = %s AND estado <> 'cancelado'",
         ((motivo or "").strip() or None, agendamento_id),
     ) > 0
+    if not mudou or not escreve_no_harmonit(cfg):
+        return mudou
+
+    recusas = []
+    for linha in _rastro_no_harmonit(agendamento_id):
+        r = fpsl_ponte.cancelar_agendamento(
+            numero_os=linha["numero_os"],
+            agendamento_id=linha["harmonit_agendamento_id"],
+            vinculo_id=linha["harmonit_vinculo_id"],
+            # ⚠️ NULO conta como "não é nossa": rastro anterior à migração 112
+            # não diz quem criou a linha, e quem não sabe não apaga.
+            vinculo_criado=bool(linha["vinculo_criado"]))
+        if r.get("ok"):
+            banco.executar(
+                "UPDATE agendamento_os SET harmonit_agendamento_id = NULL, "
+                "       harmonit_vinculo_id = NULL, harmonit_em = now() "
+                " WHERE agendamento_id = %s AND numero_os = %s",
+                (agendamento_id, linha["numero_os"]))
+        else:
+            recusas.append(f"OS {linha['numero_os']}: "
+                           f"{fpsl_ponte.frase_da_recusa(r)}")
+    # 🚨 A recusa fica LEGÍVEL na própria linha, como no agendar: dizer só
+    # "deu erro" obrigaria a abrir o log para saber em qual OS.
+    if recusas:
+        banco.executar(
+            "UPDATE agendamento SET harmonit_erro = %s WHERE id = %s",
+            ("; ".join(recusas), agendamento_id))
+    return mudou
 
 
-def reagendar(agendamento_id: int, inicio, fim=None) -> bool:
+def reagendar(agendamento_id: int, inicio, fim=None, *,
+              cfg: dict | None = None) -> bool:
     """Muda a data. Volta para `aguardando` e **esquece a confirmação**.
 
     🚨 Confirmação é de uma data, não do compromisso: manter `confirmado`
     depois de mudar o dia faria a tela afirmar que o cliente concordou com
     algo que ele não viu.
+
+    🚨 E DESDE 18/11 A DATA NOVA VAI AO HARMONIT NA HORA, 🔵 a pedido dele.
+    ⚠️ Antes, o compromisso do ERP ficava com a data velha até alguém
+    reconfirmar -- e data velha na agenda do técnico faz alguém viajar no dia
+    errado. O ERP não tem alteração: o caminho é criar o novo e apagar o
+    antigo, **nessa ordem**.
     """
-    return banco.executar(
+    rastro = _rastro_no_harmonit(agendamento_id)
+    antes = por_id(agendamento_id)
+    mudou = banco.executar(
         "UPDATE agendamento SET inicio = %s, fim = %s, estado = 'aguardando', "
         "       responsavel_cliente = NULL, confirmado_em = NULL "
         " WHERE id = %s AND estado <> 'cancelado'",
         (inicio, fim, agendamento_id),
     ) > 0
+    if not mudou or not escreve_no_harmonit(cfg) or not rastro:
+        return mudou
+
+    contato = banco.um(
+        """SELECT ct.harmonit_tecnico_id,
+                  (SELECT e164 FROM contato_telefone
+                    WHERE contato_id = ct.id
+                    ORDER BY principal DESC, id LIMIT 1) AS e164
+             FROM contato ct WHERE ct.id = %s""",
+        (antes["tecnico_contato_id"],)) if antes else {}
+    contato = contato or {}
+
+    recusas = []
+    for linha in rastro:
+        r = fpsl_ponte.reagendar_tecnico(
+            numero_os=linha["numero_os"], inicio=inicio, fim=fim,
+            agendamento_id_antigo=linha["harmonit_agendamento_id"],
+            vinculo_id_antigo=linha["harmonit_vinculo_id"],
+            vinculo_criado=bool(linha["vinculo_criado"]),
+            tecnico_telefone=contato.get("e164"),
+            tecnico_id=contato.get("harmonit_tecnico_id"),
+            tecnico_nome=(antes or {}).get("tecnico_nome"))
+        if r.get("ok"):
+            # 🚨 O rastro passa a apontar o compromisso NOVO. ⚠️ E
+            # `apagou_o_antigo` falso NÃO invalida o reagendamento: o novo
+            # está lá, o antigo é que sobrou -- e a frase diz qual.
+            banco.executar(
+                "UPDATE agendamento_os "
+                "   SET harmonit_agendamento_id = %s, harmonit_vinculo_id = %s, "
+                "       vinculo_criado = %s, harmonit_em = now() "
+                " WHERE agendamento_id = %s AND numero_os = %s",
+                (r.get("agendamento_id"), r.get("vinculo_id"),
+                 bool(r.get("vinculo_criado")), agendamento_id,
+                 linha["numero_os"]))
+            if not r.get("apagou_o_antigo"):
+                recusas.append(f"OS {linha['numero_os']}: "
+                               f"{r.get('motivo') or 'o compromisso antigo ficou'}")
+        else:
+            recusas.append(f"OS {linha['numero_os']}: "
+                           f"{fpsl_ponte.frase_da_recusa(r)}")
+    banco.executar(
+        "UPDATE agendamento SET harmonit_erro = %s WHERE id = %s",
+        ("; ".join(recusas) or None, agendamento_id))
+    return mudou
 
 
 def _montar(linhas: list[dict]) -> list[dict]:

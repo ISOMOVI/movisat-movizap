@@ -262,6 +262,49 @@ TELAS = [
         "fase": 1,
     },
     {
+        # 🔵 18/11, pedido dele: *"Nova aba2 no painel do Financeiro Movizap:
+        # 'Serviço dos técnicos'"* — as cinco colunas do pagamento de técnico,
+        # da varredura automática até o arquivo do Procfy.
+        #
+        # 🚨 ESTA ABA NÃO É COMO AS OUTRAS, e por isso tem tela própria em vez
+        # de reusar o `PainelAba.vue`: as cinco colunas **não são etapas
+        # nossas nem situações do ERP** — são estados do *artefato de
+        # pagamento*, que vive no FPSL. O `quadro_da_aba` desenharia cinco
+        # colunas vazias para sempre.
+        #
+        # 🔵 *"É possível fazer tudo no FPSL com as rotas e etc, mas o painel é
+        # aqui"*: os dados e os gestos moram lá (3 tabelas + 12 rotas de
+        # ponte), e esta entrada é a PORTA.
+        #
+        # ⚠️ Código conferido contra `CODIGOS_APOSENTADOS` e contra os em uso:
+        # `PNL_1.6` estava livre. O Financeiro já tinha a `PNL_1.4`, e 🔵 ele
+        # disse em 06/11 que *"o financeiro tera suas proprias abas"* — esta é
+        # a segunda.
+        #
+        # 🚨 NASCE SÓ OWNER, como toda aba nova. ⚠️ E aqui pesa mais que no
+        # resto: esta tela move dinheiro e gera o arquivo que vai ao Procfy.
+        "codigo": "PNL_1.6",
+        "titulo": "Serviço dos técnicos",
+        "rota": "/paineis/servico-dos-tecnicos",
+        "icone": "bi-cash-coin",
+        "descricao": "Pagamento dos técnicos: da movimentação ao arquivo do "
+                     "Procfy, em cinco colunas.",
+        "grupo": "Painéis",
+        # 🚨 `aba_de` -> NÃO VIRA ITEM DE MENU, e é a correção dele de
+        # 05/11: *"só aba principal no menu. As demais são dentro dela
+        # já"*. A `PNL_1.3` já segue isso no Pós-venda.
+        #
+        # ⚠️ EU ERREI ISTO PRIMEIRO e o `teste_menu_grupos` me pegou: sem
+        # este campo, o Financeiro ganharia DOIS itens de menu, que é
+        # exatamente o que ele mandou não fazer. A tela continua
+        # existindo, com rota e permissão próprias -- o que ela não ganha
+        # é linha no menu, porque se chega nela pela TIRA DE ABAS de
+        # dentro do Financeiro.
+        "aba_de": "PNL_1.4",
+        "permissao": "owner",
+        "fase": 1,
+    },
+    {
         # 🔵 22/10: a tela que recebe o que chega pelos formularios proprios
         # (`forms.movisat.com.br`). Modulo `FRM`, nao ATD: formulario nao e
         # conversa -- tem definicao, tem campo obrigatorio e tem anexo, e

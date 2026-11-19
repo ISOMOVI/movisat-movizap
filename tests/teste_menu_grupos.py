@@ -103,7 +103,10 @@ class TestDeclaracaoDosGrupos:
         # (`PNL_1.5`) -- *"conclua e exiba o financeiro no paniel para owner"*
         # e *"gere a mesmta tela do 'Financeiro' para o 'Contratual'"*. Os
         # quatro paineis do `paineis.PAINEIS` passaram a ter tela.
-        assert dentro == ["PNL_1.1", "PNL_1.2", "PNL_1.3", "PNL_1.4", "PNL_1.5"]
+        # 🔵 18/11: a `PNL_1.6`, segunda aba do Financeiro. 🚨 Uma entrada
+        # por ABA porque a permissão é campo da entrada.
+        assert dentro == ["PNL_1.1", "PNL_1.2", "PNL_1.3", "PNL_1.4",
+                          "PNL_1.5", "PNL_1.6"]
         # 🚨 MAS O MENU DESENHA DOIS ITENS, E NAO TRES, e e correcao dele no
         # mesmo dia: *"so aba principal no menu. As demais sao dentro dela
         # ja"*. A `PNL_1.3` leva `aba_de`, e o `MenuLateral` pula toda tela

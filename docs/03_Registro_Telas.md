@@ -100,6 +100,7 @@ aparecem todos.
 | `PNL_1.1` | Operação | `/paineis/operacao` | `owner` | 1 |
 | `PNL_1.4` | Financeiro | `/paineis/financeiro` | `owner` | 1 |
 | `PNL_1.5` | Contratual | `/paineis/contratual` | `owner` | 1 |
+| `PNL_1.6` | Serviço dos técnicos | `/paineis/servico-dos-tecnicos` | `owner` | 1 |
 
 ### 🚨 `PNL_1.1` mudou de natureza em 29/10 — o card é a OS
 
@@ -286,6 +287,7 @@ O campo **`icone`** deste registro é o que o menu desenha, e ele é **a fonte
 | `PNL_1.1` Operação | `bi-kanban` | menu (grupo Painéis) |
 | `PNL_1.4` Financeiro | `bi-cash-coin` | menu (grupo Painéis) |
 | `PNL_1.5` Contratual | `bi-file-earmark-text` | menu (grupo Painéis) |
+| `PNL_1.6` Serviço dos técnicos | `bi-cash-coin` | menu (grupo Painéis) |
 | `PNL_1.2` Pós-venda | `bi-clipboard-check` | menu (grupo Painéis) |
 | `PNL_1.3` Pós-venda | `bi-clipboard-check` | **sem item** — tem `aba_de` |
 | `CAD_1.1` Clientes | `bi-building` | menu |
@@ -830,3 +832,21 @@ seria pôr palavra dele na boca do sistema. Ele disse *"depois colo"*.
 🚨 **A tela mostra o texto RESOLVIDO com valores de exemplo**, e é o que a torna
 uma conferência de verdade: ler `{{Nome}}` não diz nada sobre o que o cliente
 vê. Variável desconhecida **sai fora** do texto final, nunca crua.
+
+## 18/11 — `PNL_1.6` Serviço dos técnicos: a aba 2 do Financeiro
+
+🔵 Pedido dele: *"Nova aba2 no painel do Financeiro Movizap: 'Serviço dos
+técnicos'"*, com cinco colunas — Movimentação, Preparação, Validação, Procfy e
+Pagamento enviado.
+
+🚨 **TELA PRÓPRIA, e não a `PainelAba`.** As outras abas de pipeline desenham
+`pipeline_etapa`; estas cinco colunas **não são etapas nossas nem situações do
+ERP** — são estados do *artefato de pagamento*, que vive no FPSL. A `PainelAba`
+mostraria cinco colunas vazias para sempre.
+
+🔵 *"É possível fazer tudo no FPSL com as rotas e etc, mas o painel é aqui"*: os
+dados e os gestos moram no FPSL (3 tabelas e 12 rotas de ponte); esta tela
+desenha, e o **orçamento** é o único dado que nasce deste lado.
+
+⚠️ Nasce **só owner**, como toda aba nova — e aqui pesa mais: esta tela move
+dinheiro e gera o arquivo que vai ao Procfy.

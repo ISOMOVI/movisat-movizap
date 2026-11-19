@@ -215,7 +215,12 @@ def teste_o_contratual_aparece_na_aba_de_permissao_sem_uma_linha_de_codigo():
     assert CODIGO in permissao_paineis.codigos_concediveis()
     grade = permissao_paineis.grade()
     codigos = [t["codigo"] for t in grade["telas"]]
-    assert codigos == ["PNL_1.1", "PNL_1.2", "PNL_1.3", "PNL_1.4", "PNL_1.5"]
+    # 🔵 18/11: entrou a `PNL_1.6`, a segunda aba do Financeiro
+    # (*"Serviço dos técnicos"*). ⚠️ UMA ENTRADA POR ABA porque a
+    # permissão é campo da entrada -- 🔵 *"a Karla tera permissao para ver
+    # o 'Financeiro' e todas as abas. A Erika, apenas a aba 3"*.
+    assert codigos == ["PNL_1.1", "PNL_1.2", "PNL_1.3", "PNL_1.4",
+                       "PNL_1.5", "PNL_1.6"]
     contratual = [t for t in grade["telas"] if t["codigo"] == CODIGO][0]
     assert contratual["aba_titulo"] == "Contratual"
     donos = [p for p in grade["pessoas"] if p["owner"]]
@@ -227,8 +232,24 @@ def teste_os_cinco_paineis_tem_item_de_menu_proprio_para_o_owner():
     continua sendo UM item com duas abas dentro (correção dele de 05/11)."""
     telas = registro_telas.do_usuario({"owner": True})
     pnl = [t for t in telas if t["codigo"].startswith("PNL_")]
-    assert len(pnl) == 5
+    # 🔵 18/11: a `PNL_1.6` entrou -- a segunda aba do
+    # Financeiro, *"Serviço dos técnicos"*. São SEIS
+    # entradas de menu agora, e uma por ABA porque a
+    # permissão é campo da entrada.
+    assert len(pnl) == 6
     sem_aba_de = [t["codigo"] for t in pnl if not t["aba_de"]]
+    # 🚨 A `PNL_1.6` NÃO entra aqui, e eu errei isso primeiro: ela é a
+    # SEGUNDA aba do Financeiro, então leva `aba_de: PNL_1.4` -- 🔵 *"só
+    # aba principal no menu. As demais são dentro dela já"*. Sem o
+    # campo, o Financeiro ganharia dois itens de menu, que é o que ele
+    # mandou não fazer em 05/11.
     assert sem_aba_de == ["PNL_1.1", "PNL_1.2", "PNL_1.4", "PNL_1.5"]
     # 🚨 A `PNL_1.3` é a única com `aba_de`, e é a de dentro do Pós-venda.
-    assert [t["codigo"] for t in pnl if t["aba_de"]] == ["PNL_1.3"]
+    # 🔵 18/11: passaram a ser DUAS as telas de painel com `aba_de` -- a
+    # `PNL_1.3` (aba 2 do Pós-venda) e a `PNL_1.6` (aba 2 do Financeiro,
+    # *"Serviço dos técnicos"*).
+    # 🚨 A regra é a dele, de 05/11: *"só aba principal no menu. As demais
+    # são dentro dela já"*. Então painel com duas abas tem UM item de
+    # menu, e a segunda aba se alcança pela tira de dentro.
+    assert [t["codigo"] for t in pnl if t["aba_de"]] == ["PNL_1.3",
+                                                         "PNL_1.6"]

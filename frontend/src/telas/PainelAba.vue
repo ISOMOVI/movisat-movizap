@@ -28,6 +28,7 @@ import { useRoute } from 'vue-router'
 import { api, ErroDeApi } from '../api/cliente.js'
 import BarraDeRolagem from '../componentes/BarraDeRolagem.vue'
 import DialogoDeChamado from '../componentes/DialogoDeChamado.vue'
+import CorpoDoCard from '../componentes/CorpoDoCard.vue'
 import RolagemDaBorda from '../componentes/RolagemDaBorda.vue'
 import { sessao } from '../estado/sessao.js'
 
@@ -294,43 +295,20 @@ async function soltarNaColuna(coluna) {
                    :draggable="!card.desfecho"
                    @dragstart="comecarArrasto(card, $event)"
                    @dragend="terminarArrasto">
-            <div class="card__abrir"
-                 :class="{ 'card__abrir--arquivado': !!card.desfecho }"
-                 @click="cliqueNoCard(card)">
-              <!-- 🔵 O SELO DO DESFECHO: *"ele esmaece e fica no fim da fila
-                   arquivado com status de concluído"*. ⚠️ O esmaecer sozinho
-                   não diz QUAL dos dois foi — opacidade não é portadora de
-                   informação. -->
-              <span v-if="card.desfecho" class="card__arquivado">
-                <i class="bi bi-archive" aria-hidden="true"></i>
-                {{ card.desfecho_rotulo || card.desfecho }}
-                <template v-if="card.desfecho_em">
-                  &middot; {{ dataCurta(card.desfecho_em) }}
-                </template>
-              </span>
+            <!-- 🚨 O CORPO DO CARD VEM DO COMPONENTE ÚNICO desde 18/11, e isto
+                 nasceu de uma pergunta dele: *"Então pq os cards informam que
+                 não vem de OS no painel?"*
 
-              <p class="card__cliente" :title="card.cliente || ''">
-                {{ card.cliente || 'Sem cliente identificado' }}
-              </p>
-              <span class="card__ident">
-                <button class="card__os" type="button"
-                        @click.stop="cliqueNoCard(card)">
-                  <!-- 🚨 CARD COM OS EXISTE AQUI DESDE A MIGRACAO 106: as OS
-                       das situacoes 15746, 15695 e 16492 sairam das colunas da
-                       Operacao e nascem nestes paineis. Sem esta linha o card
-                       dizia "Card 912" -- um numero NOSSO, que nao serve para
-                       procurar nada no Harmonit. -->
-                  <template v-if="card.numero_os">OS {{ card.numero_os }}</template>
-                  <template v-else>{{ card.formulario || 'Card ' + card.id }}</template>
-                </button>
-                <span class="card__quando">{{ dataCurta(card.criada_em) }}</span>
-              </span>
-              <p v-if="card.resumo" class="card__resumo">{{ card.resumo }}</p>
-              <span v-if="card.observacoes" class="pilula">
-                <i class="bi bi-chat-left-text" aria-hidden="true"></i>
-                {{ card.observacoes }}
-              </span>
-            </div>
+                 📏 Os 8 cards do Financeiro eram TODOS OS, e esta tela
+                 desenhava 6 campos enquanto o servidor mandava mais de 20 --
+                 `tipo_nome`, `termo`, `status_str`, `placas`, `tecnicos`,
+                 `prioridade`, `visto_em`, `etapa_desde`, `prazo` entraram em
+                 12/11 a pedido dele (*"igual da OP"*) e nunca apareceram aqui.
+
+                 ⚠️ A causa era estrutural: dois `<article>` em dois arquivos.
+                 Enquanto fossem dois, o próximo campo entraria num e faltaria
+                 no outro. -->
+            <CorpoDoCard :card="card" @abrir="cliqueNoCard" />
           </article>
 
           <p v-if="!coluna.total" class="nota pequeno">Vazia.</p>

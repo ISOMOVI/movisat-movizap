@@ -462,3 +462,230 @@ class TestPonteAoVivo:
             for o in fpsl_ponte.os_do_cliente(harmonit_id, meses=60):
                 achou = achou or o["sem_situacao"]
         assert achou, "nenhuma OS sem situação voltou -- o filtro sumiu com as nulas"
+
+
+class TestCancelarEReagendarNoHarmonit:
+    """🔵 Demanda dele, 18/11. 🚨 NENHUM DESTES TESTES FALA COM O HARMONIT.
+
+    O que a medição na Velasco (OS 17105) decidiu, e é o que estes testes
+    guardam: o ERP **não tem alteração** de compromisso, o único caminho é o
+    `DELETE`, e o `DELETE` leva **o compromisso E a linha do técnico** juntos.
+    Logo 🔵 *"apaga, só se a linha for nossa"*.
+    """
+
+    def _rastro(self, agendamento_id, numero_os, *, vinculo_criado,
+                compromisso=944000, vinculo=1199999):
+        """Finge o que a migração 112 guarda quando o agendar dá certo."""
+        banco.executar(
+            "UPDATE agendamento_os "
+            "   SET harmonit_agendamento_id = %s, harmonit_vinculo_id = %s, "
+            "       vinculo_criado = %s, harmonit_em = now() "
+            " WHERE agendamento_id = %s AND numero_os = %s",
+            (compromisso, vinculo, vinculo_criado, agendamento_id, numero_os))
+
+    def _lido(self, agendamento_id, numero_os):
+        return banco.um(
+            "SELECT harmonit_agendamento_id, harmonit_vinculo_id, "
+            "       vinculo_criado FROM agendamento_os "
+            " WHERE agendamento_id = %s AND numero_os = %s",
+            (agendamento_id, numero_os))
+
+    # -- o rastro ----------------------------------------------------------
+    def test_o_agendar_GRAVA_o_vinculo_por_OS(self, base, monkeypatch):
+        """🚨 Sem este elo, cancelar não existe: é o campo que diz se apagar é
+        seguro. ⚠️ E é POR OS, não por compromisso -- um compromisso do
+        MoviZap cobre várias OS e cada uma tem a sua linha lá."""
+        def fingir(**k):
+            return {"ok": True, "numero_os": k["numero_os"],
+                    "agendamento_id": 944100 + k["numero_os"] % 10,
+                    "vinculo_id": 1199000 + k["numero_os"] % 10,
+                    "vinculo_criado": True}
+
+        monkeypatch.setattr(agendamento.fpsl_ponte, "agendar_tecnico", fingir)
+        a = _criar(base, [{"numero_os": 997101, "placa": None},
+                          {"numero_os": 997102, "placa": None}])
+        agendamento.levar_ao_harmonit(
+            a, cfg={"agendamento_escreve_harmonit": "true"})
+        um = self._lido(a, 997101)
+        dois = self._lido(a, 997102)
+        assert um["harmonit_agendamento_id"] == 944101
+        assert um["harmonit_vinculo_id"] == 1199001
+        assert um["vinculo_criado"] is True
+        # 🚨 Ids DIFERENTES por OS: era isto que a coluna de 070 não podia
+        # guardar, porque ela é uma só para o compromisso inteiro.
+        assert dois["harmonit_agendamento_id"] == 944102
+        assert dois["harmonit_vinculo_id"] == 1199002
+
+    def test_recusa_NAO_grava_rastro(self, base, monkeypatch):
+        """⚠️ Rastro de escrita que não aconteceu faria cancelar apontar para
+        uma linha que não é nossa."""
+        monkeypatch.setattr(
+            agendamento.fpsl_ponte, "agendar_tecnico",
+            lambda **k: {"ok": False, "numero_os": k["numero_os"],
+                         "motivo": "recusou (encenado)"})
+        a = _criar(base, [{"numero_os": 997110, "placa": None}])
+        agendamento.levar_ao_harmonit(
+            a, cfg={"agendamento_escreve_harmonit": "true"})
+        assert self._lido(a, 997110)["harmonit_vinculo_id"] is None
+
+    # -- cancelar ----------------------------------------------------------
+    def test_cancelar_LEVA_AO_ERP_quando_a_linha_e_nossa(self, base,
+                                                         monkeypatch):
+        chamadas = []
+
+        def fingir(**k):
+            chamadas.append(k)
+            return {"ok": True, "apagou": True, "numero_os": k["numero_os"]}
+
+        monkeypatch.setattr(agendamento.fpsl_ponte, "cancelar_agendamento",
+                            fingir)
+        a = _criar(base, [{"numero_os": 997120, "placa": None}])
+        self._rastro(a, 997120, vinculo_criado=True)
+        assert agendamento.cancelar(
+            a, "cliente desmarcou",
+            cfg={"agendamento_escreve_harmonit": "true"}) is True
+        assert len(chamadas) == 1
+        assert chamadas[0]["numero_os"] == 997120
+        assert chamadas[0]["vinculo_id"] == 1199999
+        assert chamadas[0]["vinculo_criado"] is True
+        # 🚨 O rastro é LIMPO: a linha não está mais lá, e deixar o id faria
+        # uma segunda tentativa apagar o que já não existe.
+        assert self._lido(a, 997120)["harmonit_vinculo_id"] is None
+        # ...e o histórico deste lado fica, como sempre foi.
+        assert agendamento.por_id(a)["estado"] == "cancelado"
+        assert agendamento.por_id(a)["motivo_cancelamento"] == "cliente desmarcou"
+
+    def test_cancelar_com_linha_DE_OUTRO_recusa_e_fica_LEGIVEL(self, base,
+                                                               monkeypatch):
+        """🔵 *"apaga, só se a linha for nossa"*. ⚠️ E o compromisso continua
+        cancelado DESTE lado: o operador já desmarcou com o cliente."""
+        monkeypatch.setattr(
+            agendamento.fpsl_ponte, "cancelar_agendamento",
+            lambda **k: {"ok": False, "apagou": False,
+                         "numero_os": k["numero_os"],
+                         "causa": "vinculo_nao_e_nosso",
+                         "motivo": "a linha nao foi criada por nos"})
+        a = _criar(base, [{"numero_os": 997130, "placa": None}])
+        self._rastro(a, 997130, vinculo_criado=False)
+        assert agendamento.cancelar(
+            a, "", cfg={"agendamento_escreve_harmonit": "true"}) is True
+        guardado = agendamento.por_id(a)
+        assert guardado["estado"] == "cancelado"
+        # 🔵 Pendência 4 dele: o motivo aparece DESCRITO, e dizendo em qual OS.
+        assert "997130" in guardado["harmonit_erro"]
+        assert "não criamos" in guardado["harmonit_erro"]
+        # 🚨 E o rastro NÃO é limpo: a linha continua lá no Harmonit.
+        assert self._lido(a, 997130)["harmonit_vinculo_id"] == 1199999
+
+    def test_rastro_NULO_conta_como_nao_e_nossa(self, base, monkeypatch):
+        """🚨 O caso das linhas que já existiam antes da migração 112: não se
+        sabe quem criou, e quem não sabe não apaga."""
+        vistos = []
+        monkeypatch.setattr(
+            agendamento.fpsl_ponte, "cancelar_agendamento",
+            lambda **k: vistos.append(k) or {"ok": False, "apagou": False,
+                                             "numero_os": k["numero_os"],
+                                             "causa": "vinculo_nao_e_nosso",
+                                             "motivo": "nao e nossa"})
+        a = _criar(base, [{"numero_os": 997140, "placa": None}])
+        self._rastro(a, 997140, vinculo_criado=None)
+        agendamento.cancelar(a, "", cfg={"agendamento_escreve_harmonit": "true"})
+        assert vistos and vistos[0]["vinculo_criado"] is False
+
+    def test_cancelar_DESLIGADO_nao_chama_nada(self, base, monkeypatch):
+        def nao_deveria(**k):
+            raise AssertionError("chamou o Harmonit com o interruptor desligado")
+
+        monkeypatch.setattr(agendamento.fpsl_ponte, "cancelar_agendamento",
+                            nao_deveria)
+        a = _criar(base, [{"numero_os": 997150, "placa": None}])
+        self._rastro(a, 997150, vinculo_criado=True)
+        assert agendamento.cancelar(
+            a, "", cfg={"agendamento_escreve_harmonit": "false"}) is True
+        assert agendamento.por_id(a)["estado"] == "cancelado"
+
+    def test_cancelar_SEM_RASTRO_nao_chama_nada(self, base, monkeypatch):
+        """⚠️ Sem `harmonit_vinculo_id` não há o que apagar lá, e inventar um
+        id seria apontar para a linha de outra pessoa."""
+        def nao_deveria(**k):
+            raise AssertionError("chamou o Harmonit sem saber qual linha")
+
+        monkeypatch.setattr(agendamento.fpsl_ponte, "cancelar_agendamento",
+                            nao_deveria)
+        a = _criar(base, [{"numero_os": 997160, "placa": None}])
+        assert agendamento.cancelar(
+            a, "", cfg={"agendamento_escreve_harmonit": "true"}) is True
+
+    # -- reagendar ---------------------------------------------------------
+    def test_reagendar_APONTA_O_RASTRO_para_o_compromisso_novo(self, base,
+                                                               monkeypatch):
+        chamadas = []
+
+        def fingir(**k):
+            chamadas.append(k)
+            return {"ok": True, "reagendou": True, "apagou_o_antigo": True,
+                    "numero_os": k["numero_os"], "agendamento_id": 977000,
+                    "vinculo_id": 1177777, "vinculo_criado": True}
+
+        monkeypatch.setattr(agendamento.fpsl_ponte, "reagendar_tecnico",
+                            fingir)
+        a = _criar(base, [{"numero_os": 997170, "placa": None}])
+        self._rastro(a, 997170, vinculo_criado=True)
+        nova = datetime.now(timezone.utc) + timedelta(days=9)
+        assert agendamento.reagendar(
+            a, nova, cfg={"agendamento_escreve_harmonit": "true"}) is True
+        # 🚨 Mandou o ANTIGO para apagar e o novo para criar, na mesma chamada.
+        assert chamadas[0]["agendamento_id_antigo"] == 944000
+        assert chamadas[0]["vinculo_id_antigo"] == 1199999
+        guardado = self._lido(a, 997170)
+        assert guardado["harmonit_agendamento_id"] == 977000
+        assert guardado["harmonit_vinculo_id"] == 1177777
+        # ⚠️ E a confirmação foi esquecida, como já era a regra.
+        assert agendamento.por_id(a)["estado"] == "aguardando"
+        assert agendamento.por_id(a)["confirmado_em"] is None
+
+    def test_antigo_que_NAO_SAIU_fica_dito_e_nao_derruba_o_novo(self, base,
+                                                                monkeypatch):
+        """🚨 Nunca zero compromisso. A OS fica com dois, e a frase diz qual
+        não saiu -- errar para o lado do excesso é recuperável."""
+        monkeypatch.setattr(
+            agendamento.fpsl_ponte, "reagendar_tecnico",
+            lambda **k: {"ok": True, "reagendou": True,
+                         "apagou_o_antigo": False,
+                         "numero_os": k["numero_os"],
+                         "agendamento_id": 977001, "vinculo_id": 1177778,
+                         "vinculo_criado": True,
+                         "causa_do_antigo": "recusa_do_erp",
+                         "motivo": "o antigo (944000) NAO saiu da OS"})
+        a = _criar(base, [{"numero_os": 997180, "placa": None}])
+        self._rastro(a, 997180, vinculo_criado=True)
+        nova = datetime.now(timezone.utc) + timedelta(days=10)
+        assert agendamento.reagendar(
+            a, nova, cfg={"agendamento_escreve_harmonit": "true"}) is True
+        # O rastro aponta o NOVO (é ele que vale para cancelar daqui em diante)
+        assert self._lido(a, 997180)["harmonit_agendamento_id"] == 977001
+        # ...e o que sobrou está escrito, com a OS.
+        erro = agendamento.por_id(a)["harmonit_erro"]
+        assert "997180" in erro and "944000" in erro
+
+    def test_reagendar_DESLIGADO_so_muda_a_data_daqui(self, base, monkeypatch):
+        def nao_deveria(**k):
+            raise AssertionError("chamou o Harmonit com o interruptor desligado")
+
+        monkeypatch.setattr(agendamento.fpsl_ponte, "reagendar_tecnico",
+                            nao_deveria)
+        a = _criar(base, [{"numero_os": 997190, "placa": None}])
+        self._rastro(a, 997190, vinculo_criado=True)
+        nova = datetime.now(timezone.utc) + timedelta(days=11)
+        assert agendamento.reagendar(
+            a, nova, cfg={"agendamento_escreve_harmonit": "false"}) is True
+        assert self._lido(a, 997190)["harmonit_agendamento_id"] == 944000
+
+    def test_reagendar_LE_O_RASTRO_ANTES_de_mudar_a_data(self):
+        """🚨 Trava por texto, e o que ela guarda é uma ordem que nenhum dublê
+        pega: o rastro tem de ser lido ANTES do UPDATE da data. Se fosse
+        depois, o reagendar ainda funcionaria -- e é por isso que precisa de
+        trava."""
+        import inspect
+        fonte = inspect.getsource(agendamento.reagendar)
+        assert fonte.index("_rastro_no_harmonit") < fonte.index("UPDATE agendamento SET inicio")

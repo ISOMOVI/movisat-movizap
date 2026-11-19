@@ -3735,3 +3735,206 @@ deixaria os dois cliques enviarem antes de qualquer um marcar.
 ⚠️ **E solta a reserva quando o envio falha** (`soltar_disparo`), para o
 operador poder tentar de novo — mas **só enquanto `disparo_texto` é nulo**: com
 texto gravado, o aviso aconteceu e não se desfaz.
+
+
+---
+
+## Migração 112 — o rastro do compromisso no Harmonit, **por OS**
+
+🔵 Demanda dele, 18/11: reagendar e cancelar o compromisso também no Harmonit.
+
+| coluna de `agendamento_os` | tipo | para quê |
+|---|---|---|
+| `harmonit_agendamento_id` | `bigint` | o `agendamentoId` **daquela OS** |
+| `harmonit_vinculo_id` | `bigint` | o `ordemServicoxTecnicoId` daquela OS |
+| `vinculo_criado` | `boolean` | **nós** criamos a linha do técnico? |
+| `harmonit_em` | `timestamptz` | quando o rastro foi colhido |
+
+🚨 **POR QUE EM `agendamento_os` E NÃO EM `agendamento`.** Um compromisso do
+MoviZap cobre **N OS**, e no Harmonit **cada OS tem a sua linha de técnico e o
+seu compromisso** — não existe "agendar as três de uma vez". A
+`agendamento.harmonit_agendamento_id` (migração 070) guarda só o **primeiro**
+id que voltou: serve para o selo *"foi para o Harmonit?"*, e **não serve para
+apagar**, porque apagar com o id da OS errada arrancaria a linha errada.
+
+⚠️ A coluna de 070 **fica onde está**. Ela não mente — responde outra pergunta,
+e é a que o selo já no ar lê.
+
+🚨 **`vinculo_criado` É O CAMPO QUE DECIDE SE CANCELAR PODE EXISTIR**, e isso
+vem de medição, não de preferência. Na Velasco (OS 17105, 18/11), com vínculo e
+compromisso descartáveis:
+
+| hipótese | resultado |
+|---|---|
+| `AgendarTecnico` com o `id` do compromisso e data nova | 🔴 recusou: *"Erro ao alterar Evento: TecnicoJaAgendado"*; a data não mudou |
+| a mesma rota mexendo em `statusCompromisso`/`motivoCancelamento` | 🔴 recusou igual |
+| `DELETE(osId, id, agendaId)` | ✅ funcionou — **e levou o compromisso E a linha do técnico**; a OS ficou com zero linhas |
+
+Ou seja: **não existe alteração de compromisso no ERP, e não existe cancelar o
+compromisso deixando a linha.** Cancelar é apagar a linha. 🔵 Logo, a regra
+dele: *"apaga, só se a linha for nossa"* — porque quando reusamos a linha de um
+técnico que já estava na OS (🔵 *"usa a linha existente"*), apagá-la levaria o
+vínculo e o compromisso de outra pessoa.
+
+🚨 **`vinculo_criado` NULO é "não sei", e não é o mesmo que `false`.** As linhas
+anteriores a esta migração nasceram sem o rastro: para elas não se sabe quem
+criou o vínculo. Na prática não se apaga, igual a `false` — mas a tela pode
+dizer a verdade (*"não sei de quem é esta linha"*) em vez de afirmar que é de
+outro.
+
+⚠️ **E reagendar cria o novo ANTES de apagar o antigo.** Apagando primeiro, uma
+criação que falhasse deixaria a OS com **zero** compromisso: o técnico perde a
+visita da agenda e ninguém percebe. Na ordem que está no código, a falha deixa
+**dois** — visível, corrigível, e a frase diz qual sobrou. Errar para o lado do
+excesso é recuperável; para o lado da falta, não.
+
+🚨 **O caso que a medição obrigou e que não estava no desenho:** se o
+compromisso novo nascer na **mesma linha** do antigo, não se apaga nada — o
+`DELETE` levaria junto o compromisso que acabamos de criar.
+
+
+---
+
+## Migrações 113, 114 e 115 — a auditoria da OS e a fila das passagens
+
+🔵 Desenho dele, 18/11: *"uma pode verificar e levantar, indicar os erros, e
+disparar por outro que só vai reescrever, daí guardar os logs juntos para evitar
+perca e depois devolve ao primeiro para validar e passar verde"* · *"assim op
+não para de trabalhar e seguimos no background com a OS"*.
+
+### 🚨 O fato que originou as três, e vale ler antes das tabelas
+
+Na OS **17133**, em 18/11, a mesma rota do Harmonit, na mesma OS, **sem nenhuma
+escrita entre as duas leituras**:
+
+```
+11:42:47  devolveu 251    -> o painel recusou a passagem como "alguem mudou no meio"
+11:43:18  devolveu 16488  -> a passagem seguinte funcionou
+```
+
+Das 11:17 às 11:42 ela respondeu **o valor que escrevemos às 09:42**, ignorando
+o de 09:49: um atraso de ≈1h54 que se resolveu sozinho. Foram **7 recusas,
+todas falsas**, e o operador clicando porque nada acontecia.
+
+🚨 **A pergunta que separa tudo o que vem abaixo:** o valor que o ERP mostra é
+um valor que **nós** já escrevemos nesta OS?
+
+| o ERP mostra | significa | o que se faz |
+|---|---|---|
+| valor **nosso**, escrita recente (< 1h) | a leitura dele atrasou | nada; espera |
+| valor **nosso**, escrita antiga (> 1h) | a escrita se perdeu | reescreve |
+| valor que **nunca escrevemos** | alguém mexeu no ERP | **nada** — o ERP está certo |
+
+### `auditoria_os` (migração 113)
+
+Uma linha por divergência. 🚨 **Uma tabela, não duas**, e é a parte do pedido
+dele que mais importa: *"guardar os logs juntos para evitar perca"*. O auditor
+levanta e fecha; o escritor anota as tentativas **na mesma linha**.
+
+| coluna | para quê |
+|---|---|
+| `numero_os`, `coluna_nossa`, `situacao_do_erp` | os dois lados |
+| `lido_em`, `cache_de` | a idade de cada leitura — divergência entre um dado de agora e um de ontem é dado velho, não divergência |
+| `veredito` | ver abaixo |
+| `tentativas`, `grupos`, `ultimo_erro`, `escrito_em` | o log do escritor |
+| `fechada_em`, `fechada_como` | o fechamento, que é **sempre** do auditor relendo |
+
+Índice único parcial `auditoria_os_uma_aberta`: **uma linha aberta por OS**, para
+uma OS parada não criar uma linha por noite e a red flag não contar o mesmo
+problema várias vezes.
+
+### 🚨 Os vereditos (migração 114, e ela nasceu de um furo meu)
+
+A 113 saiu com `veredito` em `aberta`/`atraso`/`nao_confirmada`/`resolvida`/
+`desistiu`, e **toda divergência confirmada ia para o escritor**. O ensaio a
+seco contra a produção — rodado antes de ligar a escrita — mostrou o problema:
+
+```
+OS 17054: o painel diz 251   e o Harmonit diz 16490
+OS 17114: o painel diz 15696 e o Harmonit diz 16490
+```
+
+E o histórico de passagens diz o que elas são: escrevemos 251 em 29/10 e 15696
+em 12/11, e **16490 nunca foi escrito por nós**. Alguém avançou essas OS dentro
+do Harmonit. ⚠️ **O escritor iria reescrever a nossa coluna por cima** — puxando
+a 17054 de *"Analise de Equipamentos Retornados"* de volta para *"Configurar
+equipamentos e Sistemas"*, numa OS de cliente, desfazendo o trabalho de quem
+fez a coisa certa.
+
+A 114 separou:
+
+| veredito | o que é | vai ao escritor? |
+|---|---|---|
+| `aberta` | em avaliação na rodada | — |
+| `atraso` | valor nosso, escrita de menos de 1h | **não** |
+| `escrita_perdida` | valor nosso, escrita de mais de 1h | **sim** — a única |
+| `mudou_no_erp` | valor que nunca escrevemos | **não**, vira aviso |
+| `nao_confirmada` | as duas leituras discordaram | **não** |
+| `resolvida` | o auditor releu e fechou verde | — |
+| `desistiu` | 3 grupos estouraram ou recusa de negócio | vira red flag |
+
+### `os_passagem`, colunas da fila (migração 115)
+
+| coluna | para quê |
+|---|---|
+| `pendente_desde` | 🚨 **nulo = não está na fila.** Enquanto preenchido, a coluna do card sai **daqui**, não do cache do FPSL |
+| `tentativas`, `pendente_erro` | quantas vezes e o último retorno, em frase |
+| `resolvida_em` | quando saiu da fila, **para qualquer lado** |
+| `avisada_em` | para a mesma pendência não ser avisada em toda rodada do cron |
+
+🚨 **A fila são linhas, não memória**: reinício não pode perder escrita. E mora
+na própria `os_passagem`, que já é o registro de *"quem faz o que SEMPRE"* —
+tabela nova seria um segundo lugar para a mesma verdade.
+
+🚨 **Índice único parcial `os_passagem_uma_pendente_por_os`:** duas pendentes na
+mesma OS seriam duas verdades sobre em que coluna o card está, e a tela teria de
+escolher uma sem critério. A segunda passagem **atualiza** o destino — o
+operador acabou de dizer para onde quer o card.
+
+⚠️ **`ok` continua FALSO numa pendente**, e isso é de propósito: a OS não mudou.
+O card anda, mas quem lê a linha não pode concluir que o ERP gravou. `ok` só
+vira `true` quando a fila consegue escrever **e** a releitura confirma.
+
+### Os números, todos dele (18/11)
+
+| número | onde |
+|---|---|
+| **60s** entre passagens da mesma OS | `passagem.SEGUNDOS_ENTRE_PASSAGENS` |
+| **3 grupos de 3** tentativas | `auditoria_os.GRUPOS`, `TENTATIVAS_POR_GRUPO` |
+| **5 min** entre os grupos | `auditoria_os.SEGUNDOS_ENTRE_GRUPOS` |
+| **1 hora** para atraso virar escrita perdida | `auditoria_os.HORAS_DE_ESPERA_DO_ATRASO` |
+| **1 hora** para a pendência virar red flag | `passagem.HORAS_PARA_A_RED_FLAG` |
+| **03:00** para o auditor rodar | o cron, quando ele mandar |
+
+⚠️ Limite, filtro e teto são decisão dele: nenhum destes se muda sem a palavra
+dele.
+
+### Migração 116 — `auditoria_os.avisada_em`: o aviso sai uma vez
+
+🚨 **Defeito meu, achado em 18/11 ao conferir o que a rodada SEGUINTE diria.** As
+duas linhas que o ensaio a seco abriu —
+
+```
+OS 17054  mudou_no_erp  nossa=251    erp=16490  fechada=None
+OS 17114  mudou_no_erp  nossa=15696  erp=16490  fechada=None
+```
+
+— ficavam com `fechada_em` nulo para sempre, e a red flag as pegava por
+`veredito = 'mudou_no_erp' AND fechada_em IS NULL`. **As mesmas duas OS sairiam
+na mensagem todas as noites, indefinidamente.**
+
+⚠️ **E o problema é mais fundo que a coluna que faltava.** `coluna_nossa` é a
+nossa última passagem confirmada, e ela **nunca** vai voltar a bater com um valor
+que nós não escrevemos. A divergência é permanente por construção — avisar dela
+sem parar é avisar de um fato que não tem conserto, e treina a pessoa a ignorar
+o vigia. 🔵 Contra a regra dele que o resto do desenho respeita: *"aviso que
+aparece todo dia vira aviso que ninguém lê"*.
+
+| coluna | para quê |
+|---|---|
+| `avisada_em` | nulo = ainda não avisada. **Marcada depois de o envio dar certo** — marcar antes perderia o aviso se o WhatsApp falhasse |
+
+A regra que isto fecha: **mudança feita no ERP é aceita, e aceitar é lembrar.**
+`mudou_no_erp` **fecha a linha na hora** (não há o que fazer: o card já segue o
+ERP, que vem do cache), avisa uma vez, e só volta a falar se o ERP for para um
+**terceiro** valor que também não é nosso.
