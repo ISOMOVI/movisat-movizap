@@ -137,7 +137,24 @@ def confirmar_pareamento(canal_id: int, quem: str) -> dict:
     if not canal or not canal["instancia"]:
         raise ValueError("canal sem instância configurada")
 
-    aplicadas = evolution.aplicar_settings(canal["instancia"])
+    # 🚨 19/11: O PAREAMENTO ATROPELAVA A DECISÃO DELE DE 12/08.
+    #
+    # Até aqui esta linha era `aplicar_settings(canal["instancia"])`, sem
+    # argumento -- e o `SETTINGS_PADRAO` tem `groupsIgnore = True`. Quando ele
+    # leu o QR em 19/11 às 09:21:23, o pareamento reescreveu o valor e os
+    # grupos pararam de chegar: nenhuma entrada de grupo depois das 08:01:59,
+    # contra 208 em 17/11. A decisão de 12/08 vivia só no
+    # `scripts/ligar_grupo.py`, que alguém tinha de lembrar de rodar.
+    #
+    # ⚠️ A regra é a que já estava escrita no `SETTINGS_PADRAO`: quem atende
+    # grupo é a `atendimento`; a `informativos` é disparo e nunca recebe grupo.
+    # O `canal.tipo` já carrega isso, então não precisa de campo novo.
+    #
+    # 🚨 O VALOR VAI SEMPRE EXPLÍCITO. Deixar o padrão decidir é o que causou a
+    # regressão, e um teste trava justamente a chamada sem valor.
+    aplicadas = evolution.aplicar_settings(
+        canal["instancia"],
+        {"groupsIgnore": canal["tipo"] != "atendimento"})
     registrar_evento(canal_id, "conectado", f"pareado por {quem}")
     log.info("canal %s pareado; settings aplicadas: %s", canal_id, aplicadas)
     return aplicadas

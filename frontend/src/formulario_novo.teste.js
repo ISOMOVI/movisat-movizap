@@ -26,7 +26,7 @@ import { describe, expect, it } from 'vitest'
 import { mount } from '@vue/test-utils'
 
 import {
-  conferir, limpar, mascarar, placaVale, problemas,
+  conferir, identificadorVale, limpar, mascarar, placaVale, problemas,
 } from './util/validacao_campo.js'
 import CamposDoFormulario from './componentes/CamposDoFormulario.vue'
 
@@ -107,10 +107,31 @@ describe('a conferência diz a frase, e aceita os dois padrões de placa', () =>
     expect(placaVale('ABC1D23')).toBe(true)
     expect(placaVale('AB12345')).toBe(false)
     expect(conferir('placa', 'ABC1234')).toBe('')
-    expect(conferir('placa', 'ABC12')).toContain('Informe a placa')
+    expect(conferir('placa', 'ABC12')).toContain('Sugestão')
     /* ⚠️ A placa é PROCURADA dentro do texto: o campo pede veículo E placa. */
     expect(conferir('placa', 'Saveiro ABC1234')).toBe('')
-    expect(conferir('placa', 'SAVEIRO BRANCA')).toContain('Informe a placa')
+    expect(conferir('placa', 'SAVEIRO BRANCA')).toContain('Sugestão')
+  })
+
+  /* 🔵 Decisão dele, 19/11: *"as validações de placa devem permitir tbm
+     chassis, hoje travam no formato placas, deixe o formato como sugestão
+     de placas apenas e não regra"*. O campo aceita chassi (VIN, 17
+     caracteres, sem I/O/Q) e o formato de placa deixa de ser bloqueio. */
+  it('🔵 chassi (VIN) vale tanto quanto placa, e nenhum dos dois é regra', () => {
+    expect(identificadorVale('9BWZZZ377VT0042511')).toBe(false) // 18 chars, não é VIN
+    expect(identificadorVale('9BWZZZ377VT004251')).toBe(true) // 17 chars, VIN valido
+    expect(identificadorVale('SAVEIRO 9BWZZZ377VT004251')).toBe(true)
+    expect(identificadorVale('ABC1234')).toBe(true)
+    expect(identificadorVale('XIXI')).toBe(false)
+    expect(conferir('placa', '9BWZZZ377VT004251')).toBe('')
+    expect(conferir('placa', 'XIXI')).toContain('Sugestão')
+
+    /* 🚨 O FORMATO NÃO TRAVA MAIS O AVANÇAR — é sugestão, não regra. Uma
+       placa estrangeira, um cadastro antigo ou um erro de digitação não
+       impedem a pessoa de seguir. */
+    const campos = [campo('veiculo', 'string', { validacao: 'placa' })]
+    expect(problemas(campos, { veiculo: 'texto qualquer sem placa' }, null))
+      .toEqual([])
   })
 
   it('🔵 placa com hífen e com espaço DENTRO do padrão — 11/11', () => {
@@ -162,10 +183,14 @@ describe('problemas() — a mesma conta que a tela mostra e o trilho segura', ()
     expect(problemas(campos, {}, new Set(['oculto']))).toHaveLength(1)
   })
 
-  it('no repetidor, uma linha errada basta para avisar', () => {
+  it('no repetidor, placa fora do padrão não avisa — é sugestão, não regra', () => {
     const campos = [campo('placas', 'string', { multiplo: true, validacao: 'placa' })]
     expect(problemas(campos, { placas: ['ABC1234', 'ABC1D23'] }, null)).toEqual([])
-    expect(problemas(campos, { placas: ['ABC1234', 'XX'] }, null)).toHaveLength(1)
+    /* 🔵 19/11: antes isto dava 1 aviso bloqueante; hoje `placa` nunca entra
+       no `fora` de `problemas()`, então uma linha fora do padrão (placa
+       estrangeira, chassi digitado errado, erro de digitação) não trava
+       o Avançar. */
+    expect(problemas(campos, { placas: ['ABC1234', 'XX'] }, null)).toEqual([])
     expect(problemas(campos, { placas: ['Saveiro ABC1234'] }, null)).toEqual([])
     // ⚠️ Linha em branco não é linha errada: quem clicou no `+` e desistiu
     // não leva aviso.
@@ -219,7 +244,7 @@ describe('o repetidor `+` (Bloco 1) — o dado que se perdia em silêncio', () =
     // 🟡 Campo que fica vermelho na terceira tecla é hostil.
     expect(tela.find('.campo__frase').exists()).toBe(false)
     await tela.find('.linha input').trigger('blur')
-    expect(tela.find('.campo__frase').text()).toContain('Informe a placa')
+    expect(tela.find('.campo__frase').text()).toContain('Sugestão')
   })
 
   it('arquivo múltiplo aceita vários no mesmo campo', () => {

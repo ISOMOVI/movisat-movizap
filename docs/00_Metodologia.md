@@ -101,3 +101,68 @@ O MoviChat tem **8.816 linhas e zero teste**, e é a peça mais reaproveitada aq
 2. Conferir drift local × VPS antes de editar.
 3. Verificar antes de perguntar.
 4. Item já decidido não volta como pergunta — mas checar o `Reavaliar se`.
+
+## 8. Varredura de sombra — rota escondida por curinga (nova em 19/11)
+
+🚨 **O FastAPI casa na ORDEM DE REGISTRO, e a ordem é invisível na leitura do
+arquivo.** Em 18/11 a `PNL_1.6` subiu com a rota do quadro declarada **abaixo**
+de `/api/paineis/{painel}`: a aba aparecia, o conteúdo não, e o log dizia
+`400 "Painel desconhecido."`. Nenhuma conferência de sintaxe, de import, de
+contagem de rotas (14+14) ou de registro × roteador vê isso.
+**Contar rota registrada não é pedir uma rota.**
+
+**A trava:** `/home/claude/auditoria_1911.py`. Para cada rota **literal** ela
+testa o caminho contra os `path_regex` de **todas as anteriores do mesmo
+método**, e acusa a que estiver engolida.
+
+```
+cd /home/claude/fpsl_weso && ./venv/bin/python /home/claude/auditoria_1911.py fpsl
+/home/claude/movizap_painel/venv/bin/python /home/claude/auditoria_1911.py movizap
+```
+
+**Onde entra:** no deploy, **depois do import de verdade e antes da suíte**.
+Leva segundos.
+
+📏 Medido em 19/11 14:20: MoviZap **293 rotas conferidas, 0 escondidas**.
+
+🚨 **Duas limitações medidas, e as duas valem mais que o verde:**
+
+1. **No FPSL ela só alcança 17 das 37 rotas do app.** As outras 20 são 19
+   `_IncludedRouter` e 1 `Mount`, e a varredura **não desce neles** — ou seja,
+   toda a API da ponte fica fora. Um *"FPSL ... nenhuma escondida"* hoje é um
+   verde que quase não mediu. Consertar é descer nos routers incluídos.
+2. **Cada app exige o seu venv, e o FPSL exige o diretório dele.** Rodada com o
+   python do MoviZap ela morre em `ModuleNotFoundError: pydantic_settings`;
+   rodada fora de `/home/claude/fpsl_weso` morre em
+   `ValidationError: weso_api_key`. Enquanto for um `.py` solto em
+   `/home/claude`, *"roda antes de todo build"* depende de alguém lembrar — o
+   lugar dela é o repositório, com um alvo que já carregue venv e diretório.
+
+## 9. A régua de "definitivo" — o que impede entrega pela metade (19/11)
+
+🔵 Dele, no fim de um dia em que ele achou três defeitos em coisas que eu havia
+declarado prontas: *"estamos cheios de entrega pela metade. dessa vez vamos de
+definitivo"*.
+
+🚨 **Um item só fecha com as SEIS linhas abaixo.** Qualquer uma faltando, ele
+fica aberto — e é **dito** como aberto, não como pronto.
+
+| # | a linha | por que ela existe, com o caso que a pagou |
+|---|---|---|
+| 1 | **o defeito reproduzido por teste que falha ANTES do conserto** | o filtro de data da `PNL_1.6`: o teste ficou vermelho contra a produção com a queixa dele, palavra por palavra. Sem isso não se sabe se consertou ou mascarou |
+| 2 | **o GESTO exercitado, não a função** | eu li a lógica do mesmo filtro e ela estava **correta**. O defeito estava no `<input type="date">`, que dispara `input` a cada dígito do ano. **Ler a fonte não alcança gesto** |
+| 3 | **a causa escrita no doc dono** | `M12`: doc que não volta para matar o texto velho passa a mentir |
+| 4 | **as três suítes + a varredura de sombra + as 9 conferências de CSS, antes do build** | `M16`: build em produção É publicação |
+| 5 | **o estado conferido depois, não o HTTP** | `no_ar_nao_e_200` |
+| 6 | 🔵 **ELE usa a tela e confirma** | `M9`. É a linha que eu pulei em 19/11 às 15:00, e às 15:05 ele achou o filtro de data |
+
+🚨 **E a regra de varredura que nasceu no mesmo dia:** varredura de padrão se faz
+**contra a Operação**, por **lista nominal escrita antes do código**. Comparar a
+tela nova com a anterior é comparar **cópia com cópia** — foi o que eu fiz na
+`PNL_1.6`, e por isso a divergência de cabeçalho da própria aba 1 (`h1` de 16px
+em vez de 20px, e sem `AjudaDaTela`) passou inteira.
+
+⚠️ **O corolário desagradável, e ele vale mais que o resto:** *"a suíte está
+verde"* e *"o build está limpo"* **não** são a linha 6. Em 19/11 a `PNL_1.6`
+subiu com 340 + 2.618 + 940 verdes e as 9 conferências passando, **e a tela
+estava quebrada em dois gestos**.

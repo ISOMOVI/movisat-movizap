@@ -357,7 +357,7 @@ defineExpose({ ehExcecao, temOS })
   width: 100%; padding: var(--e-2) var(--e-3);
   border: var(--borda-fina) solid var(--borda);
   border-left: 3px solid transparent;
-  border-radius: var(--r-2);
+  border-radius: var(--r-md);
   background: var(--superficie);
   text-align: left; cursor: pointer;
 }
@@ -402,10 +402,10 @@ defineExpose({ ehExcecao, temOS })
 .card__dado { font-size: var(--txt-xs); color: var(--texto-fraco); }
 .card__etapa--parado { color: var(--aviso); font-weight: var(--peso-forte); }
 .card__prazo { display: inline-flex; align-items: center; gap: var(--e-1); }
-.card__prazo--atrasado { color: var(--perigo); font-weight: var(--peso-forte); }
+.card__prazo--atrasado { color: var(--erro); font-weight: var(--peso-forte); }
 .card__pistas { display: flex; flex-wrap: wrap; gap: var(--e-1); min-width: 0; }
 .card__alerta {
-  font-size: var(--txt-xs); font-weight: var(--peso-forte); color: var(--perigo);
+  font-size: var(--txt-xs); font-weight: var(--peso-forte); color: var(--erro);
 }
 .card__visto { font-size: var(--txt-xs); color: var(--texto-fraco); }
 .card__resumo {
@@ -447,7 +447,7 @@ defineExpose({ ehExcecao, temOS })
   border-color: var(--aviso); color: var(--aviso);
   font-weight: var(--peso-forte);
 }
-.pilula--pronto { border-color: var(--sucesso); color: var(--sucesso); }
+.pilula--pronto { border-color: var(--ok); color: var(--ok); }
 .etiqueta {
   padding: 1px var(--e-2); border-radius: var(--r-full);
   font-size: var(--txt-xs); background: var(--superficie-2);

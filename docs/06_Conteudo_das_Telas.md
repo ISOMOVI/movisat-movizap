@@ -8352,3 +8352,194 @@ novo sem os removidos, e os removidos voltam à coluna 1.
 🚨 **Todo gesto grava evento** (`pagamento_evento`): este fluxo move dinheiro e
 avisa gente de fora (a correção no DataScope dispara os webhooks deles e manda
 push ao técnico). 🔵 *"deve ter o log de quem faz o que SEMPRE"*.
+
+### ✅ 19/11 — A rota do quadro estava ENGOLIDA pelo curinga (NO AR)
+
+🔵 Ele, olhando a tela: *"a tela não aparece no movizap. a aba aparece mas o
+conteúdo não"*.
+
+📏 Medido no log de produção:
+
+```
+19/11 08:12:14  GET /paineis/servico-dos-tecnicos       -> 200   (a tela abre)
+19/11 08:12:14  GET /api/paineis/servico-dos-tecnicos   -> 400   "Painel desconhecido."
+```
+
+🚨 **O FastAPI casa na ORDEM DE REGISTRO.** `@app.get("/api/paineis/{painel}")`
+estava declarada na linha **5481** e `quadro_do_servico` na **6810**: o curinga
+comia `servico-dos-tecnicos` como se fosse o nome de um painel, e o
+`paineis_mod.quadro` recusava. A tela trata o 400 como erro e não desenha —
+quadro vazio nunca.
+
+⚠️ **Só o GET do quadro estava preso.** As outras 13 rotas da aba são POST ou
+têm dois segmentos, e o curinga é GET de um segmento só.
+
+**O conserto:** `quadro_do_servico` foi movida para **antes** do curinga, com a
+razão escrita no código. Nada do corpo mudou.
+
+⚠️ **Por que as conferências de 18/11 não pegaram:** elas olharam sintaxe,
+import de verdade, **contagem** de rotas (14+14), registro × roteador, tabelas,
+migrações, resíduo e serviços. **Contar rota registrada não é pedir uma rota**,
+e a ordem é invisível na leitura do arquivo. A trava que nasceu disso é a
+**varredura de sombra** — está no `00_Metodologia.md`.
+
+**Travas que entraram:** `tests/teste_rota_servico_dos_tecnicos.py` compara os
+índices em `app.routes` **e** faz o GET proibindo a frase do erro.
+
+---
+
+### 📏 19/11 — O ALCANCE da varredura da aba 2: não há corte de data
+
+🔵 Pergunta dele: *"a aba nova do financeiro precisa de uma data início para
+exibir os dados - qual está usando atualmente?"*
+
+**Nenhuma.** A varredura não tem corte de data. Ela lê o cache `os_historico` e
+filtra por três coisas: OS não excluída, com `materiais_json`, e pagamento + km
+maior que zero. O parâmetro é `horas`:
+
+| chamada | `horas` | alcance |
+|---|---|---|
+| o botão *"Buscar serviços"* | `None` | **o cache inteiro** |
+| a varredura da madrugada | `24` | filtra por `atualizado_em` (quando a OS mudou), **não** pela data da OS |
+
+🚨 **A da madrugada nunca rodou**: não existe linha no `crontab` (conferido em
+19/11, 53 linhas, nenhuma delas). Hoje só o botão alimenta a coluna 1.
+
+📏 O que isso produziu, medido em 19/11 14:15:
+
+| | |
+|---|---|
+| artefatos | **79** — 78 em *movimentação*, 1 em *validação* |
+| lotes · eventos | **2 · 7** |
+| data da OS | **05/08/2026 a 17/11/2026** |
+| universo varrido | 633 OS com materiais, de 08/2022 a 18/11/2026 |
+
+Os filtros *"de / até"* da tela nascem vazios e peneiram **só o que já está na
+tela**.
+
+⚠️ **Comparação:** a Operação tem data matriz própria,
+`config.painel_operacao_desde` (hoje `2026-11-10`), e só o owner muda. **A aba 2
+não tem equivalente**, e se vai ter — e se o corte é na varredura ou só na tela
+— é decisão dele, em aberto.
+
+---
+
+### ✅ 19/11 — "A OS no Harmonit" no card aberto das abas (NO AR)
+
+🔵 Ele: *"nos cards do financeiro, aba1, faltam trazer os dados das OS para os
+cards, no menu da direita do card aberto"* · *"igual os cards que são de OS do
+operacional"*.
+
+🚨 **Defeito de OMISSÃO:** o card do Financeiro **tem** OS (`numero_os`), a
+Operação lia a ficha dela no ERP desde 29/10, e o diálogo das abas nunca pediu
+essa leitura — a coluna da direita tinha só as passagens de etapa.
+
+| camada | o que mudou |
+|---|---|
+| `movizap/main.py` | o corpo de `ficha_do_card` virou `_ficha_da_os`; nasceu `GET /api/paineis/operacao/chamado/{card_id}/os` |
+| `componentes/DialogoDeChamado.vue` | a caixa **"A OS no Harmonit"** com os 4 temas da Operação, e as classes `temas__*` **redeclaradas** |
+
+**O contrato da rota, e cada cláusula é uma trava:**
+
+1. 🚨 **O número da OS sai do CARD, não da consulta.** Aceitar `numero_os` de
+   fora deixaria quem alcança uma aba qualquer ler qualquer OS do ERP. Mandar
+   `?numero_os=99999` é ignorado.
+2. ⚠️ **A permissão é a do CARD** (`_exigir_aba`), não `PNL_1.1` — a régua de
+   05/11. A `/api/paineis/operacao/ficha` **não foi afrouxada**, e é por isso
+   que a rota nova precisou existir.
+3. 🚨 **Card sem OS é 404 com a frase**, e a tela simplesmente não desenha a
+   caixa. Falha do Harmonit vira **erro escrito**, nunca caixa vazia — e não
+   derruba o card, que é lido do nosso banco.
+4. ⚠️ **As classes `temas__*` foram redeclaradas no componente**: as da Operação
+   vivem no `<style scoped>` daquela tela e não alcançam este diálogo. É a lição
+   de 05/11 com o `max-width` e a de 12/11 com a `.pilula`.
+
+**Travas:** `tests/teste_ficha_da_os_do_card.py` (o número sai do card, consulta
+de fora é ignorada, card sem OS é 404, sem login é 401) e
+`src/os_no_card_da_aba_1911.teste.js` (7 testes de tela: os quatro temas, o
+vazio dito, o Agendamento apagado com a razão, erro do Harmonit escrito, e o
+chamado de verdade sem a caixa).
+
+📏 Provado ao vivo em 19/11: `GET /api/paineis/operacao/chamado/1301/os` → `200`
+às 08:29:26 e às 11:26:13, com descrição real do ERP (*"RESSARCIMENTO: placas:
+RVF 5G49 | 007933929 (Suntech ST310)"*), solução técnica presente e 1
+observação.
+
+---
+
+### ✅ 19/11 15:00:37 — A aba 2 no padrão da aba 1 (NO AR)
+
+🔵 Ele: *"corrija o layout definitivo da aba 2"*, depois de
+*"nem o cabeçalho aparece isso é absurdo pela documentação que tem!"*.
+
+📏 A tela foi de **534 para 1.556 linhas**. O que entrou: tira de abas, busca
+com *"casou por"*, dois ordenadores, casco de 360px recolhível com contagem,
+dados da OS no artefato, comprovante, prévia do Procfy e a caixa da OS.
+
+🚨 **Por que o cabeçalho parecia não existir, medido:** a tela antiga **tinha**
+`<header>` e `<h1>`. O que faltava era o campo **`abas`** no retorno do
+`quadro()` — sem ele não há tira, e a `PNL_1.6` era um beco sem volta para a
+aba 1 (ela não está no menu, por desenho: `aba_de: PNL_1.4`). O `h1` passou a
+ser **"Financeiro"**, o nome do painel, com a aba atual marcada **por borda**,
+nunca por cor sozinha.
+
+**As quatro variáveis de CSS que não existiam saíram.** 📏 Eram **0 definições e
+11 usos**; no CSS publicado agora há **zero** ocorrência de `var(--sucesso)`,
+`var(--perigo)`, `var(--r-2)` e `var(--r-3)`. Isso devolve o **verde** do
+checklist completo, o **vermelho** do *"atrasado"* e o **raio** do canto —
+**também na aba 1 e na Operação**, porque o `CorpoDoCard.vue` desenha as três.
+
+⚠️ **O que ficou faltando no padrão, e é divergência da ABA 1, não da aba 2:**
+
+| tela | header | `h1` | AjudaDaTela |
+|---|---|---|---|
+| **Operação** (a referência) | `tela__cabecalho`, com identidade × controles | `--txt-xl` = 20px | **sim** |
+| aba 1 (`PainelAba.vue`) | `painel__topo` | `--txt-lg` = 16px | não |
+| aba 2 | `painel__topo` | `--txt-lg` = 16px | não |
+
+O token `--txt-xl` tem escrito nele *"título de tela"*. Das 41 telas, **25 têm
+`AjudaDaTela`**; as duas de painel de aba estão entre as 16 que não têm.
+🔵 **Decisão dele em 19/11: alinhar em TODAS, e o padrão da Operação passa a ser
+o padrão.** Não feito ainda.
+
+🚨 **E a lição de método que custou isto:** a auditoria que eu fiz comparou a
+aba 2 **com a aba 1**, tomando a aba 1 como padrão. Por construção, ela não vê
+divergência que a aba 1 tenha — os 8 achados eram todos *"aba 2 ≠ aba 1"* e
+**nenhum** era *"aba 1 ≠ Operação"*. **Varredura de padrão se faz contra a
+Operação, por lista nominal escrita antes do código** (`M11`).
+
+---
+
+### ✅ 19/11 15:14:33 — O filtro de data fazia os cards sumirem (NO AR)
+
+🔵 Ele, usando a tela **depois** de eu publicar: *"ao usa o filtro de data na
+aba2 os cards somem - precisa fazer um audit decente dessa aba"*.
+
+🚨 **A causa não era a comparação de datas — era o CAMPO.**
+`<input type="date">` dispara `input` **a cada dígito do ano**: digitar 2026
+produz `0002-11-19`, `0020-…`, `0202-…` antes de `2026-…`. Com
+`até = 0002-11-19`, **todo** artefato é maior que o limite e cai fora. O card
+esvazia na cara de quem está digitando.
+
+⚠️ **Eu li a lógica do filtro antes de publicar e ela estava correta.** Estava
+mesmo: `isoDaData` converte `dd/mm/aaaa` certinho e a comparação é ISO com ISO.
+**O defeito estava no gesto, e ler a fonte não alcança gesto.**
+
+**Duas travas, independentes de propósito:**
+
+1. o campo passou a escutar **`change`** (só valor commitado);
+2. **limite com ano antes de 1900 é limite que NÃO EXISTE** (`limiteValido`) —
+   sem isto, colar uma data torta ou um teclado que comita cedo repete o
+   sintoma.
+
+**Seis travas de TELA**, em `src/aba2_padrao_e_servicos_1911.teste.js`: a
+sequência do ano parcial não filtra nada · ano implausível commitado não esvazia
+· data plausível filtra de verdade · **o card continua na coluna sem nenhum
+artefato à vista e DIZ** *"Nenhum artefato à vista com este filtro"* (card vazio
+é informação; card ausente é a tela mentindo) · o contador acompanha · limpar
+devolve tudo.
+
+📏 **Provado na ordem certa:** rodei os testes novos **contra a produção antes
+do conserto** e dois ficaram vermelhos com a queixa dele
+(`expected '…' to contain 'OS 16689'`). Depois do conserto: **25 verdes** no
+arquivo, **946 em 53 arquivos** na suíte inteira, as 9 conferências de CSS.

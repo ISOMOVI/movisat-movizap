@@ -39,16 +39,41 @@ pytestmark = pytest.mark.skipif(
 OS_BASE = 997400
 FAIXA = list(range(OS_BASE, OS_BASE + 30))
 
+# 🚨 A FAIXA VIZINHA existe para UMA coisa: provar que o escoamento do teste
+# não toca linha de fora. Ela é limpa junto, para não virar resíduo.
+FAIXA_VIZINHA = list(range(OS_BASE + 50, OS_BASE + 60))
+
 
 @pytest.fixture(autouse=True)
 def limpo():
     banco.abrir()
     banco.executar("DELETE FROM os_passagem WHERE numero_os = ANY(%s)",
-                   (FAIXA,))
+                   (FAIXA + FAIXA_VIZINHA,))
     yield
     banco.abrir()
     banco.executar("DELETE FROM os_passagem WHERE numero_os = ANY(%s)",
-                   (FAIXA,))
+                   (FAIXA + FAIXA_VIZINHA,))
+
+
+@pytest.fixture(autouse=True)
+def so_a_nossa_faixa(monkeypatch):
+    """🚨 ESTE TESTE FALA COM O BANCO DE PRODUÇÃO, e `escoar_fila()` varre a
+    `os_passagem` INTEIRA.
+
+    📏 Em 19/11, sem esta trava, a suíte resolveu a passagem REAL da OS 17137
+    (251 -> 1316) com o dublê `{"ok": True}`: `resolvida_em = 16:02:04`, e o
+    Harmonit nunca recebeu a escrita. Uma passada de teste deu um trabalho de
+    verdade como feito.
+
+    ⚠️ O que se isola é a LEITURA da fila, não o `escoar_fila`: assim o teste
+    continua exercitando o código de produção inteiro, só que sobre as linhas
+    dele. Afrouxar o `escoar_fila` para "pular o que não é teste" seria pôr o
+    dublê na borda errada.
+    """
+    real = passagem.fila
+    monkeypatch.setattr(
+        passagem, "fila",
+        lambda: [d for d in real() if d["numero_os"] in FAIXA])
 
 
 def _moveu(numero_os, de, para, *, ha_segundos=7200):
@@ -155,6 +180,32 @@ class TestOEscoamento:
             "  AND para_situacao = 677", (OS_BASE + 6,))
         assert linha["ok"] is True
         assert linha["resolvida_em"] is not None
+
+    def test_o_escoamento_NAO_TOCA_linha_de_fora_da_faixa(self):
+        """🚨 A trava do dano de 19/11 16:02:04.
+
+        Uma linha pendente que não é do teste tem de continuar pendente
+        depois da passada. Sem isto, rodar a suíte resolve escrita de verdade.
+        """
+        de_fora = FAIXA_VIZINHA[0]
+        banco.executar(
+            "INSERT INTO os_passagem (numero_os, de_situacao, para_situacao, "
+            "  ok, em, pendente_desde, tentativas) "
+            "VALUES (%s, 251, 1316, false, now(), now(), 0)", (de_fora,))
+
+        self._na_fila(OS_BASE + 6)
+        feito = passagem.escoar_fila(gravar=lambda *a, **k: {"ok": True})
+
+        assert feito["resolvidas"] == 1, (
+            "escoou mais de uma: a fila REAL entrou na passada -- %s" % feito)
+        linha = banco.um(
+            "SELECT pendente_desde, resolvida_em, tentativas "
+            "  FROM os_passagem WHERE numero_os = %s", (de_fora,))
+        assert linha["resolvida_em"] is None, (
+            "a linha de fora foi RESOLVIDA pelo teste -- e o dano de 19/11")
+        assert linha["pendente_desde"] is not None
+        assert linha["tentativas"] == 0, (
+            "a linha de fora foi TENTADA pelo teste")
 
     def test_UMA_tentativa_por_passada(self):
         """⚠️ Insistir em laço dentro da mesma execução é o *"só cansa a

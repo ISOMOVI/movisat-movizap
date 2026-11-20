@@ -5478,6 +5478,50 @@ def saude(request: Request):
 # que ainda não existem com a frase que DIZ isso -- não com 404, que faria
 # parecer erro de digitação.
 
+# ============================================================================
+# 🚨 ESTA ROTA VEM ANTES DO CURINGA `/api/paineis/{painel}`, E A ORDEM E O
+# CONSERTO. Ate 19/11 ela era declarada 1.300 linhas ABAIXO dele, e o FastAPI
+# casa na ORDEM DE REGISTRO: `GET /api/paineis/servico-dos-tecnicos` entrava
+# no curinga como se "servico-dos-tecnicos" fosse o nome de um painel, e o
+# `paineis_mod.quadro` devolvia 400 "Painel desconhecido". 📏 Medido no log de
+# producao: 19/11 08:02:24 e 08:12:14, os dois acessos dele. A tela abria e
+# ficava sem conteudo -- ela trata o 400 como erro, porque quadro vazio nunca.
+#
+# ⚠️ So o GET do quadro estava preso: as outras 13 rotas sao POST ou tem dois
+# segmentos (`/varrer`, `/preparar`, `/arquivo/{lote_id}`), e o curinga, que e
+# GET de um segmento so, nao as alcanca.
+#
+# 🚨 QUEM GUARDA ISTO E O `tests/teste_rota_servico_dos_tecnicos.py`: a ordem
+# e invisivel na leitura do arquivo, entao so um pedido HTTP de verdade a
+# prova. Mover esta funcao para baixo do curinga deixa aquele teste vermelho.
+# ============================================================================
+@app.get("/api/paineis/servico-dos-tecnicos")
+def quadro_do_servico(usuario: dict = Depends(auth.requer_tela("PNL_1.6"))):
+    """As cinco colunas, com o orçamento preenchido deste lado.
+
+    🔵 A ordem no card é **Orçamento — OS — TERMO**, e o orçamento é o do
+    MoviZap (decisão dele): o FPSL não tem como sabê-lo.
+    """
+    try:
+        quadro = fpsl_ponte.quadro_do_pagamento()
+    except fpsl_ponte.FpslIndisponivel as e:
+        # 🚨 QUADRO VAZIO NUNCA. Vazio silencioso faria o operador concluir que
+        # não há pagamento a preparar — justo quando há.
+        raise HTTPException(status_code=502, detail=str(e))
+    # 🔵 19/11: A TIRA DE ABAS TAMBÉM AQUI. A `PNL_1.6` não aparece no menu por
+    # desenho (`aba_de: PNL_1.4`), então sem esta lista quem entra na aba 2 não
+    # tem caminho de volta para a aba 1 — e a aba 1 já desenha a tira desde
+    # 18/11, porque o `quadro_da_aba` devolve `abas`.
+    # ⚠️ Sai do BANCO (`painel_aba` do painel `financeiro`), como lá: no dia em
+    # que o Financeiro ganhar a terceira aba, ela aparece sozinha.
+    # ⚠️ A ROTA não vem aqui: o frontend a resolve pelo `sessao.telas`, e assim
+    # aba que a pessoa não alcança cai fora sem segunda régua de permissão.
+    quadro["abas"] = [{"codigo_tela": a["codigo_tela"], "titulo": a["titulo"]}
+                      for a in pipeline.abas("financeiro")]
+    quadro["titulo"] = "Serviço dos técnicos"
+    return quadro
+
+
 @app.get("/api/paineis/{painel}")
 def ver_painel(painel: str,
                so_abertas: int = Query(1, ge=0, le=1),
@@ -6260,6 +6304,21 @@ def ficha_do_card(numero_os: int = Query(..., ge=1),
 
     🚨 Falha da ponte vira **502 com a frase**, não ficha vazia: ficha vazia é
     indistinguível de OS sem dados.
+
+    ⚠️ O CORPO SAIU DAQUI em 19/11 e virou `_ficha_da_os`: a mesma ficha passou
+    a ser pedida pelo card de uma ABA (Financeiro, Pós-venda, Contratual), que
+    tem OS mas não tem a `PNL_1.1`. Duas cópias da montagem divergiriam na
+    primeira mudança.
+    """
+    return _ficha_da_os(numero_os, usuario)
+
+
+def _ficha_da_os(numero_os: int, usuario: dict) -> dict:
+    """A montagem da ficha, sem a porta.
+
+    🚨 A PERMISSÃO NÃO MORA AQUI de propósito: quem chama é que sabe por qual
+    porta a pessoa entrou -- `requer_tela("PNL_1.1")` na Operação, `_exigir_aba`
+    no card de uma aba. Pôr uma regra fixa aqui recusaria uma das duas.
     """
     try:
         ficha = fpsl_ponte.ficha_da_os(numero_os)
@@ -6318,6 +6377,38 @@ def ficha_do_card(numero_os: int = Query(..., ge=1),
             "respostas": (d or {}).get("respostas") or [],
         }
     return ficha
+
+
+@app.get("/api/paineis/operacao/chamado/{card_id}/os")
+def ficha_da_os_do_card(card_id: int,
+                        usuario: dict = Depends(auth.get_usuario)):
+    """A OS no Harmonit, para o card ABERTO de uma aba de pipeline.
+
+    🔵 19/11, dele: *"nos cards do financeiro, aba1, faltam trazer os dados das
+    OS para os cards, no menu da direita do card aberto"* · *"igual os cards
+    que são de OS do operacional"*.
+
+    🚨 O NÚMERO DA OS SAI DO CARD, não da consulta. O card já sabe qual OS é
+    (`pipeline_card.numero_os`), e aceitar um `numero_os` de fora deixaria
+    qualquer um ler qualquer OS tendo acesso a uma aba qualquer.
+
+    ⚠️ A PERMISSÃO É A DO CARD, pela mesma régua de 05/11 que fez o
+    `_exigir_aba` existir: a aba do card manda, e não uma tela fixa.
+
+    🚨 CARD SEM OS É 404 COM A FRASE, e não ficha vazia: o chamado de verdade
+    não tem OS, e a tela precisa distinguir *"não tem"* de *"não li"*.
+    """
+    _exigir_aba((pipeline.aba_do_card(card_id) or {}).get("codigo_tela"),
+                usuario)
+    linha = banco.um("SELECT numero_os FROM pipeline_card WHERE id = %s",
+                     (card_id,))
+    if not linha:
+        raise HTTPException(status_code=404, detail="Este card não existe.")
+    numero = linha.get("numero_os")
+    if not numero:
+        raise HTTPException(status_code=404,
+                            detail="Este card não tem OS no Harmonit.")
+    return _ficha_da_os(int(numero), usuario)
 
 
 @app.get("/api/paineis/operacao/passagens")
@@ -6807,21 +6898,6 @@ class ComprovanteDoArtefato(BaseModel):
     dispensa: str | None = Field(default=None, max_length=400)
 
 
-@app.get("/api/paineis/servico-dos-tecnicos")
-def quadro_do_servico(usuario: dict = Depends(auth.requer_tela("PNL_1.6"))):
-    """As cinco colunas, com o orçamento preenchido deste lado.
-
-    🔵 A ordem no card é **Orçamento — OS — TERMO**, e o orçamento é o do
-    MoviZap (decisão dele): o FPSL não tem como sabê-lo.
-    """
-    try:
-        return fpsl_ponte.quadro_do_pagamento()
-    except fpsl_ponte.FpslIndisponivel as e:
-        # 🚨 QUADRO VAZIO NUNCA. Vazio silencioso faria o operador concluir que
-        # não há pagamento a preparar — justo quando há.
-        raise HTTPException(status_code=502, detail=str(e))
-
-
 @app.post("/api/paineis/servico-dos-tecnicos/varrer")
 def varrer_servicos(usuario: dict = Depends(auth.requer_tela("PNL_1.6"))):
     """A varredura à mão. 🔵 A automática roda de madrugada.
@@ -6879,6 +6955,44 @@ def datascope_do_servico(artefato_id: int,
     🔵 ele decidiu que ela abre modal antes de escrever: `change_state` dispara
     os webhooks deles e manda push ao técnico que enviou a resposta."""
     return fpsl_ponte.datascope_do_artefato(artefato_id)
+
+
+@app.get("/api/paineis/servico-dos-tecnicos/os/{artefato_id}")
+def os_do_artefato(artefato_id: int,
+                   usuario: dict = Depends(auth.requer_tela("PNL_1.6"))):
+    """A OS no Harmonit do artefato de pagamento — os quatro temas da Operação.
+
+    🔵 19/11, dele: *"faltam várias coisas (...) como a aba1 apresenta"*. A aba
+    1 ganhou esta caixa no mesmo dia (*"igual os cards que são de OS do
+    operacional"*); aqui **todo** artefato é uma OS, e a tela mostrava só o
+    número.
+
+    🚨 O NÚMERO SAI DO ARTEFATO, NÃO DA CONSULTA — a régua da rota irmã de
+    19/11. Esta função não aceita `numero_os` de fora: quem alcança a
+    `PNL_1.6` só lê as OS que já estão no quadro dela.
+
+    ⚠️ A permissão é a da TELA, e a `/api/paineis/operacao/ficha` continua
+    exigindo `PNL_1.1` — é por isso que esta rota existe em vez de afrouxar
+    aquela.
+
+    🚨 ARTEFATO QUE NÃO ESTÁ NO QUADRO É 404 COM A FRASE: ficha vazia seria
+    indistinguível de OS sem dados, e quem lê concluiria que não há o que ver.
+    """
+    try:
+        quadro = fpsl_ponte.quadro_do_pagamento()
+    except fpsl_ponte.FpslIndisponivel as e:
+        raise HTTPException(status_code=502, detail=str(e))
+    numero = None
+    for coluna in quadro.get("colunas") or []:
+        for card in coluna.get("cards") or []:
+            for a in card.get("artefatos") or []:
+                if int(a.get("id") or 0) == artefato_id:
+                    numero = a.get("numero_os")
+    if not numero:
+        raise HTTPException(
+            status_code=404,
+            detail="Este artefato de pagamento não está no quadro.")
+    return _ficha_da_os(int(numero), usuario)
 
 
 @app.post("/api/paineis/servico-dos-tecnicos/comprovante")

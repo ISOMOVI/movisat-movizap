@@ -136,14 +136,23 @@ function cnpjVale(bruto) {
 const PLACA_ANTIGA = /^[A-Z]{3}\d{4}$/
 const PLACA_MERCOSUL = /^[A-Z]{3}\d[A-Z]\d{2}$/
 
-/* ⚠️ PROCURA A PLACA DENTRO DO TEXTO, não exige que o texto SEJA a placa: o
-   campo do Suporte pede *"Veículo e Placa"*, então `SAVEIRO ABC1234` é
-   resposta certa, não resposta errada. */
-export function placaVale(texto) {
+/* 🔵 CHASSI (VIN) — decisão dele, 19/11: o campo aceita chassi também, não só
+   placa. 17 caracteres alfanuméricos, sem `I`, `O` nem `Q` (o padrão VIN não
+   usa essas três letras, pra não confundir com 1 e 0). */
+const CHASSI = /^[A-HJ-NPR-Z0-9]{17}$/
+
+function chassiVale(parte) {
+  return CHASSI.test(parte)
+}
+
+/* ⚠️ PROCURA A PLACA OU O CHASSI DENTRO DO TEXTO, não exige que o texto SEJA
+   um dos dois: o campo do Suporte pede *"Veículo e Placa"*, então
+   `SAVEIRO ABC1234` é resposta certa, não resposta errada. */
+export function identificadorVale(texto) {
   const bruto = String(texto ?? '').toUpperCase()
   const partes = bruto.split(/[^A-Z0-9]+/).filter(Boolean)
   const casa = (p) => PLACA_ANTIGA.test(p) || PLACA_MERCOSUL.test(p)
-  if (partes.some(casa)) return true
+  if (partes.some((p) => casa(p) || chassiVale(p))) return true
   /* 🚨 OS PARES VIZINHOS COLADOS, e isto conserta um buraco medido em 11/11:
      `ABC-1234` passava por acidente (o `1234` sozinho não casa, mas o texto
      tinha outro pedaço que casava), e `ABC-1D23` NÃO passava -- ele quebra em
@@ -154,6 +163,20 @@ export function placaVale(texto) {
      ⚠️ Limite conhecido e aceito: `ABC-1-D23` (dois separadores dentro da
      placa) continua fora -- seriam três pedaços, e não vi ninguém escrever
      assim. */
+  for (let i = 0; i < partes.length - 1; i += 1) {
+    if (casa(partes[i] + partes[i + 1])) return true
+  }
+  return false
+}
+
+/* ⚠️ Nome antigo mantido como sinônimo -- só placa/Mercosul, sem chassi.
+   Quem quiser o identificador completo (placa OU chassi) usa
+   `identificadorVale`, que é o que `conferir('placa', ...)` chama agora. */
+export function placaVale(texto) {
+  const bruto = String(texto ?? '').toUpperCase()
+  const partes = bruto.split(/[^A-Z0-9]+/).filter(Boolean)
+  const casa = (p) => PLACA_ANTIGA.test(p) || PLACA_MERCOSUL.test(p)
+  if (partes.some(casa)) return true
   for (let i = 0; i < partes.length - 1; i += 1) {
     if (casa(partes[i] + partes[i + 1])) return true
   }
@@ -177,7 +200,11 @@ export function conferir(regra, texto) {
     return cnpjVale(bruto) ? '' : 'CNPJ inválido — confira os 14 caracteres.'
   }
   if (regra === 'placa') {
-    return placaVale(bruto) ? '' : 'Informe a placa (ABC1234 ou ABC1D23).'
+    /* 🔵 SUGESTÃO, NÃO REGRA — decisão dele, 19/11. Quem não escreveu placa
+       nem chassi reconhecíveis vê a dica, mas o Avançar não trava por isso
+       (ver `problemas()`, que pula `placa` de propósito). */
+    return identificadorVale(bruto) ? ''
+      : 'Sugestão: placa (ABC1234 ou ABC1D23) ou chassi (17 caracteres).'
   }
   if (regra === 'telefone') {
     const n = digitos(bruto).length
@@ -221,7 +248,11 @@ export function problemas(campos, valores, dePe) {
       fora.push({ nome: campo.nome, mensagem: 'Preencha este campo.' })
       continue
     }
-    if (!campo.validacao) continue
+    /* 🔵 `placa` SAI DO BLOQUEIO DE PROPÓSITO — decisão dele, 19/11: o
+       formato é sugestão (mostrada em `frase()`, no componente), nunca
+       trava o Avançar. Ele pode não casar nem placa nem chassi (ex.: placa
+       estrangeira, cadastro antigo) e a resposta continua certa. */
+    if (!campo.validacao || campo.validacao === 'placa') continue
     for (const valor of preenchidas) {
       const msg = conferir(campo.validacao, valor)
       if (msg) { fora.push({ nome: campo.nome, mensagem: msg }); break }

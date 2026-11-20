@@ -10,9 +10,15 @@
    Pós-venda usam o mesmo diálogo. Duplicar o markup faria a correção seguinte
    ter de ser lembrada em dois lugares — e é assim que uma delas apodrece.
 
-   🚨 NENHUMA LEITURA DAQUI VAI AO ERP, e é a diferença inteira em relação ao
-   card de OS: a `/chamado/{id}` lê o nosso banco, então não pode devolver 502
-   por falha de terceiro.
+   🚨 UMA LEITURA DAQUI VAI AO ERP, E SÓ UMA, desde 19/11: a ficha da OS do
+   card, quando ele tem OS. 🔵 Pedido dele: *"faltam trazer os dados das OS
+   para os cards, no menu da direita do card aberto"* · *"igual os cards que
+   são de OS do operacional"*.
+
+   ⚠️ E ELA É SEPARADA DA OUTRA de propósito: a `/chamado/{id}` lê o nosso
+   banco e não pode devolver 502 por falha de terceiro, então uma falha do
+   Harmonit não pode levar o diálogo inteiro junto. São dois estados de
+   carregamento e dois de erro, e o da OS é dito na própria caixa dela.
 
    ⚠️ O DIÁLOGO DECLARA O PRÓPRIO TETO: a `.modal__caixa` da casa impõe
    `max-width: 420px`, e teto não se vence com especificidade — só
@@ -47,9 +53,72 @@ const recado = ref('')
 const enviandoRecado = ref(false)
 const erroDoRecado = ref('')
 
+/* 🚨 ESTADO PRÓPRIO DA OS, e não o `lendo`/`erro` do diálogo: a leitura do
+   Harmonit falha sozinha, e misturar os dois faria uma falha do ERP apagar o
+   card inteiro -- que é lido do nosso banco e estava certo. */
+const fichaDaOs = ref(null)
+const lendoOs = ref(false)
+const erroDaOs = ref('')
+const temaAberto = ref('descricao')
+
 const observacoes = computed(() => ficha.value?.observacoes || [])
 const etapas = computed(() => ficha.value?.etapas || [])
 const etapaAtual = computed(() => ficha.value?.card?.etapa_id ?? null)
+
+/* 🚨 OS MESMOS QUATRO TEMAS DA OPERAÇÃO, na mesma ordem e com os mesmos
+   títulos: é o *"igual os cards que são de OS do operacional"* dele. O que
+   muda é UMA linha -- o Agendamento, que lá acende pela situação 1316 do ERP e
+   aqui não pode: 🚨 o card de uma aba tem `situacao_id` NULO de propósito (é
+   esse nulo que o mantém fora do arrasto para o Harmonit). Então aqui ele
+   acende pelo que a ficha respondeu, que é a única fonte que esta tela tem.
+
+   ⚠️ VAZIO É DITO, nunca deixado em branco: caixa branca parece defeito. */
+const temas = computed(() => {
+  const f = fichaDaOs.value
+  return [
+    {
+      chave: 'descricao',
+      titulo: 'Descrição da OS',
+      resumo: f ? (f.descricao || 'sem descrição escrita') : '…',
+      texto: f?.descricao || null,
+      vazio: !!f && !f.descricao,
+      ligado: true,
+    },
+    {
+      chave: 'solucao',
+      titulo: 'Solução técnica',
+      resumo: f ? (f.solucao_tecnica || 'sem solução técnica escrita') : '…',
+      texto: f?.solucao_tecnica || null,
+      vazio: !!f && !f.solucao_tecnica,
+      ligado: true,
+    },
+    {
+      chave: 'chamado',
+      titulo: 'Dados do chamado',
+      resumo: f
+        ? (f.chamado
+            ? `${f.chamado.formulario} · ${f.chamado.respostas.length} campos`
+              + (f.chamado.anexos ? ` · ${f.chamado.anexos} anexo(s)` : '')
+            : 'esta OS não veio de formulário')
+        : '…',
+      respostas: f?.chamado?.respostas || [],
+      vazio: !!f && !f.chamado,
+      ligado: true,
+    },
+    {
+      chave: 'agendamento',
+      titulo: 'Agendamento',
+      ligado: !!f?.tem_agendamento,
+      resumo: f
+        ? (f.tem_agendamento
+            ? `${f.agendamentos.length} compromisso(s)`
+            : 'nenhum compromisso nesta OS')
+        : '…',
+      agendamentos: f?.agendamentos || [],
+      vazio: !!f && !f.tem_agendamento,
+    },
+  ]
+})
 
 function quando(iso) {
   if (!iso) return '—'
@@ -84,16 +153,39 @@ function focar() {
   })
 }
 
+/* 🚨 A OS SÓ É PEDIDA SE O CARD TIVER OS, e o número sai do CARD no servidor:
+   o chamado de verdade não tem OS, e pedir por ele seria um 404 por desenho.
+   ⚠️ 404 aqui é *"este card não tem OS"* e não é erro de tela: o diálogo
+   simplesmente não mostra a caixa. */
+async function carregarOs() {
+  fichaDaOs.value = null
+  erroDaOs.value = ''
+  if (!props.card?.numero_os) return
+  lendoOs.value = true
+  try {
+    fichaDaOs.value = await api.get(
+      `/api/paineis/operacao/chamado/${props.card.id}/os`)
+  } catch (e) {
+    /* 🚨 ERRO, NÃO CAIXA VAZIA: ficha vazia é indistinguível de OS sem dados,
+       e quem lê concluiria que não há o que ver. */
+    erroDaOs.value = e instanceof ErroDeApi
+      ? e.message : 'Não deu para ler a OS no Harmonit agora.'
+  } finally {
+    lendoOs.value = false
+  }
+}
+
 onMounted(async () => {
   focar()
-  await carregarFicha()
+  await Promise.all([carregarFicha(), carregarOs()])
 })
 
 watch(() => props.card?.id, async (novo, velho) => {
   if (novo && novo !== velho) {
     perguntandoDesfecho.value = false
     recado.value = ''
-    await carregarFicha()
+    temaAberto.value = 'descricao'
+    await Promise.all([carregarFicha(), carregarOs()])
   }
 })
 
@@ -325,6 +417,62 @@ async function salvarRecado() {
         </div>
 
         <div class="modal__coluna">
+          <!-- 🔵 19/11, dele: *"faltam trazer os dados das OS para os cards, no
+               menu da direita do card aberto"* · *"igual os cards que são de OS
+               do operacional"*. 🚨 A caixa só existe quando o card TEM OS --
+               num chamado de verdade ela seria um cabeçalho com nada embaixo,
+               que é o que parece defeito. -->
+          <template v-if="card.numero_os">
+            <p class="modal__secao">A OS no Harmonit</p>
+            <section class="modal__painel modal__temas">
+              <h3>OS {{ card.numero_os }}</h3>
+              <p v-if="lendoOs" class="nota pequeno">Lendo a OS no Harmonit…</p>
+              <p v-else-if="erroDaOs" class="aviso aviso--erro" role="alert">
+                {{ erroDaOs }}
+              </p>
+
+              <div class="temas__abas" role="tablist">
+                <button v-for="t in temas" :key="t.chave" type="button"
+                        role="tab" class="temas__aba"
+                        :class="{ 'temas__aba--ativa': temaAberto === t.chave,
+                                  'temas__aba--apagada': !t.ligado }"
+                        :aria-selected="temaAberto === t.chave"
+                        :disabled="!t.ligado"
+                        @click="temaAberto = t.chave">
+                  <strong>{{ t.titulo }}</strong>
+                  <span class="temas__resumo">{{ t.resumo }}</span>
+                </button>
+              </div>
+
+              <div v-for="t in temas" :key="`c-${t.chave}`" class="temas__corpo">
+                <template v-if="temaAberto === t.chave">
+                  <p v-if="t.vazio" class="nota pequeno">{{ t.resumo }}</p>
+
+                  <pre v-else-if="t.texto" class="temas__texto">{{ t.texto }}</pre>
+
+                  <!-- os dados do chamado, com RÓTULO e nunca a chave do Bitrix -->
+                  <dl v-else-if="t.respostas && t.respostas.length"
+                      class="temas__respostas">
+                    <template v-for="r in t.respostas" :key="r.nome">
+                      <dt>{{ r.rotulo }}</dt>
+                      <dd>{{ Array.isArray(r.valor) ? r.valor.join(' · ') : r.valor }}</dd>
+                    </template>
+                  </dl>
+
+                  <ul v-else-if="t.agendamentos && t.agendamentos.length"
+                      class="temas__respostas">
+                    <li v-for="a in t.agendamentos" :key="a.agendamento_id">
+                      {{ a.nome || `usuário ${a.usuario_id}` }} —
+                      compromisso {{ a.agendamento_id }}
+                    </li>
+                  </ul>
+
+                  <p v-else class="nota pequeno">{{ t.resumo }}</p>
+                </template>
+              </div>
+            </section>
+          </template>
+
           <p class="modal__secao">O histórico</p>
           <section class="modal__painel">
             <h3>Passagens de etapa</h3>
@@ -480,6 +628,30 @@ async function salvarRecado() {
 .modal__painel h3 {
   margin: 0 0 var(--e-3); font-size: var(--txt-sm);
   display: flex; align-items: center; gap: var(--e-2);
+}
+/* 🚨 AS CLASSES `temas__*` SÃO REDECLARADAS AQUI, e não herdadas: as da
+   Operação vivem no `<style scoped>` daquela TELA e não alcançam este
+   componente. Foi a lição de 05/11 com o `max-width` do modal, e a de 12/11
+   com a `.pilula`: nome de classe igual não é estilo igual. */
+.modal__temas { display: flex; flex-direction: column; gap: var(--e-2); }
+.temas__abas { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: var(--e-2); }
+.temas__aba {
+  text-align: left; min-height: 56px; padding: var(--e-2) var(--e-3);
+  border: var(--borda-fina) solid var(--borda); border-radius: var(--r-sm, 6px);
+  background: var(--superficie); color: var(--texto); cursor: pointer;
+  display: flex; flex-direction: column; gap: 2px;
+  transition: border-color .15s ease, box-shadow .15s ease;
+}
+.temas__aba:hover:not(:disabled) { box-shadow: var(--sombra-1); }
+.temas__aba--ativa { border-color: var(--acento); box-shadow: var(--sombra-1); }
+.temas__aba--apagada { border-style: dashed; opacity: .65; cursor: not-allowed; }
+.temas__resumo { font-size: var(--txt-xs); color: var(--texto-fraco); }
+.temas__corpo:empty { display: none; }
+.temas__texto {
+  margin: 0; white-space: pre-wrap; word-break: break-word;
+  font-family: inherit; font-size: var(--txt-sm);
+  background: var(--superficie-2); border-radius: var(--r-sm, 6px);
+  padding: var(--e-3); max-height: 240px; overflow-y: auto;
 }
 .temas__respostas { margin: 0; display: grid; gap: var(--e-2); }
 .temas__respostas dt {
