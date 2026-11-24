@@ -74,11 +74,17 @@ JANELA_S = 600               # 10 minutos: é de quanto em quanto tempo a senha 
 # ⚠️ Para voltar a 20 minutos é esta linha, e só ela: `JANELAS_ACEITAS = 2`.
 JANELAS_ACEITAS = 288        # 288 × 10 min = 48 h (pedido dele, 15/10)
 
+# 🔵 23/11, DELE: *"coloque a senha nova padrao de Movisat!@"* -- o valor de
+# hoje está em `config.ligacoes_senha_fixa`.
+# ⚠️ E O EFETIVO É `MOVISAT`: `senha_fixa()` passa a `_limpar()`, que
+# maiusculiza e descarta o que não é `A-Z2-9` -- o `!@` sai. Digitar
+# `Movisat!@`, `movisat` ou `MOVISAT` casa com a mesma linha.
+#
 # 🔵 13/11, DELE: *"deixar senha padrão de 'movicall' (essa senha não há muita
 # exigência de segredo)"*. A senha derivada por HMAC continua existindo e
 # continua valendo -- esta é um ATALHO, não uma substituição.
 #
-# 🚨 O QUE ELA CUSTA, POR ESCRITO: quem souber `movicall` e um ramal alista um
+# 🚨 O QUE ELA CUSTA, POR ESCRITO: quem souber a senha padrão e um ramal alista um
 # PC naquele ramal. Ele decidiu que o segredo aqui não é exigência, e as outras
 # travas ficam de pé: limite de tentativas por IP, ramal que tem de existir e
 # estar ativo, e certificado de cliente emitido para aquele PC.

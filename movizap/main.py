@@ -6323,6 +6323,20 @@ def _ficha_da_os(numero_os: int, usuario: dict) -> dict:
     try:
         ficha = fpsl_ponte.ficha_da_os(numero_os)
     except Exception as e:  # noqa: BLE001
+        # 🚨 ESTA LINHA É A TAREFA 3.4, e ela existe porque a falta dela
+        # custou uma investigação. Em 19/11 a ficha devolveu 502 quatro
+        # vezes, todas na OS 17137, e **nenhuma deixou rastro**: o `except`
+        # levantava o 502 direto. A frase chegava na tela do operador e
+        # morria ali.
+        #
+        # ⚠️ E É O QUE DESTRAVA O A10 E O A16: as duas perguntam *"o valor
+        # que o ERP mostra é um que NÓS escrevemos?"*, e responder exige
+        # saber QUANDO a ponte falhou e COM QUÊ. `exc_info=True` de
+        # propósito -- `str(e)` num erro de pool do Harmonit é linha
+        # genérica, e o traço é o que separa timeout de pool esgotado e de
+        # 500 do ERP.
+        log.warning("ficha da OS %s nao veio do Harmonit: %s",
+                    numero_os, e, exc_info=True)
         raise HTTPException(
             status_code=502,
             detail=f"não deu para ler a OS {numero_os} no Harmonit agora: {e}")
@@ -6506,6 +6520,17 @@ def _publico_do_formulario(d: dict, ip: str | None) -> dict:
         # eles -- um POST cru sem etapa nenhuma e conferido igual.
         "formato": d.get("formato") or "classico",
         "etapas": _etapas_publicas(d),
+        # 🚨 ESTA LINHA É O ELO QUE FALTOU EM 23/11, e o defeito foi medido ao
+        # vivo: a coluna existia, a carga a escrevia, o `definicao()` a
+        # devolvia, a suíte estava verde -- e a internet recebia a chave
+        # AUSENTE, porque este payload é montado campo por campo. Resultado:
+        # `def.busca_cliente === true` falso em todos, e o botão *Buscar*
+        # sumiu também dos 6 que devem tê-lo.
+        #
+        # ⚠️ `bool()` de propósito: a tela decide com `=== true`, e chave
+        # ausente ou nula mentiria dizendo "não procura" num formulário que
+        # procura. Aqui a resposta é sempre sim ou não, nunca silêncio.
+        "busca_cliente": bool(d.get("busca_cliente")),
         "campos": [{"nome": c["nome"], "rotulo": c["rotulo"], "tipo": c["tipo"],
                     "obrigatorio": c["obrigatorio"], "multiplo": c["multiplo"],
                     "visivel": c["visivel"], "opcoes": c["opcoes"],
@@ -6891,11 +6916,49 @@ class ArtefatoDevolvido(BaseModel):
     justificativa: str = Field(..., min_length=1, max_length=400)
 
 
+class LoteDevolvido(BaseModel):
+    lote_id: int = Field(..., ge=1)
+    # ⚠️ Obrigatória, igual à de um item: a mesma frase vai em todos os itens,
+    # e é ela que o card da coluna 1 mostra em laranja.
+    justificativa: str = Field(..., min_length=1, max_length=400)
+
+
 class ComprovanteDoArtefato(BaseModel):
     artefato_id: int = Field(..., ge=1)
     arquivo: str | None = None
     valor: float | None = None
     dispensa: str | None = Field(default=None, max_length=400)
+
+
+class DataInicialDaAba2(BaseModel):
+    # 🔵 D6 dele, 23/11: *"use 16/11/2026 de inicio para o financeiro, não mexa
+    # na data do OP"*.
+    desde: str = Field(..., min_length=10, max_length=10)
+
+
+@app.put("/api/paineis/servico-dos-tecnicos/desde")
+def definir_desde_da_aba2(
+        dados: DataInicialDaAba2,
+        usuario: dict = Depends(auth.requer_tela("PNL_1.6"))):
+    """A data inicial da aba 2 do Financeiro. 🔵 D6 e D7 dele, 23/11.
+
+    🚨 A PERMISSÃO DA TELA NÃO BASTA AQUI, e é o ponto desta rota: a `PNL_1.6`
+    está concedida a três pessoas (Aline, Erika e Karla, desde 19/11), e mover
+    a data muda o que **todas** veem -- e também o que a varredura da madrugada
+    cria. Então a tela é de quem tem a aba e a data é do owner, a mesma régua
+    da data matriz da Operação (`/api/paineis/operacao/desde`).
+
+    ⚠️ **CHAVE PRÓPRIA, do outro lado.** A data vive no `config` do FPSL, não
+    neste Postgres: quem precisa dela primeiro é a varredura, que roda lá. E
+    ele foi explícito em não mexer na data da Operação -- compartilhar a chave
+    faria mover uma mover a outra.
+    """
+    if not usuario.get("owner"):
+        raise HTTPException(
+            status_code=403,
+            detail="Só o owner muda a data inicial desta aba.")
+    return fpsl_ponte._pagamento("/desde", {"desde": dados.desde,
+                                            "por": usuario.get("nome")})
 
 
 @app.post("/api/paineis/servico-dos-tecnicos/varrer")
@@ -6938,6 +7001,33 @@ def devolver_servico(dados: ArtefatoDevolvido,
     retorna para a anterior e sim para o 1"*."""
     return fpsl_ponte.devolver_artefato(dados.artefato_id, dados.justificativa,
                                         por=usuario.get("nome"))
+
+
+@app.post("/api/paineis/servico-dos-tecnicos/devolver-lote")
+def devolver_lote_do_servico(
+        dados: LoteDevolvido,
+        usuario: dict = Depends(auth.requer_tela("PNL_1.6"))):
+    """🔵 *"Excluir o card inteiro devolvendo tudo à coluna 1, com
+    justificativa única"* -- tarefa 2.4.
+
+    🚨 Vale de QUALQUER coluna, inclusive da 5: 🔵 *"veja que aqui não retorna
+    para a anterior e sim para o 1"*. O lote sai do quadro sozinho, porque os
+    cards vêm dos artefatos.
+    """
+    return fpsl_ponte.devolver_lote(dados.lote_id, dados.justificativa,
+                                    por=usuario.get("nome"))
+
+
+@app.post("/api/paineis/servico-dos-tecnicos/reabrir/{lote_id}")
+def reabrir_lote_do_servico(
+        lote_id: int,
+        usuario: dict = Depends(auth.requer_tela("PNL_1.6"))):
+    """🔵 *"Reabrir na coluna 5 e gerar o arquivo de novo"* -- tarefa 2.5.
+
+    🚨 O lote volta para a Validação com ciente e comprovante INTACTOS: não é
+    devolver (2.4), é gerar o arquivo outra vez.
+    """
+    return fpsl_ponte.reabrir_lote(lote_id, por=usuario.get("nome"))
 
 
 @app.post("/api/paineis/servico-dos-tecnicos/auditar/{lote_id}")

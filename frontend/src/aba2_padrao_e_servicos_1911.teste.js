@@ -150,11 +150,57 @@ function quadro() {
 
 async function montar() {
   const tela = mount(PainelServicoDosTecnicos, {
+    attachTo: document.body,
     global: { stubs: { RouterLink: { template: '<a><slot /></a>' } } },
   })
   await flushPromises()
   return tela
 }
+
+/* ===========================================================================
+ * 🚨 O GESTO MUDOU EM 23/11 (tarefa 2.2), A REGRA NÃO
+ * ===========================================================================
+ * 🔵 Dele, 23/11: *"o card fechado só com resumo, dados e botões só no card
+ * aberto"*. O filtro de data, a lista de artefatos, as caixas de marcação e os
+ * botões de ação saíram do card fechado e foram para o diálogo do card aberto
+ * — o padrão que a aba 1 e a Operação já seguiam desde 05/11.
+ *
+ * 🚨 **NENHUMA TRAVA DESTE ARQUIVO FOI AFROUXADA.** Cada uma cobra exatamente
+ * o que cobrava em 19/11; o que ganharam foi UM clique antes, que é o gesto de
+ * quem usa a tela. Afrouxar o que a trava mede para ela ficar verde seria o
+ * contrário do que ela existe para fazer.
+ *
+ * ⚠️ **DUAS MUDARAM DE FORMA, não só de gesto**: as que provavam que o filtro
+ * e a marcação são POR CARD olhando o card do Franck e o do Pedro LADO A LADO.
+ * Com um diálogo por vez isso é impossível, e o isolamento agora se prova
+ * abrindo um, medindo, fechando e abrindo o outro. O que elas guardam — que o
+ * estado de um card não vaza para o outro — é o mesmo, e era o defeito de
+ * 18/11.
+ */
+const DIALOGO = '.modal[aria-label^="Card de"]'
+
+async function abrir(tela, nome) {
+  const fechado = tela.findAll('article.card')
+    .find((a) => a.text().includes(nome))
+  expect(fechado, `o card de ${nome} tem de estar no quadro`).toBeTruthy()
+  await fechado.find('button.card__abrir').trigger('click')
+  await flushPromises()
+  const d = tela.find(DIALOGO)
+  expect(d.exists(), `o diálogo de ${nome} tem de abrir`).toBe(true)
+  return d
+}
+
+async function fecharODialogo(tela) {
+  await tela.find(DIALOGO).findAll('button')
+    .find((b) => b.text().trim() === 'Fechar').trigger('click')
+  await flushPromises()
+  expect(tela.find(DIALOGO).exists(), 'o diálogo tem de fechar').toBe(false)
+}
+
+/* O card do Franck na MOVIMENTAÇÃO, e não o lote dele na Validação: os dois
+   dizem "Franck", e o primeiro do quadro é o da coluna 1. */
+async function abrirOFranck(tela) { return abrir(tela, 'Franck') }
+async function abrirOLote(tela) { return abrir(tela, 'lote 9') }
 
 beforeEach(() => {
   estado.quadro = quadro()
@@ -208,7 +254,9 @@ describe('a tira de abas', () => {
 // ===========================================================================
 describe('os dados da OS no artefato', () => {
   it('mostra cliente, tipo da OS e a data do serviço', async () => {
-    const texto = (await montar()).text()
+    const tela = await montar()
+    await abrirOFranck(tela)
+    const texto = tela.text()
     expect(texto).toContain('SWM - COMERCIO E LOCACAO DE IMOVEIS LTDA')
     expect(texto).toContain('Contrato')
     expect(texto).toContain('05/08/26')
@@ -216,12 +264,15 @@ describe('os dados da OS no artefato', () => {
   })
 
   it('cliente sem nome é DITO, não deixado em branco', async () => {
-    const texto = (await montar()).text()
-    expect(texto).toContain('cliente 1015624, fora do nosso cadastro')
+    /* ⚠️ O artefato sem nome de cliente é o do PEDRO, não o do Franck. */
+    const tela = await montar()
+    await abrir(tela, 'Pedro Felipe')
+    expect(tela.text()).toContain('cliente 1015624, fora do nosso cadastro')
   })
 
   it('a ordem do artefato é Orçamento — OS — TERMO, a dele', async () => {
     const tela = await montar()
+    await abrirOFranck(tela)
     const primeiro = tela.findAll('.artefato')[0].text().replace(/\s+/g, ' ')
     expect(primeiro).toMatch(/sem orçamento.*OS 16689.*TERMO 8937/)
   })
@@ -233,12 +284,17 @@ describe('os dados da OS no artefato', () => {
 describe('a ordem', () => {
   it('nasce com o serviço mais antigo primeiro', async () => {
     const tela = await montar()
+    await abrirOFranck(tela)
     const oss = tela.findAll('.artefato__os').map((b) => b.text())
     expect(oss.slice(0, 2)).toEqual(['OS 16689', 'OS 17120'])
   })
 
   it('trocar para "OS, da mais nova" muda o que está na tela', async () => {
     const tela = await montar()
+    await abrirOFranck(tela)
+    /* ⚠️ O seletor de ordem fica nos CONTROLES do painel, fora do diálogo —
+       ele ordena os artefatos de todos os cards, e continua alcançável com o
+       card aberto. */
     await tela.findAll('select')[0].setValue('os_desc')
     const oss = tela.findAll('.artefato__os').map((b) => b.text())
     expect(oss.slice(0, 2)).toEqual(['OS 17120', 'OS 16689'])
@@ -246,6 +302,7 @@ describe('a ordem', () => {
 
   it('a busca diz ONDE casou, que é o que separa OS de termo', async () => {
     const tela = await montar()
+    await abrirOFranck(tela)
     await tela.find('.controles__busca input').setValue('8937')
     const texto = tela.text()
     expect(texto).toContain('casou por termo')
@@ -265,35 +322,66 @@ describe('a ordem', () => {
 // ===========================================================================
 describe('o filtro e a marcação, por card', () => {
   it('filtrar o período do Franck não mexe no card do Pedro', async () => {
+    /* 🚨 **MUDOU DE FORMA EM 23/11, e o que ela guarda é o mesmo.** Antes os
+       dois cards estavam abertos lado a lado e bastava um `tela.text()`. Com
+       um diálogo por vez, o isolamento se prova abrindo um, medindo, fechando
+       e abrindo o outro — e é justamente essa ida e volta que pegaria o
+       vazamento de 18/11, quando o filtro era um só para a tela inteira. */
     const tela = await montar()
-    const datas = tela.findAll('.card__filtro input[type="date"]')
-    /* Os dois primeiros são do card do Franck.
-       ⚠️ `setValue` dispara `input`; o campo escuta `change` desde 19/11
+    const franck = await abrirOFranck(tela)
+    const datas = franck.findAll('input[type="date"]')
+    /* ⚠️ `setValue` dispara `input`; o campo escuta `change` desde 19/11
        (ver o defeito do ano parcial abaixo), então o gesto precisa dos dois. */
     await datas[0].setValue('2026-11-01')
     await datas[0].trigger('change')
-    const texto = tela.text()
-    /* A OS de agosto do Franck sai... */
-    expect(texto).not.toContain('OS 16689')
-    /* ...e a de setembro do PEDRO fica, porque o filtro não é dele. */
-    expect(texto).toContain('OS 16705')
+    /* A OS de agosto do Franck sai, a de 17/11 fica. */
+    expect(franck.text()).not.toContain('OS 16689')
+    expect(franck.text()).toContain('OS 17120')
+
+    await fecharODialogo(tela)
+    const pedro = await abrir(tela, 'Pedro Felipe')
+    /* 🚨 A de setembro do PEDRO fica, porque o filtro não é dele -- e os
+       campos de data DELE continuam vazios. */
+    expect(pedro.text()).toContain('OS 16705')
+    const dpedro = pedro.findAll('input[type="date"]')
+    expect(dpedro[0].element.value, 'o filtro do Pedro não foi tocado').toBe('')
+    expect(dpedro[1].element.value).toBe('')
   })
 
   it('marcar no card do Franck não conta no botão do Pedro', async () => {
+    /* 🚨 **MUDOU DE FORMA EM 23/11**, pelo mesmo motivo da trava acima: antes
+       os dois botões "Preparar os marcados" estavam na tela ao mesmo tempo e a
+       trava comparava os dois contadores. Agora há um por diálogo, e a prova é
+       a mesma ida e volta. */
     const tela = await montar()
-    await tela.findAll('.artefato__marca input[type="checkbox"]')[0]
+    const franck = await abrirOFranck(tela)
+    await franck.findAll('.artefato__marca input[type="checkbox"]')[0]
       .setValue(true)
-    const botoes = tela.findAll('button')
-      .map((b) => b.text()).filter((t) => t.startsWith('Preparar os marcados'))
-    expect(botoes[0]).toBe('Preparar os marcados (1)')
-    expect(botoes[1]).toBe('Preparar os marcados (0)')
+    expect(franck.findAll('button').map((b) => b.text())
+      .find((x) => x.startsWith('Preparar os marcados')))
+      .toBe('Preparar os marcados (1)')
+
+    await fecharODialogo(tela)
+    const pedro = await abrir(tela, 'Pedro Felipe')
+    expect(pedro.findAll('button').map((b) => b.text())
+      .find((x) => x.startsWith('Preparar os marcados')))
+      .toBe('Preparar os marcados (0)')
+
+    /* ⚠️ E voltar ao Franck tem de ACHAR a marcação ainda lá: fechar o
+       diálogo não é desmarcar. */
+    await fecharODialogo(tela)
+    const devolta = await abrirOFranck(tela)
+    expect(devolta.findAll('button').map((b) => b.text())
+      .find((x) => x.startsWith('Preparar os marcados')))
+      .toBe('Preparar os marcados (1)')
   })
 
   it('prepara só os artefatos daquele card', async () => {
     const tela = await montar()
-    await tela.findAll('.artefato__marca input[type="checkbox"]')[0]
+    const franck = await abrirOFranck(tela)
+    await franck.findAll('.artefato__marca input[type="checkbox"]')[0]
       .setValue(true)
-    const botao = tela.findAll('button')
+    const botao = franck.findAll('button')
       .find((b) => b.text().startsWith('Preparar os marcados'))
     await botao.trigger('click')
     await flushPromises()
@@ -302,9 +390,21 @@ describe('o filtro e a marcação, por card', () => {
   })
 
   it('o card sem técnico não prepara e DIZ por quê', async () => {
-    const texto = (await montar()).text()
-    expect(texto).toContain('sem técnico identificado')
-    expect(texto).toContain('Não há a quem pagar')
+    const tela = await montar()
+    /* 🚨 A VERSÃO CURTA FICA NO CARD FECHADO, de propósito: o dinheiro parado
+       tem de ter explicação à vista, e esconder o motivo atrás de um clique
+       deixaria o valor sem razão aparente na coluna. */
+    const fechado = tela.findAll('article.card')
+      .find((a) => a.text().includes('sem técnico identificado'))
+    expect(fechado, 'o card dos sem técnico tem de estar no quadro').toBeTruthy()
+    expect(fechado.text()).toContain('não há a quem pagar')
+
+    /* E a frase INTEIRA, com o que fazer a respeito, fica no card aberto. */
+    const aberto = await abrir(tela, 'sem técnico identificado')
+    expect(aberto.text()).toContain('Não há a quem pagar até alguém')
+    expect(aberto.text()).toContain('vincular o técnico na OS')
+    /* 🚨 E não há botão de preparar: não há a quem pagar. */
+    expect(aberto.text()).not.toContain('Preparar os marcados')
   })
 })
 
@@ -314,6 +414,7 @@ describe('o filtro e a marcação, por card', () => {
 describe('os serviços que a tela não chamava', () => {
   it('a OS abre pelo ARTEFATO, nunca pela rota da Operação', async () => {
     const tela = await montar()
+    await abrirOFranck(tela)
     await tela.findAll('.artefato__os')[0].trigger('click')
     await flushPromises()
     expect(estado.gets).toContain('/api/paineis/servico-dos-tecnicos/os/1')
@@ -331,6 +432,8 @@ describe('os serviços que a tela não chamava', () => {
 
   it('o comprovante existe na Validação e manda arquivo e valor', async () => {
     const tela = await montar()
+    /* ⚠️ O comprovante vive no card do LOTE, na Validação. */
+    await abrirOLote(tela)
     const botao = tela.findAll('button').find((b) => b.text() === 'Comprovante')
     expect(botao).toBeTruthy()
     await botao.trigger('click')
@@ -352,6 +455,7 @@ describe('os serviços que a tela não chamava', () => {
 
   it('sem comprovante e sem justificativa, Salvar fica travado', async () => {
     const tela = await montar()
+    await abrirOLote(tela)
     await tela.findAll('button').find((b) => b.text() === 'Comprovante')
       .trigger('click')
     const salvar = tela.findAll('.modal__acoes button')
@@ -361,6 +465,7 @@ describe('os serviços que a tela não chamava', () => {
 
   it('a prévia diz quais colunas do Procfy saem em branco', async () => {
     const tela = await montar()
+    await abrirOLote(tela)
     await tela.findAll('button').find((b) => b.text() === 'Ver prévia')
       .trigger('click')
     await flushPromises()
@@ -376,6 +481,7 @@ describe('os serviços que a tela não chamava', () => {
 
   it('o DataScope é lido por gesto, e só lido', async () => {
     const tela = await montar()
+    await abrirOLote(tela)
     await tela.findAll('button').find((b) => b.text() === 'Ler DataScope')
       .trigger('click')
     await flushPromises()
@@ -410,6 +516,7 @@ describe('o filtro de data não pode esvaziar o card', () => {
   it('o campo escuta `change`, não `input` — ano parcial não filtra nada',
      async () => {
     const tela = await montar()
+    await abrirOFranck(tela)
     const datas = tela.findAll('.card__filtro input[type="date"]')
     const ate = datas[1]
     /* A sequência que o navegador produz enquanto se digita o ano 2026. */
@@ -424,6 +531,7 @@ describe('o filtro de data não pode esvaziar o card', () => {
 
   it('ano implausível comitado ainda não esvazia o card', async () => {
     const tela = await montar()
+    await abrirOFranck(tela)
     const ate = tela.findAll('.card__filtro input[type="date"]')[1]
     await ate.setValue('0002-11-19')
     await ate.trigger('change')
@@ -434,6 +542,7 @@ describe('o filtro de data não pode esvaziar o card', () => {
 
   it('a data completa e plausível filtra de verdade', async () => {
     const tela = await montar()
+    await abrirOFranck(tela)
     const ate = tela.findAll('.card__filtro input[type="date"]')[1]
     await ate.setValue('2026-10-01')
     await ate.trigger('change')
@@ -445,19 +554,26 @@ describe('o filtro de data não pode esvaziar o card', () => {
   it('o CARD continua na coluna mesmo sem nenhum artefato à vista, e DIZ',
      async () => {
     const tela = await montar()
+    await abrirOFranck(tela)
     const datas = tela.findAll('.card__filtro input[type="date"]')
     await datas[0].setValue('2030-01-01')
     await datas[0].trigger('change')
     const texto = tela.text()
     /* 🚨 O card do Franck não pode desaparecer: card vazio é informação
-       ("nada a pagar neste período"); card ausente é a tela mentindo. */
+       ("nada a pagar neste período"); card ausente é a tela mentindo.
+       ⚠️ E agora são DUAS coisas a cobrar: o diálogo diz que está vazio, E o
+       card fechado por trás continua na coluna. Sumir do quadro seria o mesmo
+       defeito num lugar novo. */
     expect(texto).toContain('Franck')
     expect(texto).toContain('Nenhum artefato à vista com este filtro')
     expect(texto).not.toContain('OS 16689')
+    expect(tela.findAll('article.card').some((a) => a.text().includes('Franck')),
+           'o card fechado do Franck tem de continuar na coluna').toBe(true)
   })
 
   it('o contador do card acompanha o filtro', async () => {
     const tela = await montar()
+    await abrirOFranck(tela)
     const ate = tela.findAll('.card__filtro input[type="date"]')[1]
     await ate.setValue('2026-10-01')
     await ate.trigger('change')
@@ -467,6 +583,7 @@ describe('o filtro de data não pode esvaziar o card', () => {
 
   it('limpar devolve tudo', async () => {
     const tela = await montar()
+    await abrirOFranck(tela)
     const ate = tela.findAll('.card__filtro input[type="date"]')[1]
     await ate.setValue('2026-10-01')
     await ate.trigger('change')

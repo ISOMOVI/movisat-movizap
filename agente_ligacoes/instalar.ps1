@@ -4,6 +4,13 @@
 
   NOVO NA 0.8: a SENHA PADRAO. Pedido dele em 13/11: *"deixar senha padrao de
   'movicall' (essa senha nao ha muita exigencia de segredo)"*. Basta apertar
+  ENTER. 23/11, ELE TROCOU: a senha padrao agora e 'Movisat!@'. A frase de
+  13/11 fica como registro de POR QUE a senha fixa existe; o valor e este.
+  ATENCAO, SOBRE EXECUTAVEIS ANTIGOS: a senha vive DENTRO do .exe, e e ela que
+  o ENTER manda. Este build (23/11) carrega a senha nova; qualquer .exe gerado
+  ANTES de 23/11 carrega a antiga e tem o ENTER recusado pelo servidor -- ali a
+  pessoa precisa DIGITAR a senha. Trocar a senha no /config exige recompilar e
+  redistribuir este arquivo.
   Enter na pergunta da senha -- a senha ditada na hora continua funcionando,
   para quem preferir.
 
@@ -21,10 +28,10 @@
     - roda uma vez, para provar que falou com a VPS;
     - apaga o instalador, se tudo deu certo.
 
-  A senha PADRAO (movicall) vale sempre e serve em quantos PCs precisar.
+  A senha PADRAO (Movisat!@) vale sempre e serve em quantos PCs precisar.
   A senha DITADA continua valendo 10 minutos e servindo UMA vez.
 
-  O que a senha padrao custa, dito em voz alta: quem souber 'movicall' e um
+  O que a senha padrao custa, dito em voz alta: quem souber 'Movisat!@' e um
   ramal consegue alistar um PC naquele ramal. As outras travas continuam de
   pe -- limite de tentativas por IP na VPS, ramal que precisa existir e estar
   ativo, e certificado de cliente emitido so para este PC.
@@ -41,7 +48,7 @@ param(
     # 13/11: a senha padrao. Fica em parametro, e nao cravada no meio do
     # codigo, para o dia em que ele quiser outra -- e para o teste poder
     # passar uma diferente sem editar o arquivo.
-    [string]$SenhaPadrao = 'movicall',
+    [string]$SenhaPadrao = 'Movisat!@',
     [switch]$NaoApagar,         # mantem o instalador na pasta (para teste)
     [switch]$NaoRodarAgora      # nao dispara a primeira passada
 )

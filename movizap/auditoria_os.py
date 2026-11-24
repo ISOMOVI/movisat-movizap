@@ -268,11 +268,34 @@ def abertas() -> list[dict]:
     nunca escrevemos, ou seja alguém mexeu na OS dentro do Harmonit -- e
     reescrever a nossa coluna por cima desfaria o trabalho dessa pessoa. Foi o
     que teria acontecido com as OS 17054 e 17114.
+
+    🚨 **E A FILA GANHA (🔵 D3 dele, 23/11): OS com passagem PENDENTE fica
+    fora.** Reproduzido no banco em 23/11, na OS 17137: `251 -> 16488` às
+    14:50 (a fila, da passagem do operador) e `251 -> 1316` às 15:01 (este
+    escritor), mesma origem e dois destinos em 11 minutos. A fila venceu por
+    sorte de ordem -- ninguém arbitrava.
+
+    ⚠️ **A ARBITRAGEM MORA AQUI, e é de propósito:** esta é a ÚNICA lista que o
+    escritor lê, e ele não decide nada -- escreve o que a lista der. Pôr a
+    regra no escritor abriria um segundo lugar para esquecer dela.
+
+    ⚠️ **ESPERAR NÃO É DESISTIR:** a linha do auditor continua ABERTA. Quando a
+    fila resolver (`resolvida_em`), a OS volta à lista e o escritor a pega na
+    rodada seguinte. Fechar aqui descartaria uma divergência real por causa de
+    um conflito temporário.
     """
     return banco.varios(
         "SELECT id, numero_os, coluna_nossa, situacao_do_erp, tentativas, "
         "       grupos FROM auditoria_os "
         " WHERE fechada_em IS NULL AND veredito = 'escrita_perdida' "
+        # 🔵 D3: a fila ganha. `pendente_desde IS NOT NULL AND resolvida_em IS
+        # NULL` é a definição de "a fila ainda está insistindo nesta OS"
+        # (migração 115) -- a mesma que a própria fila usa para escolher o que
+        # retentar.
+        "   AND NOT EXISTS (SELECT 1 FROM os_passagem p "
+        "                    WHERE p.numero_os = auditoria_os.numero_os "
+        "                      AND p.pendente_desde IS NOT NULL "
+        "                      AND p.resolvida_em IS NULL) "
         " ORDER BY numero_os")
 
 
@@ -422,6 +445,47 @@ def para_a_red_flag() -> list[dict]:
         " WHERE avisada_em IS NULL "
         "   AND (veredito = 'desistiu' OR veredito = 'mudou_no_erp') "
         " ORDER BY numero_os")
+
+
+def avisar(texto: str, a_avisar: list[dict], *, enviar) -> dict:
+    """Manda a red flag e **SÓ ENTÃO** marca as linhas como avisadas.
+
+    🚨 **O DEFEITO QUE ISTO CONSERTA, medido em 23/11.** O `auditor_os.py`
+    **nunca chamava** `marcar_avisadas`. A função existia aqui embaixo, escrita
+    e documentada, e **nenhum chamador a invocava** -- então `avisada_em` ficava
+    `NULL` em todas as linhas e a `para_a_red_flag()`, que filtra justamente por
+    `avisada_em IS NULL`, devolvia **as mesmas três** em toda rodada.
+
+    📏 O efeito, medido no `logs/os_auditor.log`: **8 red flags** já enviadas
+    para o WhatsApp dele, duas por dia, com os mesmos avisos das OS 17054,
+    17114 e 17128 -- e seguiria para sempre. É o oposto do que o comentário da
+    `para_a_red_flag` manda: *"aviso que aparece todo dia vira aviso que
+    ninguém lê"*.
+
+    ⚠️ **MARCA DEPOIS DE ENVIAR, nunca antes.** Marcar antes perderia o aviso
+    se o envio falhasse, e **ninguém nota a ausência de um aviso**. É a mesma
+    régua que o `fila_das_passagens.py` já escrevia -- o auditor é que ficou de
+    fora.
+
+    🚨 **O ENVIO É INJETADO**, no mesmo estilo do `auditar(ler=...)` e do
+    `escrever(gravar=...)` deste módulo: é o que permite a trava medir a ordem
+    (enviar, depois marcar) sem falar com o Evolution nem com a rede.
+
+    Devolve `{"enviado": bool, "marcadas": int, "erro": str}`.
+    """
+    ids = [d["id"] for d in a_avisar if d.get("id") is not None]
+    try:
+        enviar(texto)
+    except Exception as e:  # noqa: BLE001
+        # ⚠️ Falha no envio NÃO marca nada: a linha tem de voltar na próxima
+        # rodada. E não estoura, porque o alerta já foi impresso pelo script --
+        # perder o aviso é o dano, não perder o processo.
+        return {"enviado": False, "marcadas": 0,
+                "erro": f"{e.__class__.__name__}: {e}"}
+    marcar_avisadas(ids)
+    log.info("red flag da auditoria: %d linha(s) avisada(s) e marcada(s)",
+             len(ids))
+    return {"enviado": True, "marcadas": len(ids), "erro": ""}
 
 
 def marcar_avisadas(ids: list[int]) -> None:

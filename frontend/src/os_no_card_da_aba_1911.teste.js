@@ -148,6 +148,46 @@ describe('a OS no card aberto de uma aba', () => {
     expect(abas[abas.length - 1].attributes('disabled')).toBeUndefined()
   })
 
+  /* 🔵 23/11, DELE: *"os agendamentos feitos por aqui no Movizap, continuam
+     não sendo escritos nas OS, precisamos de um definitivo para isso!"*
+
+     🚨 A MEDIÇÃO CONTRADISSE O SINTOMA: a escrita estava completa (ERP com
+     `start 23/11 16:00` e `end 18:00`, técnico 14262). O que esta tela
+     mostrava era *"usuário 14262 — compromisso 969544"* — sem nome e sem
+     data. Concluir "não foi escrito" era a leitura certa do que a tela
+     mostrava: tela que mente por omissão (`M12`).
+
+     ⚠️ A janela vem PRONTA do backend (`janela`), porque o mesmo bloco é
+     desenhado em três telas e formatar em três lugares é o gêmeo nascendo
+     outra vez. */
+  it('🔵 o compromisso diz QUEM e QUANDO, não só o número', async () => {
+    estado.os = { ...A_OS, tem_agendamento: true,
+                  agendamentos: [{ agendamento_id: 969544, nome: 'Franck',
+                                   usuario_id: 14262,
+                                   janela: '23/11/2026 16:00 às 18:00' }] }
+    const tela = await montar(cardDeOS())
+    const abas = tela.findAll('.temas__aba')
+    await abas[abas.length - 1].trigger('click')
+    const texto = tela.text()
+    expect(texto).toContain('Franck')
+    expect(texto).toContain('23/11/2026 16:00 às 18:00')
+    /* O id continua: é por ele que se confere no ERP. */
+    expect(texto).toContain('969544')
+    /* 🚨 E o "usuário 14262" NÃO aparece mais: era o sintoma. */
+    expect(texto).not.toContain('usuário 14262')
+  })
+
+  it('⚠️ compromisso sem janela não inventa data', async () => {
+    estado.os = { ...A_OS, tem_agendamento: true,
+                  agendamentos: [{ agendamento_id: 969544, nome: 'Franck',
+                                   usuario_id: 14262, janela: null }] }
+    const tela = await montar(cardDeOS())
+    const abas = tela.findAll('.temas__aba')
+    await abas[abas.length - 1].trigger('click')
+    expect(tela.text()).toContain('969544')
+    expect(tela.text()).not.toContain('null')
+  })
+
   it('falha do Harmonit vira ERRO escrito, nunca caixa vazia', async () => {
     estado.osFalha = true
     const tela = await montar(cardDeOS())

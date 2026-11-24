@@ -362,6 +362,41 @@ function aBarraDeEtapasRolaENaoQuebra(css) {
 }
 
 /* ------------------------------------------------------------------ */
+/* ------------------------------------------------------------------ 10 */
+function todoVarUsadoExiste(css) {
+  /* 🚨 O DEFEITO: `var(--nao-existe)` é DESCARTADA EM SILÊNCIO -- a declaração
+     inteira desaparece, sem erro no console e sem aviso no build. Nenhuma das
+     nove conferências acima vê isso: todas olham uma regra que já quebrou, e
+     esta olha a CADEIA (o token existe? quem o usa o encontra?).
+
+     ⚠️ FALLBACK FICA DE FORA, e não é indulgência: `var(--x, #fff)` não
+     descarta nada. Medido em 23/11 -- é o caso do `IaPrompt.vue:440`, e
+     reprovar ali seria a trava errada, do tipo que faz a casa afrouxar a
+     trava em vez de consertar o código.
+
+     ⚠️ DECLARADA EM QUALQUER LUGAR CONTA: `:root`, `[data-theme]`, um
+     `@media`, ou uma classe de escala. O que se mede é EXISTIR; onde mora é
+     assunto da conferência 3. */
+  const declaradas = new Set(
+    [...css.matchAll(/(--[a-zA-Z0-9_-]+)\s*:/g)].map((m) => m[1]))
+  /* `var(` até a vírgula ou o fecha-parêntese: o que vier depois é fallback. */
+  const usadas = new Map()
+  for (const m of css.matchAll(/var\(\s*(--[a-zA-Z0-9_-]+)\s*([,)])/g)) {
+    const nome = m[1]
+    const temFallback = m[2] === ','
+    if (temFallback) continue
+    if (!usadas.has(nome)) usadas.set(nome, 0)
+    usadas.set(nome, usadas.get(nome) + 1)
+  }
+  const orfas = [...usadas.keys()].filter((n) => !declaradas.has(n)).sort()
+  if (orfas.length) {
+    falhar(`${orfas.length} var() SEM declaração e SEM fallback: `
+           + orfas.map((n) => `${n} (${usadas.get(n)}x)`).join(', ')
+           + '. O navegador descarta a declaração inteira em silêncio — '
+           + 'declare o token, ou dê um fallback se a ausência for esperada.')
+  }
+}
+
 const css = cssPublicado()
 if (!erros.length) {
   oDialogoDoPainelNaoHerdaOTeto(css)
@@ -373,6 +408,7 @@ if (!erros.length) {
   oAvisoDaEtapaEhCurtoEComBotaoNoCentro(css)
   todaVarianteDePilulaTemAPilulaBase(css)
   aBarraDeEtapasRolaENaoQuebra(css)
+  todoVarUsadoExiste(css)
 }
 
 if (erros.length) {
@@ -380,9 +416,9 @@ if (erros.length) {
   erros.forEach((e, i) => console.error(`  ${i + 1}. ${e}\n`))
   process.exit(1)
 }
-console.log('CSS publicado: as 9 conferências passaram (teto do diálogo, '
+console.log('CSS publicado: as 10 conferências passaram (teto do diálogo, '
             + 'ordem da cascata, tokens no :root, empilhamento dos diálogos, '
             + 'teto e empilhamento do diálogo do chamado, camada dos controles '
             + 'de rolagem, forma do aviso da etapa, lista de etapas com largura estável, '
             + 'pílula com base no mesmo '
-            + 'escopo)')
+            + 'escopo, todo var() com token declarado)')

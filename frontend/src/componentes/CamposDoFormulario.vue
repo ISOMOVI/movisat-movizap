@@ -47,6 +47,12 @@ const props = defineProps({
   erro: { type: String, default: '' },
   // 'classico' (22/10) ou 'novo' (29/10). O banco é quem diz.
   formato: { type: String, default: 'classico' },
+  // 🔵 23/11: o botão *Buscar* do CNPJ só onde há base para procurar.
+  // ⚠️ `false` POR PADRÃO, de propósito: quem não disser que procura cliente
+  // não oferece busca. Oferecer uma busca que nunca acha é pior que não
+  // oferecer -- quem vem do `pagamento-tecnicos` clicava e lia "não achou".
+  // Quem manda é o banco (`formulario.busca_cliente`, migração 118).
+  buscaCliente: { type: Boolean, default: false },
   // Só estes campos, nesta ordem -- é como a página pede UMA etapa. Vazio
   // significa "todos", que é o rolo único de sempre.
   somente: { type: Array, default: () => [] },
@@ -181,9 +187,17 @@ function frase(campo, valor, i = null) {
 
 /* 🔵 O botão *Buscar* do CNPJ -- pedido dele, 29/10. Só no CNPJ: o CPF não tem
    para onde preencher (o nome da pessoa é uma caixa livre, e dividir nome no
-   palpite erra sobrenome composto). */
+   palpite erra sobrenome composto).
+
+   🚨 E SÓ ONDE HÁ BASE PARA PROCURAR (🔵 dele, 23/11). Esta função dizia
+   `ehNovo && validacao === 'cnpj'` e isso era regra fixa demais: desde 11/11
+   os 16 estão em `novo`, então todo formulário com CNPJ ganhou o botão. O
+   `cliente_por_documento` varre a tabela `cliente` -- os clientes NOSSOS --,
+   e parceiro técnico, fornecedor ou interessado em teste gratuito não está
+   lá. A terceira condição é dado (`formulario.busca_cliente`), não `if` por
+   slug: no dia em que ele mudar de ideia é uma linha na carga. */
 function temBusca(campo) {
-  return ehNovo.value && campo.validacao === 'cnpj'
+  return ehNovo.value && campo.validacao === 'cnpj' && props.buscaCliente
 }
 
 /* ⚠️ `linhas` manda mais que o tipo: "Detalhe a ocorrência" é `string` no

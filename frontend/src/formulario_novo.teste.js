@@ -338,7 +338,11 @@ describe('os três pedidos dele de 29/10 à tarde', () => {
     const cpf = campo('cpf', 'double', { validacao: 'cpf' })
     const valores = {}
     const tela = mount(CamposDoFormulario, {
-      props: { campos: [cnpj, cpf], regras: [], valores, formato: 'novo' },
+      props: {
+        campos: [cnpj, cpf], regras: [], valores, formato: 'novo',
+        // 🔵 23/11: o botão depende de o formulário procurar cliente.
+        buscaCliente: true,
+      },
     })
     /* 🚨 Um botão só: o CPF não tem para onde preencher. */
     expect(tela.findAll('.campo__buscar')).toHaveLength(1)
@@ -351,6 +355,29 @@ describe('os três pedidos dele de 29/10 à tarde', () => {
     /* O componente não conhece rota nenhuma: ele pede, a página busca. E o que
        sai é a forma canônica, não o que foi colado. */
     expect(tela.emitted('buscar')[0]).toEqual(['cnpj', 'WQ0P6GLD000108'])
+  })
+
+  /* 🔵 23/11, DELE: *"ele nao precisa de cpf e cnpj, obviamente pois nao puxa
+     de base alguma"* -- e, sobre o botão, **tirar onde não há base**.
+
+     🚨 ESTA TRAVA GUARDA UM DEFEITO QUE ESTEVE NO AR. A regra era
+     `ehNovo && validacao === 'cnpj'`, e `FORMATO_NOVO = None` põe os 16 em
+     `novo`: o `pagamento-tecnicos` mostrava um botão que varre a tabela
+     `cliente` procurando um parceiro técnico, que nunca está lá.
+
+     ⚠️ E o campo CONTINUA INTEIRO -- máscara, validação e tudo. O que sai é a
+     busca, não a pergunta. */
+  it('🔵 sem base para procurar, o CNPJ não tem botão Buscar', async () => {
+    const cnpj = campo('cnpj', 'double', { validacao: 'cnpj' })
+    const tela = mount(CamposDoFormulario, {
+      props: { campos: [cnpj], regras: [], valores: {}, formato: 'novo' },
+    })
+    /* O padrão é NÃO procurar: o prop ausente já significa "sem busca". */
+    expect(tela.find('.campo__buscar').exists()).toBe(false)
+    /* ⚠️ Mas o campo é o mesmo campo: mascarado, e com a frase de erro. */
+    await tela.find('input').setValue('123')
+    await tela.find('input').trigger('blur')
+    expect(tela.find('.campo__frase').exists()).toBe(true)
   })
 
   it('o recado da busca aparece no campo', () => {

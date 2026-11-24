@@ -2025,7 +2025,7 @@ onBeforeUnmount(() => {
                       class="temas__respostas">
                     <li v-for="a in t.agendamentos" :key="a.agendamento_id">
                       {{ a.nome || `usuário ${a.usuario_id}` }} —
-                      compromisso {{ a.agendamento_id }}
+                      <template v-if="a.janela">{{ a.janela }} · </template>compromisso {{ a.agendamento_id }}
                     </li>
                   </ul>
 

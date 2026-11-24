@@ -118,6 +118,56 @@ const SEMAFORO = {
   vermelho: { icone: 'bi-x-circle-fill', texto: 'a pagar maior que o recibo' },
 }
 
+/* ==========================================================================
+   O CARD ABERTO — 🔵 dele, 23/11
+   ==========================================================================
+   🔵 *"o card fechado só com resumo, dados e botões só no card aberto"*.
+
+   🚨 **É O PADRÃO DA CASA, e não invenção desta tela.** A aba 1
+   (`PainelAba.vue`) e a Operação (`PainelOperacao.vue`) já abrem o card num
+   diálogo desde 05/11; esta tela era a única em que o card trazia tudo dentro
+   de um `<div class="card__abrir">` que nunca abria nada. Medido em 23/11: a
+   coluna 1 empilhava nome, valores, dois campos de data, a lista inteira de
+   artefatos com caixas de marcação e três botões — num card que fica ao lado
+   de outros quatro numa coluna estreita.
+
+   ⚠️ **A COLUNA ENTRA NO ESTADO, não só o card.** Os botões do diálogo mudam
+   por coluna (Preparar na 1, Conferir na 2, Montar arquivo na 3, Baixar na 4),
+   e o card sozinho não sabe de qual coluna veio. */
+const cardAberto = ref(null)
+const colunaAberta = ref('')
+const focoAnterior = ref(null)
+
+function abrirCardDoTecnico(card, coluna) {
+  /* 🔵 De onde o foco veio -- para ele voltar exatamente ali ao fechar. É a
+     mesma régua do `PainelOperacao.abrirCard`. */
+  focoAnterior.value = document.activeElement
+  cardAberto.value = card
+  colunaAberta.value = coluna.chave
+}
+
+function fecharCardDoTecnico() {
+  cardAberto.value = null
+  colunaAberta.value = ''
+  const alvo = focoAnterior.value
+  focoAnterior.value = null
+  if (alvo && typeof alvo.focus === 'function') alvo.focus()
+}
+
+/* 🚨 O RESUMO DO SEMÁFORO DO CARD, para o card FECHADO. O pior semáforo manda:
+   um artefato vermelho num card de dez não pode ficar escondido atrás de nove
+   verdes, porque vermelho é justamente o que faz alguém abrir o card.
+   ⚠️ Ícone E texto, nunca a cor sozinha — é a régua desta tela desde 19/11. */
+const PIOR_PRIMEIRO = ['vermelho', 'amarelo', 'laranja', 'verde']
+
+function semaforoResumo(card, visiveis) {
+  const lista = (visiveis || artefatosVisiveis)(card)
+  for (const cor of PIOR_PRIMEIRO) {
+    if (lista.some((a) => a.semaforo === cor)) return cor
+  }
+  return ''
+}
+
 /* 🚨 AS 6 CORES DO CATAVENTO, as mesmas da Operação e da aba 1, ciclando pelas
    cinco colunas. ⚠️ A cor é da COLUNA e nunca do card: o card já está nela, e
    dentro dela todos teriam a mesma cor — a régua de 05/11. */
@@ -177,6 +227,23 @@ async function carregar() {
         abertas.value[coluna.chave] = true
       }
     }
+    /* 🚨 **O CARD ABERTO TEM DE SER REAPONTADO**, e esta é a mesma armadilha
+       que a `PainelAba.vue` já documentava: sem isto o diálogo seguiria
+       mostrando o retrato de ANTES da recarga -- a lista velha de artefatos,
+       o valor velho, o semáforo velho -- justamente depois de um "Preparar"
+       ou um "Atualizar", que é quando o dado mudou.
+       ⚠️ E card que saiu do quadro (foi todo para a coluna seguinte) fecha o
+       diálogo, em vez de ficar aberto sobre o que não existe mais. */
+    if (cardAberto.value) {
+      const col = (quadro.value.colunas || [])
+        .find((c) => c.chave === colunaAberta.value)
+      const chave = colunaAberta.value === 'movimentacao'
+        ? 'tecnico_id' : 'lote_id'
+      const alvo = cardAberto.value[chave]
+      const vivo = (col?.cards || []).find((c) => c[chave] === alvo)
+      if (vivo) cardAberto.value = vivo
+      else fecharCardDoTecnico()
+    }
   } catch (e) {
     /* 🚨 QUADRO VAZIO NUNCA: vazio silencioso faria concluir que não há
        pagamento a preparar, justo quando há. */
@@ -213,6 +280,28 @@ const codigoDesta = 'PNL_1.6'
    ⚠️ E não sai do servidor porque o `painel_aba` guarda a chave (`financeiro`)
    e o título de cada ABA, não o nome do painel. */
 const tituloDoPainel = 'Financeiro'
+
+/* ==========================================================================
+   O CORTE DE DATA DA ABA 2 — 🔵 D6 e D7 dele, 23/11
+   ==========================================================================
+   🔵 *"use 16/11/2026 de inicio para o financeiro, não mexa na data do OP"*, e
+   os anteriores se **escondem, não se apagam**.
+
+   🚨 **A TELA TEM DE DIZER O CORTE, e isto é uma saída deliberada do padrão da
+   Operação.** Medido em 23/11: a `PainelOperacao.vue` **não mostra nem deixa
+   mudar** a data dela — a `.painel__desde` existe no CSS dela e **nenhum
+   template a usa**, é regra morta. Copiar isso aqui seria copiar o defeito:
+   📏 o corte de 16/11 leva a contagem de **79 artefatos para 2**, e número que
+   cai 97% sem explicação é a tela mentindo por omissão (`M12`). Foi assim que
+   o "sumiço" de 19/11 pareceu defeito quando era filtro.
+
+   ⚠️ **A DATA NÃO SE MUDA PELA TELA**, e aí sim o padrão da Operação vale: ela
+   é do owner e se muda pela rota (`PUT /api/paineis/servico-dos-tecnicos/desde`,
+   403 para quem não é owner). Pôr um campo aqui o daria às três pessoas que
+   têm a `PNL_1.6`. */
+const desdeDoQuadro = computed(() => quadro.value?.desde || '')
+const escondidosPelaData = computed(
+  () => Number(quadro.value?.escondidos_pela_data) || 0)
 
 /* ---------------------------------------------------------------- as datas */
 
@@ -503,6 +592,51 @@ function pedirDevolucao(linha) {
   justificativa.value = ''
 }
 
+/* 🔵 Tarefa 2.4: *"Excluir o card inteiro devolvendo tudo à coluna 1, com
+   justificativa única"*.
+   🚨 REUSA O MESMO DIÁLOGO da devolução de um item -- `devolvendoLote` só diz
+   que o alvo é o lote. Um segundo diálogo com o mesmo texto divergiria do
+   primeiro na primeira palavra que ele mudasse. */
+const devolvendoLote = ref(null)
+
+function pedirExclusaoDoCard(card) {
+  devolvendoLote.value = card
+  justificativa.value = ''
+}
+
+/* 🔵 Tarefa 2.5: *"Reabrir na coluna 5 e gerar o arquivo de novo"*.
+   ⚠️ SEM DIÁLOGO DE JUSTIFICATIVA, e é de propósito: nada é devolvido nem
+   desfeito -- o lote volta para a Validação com a conferência intacta. Pedir
+   motivo aqui trataria reabrir como erro, e reabrir é trabalho. */
+async function reabrirLote(card) {
+  const r = await chamar(`/reabrir/${card.lote_id}`)
+  if (r) {
+    fecharCardDoTecnico()
+    aviso.value = r.ok
+      ? `Lote ${card.lote_id} voltou para a Validação: gere o arquivo de novo.`
+      : (r.motivo || 'não deu para reabrir')
+    await carregar()
+  }
+}
+
+async function devolverLote() {
+  const alvo = devolvendoLote.value
+  if (!alvo) return
+  const r = await chamar('/devolver-lote', {
+    lote_id: alvo.lote_id, justificativa: justificativa.value,
+  })
+  if (r) {
+    devolvendoLote.value = null
+    /* ⚠️ Fecha o card aberto: ele acabou de ficar sem item nenhum, e deixá-lo
+       aberto mostraria uma lista vazia sem dizer por quê. */
+    fecharCardDoTecnico()
+    aviso.value = r.ok
+      ? `${r.devolvidos} item(ns) voltaram para a Movimentação.`
+      : (r.motivo || 'nada foi devolvido')
+    await carregar()
+  }
+}
+
 async function devolver() {
   const alvo = devolvendo.value
   if (!alvo) return
@@ -724,7 +858,10 @@ function aoTeclar(evento) {
   if (comprovando.value) { comprovando.value = null; return }
   if (previa.value) { previa.value = null; return }
   if (osAberta.value) { osAberta.value = null; return }
-  if (conferindo.value) conferindo.value = null
+  if (conferindo.value) { conferindo.value = null; return }
+  /* ⚠️ O card aberto é o de BAIXO da pilha: os cinco modais acima nascem de
+     dentro dele, e fechá-lo primeiro tiraria o chão deles. */
+  if (cardAberto.value) fecharCardDoTecnico()
 }
 
 onMounted(() => {
@@ -793,6 +930,20 @@ onBeforeUnmount(() => window.removeEventListener('keydown', aoTeclar))
                   :value="chave">{{ rot }}</option>
         </select>
       </label>
+
+      <!-- 🔵 D6/D7, 23/11: o corte de data, DITO. 🚨 Não é enfeite: sem esta
+           linha a aba abriria com 2 cards onde havia 79 e ninguém saberia por
+           quê. ⚠️ E diz que eles **continuam no banco**, porque "escondido" e
+           "apagado" são coisas diferentes e a decisão dele foi esconder. -->
+      <p v-if="desdeDoQuadro" class="painel__desde">
+        <i class="bi bi-calendar-range" aria-hidden="true"></i>
+        serviço a partir de <strong>{{ dataCurta(desdeDoQuadro) }}</strong>
+        <template v-if="escondidosPelaData">
+          &middot; {{ escondidosPelaData }}
+          {{ escondidosPelaData === 1 ? 'artefato anterior' : 'artefatos anteriores' }}
+          fora de vista (seguem no banco)
+        </template>
+      </p>
     </div>
 
     <p v-if="erro" class="aviso aviso--erro" role="alert">{{ erro }}</p>
@@ -826,10 +977,16 @@ onBeforeUnmount(() => window.removeEventListener('keydown', aoTeclar))
           <div v-if="abertas[coluna.chave]" class="coluna__corpo">
             <!-- ================= COLUNA 1 — Movimentação ================= -->
             <template v-if="coluna.chave === 'movimentacao'">
+              <!-- 🔵 23/11, dele: *"o card fechado só com resumo, dados e
+                   botões só no card aberto"*. 🚨 `<button>` e não `<div>`: o
+                   card agora ABRE, e o que abre tem de chegar pelo teclado --
+                   um `div` com `@click` é invisível para quem usa Tab, e a
+                   tela estaria trancada para quem não usa mouse. -->
               <article v-for="card in cardsDa(coluna)"
                        :key="card.tecnico_id || 0" class="card">
-                <div class="card__abrir"
-                     :class="{ 'card__abrir--sem-tecnico': !card.pode_preparar }">
+                <button class="card__abrir card__abrir--botao" type="button"
+                        :class="{ 'card__abrir--sem-tecnico': !card.pode_preparar }"
+                        @click="abrirCardDoTecnico(card, coluna)">
                   <span class="card__linha">
                     <span class="card__cliente"
                           :title="card.tecnico_nome || ''">
@@ -842,45 +999,137 @@ onBeforeUnmount(() => window.removeEventListener('keydown', aoTeclar))
                   </span>
 
                   <span class="card__linha card__dado">
-                    <span>
-                      a pagar <strong>{{ moeda(totalDe(card)) }}</strong>
-                      &middot; serviço
-                      {{ moeda(somaDe(card, 'valor_pagamento')) }}
-                      &middot; km {{ moeda(somaDe(card, 'valor_km')) }}
+                    <span>a pagar <strong>{{ moeda(totalDe(card)) }}</strong></span>
+                    <!-- 🚨 O PIOR SEMÁFORO no card fechado: vermelho escondido
+                         atrás de nove verdes é justamente o que faria ninguém
+                         abrir o card. Ícone E texto, nunca a cor sozinha. -->
+                    <span v-if="semaforoResumo(card)" class="selo"
+                          :class="'selo--' + semaforoResumo(card)">
+                      <i :class="'bi ' + SEMAFORO[semaforoResumo(card)].icone"
+                         aria-hidden="true"></i>
+                      {{ SEMAFORO[semaforoResumo(card)].texto }}
                     </span>
                   </span>
+
+                  <!-- ⚠️ O filtro ATIVO é dito no card fechado, senão a
+                       contagem "4 de 39" pareceria perda de dado. -->
+                  <span v-if="filtroDo(card).de || filtroDo(card).ate"
+                        class="card__linha card__dado">
+                    <span class="card__filtrado">
+                      <i class="bi bi-funnel-fill" aria-hidden="true"></i>
+                      filtrado por data
+                    </span>
+                  </span>
+
+                  <!-- 🚨 A trava dos SEM TÉCNICO fica no card FECHADO: ela é o
+                       motivo de o dinheiro estar parado, e esconder isso atrás
+                       de um clique deixaria o valor sem explicação à vista. -->
+                  <span v-if="!card.pode_preparar" class="card__trava">
+                    <i class="bi bi-info-circle" aria-hidden="true"></i>
+                    Sem técnico identificado: não há a quem pagar.
+                  </span>
+                </button>
+              </article>
+            </template>
+
+            <!-- ============ COLUNAS 2 a 5 — os lotes por técnico ========= -->
+            <template v-else>
+              <article v-for="card in cardsDa(coluna)" :key="card.lote_id"
+                       class="card">
+                <button class="card__abrir card__abrir--botao" type="button"
+                        @click="abrirCardDoTecnico(card, coluna)">
+                  <span class="card__linha">
+                    <span class="card__cliente" :title="card.tecnico_nome || ''">
+                      {{ card.tecnico_nome || 'técnico ' + card.tecnico_id }}
+                    </span>
+                    <span class="card__direita">
+                      lote {{ card.lote_id }}
+                    </span>
+                  </span>
+
+                  <span class="card__linha card__dado">
+                    <span>
+                      {{ artefatosDoLote(card).length }} artefato(s) &middot;
+                      <strong>
+                        {{ moeda(totalDe(card, artefatosDoLote)) }}
+                      </strong>
+                    </span>
+                    <span v-if="semaforoResumo(card, artefatosDoLote)" class="selo"
+                          :class="'selo--' + semaforoResumo(card, artefatosDoLote)">
+                      <i :class="'bi ' + SEMAFORO[semaforoResumo(card, artefatosDoLote)].icone"
+                         aria-hidden="true"></i>
+                      {{ SEMAFORO[semaforoResumo(card, artefatosDoLote)].texto }}
+                    </span>
+                  </span>
+                </button>
+              </article>
+            </template>
+
+            <p v-if="!cardsDa(coluna).length" class="nota pequeno">
+              {{ busca.trim() ? 'Nenhum card casa com a busca.' : 'Vazia.' }}
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 🔵 O CARD ABERTO, 23/11: *"dados e botões só no card aberto"*.
+         🚨 PRIMEIRO NA ORDEM dos diálogos de propósito: os cinco de baixo
+         nascem DE DENTRO deste, e no DOM eles têm de ficar DEPOIS para
+         empilhar por cima sem depender de `z-index` -- é a mesma régua de
+         empilhamento que a conferência de CSS publicado já guarda. -->
+    <div v-if="cardAberto" class="modal" role="dialog" aria-modal="true"
+         :aria-label="'Card de ' + (cardAberto.tecnico_nome || 'técnico')">
+      <div class="modal__caixa">
+        <h3 class="modal__titulo">
+          {{ cardAberto.tecnico_nome || 'técnico ' + cardAberto.tecnico_id }}
+          <span v-if="colunaAberta !== 'movimentacao'" class="apagado">
+            &middot; lote {{ cardAberto.lote_id }}
+          </span>
+        </h3>
+
+        <!-- ================= COLUNA 1 — Movimentação ================= -->
+        <template v-if="colunaAberta === 'movimentacao'">
+          <span class="card__linha card__dado">
+            <span>
+              a pagar <strong>{{ moeda(totalDe(cardAberto)) }}</strong>
+              &middot; serviço
+              {{ moeda(somaDe(cardAberto, 'valor_pagamento')) }}
+              &middot; km {{ moeda(somaDe(cardAberto, 'valor_km')) }}
+            </span>
+          </span>
 
                   <!-- 🔵 O FILTRO DE DATAS DENTRO DO CARD: *"só quero fechar
                        de 16-18/11/26 filtro isso e flego"*. ⚠️ A data é a do
                        SERVIÇO, e o filtro é DESTE card. -->
                   <!-- ⚠️ `:value` + `@input`, e NÃO `v-model`: o alvo seria
-                       `filtroDo(card).de`, e `v-model` exige uma expressão de
+                       `filtroDo(cardAberto).de`, e `v-model` exige uma expressão de
                        membro simples — chamada de função no caminho é erro de
                        compilação do template. -->
                   <div class="card__filtro">
                     <label>de
-                      <input type="date" :value="filtroDo(card).de"
-                             @change="definirFiltro(card, 'de', $event.target.value)" />
+                      <input type="date" :value="filtroDo(cardAberto).de"
+                             @change="definirFiltro(cardAberto, 'de', $event.target.value)" />
                     </label>
                     <label>até
-                      <input type="date" :value="filtroDo(card).ate"
-                             @change="definirFiltro(card, 'ate', $event.target.value)" />
+                      <input type="date" :value="filtroDo(cardAberto).ate"
+                             @change="definirFiltro(cardAberto, 'ate', $event.target.value)" />
                     </label>
-                    <button v-if="filtroDo(card).de || filtroDo(card).ate"
+                    <button v-if="filtroDo(cardAberto).de || filtroDo(cardAberto).ate"
                             class="botao botao--fraco" type="button"
-                            @click="limparFiltro(card)">
+                            @click="limparFiltro(cardAberto)">
                       limpar
                     </button>
                   </div>
 
                   <ul class="artefatos">
-                    <li v-for="a in artefatosVisiveis(card)" :key="a.id"
+                    <li v-for="a in artefatosVisiveis(cardAberto)" :key="a.id"
                         class="artefato">
                       <label class="artefato__marca">
                         <input type="checkbox"
-                               :checked="estaMarcado(card, a.id)"
-                               :disabled="!card.pode_preparar"
-                               @change="alternar(card, a.id)" />
+                               :checked="estaMarcado(cardAberto, a.id)"
+                               :disabled="!cardAberto.pode_preparar"
+                               @change="alternar(cardAberto, a.id)" />
                         <!-- 🔵 A ordem é a dele: Orçamento — OS — TERMO. -->
                         <span v-if="a.orcamento_numero"
                               class="artefato__orcamento">
@@ -930,64 +1179,50 @@ onBeforeUnmount(() => window.removeEventListener('keydown', aoTeclar))
                     </li>
                   </ul>
 
-                  <p v-if="!artefatosVisiveis(card).length" class="nota pequeno">
+                  <p v-if="!artefatosVisiveis(cardAberto).length" class="nota pequeno">
                     Nenhum artefato à vista com este filtro.
                   </p>
 
                   <!-- 🚨 O card dos SEM TÉCNICO não prepara, e DIZ por quê:
                        sem técnico não há a quem pagar. Ele existe para o
                        dinheiro não sair de vista. -->
-                  <p v-if="!card.pode_preparar" class="card__trava">
+                  <!-- 🚨 A frase INTEIRA fica aqui dentro; o card fechado
+                       leva só a versão curta. Dizer POR QUE o dinheiro está
+                       parado é o recado, e ele não cabe no resumo. -->
+                  <p v-if="!cardAberto.pode_preparar" class="card__trava">
                     <i class="bi bi-info-circle" aria-hidden="true"></i>
                     Estas OS têm valor de pagamento e nenhum técnico
                     identificado na linha. Não há a quem pagar até alguém
                     vincular o técnico na OS.
                   </p>
-                  <div v-else class="card__acoes">
+                  <!-- 🔵 Os botões, que é o que ele pediu para sair do card
+                       fechado. 🚨 `v-if` próprio e não `v-else` da trava acima:
+                       o par `v-if`/`v-else` existia porque os dois moravam no
+                       mesmo card; aqui a trava é uma frase e o bloco de ações é
+                       outro, e amarrá-los faria um sumir com o outro. -->
+                  <div v-if="cardAberto.pode_preparar" class="card__acoes">
                     <button class="botao botao--fraco" type="button"
-                            @click="marcarTodosDoCard(card)">
+                            @click="marcarTodosDoCard(cardAberto)">
                       Marcar todos
                     </button>
-                    <button v-if="marcadosDo(card).length"
+                    <button v-if="marcadosDo(cardAberto).length"
                             class="botao botao--fraco" type="button"
-                            @click="limparMarcados(card)">
+                            @click="limparMarcados(cardAberto)">
                       Limpar
                     </button>
                     <button class="botao" type="button"
-                            :disabled="!marcadosDo(card).length"
-                            @click="preparar(card)">
-                      Preparar os marcados ({{ marcadosDo(card).length }})
+                            :disabled="!marcadosDo(cardAberto).length"
+                            @click="preparar(cardAberto)">
+                      Preparar os marcados ({{ marcadosDo(cardAberto).length }})
                     </button>
                   </div>
-                </div>
-              </article>
-            </template>
+        </template>
 
-            <!-- ============ COLUNAS 2 a 5 — os lotes por técnico ========= -->
-            <template v-else>
-              <article v-for="card in cardsDa(coluna)" :key="card.lote_id"
-                       class="card">
-                <div class="card__abrir">
-                  <span class="card__linha">
-                    <span class="card__cliente" :title="card.tecnico_nome || ''">
-                      {{ card.tecnico_nome || 'técnico ' + card.tecnico_id }}
-                    </span>
-                    <span class="card__direita">
-                      lote {{ card.lote_id }}
-                    </span>
-                  </span>
-
-                  <span class="card__linha card__dado">
-                    <span>
-                      {{ artefatosDoLote(card).length }} artefato(s) &middot;
-                      <strong>
-                        {{ moeda(totalDe(card, artefatosDoLote)) }}
-                      </strong>
-                    </span>
-                  </span>
+        <!-- ============ COLUNAS 2 a 5 — os lotes por técnico ========= -->
+        <template v-else>
 
                   <ul class="artefatos">
-                    <li v-for="a in artefatosDoLote(card)" :key="a.id"
+                    <li v-for="a in artefatosDoLote(cardAberto)" :key="a.id"
                         class="artefato">
                       <span class="artefato__marca">
                         <button class="artefato__os" type="button"
@@ -1038,11 +1273,26 @@ onBeforeUnmount(() => window.removeEventListener('keydown', aoTeclar))
                              🚨 Só na Validação: depois do arquivo montado,
                              mexer no recibo mudaria o que já foi para o
                              Procfy. -->
-                        <button v-if="coluna.chave === 'validacao'"
+                        <button v-if="colunaAberta === 'validacao'"
                                 class="botao botao--fraco botao--mini"
                                 type="button" @click="abrirComprovante(a)">
                           {{ a.comprovante_arquivo || a.comprovante_dispensa
                              ? 'Trocar comprovante' : 'Comprovante' }}
+                        </button>
+
+                        <!-- 🔵 Tarefa 2.3: remover o item com justificativa
+                             nas colunas 3, 4 e 5. 📏 Medido em 23/11: o
+                             serviço já aceitava de qualquer coluna que não
+                             seja a 1, e o botão existia só no diálogo de
+                             conferência, que abre da coluna 2.
+                             🚨 MESMO GESTO, não um segundo caminho: chama o
+                             `pedirDevolucao` que a conferência usa, e a regra
+                             dele ("sempre para a coluna 1") fica num lugar
+                             só. -->
+                        <button v-if="colunaAberta !== 'movimentacao'"
+                                class="botao botao--fraco botao--mini"
+                                type="button" @click="pedirDevolucao(a)">
+                          Remover
                         </button>
                       </p>
                     </li>
@@ -1051,50 +1301,69 @@ onBeforeUnmount(() => window.removeEventListener('keydown', aoTeclar))
                   <div class="card__acoes">
                     <!-- 🔵 *"todos os cards tem botão de 'atualizar'"*. -->
                     <button class="botao botao--fraco" type="button"
-                            @click="revalidar(card)">Atualizar</button>
+                            @click="revalidar(cardAberto)">Atualizar</button>
 
-                    <button v-if="coluna.chave === 'preparacao'" class="botao"
-                            type="button" @click="abrirConferencia(card)">
+                    <button v-if="colunaAberta === 'preparacao'" class="botao"
+                            type="button" @click="abrirConferencia(cardAberto)">
                       Conferir e auditar
                     </button>
 
-                    <template v-if="coluna.chave === 'validacao'">
+                    <template v-if="colunaAberta === 'validacao'">
                       <button class="botao botao--fraco" type="button"
-                              @click="lerDataScope(card)">
+                              @click="lerDataScope(cardAberto)">
                         Ler DataScope
                       </button>
                       <button class="botao botao--fraco" type="button"
-                              @click="verPrevia(card)">
+                              @click="verPrevia(cardAberto)">
                         Ver prévia
                       </button>
                       <button class="botao" type="button"
-                              @click="montarArquivo(card)">
+                              @click="montarArquivo(cardAberto)">
                         Montar arquivo
                       </button>
                     </template>
 
-                    <template v-if="coluna.chave === 'procfy'">
+                    <!-- 🔵 Tarefa 2.5: reabrir, só na coluna 5. Depois
+                         disso o lote reaparece na Validação e o "Montar
+                         arquivo" de lá serve de novo -- não há botão de
+                         gerar aqui, para não existir um segundo caminho de
+                         montar o arquivo. -->
+                    <button v-if="colunaAberta === 'enviado'"
+                            class="botao" type="button"
+                            @click="reabrirLote(cardAberto)">
+                      Reabrir para gerar de novo
+                    </button>
+
+                    <!-- 🔵 Tarefa 2.4: excluir o card inteiro. Vale de
+                         qualquer coluna de lote (2 a 5) -- na coluna 1 o card
+                         é o técnico, permanente, e não há lote para excluir.
+                         🚨 Fica junto dos outros gestos do card, e não entre
+                         os itens: o alvo aqui é o CARD. -->
+                    <button v-if="colunaAberta !== 'movimentacao'"
+                            class="botao botao--fraco" type="button"
+                            @click="pedirExclusaoDoCard(cardAberto)">
+                      Excluir o card
+                    </button>
+
+                    <template v-if="colunaAberta === 'procfy'">
                       <button class="botao botao--fraco" type="button"
-                              @click="verPrevia(card)">Ver prévia</button>
-                      <button class="botao" type="button" @click="baixar(card)">
+                              @click="verPrevia(cardAberto)">Ver prévia</button>
+                      <button class="botao" type="button" @click="baixar(cardAberto)">
                         Baixar o arquivo
                       </button>
                       <button class="botao botao--fraco" type="button"
-                              @click="enviar(card)">Marcar como enviado</button>
+                              @click="enviar(cardAberto)">Marcar como enviado</button>
                     </template>
                   </div>
-                </div>
-              </article>
-            </template>
+        </template>
 
-            <p v-if="!cardsDa(coluna).length" class="nota pequeno">
-              {{ busca.trim() ? 'Nenhum card casa com a busca.' : 'Vazia.' }}
-            </p>
-          </div>
+        <div class="modal__acoes">
+          <button class="botao" type="button" @click="fecharCardDoTecnico">
+            Fechar
+          </button>
         </div>
       </div>
     </div>
-
     <!-- 🔵 O MODAL DE CONFERIR, da coluna 2: *"exibir para o operador
          confirmar 1 a 1 na tela modal que abrir"*. -->
     <div v-if="conferindo" class="modal" role="dialog" aria-modal="true">
@@ -1142,6 +1411,23 @@ onBeforeUnmount(() => window.removeEventListener('keydown', aoTeclar))
           A OS {{ devolvendo.numero_os }} volta para a Movimentação em laranja,
           com esta justificativa à vista.
         </p>
+        <!-- 🚨 A CONSEQUÊNCIA, QUANDO HÁ UMA: na coluna 4 o arquivo do Procfy
+             já foi montado com este item dentro, e na 5 ele já foi enviado.
+             Remover sem dizer isso faria a tela esconder o que muda -- e é
+             justamente aqui que a pessoa decide. -->
+        <!-- ⚠️ `nota pequeno` e `selo--laranja`, que EXISTEM neste arquivo:
+             em 23/11 eu ia escrever `nota--aviso`, que não existe em nenhum
+             CSS -- a armadilha da `.pilula`, classe sem estilo que nenhum
+             teste pega porque o jsdom não faz layout. -->
+        <p v-if="colunaAberta === 'procfy' || colunaAberta === 'enviado'"
+           class="nota pequeno">
+          <span class="selo selo--laranja">atenção</span>
+          {{ colunaAberta === 'enviado'
+             ? 'Atenção: o arquivo deste lote já foi marcado como enviado. '
+               + 'Remover aqui não desfaz o envio — o acerto é no Procfy.'
+             : 'Atenção: o arquivo deste lote já foi montado com este item '
+               + 'dentro. Depois de remover, monte o arquivo de novo.' }}
+        </p>
         <input v-model="justificativa" class="campo" maxlength="400"
                placeholder="ex.: OS ainda em Agendar serviço" />
         <div class="modal__acoes">
@@ -1149,6 +1435,38 @@ onBeforeUnmount(() => window.removeEventListener('keydown', aoTeclar))
                   @click="devolvendo = null">Cancelar</button>
           <button class="botao" type="button" :disabled="!justificativa.trim()"
                   @click="devolver">Remover</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 🔵 Tarefa 2.4: a justificativa ÚNICA do card inteiro. -->
+    <div v-if="devolvendoLote" class="modal" role="dialog" aria-modal="true">
+      <div class="modal__caixa modal__caixa--curta">
+        <h2>Excluir o card inteiro?</h2>
+        <p class="nota pequeno">
+          Todos os itens deste lote voltam para a Movimentação em laranja, com
+          esta mesma justificativa à vista.
+        </p>
+        <!-- 🚨 O NÚMERO À VISTA: "todos os itens" sem dizer quantos deixaria a
+             pessoa decidir no escuro. -->
+        <p class="nota pequeno">
+          <span class="selo selo--laranja">atenção</span>
+          {{ (devolvendoLote.artefatos || []).length }} item(ns) ·
+          {{ colunaAberta === 'enviado'
+             ? 'o arquivo deste lote já foi marcado como enviado, e remover '
+               + 'aqui não desfaz o envio — o acerto é no Procfy.'
+             : (colunaAberta === 'procfy'
+                ? 'o arquivo deste lote já foi montado; depois de excluir, '
+                  + 'monte o arquivo de novo.'
+                : 'o lote sai do quadro.') }}
+        </p>
+        <input v-model="justificativa" class="campo" maxlength="400"
+               placeholder="ex.: lote montado com o técnico errado" />
+        <div class="modal__acoes">
+          <button class="botao botao--fraco" type="button"
+                  @click="devolvendoLote = null">Cancelar</button>
+          <button class="botao" type="button" :disabled="!justificativa.trim()"
+                  @click="devolverLote">Excluir o card</button>
         </div>
       </div>
     </div>
@@ -1289,7 +1607,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', aoTeclar))
                 class="temas__respostas">
               <li v-for="a in t.agendamentos" :key="a.agendamento_id">
                 {{ a.nome || `usuário ${a.usuario_id}` }} —
-                compromisso {{ a.agendamento_id }}
+                <template v-if="a.janela">{{ a.janela }} · </template>compromisso {{ a.agendamento_id }}
               </li>
             </ul>
             <p v-else class="nota pequeno">{{ t.resumo }}</p>
@@ -1361,6 +1679,14 @@ onBeforeUnmount(() => window.removeEventListener('keydown', aoTeclar))
   font-size: 16px;
 }
 .controles__busca input { min-width: 260px; }
+/* ⚠️ `flex-basis: 100%` para a linha do corte cair SOZINHA abaixo dos três
+   controles, em vez de disputar espaço com eles e virar uma frase apertada
+   entre dois `<select>`. O `.controles` é `flex` com `wrap`. */
+.painel__desde {
+  flex-basis: 100%; margin: 0;
+  display: flex; align-items: center; gap: var(--e-1); flex-wrap: wrap;
+  font-size: var(--txt-xs); color: var(--texto-fraco);
+}
 
 .painel__quadro {
   display: flex; gap: var(--e-3);
@@ -1521,6 +1847,29 @@ onBeforeUnmount(() => window.removeEventListener('keydown', aoTeclar))
   background: var(--superficie); display: flex; flex-direction: column;
   gap: var(--e-3);
 }
+/* 🚨 O CARD FECHADO VIROU `<button>` (23/11), e `<button>` traz consigo o
+   `background`, a `border`, o `text-align: center`, o `font` do agente e o
+   `cursor` padrão do navegador. Sem este bloco o card perderia a cara que
+   tinha e ficaria centralizado, com fonte de sistema -- e nenhum teste de
+   jsdom veria, porque o jsdom não faz layout. */
+.card__abrir--botao {
+  width: 100%; text-align: left; font: inherit; color: inherit;
+  background: none; border: 0; padding: 0; margin: 0; cursor: pointer;
+}
+/* 🚨 **NÃO SE DECLARA `:focus-visible` AQUI.** O `estilo/base.css:55` já o faz
+   para TODO elemento focável, com `outline: none` e `box-shadow: var(--foco)`.
+   ⚠️ Eu havia escrito um `outline` próprio aqui, com um token que **não
+   existe** (medido em 23/11 no CSS publicado: ele não está no `:root`). Só não
+   virou regra descartada porque eu pusera um fallback — mas o efeito seria
+   pior que o do token: uma especificidade maior que a do `base.css` daria a
+   ESTE botão um anel de foco diferente do de todo o resto do sistema. */
+/* ⚠️ A trava e o selo dentro de um `<button>` precisam ser `inline-flex` por
+   conta própria: o `<span>` herdaria o `text-align` e o alinhamento do botão. */
+.card__filtrado {
+  display: inline-flex; align-items: center; gap: var(--e-1);
+  font-size: var(--txt-xs); color: var(--texto-fraco);
+}
+.modal__titulo { margin: 0; font-size: var(--txt-lg); }
 .modal__caixa--curta { width: min(460px, 92vw); }
 .modal__acoes { display: flex; justify-content: flex-end; gap: var(--e-2); }
 .campo__rotulo {

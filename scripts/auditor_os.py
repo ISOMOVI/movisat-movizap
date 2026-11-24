@@ -117,12 +117,28 @@ if not numero:
 # 🚨 Fala direto com o Evolution, NÃO pela rota do painel: o vigia tem de
 # funcionar inclusive com o painel fora do ar -- e painel fora do ar é um dos
 # motivos de a situação da OS ficar para trás.
-try:
-    from movizap import evolution
-    evolution.enviar_texto(settings.evolution_instancia, numero,
-                           "MoviZap - Auditoria de OS\n\n" + "\n".join(linhas))
-    print(f"(red flag enviada para {numero[:7]}…)", file=sys.stderr)
-except Exception as e:  # noqa: BLE001
-    # Falhar aqui não pode esconder o alerta: ele já foi impresso acima.
-    print(f"(nao consegui enviar a red flag: {e.__class__.__name__}: {e})",
+# 🚨 **E MARCA AS LINHAS COMO AVISADAS, 23/11.** Medido naquele dia: este
+# script NUNCA chamava `marcar_avisadas`, então o `avisada_em` ficava `NULL`
+# e a `para_a_red_flag()` -- que filtra justamente por ele -- devolvia AS
+# MESMAS linhas em toda rodada. 📏 **8 red flags** com os mesmos avisos das
+# OS 17054, 17114 e 17128, duas por dia, e seguiria para sempre. O
+# `fila_das_passagens.py` já fazia certo; era este que estava de fora.
+#
+# ⚠️ Quem marca é o `auditoria_os.avisar`, e **depois** de o envio dar
+# certo: marcar antes perderia o aviso se o WhatsApp falhasse, e ninguém
+# nota a ausência de um aviso.
+from movizap import evolution  # noqa: E402
+
+texto = "MoviZap - Auditoria de OS\n\n" + "\n".join(linhas)
+r = auditoria_os.avisar(
+    texto, a_avisar,
+    enviar=lambda m: evolution.enviar_texto(
+        settings.evolution_instancia, numero, m))
+if r["enviado"]:
+    print(f"(red flag enviada para {numero[:7]}…, "
+          f"{r['marcadas']} linha(s) marcada(s))", file=sys.stderr)
+else:
+    # Falhar aqui não pode esconder o alerta: ele já foi impresso acima. E
+    # nada foi marcado, então a linha volta na próxima rodada.
+    print(f"(nao consegui enviar a red flag: {r['erro']})",
           file=sys.stderr)

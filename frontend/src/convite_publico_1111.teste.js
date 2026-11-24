@@ -104,6 +104,95 @@ async function montar(busca) {
   return tela
 }
 
+/* 🚨 O FORMULÁRIO DE PÉ, e é isto que a primeira versão desta trava não fez.
+   `visiveis()` mantém só `campos.filter((c) => c.visivel)`, e a `DEF` deste
+   arquivo não traz `visivel` -- então a tela renderizava ZERO campo, o clique
+   em Enviar não enviava nada, e a trava do "não aparece" passava de graça.
+   Trava que não exercita o gesto dá o verde sem medir. */
+function defDePe(extra) {
+  const antes = { campos: DEF.campos }
+  DEF.campos = DEF.campos.map((c) => ({ ...c, visivel: true }))
+  /* ⚠️ SEM TRILHO DE ETAPAS, de propósito: com etapas o `enviar()` passa
+     antes pelo `conferirEtapa()`, e foi ele que barrou o envio na 1ª versão
+     desta trava -- nem POST nem modal, e eu lendo o silêncio como "não
+     perguntou". Rolo único é o caminho que esta trava quer medir. */
+  Object.assign(DEF, extra || {})
+  return () => {
+    DEF.campos = antes.campos
+    for (const k of Object.keys(extra || {})) delete DEF[k]
+  }
+}
+
+/* 🚨 Quantos POSTs de ENVIO saíram. O GET da definição tem o MESMO caminho,
+   então contar por caminho dá verde sem nenhum envio -- foi o que aconteceu. */
+function enviosDeVerdade() {
+  return fetch.mock.calls.filter(
+    ([url, opcoes]) => String(url).includes('/api/publico/formulario/')
+      && opcoes?.method === 'POST'
+      && !String(url).includes('/cliente')
+      && !String(url).includes('/placa')).length
+}
+
+/* Preenche o que a DEF pede e clica em Enviar. */
+async function preencherEEnviar(tela) {
+  const campos = tela.findAll('input.campo__entrada')
+  expect(campos.length, 'sem campo de pé não há envio para medir')
+    .toBeGreaterThan(0)
+  for (const [i, valor] of ['Zz Empresa', '18999999999',
+                            'zz@exemplo.com'].entries()) {
+    if (campos[i]) await campos[i].setValue(valor)
+  }
+  const enviar = tela.findAll('button').find((b) => /Enviar/.test(b.text()))
+  expect(enviar, 'o botão Enviar tem de existir').toBeTruthy()
+  /* 🚨 SUBMIT NO FORM, nao clique no botao: o handler mora no
+     `<form @submit.prevent="enviar">`, e no jsdom clicar num botao
+     `type=submit` NAO dispara o submit -- diferente do navegador. Clicando, a
+     tela ficava parada e a trava lia o silencio como "nao perguntou". */
+  await tela.find('form').trigger('submit')
+  await flushPromises()
+  return tela
+}
+
+/* ==========================================================================
+   O AVISO "SEM EMPRESA VINCULADA" — 🔵 dele, 23/11: *"precisa remover dos
+   forms do tecnico que não possuem mesmo vinculo de empresa"*.
+
+   🚨 A MESMA RAIZ DO BOTÃO BUSCAR: a pergunta travava em `ehNovo`, e os 16
+   formulários estão em `novo` desde 11/11 -- então todos perguntavam por uma
+   empresa que a maioria não tem como vincular.
+   ========================================================================== */
+describe('o aviso de empresa não vinculada', () => {
+  it('🔵 NÃO aparece em formulário que não procura cliente', async () => {
+    const desfazer = defDePe()
+    try {
+      const tela = await montar('')
+      await preencherEEnviar(tela)
+      expect(tela.text()).not.toContain('Sem empresa vinculada')
+      /* 🚨 E O ENVIO ACONTECEU DE VERDADE -- um POST, não o GET da
+         definição. É o que separa "não perguntou" de "não enviou". */
+      expect(enviosDeVerdade()).toBe(1)
+    } finally { desfazer() }
+  })
+
+  it('aparece onde HÁ base para vincular, e o texto é o dele', async () => {
+    const desfazer = defDePe({ busca_cliente: true })
+    try {
+      const tela = await montar('')
+      await preencherEEnviar(tela)
+      expect(tela.text()).toContain('Sem empresa vinculada')
+      /* ⚠️ O texto não mudou uma palavra: é dele, de 29/10. */
+      expect(tela.text()).toContain('na nossa base')
+      /* 🔵 As palavras dos botões são dele: cancelar / continuar. */
+      const botoes = tela.findAll('button').map((b) => b.text())
+      expect(botoes).toContain('Continuar')
+      expect(botoes).toContain('Cancelar')
+      /* 🚨 E O ENVIO FICOU SEGURO até alguém responder: a confirmação é
+         confirmação, não aviso depois do fato. */
+      expect(enviosDeVerdade()).toBe(0)
+    } finally { desfazer() }
+  })
+})
+
 /* 📏 MEDIDO, e e o motivo desta funcao existir: procurar o `<input>` nao
    serve aqui. Os campos nao tem atributo `name` (o `CamposDoFormulario`
    identifica cada entrada pelo `aria-label`), e com uma definicao mínima o

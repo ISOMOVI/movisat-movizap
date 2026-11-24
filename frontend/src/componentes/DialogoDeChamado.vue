@@ -38,6 +38,14 @@ const props = defineProps({
      *"Finalizar Chamado"*, palavra dele; numa aba de Pós-venda, "chamado" não
      diz nada. */
   rotuloFinalizar: { type: String, default: 'Finalizar Chamado' },
+  /* 🚨 QUAL PAINEL ABRIU ESTE DIÁLOGO. A `PainelAba.vue` serve QUATRO telas
+     (`PNL_1.2`, `PNL_1.3`, `PNL_1.4`, `PNL_1.5`), e a pergunta nova do
+     "Finalizar" é só da etapa 888 do Contratual. Sem isto a condição seria o
+     número da etapa sozinho, e no dia em que outra aba tivesse uma etapa 888 a
+     pergunta apareceria onde não deve.
+     ⚠️ Vazio é o caso da Operação, que monta este diálogo direto e não tem
+     aba de pipeline nenhuma. */
+  aba: { type: String, default: '' },
 })
 const emit = defineEmits(['fechar', 'mudou'])
 
@@ -61,9 +69,51 @@ const lendoOs = ref(false)
 const erroDaOs = ref('')
 const temaAberto = ref('descricao')
 
+/* ==========================================================================
+   A ETAPA 888 DO CONTRATUAL — 🔵 D1 e D8 dele, 23/11
+   ==========================================================================
+   🔵 *"o botão 'Finalizar' do card de 'Assinado' pergunta se há termo para
+   gerar OS e em caso de não, ele continua o fluxo local. Em caso de 'Sim' abre
+   o modal"* (19/11) · 🔵 **D1**: o "Não" grava `resolvido` e o "Sim" grava
+   `virou_os` · 🔵 **D8**: o caminho é o **C**, aba nova, e não o modal.
+
+   🚨 **POR QUE NÃO É `final`.** Medido em 23/11 no `pipeline_etapa`: a 888
+   (Assinado) é `final = true`, MAS a 889 (Não assinado) e a 890 (Desistiu de
+   cancelar) também são. Condicionar por "etapa final" levaria a pergunta do
+   termo para duas colunas onde ela não faz sentido nenhum.
+
+   🚨 **POR QUE A ABA ENTRA NA CONDIÇÃO.** O número 888 é um id de
+   `pipeline_etapa`, não um conceito. A aba é quem diz que estamos no
+   Contratual, e as duas juntas é o que a D1 descreve.
+
+   ⚠️ **E POR QUE AS OUTRAS ETAPAS NÃO MUDAM.** Medido: os cards 1500 e 2241
+   estão na etapa 885 com `desfecho = virou_os`, e o 2588 na 885 com
+   `resolvido`. O "Finalizar" já é usado fora da 888, e trocar o texto para
+   todos reescreveria o significado de três cards reais. */
+const ETAPA_ASSINADO = 888
+const ABA_DO_CONTRATUAL = 'PNL_1.5'
+
+/* 🚨 O ENDEREÇO PÚBLICO DO FPSL, lido em 23/11 do nginx
+   (`/etc/nginx/sites-available/fpsl.conf`: `server_name fpsl.movisat.com.br`).
+   ⚠️ **NÃO é o `FPSL_BASE_URL` do `.env`**, que vale `http://127.0.0.1:8004`:
+   aquele é o endereço servidor-a-servidor da ponte, e o navegador de quem usa
+   a tela não o alcança. Esta constante mora aqui, e não em configuração,
+   porque este app não tem `VITE_*` nem rota de config que o frontend leia --
+   medido hoje. No dia em que houver um segundo ambiente, isto vira campo do
+   servidor, e a trava do `contratual_termo_os_2311.teste.js` avisa. */
+const URL_DO_FPSL_OPERACOES = 'https://fpsl.movisat.com.br/painel/operacoes'
+
 const observacoes = computed(() => ficha.value?.observacoes || [])
 const etapas = computed(() => ficha.value?.etapas || [])
 const etapaAtual = computed(() => ficha.value?.card?.etapa_id ?? null)
+
+/* ⚠️ A FICHA PRIMEIRO, O CARD DEPOIS: a ficha é o retrato fresco (ela é relida
+   a cada passagem de etapa), mas ela chega por rede e o botão existe antes
+   dela. Sem o `props.card` o diálogo mostraria a pergunta ERRADA pelo tempo da
+   leitura -- e tela que muda de texto sozinha é a `M12`. */
+const perguntaDoTermo = computed(() =>
+  props.aba === ABA_DO_CONTRATUAL
+  && (etapaAtual.value ?? props.card?.etapa_id ?? null) === ETAPA_ASSINADO)
 
 /* 🚨 OS MESMOS QUATRO TEMAS DA OPERAÇÃO, na mesma ordem e com os mesmos
    títulos: é o *"igual os cards que são de OS do operacional"* dele. O que
@@ -189,9 +239,12 @@ watch(() => props.card?.id, async (novo, velho) => {
   }
 })
 
-/* 🔵 *"Resolvido"* ou *"Não resolvido"*. 🚨 Os dois SÓ MARCAM — decisão dele:
-   *"só marca; a OS é pelo Operação"*. Nada escreve no ERP, e é isso que torna
-   o botão reversível. */
+/* 🔵 *"Resolvido"* ou *"Não resolvido"* -- e, na etapa 888 do Contratual,
+   *"Não"* ou *"Sim"* (D1, 23/11), com os MESMOS dois desfechos.
+   🚨 Os dois SÓ MARCAM — decisão dele: *"só marca; a OS é pelo Operação"*.
+   Nada escreve no ERP, e é isso que torna o botão reversível.
+   ⚠️ Nem o *"Sim"*: abrir o FPSL é NAVEGAR, não escrever. A OS continua
+   nascendo pelas mãos de quem chega lá. */
 async function finalizar(desfecho) {
   finalizando.value = true
   erro.value = ''
@@ -463,7 +516,7 @@ async function salvarRecado() {
                       class="temas__respostas">
                     <li v-for="a in t.agendamentos" :key="a.agendamento_id">
                       {{ a.nome || `usuário ${a.usuario_id}` }} —
-                      compromisso {{ a.agendamento_id }}
+                      <template v-if="a.janela">{{ a.janela }} · </template>compromisso {{ a.agendamento_id }}
                     </li>
                   </ul>
 
@@ -510,6 +563,42 @@ async function salvarRecado() {
                     @click="perguntandoDesfecho = true">
               {{ rotuloFinalizar }}
             </button>
+            <!-- 🔵 D1, 23/11: NA ETAPA 888 DO CONTRATUAL a pergunta é outra.
+                 🚨 Os dois botões gravam os MESMOS dois desfechos, na mesma
+                 ordem: "Não" grava `resolvido` (o que "Resolvido" já gravava)
+                 e "Sim" grava `virou_os` (o que "Não resolvido" já gravava).
+                 Nenhum payload muda, nenhuma migração, e o `DESFECHOS` do
+                 `pipeline.py` não foi tocado. -->
+            <span v-else-if="perguntaDoTermo" class="desfecho__pergunta">
+              <span class="desfecho__rotulo">Há termo para gerar OS?</span>
+              <!-- 🔵 D8: o "Sim" abre o FPSL em ABA NOVA (caminho C).
+                   ⚠️ **ÂNCORA, NÃO `window.open`** -- a lição está no
+                   `ModalKm.vue`: *"bloqueador de pop-up come `window.open` sem
+                   aviso, e aí o clique não faria nada e pareceria defeito"*. A
+                   navegação nativa de um `<a target="_blank">` nunca é
+                   bloqueada, e o `@click` grava o desfecho no mesmo gesto.
+                   🚨 `rel="noopener"`: sem isto a aba do FPSL ganharia
+                   `window.opener` e poderia navegar a nossa.
+                   ⚠️ Se o POST falhar a aba já abriu. É aceitável e reversível:
+                   nada foi escrito no ERP, o erro aparece aqui, e o card segue
+                   sem desfecho -- o "Reabrir" existe para o caso inverso. -->
+              <!-- ⚠️ `<a>` NÃO ACEITA `disabled`: os irmãos são `<button>` e
+                   param sozinhos durante o POST, este não. Sem a classe, dois
+                   cliques mandariam dois POST, e o segundo volta com *"este
+                   card já foi finalizado"* -- erro vermelho numa ação que deu
+                   certo. `pointer-events: none` é o que de fato segura. -->
+              <a class="botao" :class="{ 'desfecho__sim--inerte': finalizando }"
+                 :href="URL_DO_FPSL_OPERACOES"
+                 target="_blank" rel="noopener noreferrer"
+                 :aria-disabled="finalizando ? 'true' : 'false'"
+                 @click="finalizar('virou_os')">Sim</a>
+              <button class="botao botao--contorno" type="button"
+                      :disabled="finalizando"
+                      @click="finalizar('resolvido')">Não</button>
+              <button class="botao botao--fantasma" type="button"
+                      :disabled="finalizando"
+                      @click="perguntandoDesfecho = false">Cancelar</button>
+            </span>
             <span v-else class="desfecho__pergunta">
               <span class="desfecho__rotulo">Resolvido?</span>
               <button class="botao" type="button" :disabled="finalizando"
@@ -696,6 +785,17 @@ async function salvarRecado() {
   font-size: var(--txt-sm); font-weight: var(--peso-forte);
   color: var(--texto-fraco);
 }
+/* 🚨 O "Sim" da etapa 888 é uma `<a>`, não um `<button>` (D8: aba nova, e
+   âncora não é comida por bloqueador de pop-up -- lição do `ModalKm.vue`).
+   ⚠️ O `estilo/base.css:37` tem `a:hover { text-decoration: underline }`, e o
+   `.botao:hover` só mexe no fundo: sem esta linha o "Sim" sublinharia no hover
+   e os três botões da pergunta pareceriam de famílias diferentes. Nenhum teste
+   de jsdom veria isso -- ele não faz layout. */
+.desfecho__pergunta a.botao:hover { text-decoration: none; }
+/* ⚠️ Nome PRÓPRIO e não `.botao:disabled`: este componente é `scoped`, e
+   reusar um nome que já existe no global faria trava-por-texto virar sorteio.
+   📏 `.5` é a mesma opacidade do `.botao:disabled` do `componentes.css`. */
+.desfecho__sim--inerte { opacity: .5; pointer-events: none; }
 .card__arquivado {
   display: inline-flex; align-items: center; gap: var(--e-1);
   padding: 1px var(--e-2);

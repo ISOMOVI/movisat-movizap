@@ -108,6 +108,60 @@ def teste_sem_login_e_401(cliente):
     assert cliente.get(CAMINHO).status_code == 401
 
 
+# ============================================================================
+# TAREFA 2.4 — excluir o card inteiro
+# 🔵 *"Excluir o card inteiro devolvendo tudo a coluna 1, com justificativa
+# unica"*.
+# 🚨 PELA ROTA, e nao pela funcao: a rota nova e o corpo dela sao justamente o
+# que a leitura do arquivo nao prova (`feedback_rota_nova_pede_teste_http`).
+# ⚠️ A ponte e DUBLE -- a rota de verdade iria ao FPSL, e teste que fala com
+# servico de fora nao e trava, e sorteio.
+# ============================================================================
+DEVOLVER_LOTE = "/api/paineis/servico-dos-tecnicos/devolver-lote"
+
+
+def teste_excluir_o_card_sem_login_e_401(cliente):
+    assert cliente.post(DEVOLVER_LOTE,
+                        json={"lote_id": 1, "justificativa": "zz"}
+                        ).status_code == 401
+
+
+def teste_excluir_o_card_passa_lote_e_justificativa_para_a_ponte(
+        cliente, token_owner, monkeypatch):
+    visto = {}
+
+    def duble(lote_id, justificativa, *, por=None):
+        visto.update(lote_id=lote_id, justificativa=justificativa, por=por)
+        return {"ok": True, "devolvidos": 3, "para": "movimentacao"}
+
+    monkeypatch.setattr(main.fpsl_ponte, "devolver_lote", duble)
+    r = cliente.post(DEVOLVER_LOTE,
+                     headers={"Authorization": f"Bearer {token_owner}"},
+                     json={"lote_id": 7, "justificativa": "zz lote errado"})
+    assert r.status_code == 200, r.text
+    assert r.json()["devolvidos"] == 3
+    assert visto["lote_id"] == 7
+    assert visto["justificativa"] == "zz lote errado"
+    # 🔵 Quem devolveu fica gravado: e o `por` que o historico do artefato
+    # mostra depois.
+    assert visto["por"], "o nome de quem excluiu nao foi adiante"
+
+
+def teste_excluir_o_card_SEM_justificativa_e_recusado_pelo_corpo(
+        cliente, token_owner, monkeypatch):
+    """🚨 A recusa e do CORPO (422), antes de a ponte ser chamada: laranja sem
+    motivo e cor sem informacao, e o lote inteiro em laranja mudo seria N
+    itens sem explicacao."""
+    chamou = []
+    monkeypatch.setattr(main.fpsl_ponte, "devolver_lote",
+                        lambda *a, **k: chamou.append(1) or {"ok": True})
+    r = cliente.post(DEVOLVER_LOTE,
+                     headers={"Authorization": f"Bearer {token_owner}"},
+                     json={"lote_id": 7, "justificativa": ""})
+    assert r.status_code == 422, r.text
+    assert chamou == [], "a ponte foi chamada mesmo sem justificativa"
+
+
 def teste_quem_nao_e_owner_nao_entra(cliente, monkeypatch):
     """⚠️ A tela move dinheiro e gera o arquivo do Procfy: ela nasce `owner`, e
     a concessão nomeada da `CFG_15.1` é o único outro caminho."""

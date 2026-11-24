@@ -704,7 +704,7 @@ o `.exe` saiu `0.6.0.0` carregando scripts `0.7`.
 **Aperta ENTER e pronto.** A pergunta da senha passou a aceitar o padrão:
 
 ```
-Aperte ENTER para usar a senha padrao (movicall).
+Aperte ENTER para usar a senha padrao (Movisat!@).
 Ou digite a senha de uso que o Iago ditar (vale 10 min, serve uma vez).
 Senha (Enter = padrao):
 ```
@@ -713,7 +713,7 @@ Senha (Enter = padrao):
 atalho, não uma substituição. ⚠️ **A padrão NÃO queima janela:** se queimasse, o
 primeiro PC a usá-la trancaria todos os outros, que é o oposto do pedido.
 
-🚨 **O que ela custa, por escrito:** quem souber `movicall` e um ramal alista um
+🚨 **O que ela custa, por escrito:** quem souber a senha padrão e um ramal alista um
 PC naquele ramal. Seguem de pé: limite de tentativas por IP, ramal que precisa
 existir e estar ativo, e certificado de cliente emitido só para aquele PC. O
 valor vive em `config.ligacoes_senha_fixa` — **vazio desliga o atalho**, sem

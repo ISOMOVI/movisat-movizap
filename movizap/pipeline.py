@@ -440,8 +440,15 @@ def cards_da_aba(aba_id: int, teto: int = 200) -> list[dict]:
 
     ⚠️ **UMA consulta para a aba toda**, como o `quantas_observacoes` faz: uma
     por card seriam N idas ao banco por abertura de tela.
+
+    🚨 **O `resumo` ENTROU EM 23/11, e o card era MUDO sem ele.** Medido
+    enviando um teste de verdade no `pagamento-tecnicos` (solicitação 5990,
+    card 4051): as 13 respostas vinham no payload e a tela não mostrava
+    nenhuma, porque `CorpoDoCard` desenha `card.resumo` e esta consulta nunca
+    devolveu esse campo. Os outros painéis já tinham o resumo (`paineis._resumo`
+    em três lugares); o quadro de aba era o único sem.
     """
-    return banco.varios(
+    linhas = banco.varios(
         """SELECT c.id, c.aba_id, c.etapa_id, c.solicitacao_id, c.cliente_id,
                   c.numero_os,
                   c.criado_em, c.desfecho, c.desfecho_em,
@@ -480,6 +487,19 @@ def cards_da_aba(aba_id: int, teto: int = 200) -> list[dict]:
             WHERE c.aba_id = %s
             ORDER BY (c.desfecho IS NOT NULL), c.criado_em DESC, c.id DESC
             LIMIT %s""", (int(aba_id), int(teto)))
+
+    # 🚨 A MESMA FUNÇÃO DOS OUTROS PAINÉIS, e não uma segunda régua: o resumo
+    # é "as duas primeiras respostas de texto", decisão já tomada (*"card não
+    # é ficha"*). Escrever outra aqui faria o mesmo card ter dois resumos
+    # diferentes dependendo da tela que o abre.
+    #
+    # ⚠️ Import local: `paineis` importa `pipeline`, então no topo seria ciclo.
+    from .paineis import _resumo
+    for linha in linhas:
+        # ⚠️ `None` quando não há resposta nenhuma, nunca string vazia: o
+        # `v-if` do card não desenha o parágrafo, em vez de desenhar um vazio.
+        linha["resumo"] = _resumo(linha.get("valores")) or None
+    return linhas
 
 
 def etapas_que_recebem() -> list[dict]:

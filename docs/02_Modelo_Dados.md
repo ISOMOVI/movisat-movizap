@@ -3637,7 +3637,9 @@ salvar na tela antiga apagaria o terceiro nome em silêncio.
 
 ### `config.ligacoes_senha_fixa` — o atalho do alistamento
 
-A senha padrão (`movicall`) aceita **além** da derivada por HMAC, que continua
+A senha padrão (hoje `Movisat!@`, 🔵 trocada por ele em 23/11; efetiva
+`MOVISAT`, porque `senha_fixa()` passa a `_limpar()`) aceita **além** da
+derivada por HMAC, que continua
 valendo. ⚠️ **Não queima janela**, senão o primeiro PC a usá-la trancaria os
 outros. 🚨 Custo declarado por ele: quem souber a senha e um ramal alista um PC
 naquele ramal; limite de tentativas por IP e certificado do PC continuam de pé.
@@ -3938,3 +3940,51 @@ A regra que isto fecha: **mudança feita no ERP é aceita, e aceitar é lembrar.
 `mudou_no_erp` **fecha a linha na hora** (não há o que fazer: o card já segue o
 ERP, que vem do cache), avisa uma vez, e só volta a falar se o ERP for para um
 **terceiro** valor que também não é nosso.
+
+## Migração 118 — quem procura cliente na nossa base, e o documento do parceiro
+
+🔵 Ele, 23/11: *"formulario de pagamento de parceiros esta errado, ele nao
+precisa de cpf e cnpj, obviamente pois nao puxa de base alguma, devem ser
+somente preencheiveis"*. E, sobre o botão: **tirar onde não há base**.
+
+`formulario.busca_cliente` — `boolean`, **não anulável**, padrão **`false`**.
+É quem decide se o CNPJ daquele formulário ganha o botão *Buscar*.
+
+🚨 **O DEFEITO QUE A COLUNA FECHA, medido em 23/11.** O botão não era decisão
+de ninguém: a tela o desenhava por `ehNovo && campo.validacao === 'cnpj'`, e
+`FORMATO_NOVO = None` (desde 11/11) põe os 16 em `novo` — então **todo**
+formulário com campo CNPJ ganhou o botão. O `cliente_por_documento` varre a
+tabela `cliente`, que são os clientes **nossos**: parceiro técnico, fornecedor
+ou interessado em teste gratuito nunca está lá. O botão aparecia, a pessoa
+clicava, e a resposta correta era sempre *"não achou"* — comportamento certo
+numa tela que não devia ter oferecido a busca.
+
+🚨 **Fica ligada em SEIS**, e são exatamente os que têm a etapa "Contrato" com
+CPF/CNPJ **escondidos** atrás da pergunta PF/PJ, cujo CNPJ identifica quem já
+tem contrato: `SUPORTE`, `ADITIVO`, `ADMINISTRATIVO`, `FINANCEIRO`, `RESCISAO`,
+`SUBSTITUICAO`.
+⚠️ A `FICHA_CADASTRAL` fica **fora** de propósito: é a ficha de clientes
+**novos** — quem preenche, por definição, ainda não está na base.
+
+⚠️ **POR QUE COLUNA, E NÃO UMA LISTA NO `.vue`:** a mesma razão do `painel` e
+do `formato`. Quem procura cliente é decisão dele, formulário por formulário;
+em coluna, mudar de ideia é uma linha na carga — sem migração e sem build. A
+fonte é o `BUSCA_CLIENTE` do `scripts/carregar_formularios.py`, e a coluna é
+**reescrita a cada carga**, como o `painel`. Duas travas comparam banco ×
+script (`tests/teste_etapas_dos_formularios.py`), porque foi a divergência
+entre as duas verdades que quase apagou 55 validações em 11/11.
+
+🚨 **E o documento do parceiro deixou de ser obrigatório — isto é dado, não
+coluna.** Nos dois formulários de parceiro técnico (`PAGAMENTO_TECNICOS` e
+`CREDENCIAMENTO`) o CPF e o CNPJ estavam **visíveis e os dois obrigatórios**,
+sem nenhuma regra PF/PJ: pessoa física tinha de inventar um CNPJ para o botão
+Enviar funcionar, e jurídica, um CPF. No `CREDENCIAMENTO` isso fechava a porta
+de entrada do parceiro. Agora `obrigatorio = false` nos quatro campos, pelo
+`AJUSTES` da carga.
+⚠️ **Os campos FICAM, e a validação de formato também** — é o pedido dele ao pé
+da letra (*"somente preencheiveis"*): ela só fala quando a pessoa escreve algo.
+Campo vazio passa; CPF pela metade, não. Tirar as duas coisas juntas seria
+passar a aceitar documento quebrado, que é outra decisão.
+⚠️ Os de **cliente** (`TESTE_GRATUITO`, `FICHA_CADASTRAL`, `FORNECEDORES`)
+**não entraram**: lá o documento é o próprio assunto do formulário, e afrouxar
+seria mudança de régua. Decisão dele nesta rodada.

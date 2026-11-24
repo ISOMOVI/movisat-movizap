@@ -317,8 +317,14 @@ async function soltarNaColuna(coluna) {
       </div>
     </div>
 
+    <!-- 🚨 `:aba` entrou em 23/11 e NÃO é enfeite: esta tela serve QUATRO
+         painéis (`PNL_1.2`, `PNL_1.3`, `PNL_1.4`, `PNL_1.5`) com uma única
+         passagem de rótulo, e a pergunta nova do "Finalizar" é só da etapa 888
+         do Contratual (D1 dele). Sem a aba, o diálogo só veria o número da
+         etapa -- e trocar o texto por número solto mudaria as quatro telas no
+         dia em que outra aba tivesse uma etapa com o mesmo id. -->
     <DialogoDeChamado v-if="cardAberto" :card="cardAberto"
-                      rotulo-finalizar="Finalizar"
+                      rotulo-finalizar="Finalizar" :aba="codigo"
                       @fechar="fecharCard" @mudou="carregar" />
   </section>
 </template>

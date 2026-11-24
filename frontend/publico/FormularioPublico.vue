@@ -250,9 +250,24 @@ function voltar() {
    nos botões. Palavra no botão exige modal nosso.
 
    ⚠️ Só pergunta UMA VEZ: confirmado, envia. Perguntar de novo a cada clique
-   transformaria a confirmação em obstáculo. */
+   transformaria a confirmação em obstáculo.
+
+   🚨 E SÓ ONDE HÁ EMPRESA PARA VINCULAR (🔵 dele, 23/11: *"precisa remover dos
+   forms do tecnico que não possuem mesmo vinculo de empresa"*). Esta função
+   travava em `ehNovo`, e desde 11/11 os 16 formulários estão em `novo` --
+   então TODOS perguntavam *"não identificamos a empresa deste chamado na
+   nossa base"*, inclusive os de parceiro técnico, fornecedor e teste
+   gratuito, que não têm empresa nossa para identificar. A pergunta era sobre
+   um vínculo que não existe, e a resposta certa era sempre "continuar".
+
+   🚨 É A MESMA RAIZ DO BOTÃO *Buscar*, e o portão é o mesmo dado:
+   `formulario.busca_cliente` (migração 118). Formulário que não procura
+   cliente na nossa base não tem empresa para vincular -- logo não há o que
+   confirmar. O texto não muda uma palavra: é dele, de 29/10, e o Suporte
+   continua com o aviso. */
 function podeEnviarSemEmpresa() {
   if (!ehNovo.value) return true
+  if (def.value?.busca_cliente !== true) return true
   if (clienteAchado.value) return true
   perguntarSemEmpresa.value = true
   return false
@@ -391,6 +406,7 @@ onMounted(carregar)
         :valores="valores"
         :erro="erro"
         :formato="def.formato"
+        :busca-cliente="def.busca_cliente === true"
         :somente="camposDaEtapa"
         :recados="recados"
         :sugestoes="sugestoes"

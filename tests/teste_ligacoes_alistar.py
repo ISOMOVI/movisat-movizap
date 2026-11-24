@@ -267,7 +267,10 @@ class TestSenhaDeUmDia:
 
 # ── 13/11: A SENHA FIXA ──────────────────────────────────────────────────────
 #
-# 🔵 Dele: *"deixar senha padrão de 'movicall' (essa senha não há muita
+# 🔵 23/11: o valor virou `Movisat!@` (efetivo `MOVISAT`). O que estas travas
+# medem é o MECANISMO, por `senha_fixa()`, e não o valor -- trocar a senha no
+# `/config` não pode deixar a suíte vermelha.
+# 🔵 Dele, 13/11: *"deixar senha padrão de 'movicall' (essa senha não há muita
 # exigência de segredo)"*. Ela é um ATALHO, não uma substituição -- e estes
 # testes existem para as duas metades disso continuarem verdadeiras.
 
@@ -309,7 +312,7 @@ def test_a_senha_derivada_continua_valendo_com_a_fixa_ligada():
 
 def test_a_senha_fixa_nao_alista_ramal_que_nao_existe():
     """🚨 A senha ser conhecida não abre ramal nenhum: o ramal tem de existir e
-    estar ativo. Sem esta trava, `movicall` viraria uma porta para inventar
+    estar ativo. Sem esta trava, a senha padrão viraria uma porta para inventar
     agente de ramal que não é da casa."""
     with pytest.raises(ligacoes_alistar.SenhaInvalida):
         ligacoes_alistar.alistar("99999", ligacoes_alistar.senha_fixa(),
@@ -322,5 +325,8 @@ def test_senha_fixa_vazia_desliga_o_atalho(monkeypatch):
     pessoa("99340")
     monkeypatch.setattr(ligacoes_alistar, "senha_fixa", lambda: "")
     with pytest.raises(ligacoes_alistar.SenhaInvalida):
-        ligacoes_alistar.alistar("99340", "movicall", pedido("99340"),
-                                 ip="10.0.0.34")
+        # ⚠️ Qualquer senha serve aqui: o que se mede é a fixa VAZIA recusar.
+        # Era `movicall` e virou texto obviamente inventado, para ninguém ler
+        # isto como "a senha padrão é esta".
+        ligacoes_alistar.alistar("99340", "zz-senha-que-nao-existe",
+                                 pedido("99340"), ip="10.0.0.34")

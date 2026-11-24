@@ -754,6 +754,25 @@ def devolver_artefato(artefato_id: int, justificativa: str, *,
                                     "por": por})
 
 
+def devolver_lote(lote_id: int, justificativa: str, *,
+                  por: str | None = None) -> dict:
+    """🔵 *"Excluir o card inteiro devolvendo tudo à coluna 1, com
+    justificativa única"* -- tarefa 2.4.
+
+    🚨 A MESMA justificativa vai em TODOS os itens, e é o lado do FPSL que
+    aplica artefato por artefato, pela regra que já existia. Aqui só se
+    transporta -- repartir a decisão em dois lugares faria as duas divergirem.
+    """
+    return _pagamento("/devolver-lote", {"lote_id": lote_id,
+                                         "justificativa": justificativa,
+                                         "por": por})
+
+
+def reabrir_lote(lote_id: int, *, por: str | None = None) -> dict:
+    """🔵 *"Reabrir na coluna 5 e gerar o arquivo de novo"* -- tarefa 2.5."""
+    return _pagamento("/reabrir", {"lote_id": lote_id, "por": por})
+
+
 def auditar_lote(lote_id: int, *, por: str | None = None) -> dict:
     return _pagamento("/auditar", {"lote_id": lote_id, "por": por})
 

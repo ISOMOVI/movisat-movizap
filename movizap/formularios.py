@@ -140,7 +140,7 @@ def definicao(slug: str, so_ativo: bool = True) -> dict:
     linha = banco.um(
         """SELECT id, codigo, slug, titulo, setor, botao, descricao, ativo,
                   gera_os, problema_id, tipo_os_id, prioridade_id,
-                  formato, etapas
+                  formato, etapas, busca_cliente
              FROM formulario WHERE slug = %s""", (slug,))
     if not linha or (so_ativo and not linha["ativo"]):
         raise FormularioNaoExiste(slug)
@@ -449,6 +449,7 @@ def registrar(d: dict, valores: dict, arquivos: list | None = None,
 
 def gravar_definicao(bruto: dict, codigo: str, slug: str, setor: str,
                      titulo: str | None = None, painel: str | None = None,
+                     busca_cliente: bool = False,
                      ordem: int = 100, formato: str = "classico",
                      etapas: list | None = None,
                      validacoes: dict | None = None,
@@ -583,8 +584,8 @@ def gravar_definicao(bruto: dict, codigo: str, slug: str, setor: str,
     linha = banco.um(
         """INSERT INTO formulario (codigo, slug, titulo, setor, botao,
                                    bitrix_id, bitrix_sec, painel, ordem,
-                                   formato, etapas)
-           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                                   formato, etapas, busca_cliente)
+           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
            ON CONFLICT (codigo) DO UPDATE
               SET slug = EXCLUDED.slug, titulo = EXCLUDED.titulo,
                   setor = EXCLUDED.setor, botao = EXCLUDED.botao,
@@ -597,6 +598,12 @@ def gravar_definicao(bruto: dict, codigo: str, slug: str, setor: str,
                   -- publicar formulario nenhum.
                   painel = EXCLUDED.painel,
                   formato = EXCLUDED.formato, etapas = EXCLUDED.etapas,
+                  -- 🚨 REESCRITO A CADA CARGA, pela mesma razão do `painel`:
+                  -- quem procura cliente é decisão dele e vive no
+                  -- `scripts/carregar_formularios.py` (`BUSCA_CLIENTE`).
+                  -- Deixar de fora faria a lista divergir do banco em
+                  -- silêncio, que é a bomba de 11/11 outra vez.
+                  busca_cliente = EXCLUDED.busca_cliente,
                   ordem = EXCLUDED.ordem, atualizado_em = now()
         RETURNING id, ativo""",
         (codigo, slug,
@@ -604,7 +611,8 @@ def gravar_definicao(bruto: dict, codigo: str, slug: str, setor: str,
          setor, (dados.get("buttonCaption") or "Enviar").strip()[:60],
          str(bruto.get("id")), bruto.get("sec"), painel, ordem,
          formato,
-         json.dumps(etapas, ensure_ascii=False) if etapas else None))
+         json.dumps(etapas, ensure_ascii=False) if etapas else None,
+         bool(busca_cliente)))
 
     # 🚨 O DESTINO ACOMPANHA O PAINEL, e e reescrito a cada carga como ele:
     # formulario criado depois da migracao 106 nascia com painel e SEM
