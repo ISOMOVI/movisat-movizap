@@ -76,6 +76,15 @@ def pessoa(ramal: str) -> dict:
 
 
 def senha_de(ramal: str) -> str:
+    """A senha que ALISTA. 🚨 24/11: é a padrão, uma só para todos os ramais
+    (*"Somente 'Movisat!@'"*). O argumento fica para as chamadas não mudarem
+    todas, e para o dia em que a senha voltar a ser por ramal."""
+    return ligacoes_alistar.senha_fixa()
+
+
+def senha_derivada_de(ramal: str) -> str:
+    """A senha de uso único de 15/10. ⚠️ Ela NÃO alista mais -- está aqui para
+    os testes que medem justamente a recusa."""
     return ligacoes_alistar.formatar(
         ligacoes_alistar.senha_da_janela(ramal, ligacoes_alistar.janela_de()))
 
@@ -127,30 +136,32 @@ def test_alistar_devolve_chave_e_certificado_que_funcionam_juntos():
     # A prova é reler: a chave e o certificado têm de ser do MESMO agente.
     agente = ligacoes.agente_da_chave(r["chave"], r["cert_pem"], exigir_cert=True)
     assert agente["ramal"] == "99200"
+    # 🚨 24/11: a senha padrão NÃO queima janela, então não nasce linha aqui.
+    # Era `== 1` enquanto a derivada alistava.
     assert banco.um("SELECT count(*) n FROM alistamento_queimado WHERE ramal = %s",
-                    ("99200",))["n"] == 1
+                    ("99200",))["n"] == 0
 
 
-def test_a_mesma_senha_nao_serve_duas_vezes():
+def test_a_mesma_senha_SERVE_sempre():
+    """🚨 INVERTIDO EM 24/11 (*"Somente 'Movisat!@'"*). Enquanto a senha era
+    derivada, a mesma senha não servia duas vezes -- `UNIQUE (ramal, janela)`
+    a travava. Agora a senha é a padrão e ela tem de servir em quantos PCs
+    precisar: se queimasse, o primeiro PC trancaria todos os outros."""
     pessoa("99210")
     senha = senha_de("99210")
-    ligacoes_alistar.alistar("99210", senha, pedido("99210"), ip="10.0.0.2")
-    with pytest.raises(ligacoes_alistar.SenhaInvalida) as e:
-        ligacoes_alistar.alistar("99210", senha, pedido("99210"), ip="10.0.0.2")
-    assert "já foi usada" in str(e.value)
+    assert ligacoes_alistar.alistar("99210", senha, pedido("99210"),
+                                    pc="PC-UM", ip="10.0.0.2")["ok"]
+    assert ligacoes_alistar.alistar("99210", senha, pedido("99210"),
+                                    pc="PC-DOIS", ip="10.0.0.2")["ok"]
 
 
-def test_alistar_em_pc_novo_revoga_o_anterior(monkeypatch):
-    """🔵 Decisão dele (15/10): quem alista de novo está trocando de PC, e dois
-    PCs no mesmo ramal mandariam em dobro."""
+def test_alistar_em_pc_novo_revoga_o_anterior():
+    """🔵 Decisão dele (15/10), e ela NÃO mudou com a senha padrão: quem alista
+    de novo está trocando de PC, e dois PCs no mesmo ramal mandariam em dobro."""
     pessoa("99220")
     velho = ligacoes_alistar.alistar("99220", senha_de("99220"), pedido("99220"),
                                      pc="PC-VELHO", ip="10.0.0.3")
-    # Janela seguinte: senha nova, porque a anterior já foi queimada.
-    proxima = ligacoes_alistar.janela_de() + 1
-    senha = ligacoes_alistar.formatar(ligacoes_alistar.senha_da_janela("99220", proxima))
-    monkeypatch.setattr(ligacoes_alistar, "janela_de", lambda *_: proxima)
-    novo = ligacoes_alistar.alistar("99220", senha, pedido("99220"),
+    novo = ligacoes_alistar.alistar("99220", senha_de("99220"), pedido("99220"),
                                     pc="PC-NOVO", ip="10.0.0.3")
     assert novo["pc_anterior"] == "PC-VELHO"
     with pytest.raises(ligacoes.ChaveInvalida):
@@ -210,59 +221,37 @@ class TestSenhaDeUmDia:
         assert (ligacoes_alistar.JANELAS_ACEITAS
                 * ligacoes_alistar.JANELA_S) == 48 * 3600
 
-    def test_senha_de_ontem_a_noite_ainda_serve(self):
-        """23 h atrás: é o caso dele, de ditar a senha hoje e a pessoa rodar o
-        instalador amanhã de manhã."""
+    def test_a_derivada_NAO_ALISTA_MAIS(self):
+        """🚨 24/11, DELE: *"Somente 'Movisat!@'"*. A senha de uso único
+        continua sendo CALCULADA (o `senhas_dos_ramais.py` e o
+        `segundos_restantes` a importam), e deixou de abrir a porta. Esta
+        trava é a que impede alguém de "reativar" o caminho sem decidir."""
         pessoa("99130")
-        import time as _t
-        janela_velha = ligacoes_alistar.janela_de(_t.time() - 23 * 3600)
-        senha = ligacoes_alistar.senha_da_janela("99130", janela_velha)
-        r = ligacoes_alistar.alistar("99130", senha, pedido("99130"), pc="PC-VELHA")
-        assert r["ok"] and r["ramal"] == "99130"
+        senha = senha_derivada_de("99130")
+        with pytest.raises(ligacoes_alistar.SenhaInvalida):
+            ligacoes_alistar.alistar("99130", senha, pedido("99130"), pc="PC-DERIVADA")
 
-    def test_senha_de_47_horas_ainda_serve(self):
-        """É o caso dele: deixar as senhas prontas hoje e os operadores
-        rodarem o instalador depois de amanhã."""
+    def test_a_derivada_de_qualquer_janela_e_recusada(self):
+        """Nenhuma janela abre: nem a de agora, nem a de ontem, nem a de 47 h.
+        Enquanto a derivada valia, as três entravam."""
         pessoa("99134")
         import time as _t
-        janela = ligacoes_alistar.janela_de(_t.time() - 47 * 3600)
-        senha = ligacoes_alistar.senha_da_janela("99134", janela)
-        assert ligacoes_alistar.alistar("99134", senha, pedido("99134"),
-                                        pc="PC-47H")["ok"]
+        for horas in (0, 23, 47):
+            janela = ligacoes_alistar.janela_de(_t.time() - horas * 3600)
+            senha = ligacoes_alistar.senha_da_janela("99134", janela)
+            with pytest.raises(ligacoes_alistar.SenhaInvalida):
+                ligacoes_alistar.alistar("99134", senha, pedido("99134"),
+                                         pc=f"PC-{horas}H")
 
-    def test_senha_de_mais_de_48_horas_nao_serve(self):
+    def test_recusar_a_derivada_nao_queima_janela(self):
+        """⚠️ Recusa não pode gastar nada: se queimasse, uma tentativa à toa
+        trancaria a janela daquele ramal."""
         pessoa("99131")
-        import time as _t  # noqa: F811
-        janela_antiga = ligacoes_alistar.janela_de(_t.time() - 49 * 3600)
-        senha = ligacoes_alistar.senha_da_janela("99131", janela_antiga)
         with pytest.raises(ligacoes_alistar.SenhaInvalida):
-            ligacoes_alistar.alistar("99131", senha, pedido("99131"), pc="PC-ANTIGA")
-
-    def test_continua_de_uso_unico_dentro_do_dia(self):
-        """Valer um dia não é poder usar duas vezes: a primeira utilização
-        queima a janela."""
-        pessoa("99132")
-        senha = senha_de("99132")
-        assert ligacoes_alistar.alistar("99132", senha, pedido("99132"),
-                                        pc="PC-UM")["ok"]
-        with pytest.raises(ligacoes_alistar.SenhaInvalida):
-            ligacoes_alistar.alistar("99132", senha, pedido("99132"), pc="PC-DOIS")
-
-    def test_uma_janela_queimada_nao_tranca_a_seguinte(self):
-        """🚨 É O MOTIVO DE A GERAÇÃO FICAR EM 10 MIN. Queimada a senha de
-        agora, a de 10 minutos atrás (ou a da próxima janela) continua
-        servindo -- é isso que faz "peça outra senha" funcionar."""
-        pessoa("99133")
-        import time as _t
-        agora = ligacoes_alistar.janela_de()
-        assert ligacoes_alistar.alistar(
-            "99133", ligacoes_alistar.senha_da_janela("99133", agora),
-            pedido("99133"), pc="PC-A")["ok"]
-        anterior = ligacoes_alistar.janela_de(_t.time() - 600)
-        assert anterior != agora
-        assert ligacoes_alistar.alistar(
-            "99133", ligacoes_alistar.senha_da_janela("99133", anterior),
-            pedido("99133"), pc="PC-B")["ok"]
+            ligacoes_alistar.alistar("99131", senha_derivada_de("99131"),
+                                     pedido("99131"), pc="PC-ANTIGA")
+        assert banco.um("SELECT count(*) n FROM alistamento_queimado WHERE ramal = %s",
+                        ("99131",))["n"] == 0
 
 
 # ── 13/11: A SENHA FIXA ──────────────────────────────────────────────────────
@@ -271,8 +260,11 @@ class TestSenhaDeUmDia:
 # medem é o MECANISMO, por `senha_fixa()`, e não o valor -- trocar a senha no
 # `/config` não pode deixar a suíte vermelha.
 # 🔵 Dele, 13/11: *"deixar senha padrão de 'movicall' (essa senha não há muita
-# exigência de segredo)"*. Ela é um ATALHO, não uma substituição -- e estes
-# testes existem para as duas metades disso continuarem verdadeiras.
+# exigência de segredo)"*. Nasceu como ATALHO ao lado da derivada.
+#
+# 🚨 24/11, DELE: *"Somente 'Movisat!@'"*. Deixou de ser atalho e passou a ser
+# A ÚNICA porta, comparada literalmente. Os testes abaixo medem as duas metades
+# novas: a padrão entra em quantos PCs precisar, e nada mais entra.
 
 
 def test_a_senha_fixa_alista():
@@ -299,15 +291,39 @@ def test_a_senha_fixa_NAO_QUEIMA_e_serve_em_varios_PCs():
     assert segundo["pc_anterior"] == "PC-UM"
 
 
-def test_a_senha_derivada_continua_valendo_com_a_fixa_ligada():
-    """⚠️ A fixa não pode ter desligado o caminho de 15/10: quem receber a
-    senha do dia continua entrando por ela, e gastando a janela dela."""
+def test_a_senha_padrao_e_a_UNICA_que_alista():
+    """🚨 INVERTIDO EM 24/11. Até 23/11 esta trava media o contrário -- que a
+    senha padrão não havia desligado o caminho de 15/10. 🔵 Ele fechou:
+    *"Somente 'Movisat!@'"*. Então o par tem de valer junto: a padrão entra,
+    a derivada do MESMO ramal não."""
     pessoa("99320")
-    senha = senha_de("99320")
-    r = ligacoes_alistar.alistar("99320", senha, pedido("99320"), ip="10.0.0.32")
-    assert r["ok"] is True
+    assert ligacoes_alistar.alistar("99320", senha_de("99320"), pedido("99320"),
+                                    ip="10.0.0.32")["ok"] is True
     with pytest.raises(ligacoes_alistar.SenhaInvalida):
-        ligacoes_alistar.alistar("99320", senha, pedido("99320"), ip="10.0.0.32")
+        ligacoes_alistar.alistar("99320", senha_derivada_de("99320"),
+                                 pedido("99320"), ip="10.0.0.32")
+
+
+def test_a_senha_padrao_e_comparada_LITERALMENTE():
+    """🚨 24/11. Enquanto os dois lados passavam pelo `_limpar` (que reduz a
+    `A-Z2-9`), o `!@` era descartado ANTES de comparar -- e `MOVISAT`,
+    `movisat` e `mo-vi-sat` alistavam igual. *"Somente 'Movisat!@'"* quer
+    dizer o valor como está escrito.
+
+    ⚠️ Mede pelo valor REAL de `senha_fixa()`, não pela string crua: trocar a
+    senha no `/config` não pode deixar a suíte vermelha."""
+    padrao = ligacoes_alistar.senha_fixa()
+    assert padrao, "a senha padrão tem de estar definida no config"
+    pessoa("99330")
+    # Variantes que o `_limpar` tornava equivalentes e que agora são recusadas.
+    for variante in {padrao.upper(), padrao.lower(),
+                     ligacoes_alistar._limpar(padrao)} - {padrao}:
+        with pytest.raises(ligacoes_alistar.SenhaInvalida):
+            ligacoes_alistar.alistar("99330", variante, pedido("99330"),
+                                     ip="10.0.0.35")
+    # E o valor exato entra.
+    assert ligacoes_alistar.alistar("99330", padrao, pedido("99330"),
+                                    ip="10.0.0.36")["ok"]
 
 
 def test_a_senha_fixa_nao_alista_ramal_que_nao_existe():
@@ -319,14 +335,17 @@ def test_a_senha_fixa_nao_alista_ramal_que_nao_existe():
                                  pedido("99999"), ip="10.0.0.33")
 
 
-def test_senha_fixa_vazia_desliga_o_atalho(monkeypatch):
-    """⚠️ `config.ligacoes_senha_fixa` vazio é como ele desfaz isto sem mexer
-    em código -- e aí só a senha derivada entra."""
+def test_senha_fixa_vazia_TRANCA_o_alistamento(monkeypatch):
+    """🚨 MUDOU DE SIGNIFICADO EM 24/11. Enquanto a derivada alistava, esvaziar
+    `config.ligacoes_senha_fixa` só desligava um atalho. Agora que a padrão é
+    a única porta, vazia significa que NINGUÉM alista -- e isso é o jeito de
+    parar o alistamento de propósito, não um acidente.
+
+    ⚠️ Mede com a derivada TAMBÉM, porque é ela que entraria se o caminho
+    antigo tivesse sobrado."""
     pessoa("99340")
     monkeypatch.setattr(ligacoes_alistar, "senha_fixa", lambda: "")
-    with pytest.raises(ligacoes_alistar.SenhaInvalida):
-        # ⚠️ Qualquer senha serve aqui: o que se mede é a fixa VAZIA recusar.
-        # Era `movicall` e virou texto obviamente inventado, para ninguém ler
-        # isto como "a senha padrão é esta".
-        ligacoes_alistar.alistar("99340", "zz-senha-que-nao-existe",
-                                 pedido("99340"), ip="10.0.0.34")
+    for senha in ("zz-senha-que-nao-existe", senha_derivada_de("99340")):
+        with pytest.raises(ligacoes_alistar.SenhaInvalida):
+            ligacoes_alistar.alistar("99340", senha, pedido("99340"),
+                                     ip="10.0.0.34")

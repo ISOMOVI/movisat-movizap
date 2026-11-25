@@ -1,4 +1,19 @@
-"""Alistamento do agente de ligações por SENHA de uso único (15/10/2026).
+"""Alistamento do agente de ligações por SENHA (15/10/2026).
+
+🚨 LEIA ISTO PRIMEIRO -- 24/11/2026, PEDIDO DELE: *"Somente 'Movisat!@'"*.
+A senha de alistamento é UMA, padrão, igual para todos, guardada em
+`config.ligacoes_senha_fixa` e comparada LITERALMENTE (maiúscula e símbolo
+contam). A senha DERIVADA de uso único, descrita no resto deste cabeçalho,
+**não alista mais**: `senha_da_janela` continua sendo calculada porque outras
+ferramentas a importam, mas nenhuma janela abre a porta. O histórico abaixo
+fica porque explica POR QUE a derivada existiu e o que se perdeu ao trocá-la.
+
+⚠️ O QUE SE PERDEU, POR ESCRITO: a senha não vence mais, não serve uma vez só
+e é a mesma para todos os ramais. Quem souber `Movisat!@` e um ramal ativo
+alista um PC naquele ramal -- e alistar REVOGA o PC que estava usando. De pé
+continuam: ramal tem de existir e estar ativo, limite de tentativas por IP, e
+o certificado emitido vale só para aquele PC.
+
 
 🔵 Pedido dele: *"considere que podem trocar de PC, então por isso o .exe deve
 rodar livre assim, porém validar o atendente do MicroSip com uma senha que
@@ -97,10 +112,20 @@ CHAVE_SENHA_FIXA = "ligacoes_senha_fixa"
 
 
 def senha_fixa() -> str:
-    """A senha padrão de alistamento. Vazia DESLIGA o atalho."""
+    """A senha padrão de alistamento, LITERAL. Vazia TRANCA o alistamento.
+
+    🚨 24/11: NÃO passa mais pelo `_limpar`. Enquanto passava, o valor
+    guardado era reduzido a `A-Z2-9` -- `Movisat!@` virava `MOVISAT` no banco
+    e na comparação, e por isso `MOVISAT`, `movisat` e `mo-vi-sat` alistavam
+    igual. 🔵 Ele pediu *"Somente 'Movisat!@'"*: o valor vale como está
+    escrito, com maiúscula e com símbolo.
+
+    ⚠️ VAZIA NÃO É MAIS "DESLIGA O ATALHO": desde que a senha derivada deixou
+    de alistar, esta é a única porta, e vazia significa que ninguém alista.
+    """
     linha = banco.um("SELECT valor FROM config WHERE chave = %s",
                      (CHAVE_SENHA_FIXA,))
-    return _limpar((linha or {}).get("valor") or "")
+    return ((linha or {}).get("valor") or "").strip()
 TAMANHO = 8
 # Sem I, O, 0 e 1: a senha é DITADA por telefone, e "I" virando "1" custa uma
 # tentativa queimada de verdade.
@@ -215,12 +240,13 @@ def preparar(ramal: str, nome: str | None = None) -> dict:
 
 def alistar(ramal: str, senha: str, pedido_pem: str | bytes,
             pc: str | None = None, ip: str | None = None) -> dict:
-    """Uma chamada e o PC está pronto: confere a senha, queima a janela, revoga
-    o PC anterior, cria a chave nova e assina o certificado deste PC.
+    """Uma chamada e o PC está pronto: confere a senha padrão, revoga o PC
+    anterior, cria a chave nova e assina o certificado deste PC.
 
-    🚨 A ordem é deliberada: a janela é QUEIMADA ANTES de emitir qualquer
-    coisa. Se a emissão falhar depois disso, a pessoa pede outra senha — o que
-    não pode acontecer é a senha sobreviver a uma tentativa.
+    🚨 24/11: A SENHA É UMA SÓ, a de `senha_fixa()`, e ela NÃO queima janela —
+    serve em quantos PCs precisar. O bloco de `alistamento_queimado` abaixo
+    ficou de pé para as linhas que já existem e para o dia em que a senha
+    derivada voltar; com `achada` sempre None, ele não roda.
 
     🚨 Revoga o PC anterior do mesmo ramal (decisão dele, 15/10): quem alista
     de novo está trocando de PC, e dois PCs no mesmo ramal mandariam em
@@ -239,27 +265,35 @@ def alistar(ramal: str, senha: str, pedido_pem: str | bytes,
 
     atendente = banco.um(
         "SELECT id, nome FROM atendente WHERE ramal = %s AND ativo", (ramal,))
-    digitada = _limpar(senha)
-    janela_atual = janela_de()
+    # 🔵 24/11, DELE: *"Somente 'Movisat!@'"*. A SENHA DERIVADA DEIXOU DE
+    # ALISTAR. `senha_da_janela` continua existindo e continua sem ser
+    # guardada (outras ferramentas a importam), mas nenhuma janela abre a
+    # porta: a única senha que alista é a de `senha_fixa()`.
+    #
+    # 🚨 E A COMPARAÇÃO É LITERAL. Até hoje os dois lados passavam pelo
+    # `_limpar`, que reduz a `A-Z2-9` -- e por isso `MOVISAT`, `movisat` e
+    # `mo-vi-sat` alistavam igual, porque o `!@` era descartado ANTES de
+    # comparar. "Somente" quer dizer o valor como está escrito: maiúscula
+    # conta, símbolo conta.
+    #
+    # 🚨 COMPARA EM BYTES, não em str: `compare_digest` com str exige ASCII, e
+    # um acento digitado por engano levantaria TypeError -- 500 no lugar do
+    # 401 que a pessoa precisa ler.
+    #
+    # ⚠️ `achada` fica SEMPRE None de propósito: é o que mantém a janela sem
+    # ser queimada mais abaixo, e a senha padrão nunca queimou janela (se
+    # queimasse, o primeiro PC a usá-la trancaria todos os outros).
+    digitada = (senha or "").strip()
     achada = None
-    for passo in range(JANELAS_ACEITAS):
-        janela = janela_atual - passo
-        if atendente and secrets.compare_digest(digitada, senha_da_janela(ramal, janela)):
-            achada = janela
-            break
-
-    # 🔵 13/11: a senha fixa, se o ramal existe. Fica DEPOIS do laço de
-    # propósito: quem digitou a senha do dia continua gastando a janela dele,
-    # como sempre, e a fixa só entra quando a derivada não casou.
     usou_fixa = False
-    if achada is None and atendente:
-        padrao = senha_fixa()
-        if padrao and secrets.compare_digest(digitada, padrao):
-            usou_fixa = True
-            log.info("alistamento do ramal %s pela senha fixa (pc=%s ip=%s)",
-                     ramal, pc, ip)
+    padrao = senha_fixa()
+    if atendente and padrao and secrets.compare_digest(
+            digitada.encode("utf-8"), padrao.encode("utf-8")):
+        usou_fixa = True
+        log.info("alistamento do ramal %s pela senha padrao (pc=%s ip=%s)",
+                 ramal, pc, ip)
 
-    if achada is None and not usou_fixa:
+    if not usou_fixa:
         ratelimit.registrar_falha(trava)
         # Ramal sem dono e senha errada dão a MESMA resposta: dizer qual é o
         # caso entrega a lista de ramais válidos a quem está tentando adivinhar.
