@@ -285,7 +285,11 @@ describe('a ordem', () => {
   it('nasce com o serviço mais antigo primeiro', async () => {
     const tela = await montar()
     await abrirOFranck(tela)
-    const oss = tela.findAll('.artefato__os').map((b) => b.text())
+    /* 25/11: o botao da OS passou a usar `.card__os`, o nome do
+       vocabulario compartilhado do card -- o seletor acompanha a
+       classe, e e a 4a vez no dia que uma trava aponta para o NOME em
+       vez do papel. */
+    const oss = tela.findAll('.artefato .card__os').map((b) => b.text())
     expect(oss.slice(0, 2)).toEqual(['OS 16689', 'OS 17120'])
   })
 
@@ -296,7 +300,7 @@ describe('a ordem', () => {
        ele ordena os artefatos de todos os cards, e continua alcançável com o
        card aberto. */
     await tela.findAll('select')[0].setValue('os_desc')
-    const oss = tela.findAll('.artefato__os').map((b) => b.text())
+    const oss = tela.findAll('.artefato .card__os').map((b) => b.text())
     expect(oss.slice(0, 2)).toEqual(['OS 17120', 'OS 16689'])
   })
 
@@ -357,15 +361,17 @@ describe('o filtro e a marcação, por card', () => {
     const franck = await abrirOFranck(tela)
     await franck.findAll('.artefato__marca input[type="checkbox"]')[0]
       .setValue(true)
+    /* ⚠️ `toContain`, e não `toBe`: o quadro traz nome E nota (25/11), então
+       o texto do botão continua COMEÇANDO pelo nome, mas não é só ele. */
     expect(franck.findAll('button').map((b) => b.text())
       .find((x) => x.startsWith('Preparar os marcados')))
-      .toBe('Preparar os marcados (1)')
+      .toContain('Preparar os marcados (1)')
 
     await fecharODialogo(tela)
     const pedro = await abrir(tela, 'Pedro Felipe')
     expect(pedro.findAll('button').map((b) => b.text())
       .find((x) => x.startsWith('Preparar os marcados')))
-      .toBe('Preparar os marcados (0)')
+      .toContain('Preparar os marcados (0)')
 
     /* ⚠️ E voltar ao Franck tem de ACHAR a marcação ainda lá: fechar o
        diálogo não é desmarcar. */
@@ -373,7 +379,7 @@ describe('o filtro e a marcação, por card', () => {
     const devolta = await abrirOFranck(tela)
     expect(devolta.findAll('button').map((b) => b.text())
       .find((x) => x.startsWith('Preparar os marcados')))
-      .toBe('Preparar os marcados (1)')
+      .toContain('Preparar os marcados (1)')
   })
 
   it('prepara só os artefatos daquele card', async () => {
@@ -415,7 +421,7 @@ describe('os serviços que a tela não chamava', () => {
   it('a OS abre pelo ARTEFATO, nunca pela rota da Operação', async () => {
     const tela = await montar()
     await abrirOFranck(tela)
-    await tela.findAll('.artefato__os')[0].trigger('click')
+    await tela.findAll('.artefato .card__os')[0].trigger('click')
     await flushPromises()
     expect(estado.gets).toContain('/api/paineis/servico-dos-tecnicos/os/1')
     expect(estado.gets.join(' ')).not.toContain('/api/paineis/operacao/ficha')
@@ -437,11 +443,14 @@ describe('os serviços que a tela não chamava', () => {
     const botao = tela.findAll('button').find((b) => b.text() === 'Comprovante')
     expect(botao).toBeTruthy()
     await botao.trigger('click')
-    const campos = tela.findAll('.modal__caixa--curta input')
+    /* 🚨 `input.campo`, e NAO indice: o primeiro input do modal passou a ser
+       o `<input type="file">` do anexo (25/11), que o jsdom recusa receber
+       valor. A classe diz o que se quer; a posicao era suposicao. */
+    const campos = tela.findAll('.modal__caixa--curta input.campo')
     await campos[0].setValue('recibo_franck_1811.pdf')
     /* 🔵 *"Após o envio do anexo, abre o campo que pede o valor"*: o campo do
        valor só aparece depois do arquivo. */
-    const depois = tela.findAll('.modal__caixa--curta input')
+    const depois = tela.findAll('.modal__caixa--curta input.campo')
     expect(depois.length).toBe(3)
     await depois[1].setValue('100')
     await tela.findAll('.modal__acoes button')
@@ -466,7 +475,8 @@ describe('os serviços que a tela não chamava', () => {
   it('a prévia diz quais colunas do Procfy saem em branco', async () => {
     const tela = await montar()
     await abrirOLote(tela)
-    await tela.findAll('button').find((b) => b.text() === 'Ver prévia')
+    await tela.findAll('button')
+      .find((b) => b.text().startsWith('Ver prévia'))
       .trigger('click')
     await flushPromises()
     const texto = tela.text()
@@ -482,7 +492,8 @@ describe('os serviços que a tela não chamava', () => {
   it('o DataScope é lido por gesto, e só lido', async () => {
     const tela = await montar()
     await abrirOLote(tela)
-    await tela.findAll('button').find((b) => b.text() === 'Ler DataScope')
+    await tela.findAll('button')
+      .find((b) => b.text().startsWith('Ler DataScope'))
       .trigger('click')
     await flushPromises()
     expect(estado.posts.some((p) => p.caminho.endsWith('/datascope/5')))
@@ -588,7 +599,10 @@ describe('o filtro de data não pode esvaziar o card', () => {
     await ate.setValue('2026-10-01')
     await ate.trigger('change')
     expect(tela.text()).not.toContain('OS 17120')
-    const limpar = tela.findAll('button').find((b) => b.text() === 'limpar')
+    /* 25/11: o botao virou "Limpar o filtro" com icone, dentro do quadro
+       do filtro -- igualdade de texto inteiro e aposta sobre a FORMA. */
+    const limpar = tela.findAll('button')
+      .find((b) => b.text().startsWith('Limpar'))
     await limpar.trigger('click')
     expect(tela.text()).toContain('OS 17120')
   })

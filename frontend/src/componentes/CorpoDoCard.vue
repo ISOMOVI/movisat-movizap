@@ -44,6 +44,12 @@ const props = defineProps({
      escreve no ERP. Nas abas o mover grava no nosso banco, então não existe
      escrita pendente -- e mostrar o selo ali seria inventar um estado. */
   mostrarPendencia: { type: Boolean, default: false },
+  /* 🔵 25/11, dele: no CONTRATUAL o número do termo vem ANTES do nome do
+     cliente (`TERMO 12345 · PASTELARIA VELASCO`). 🚨 É prop, e não regra fixa,
+     porque este componente desenha o card das QUATRO abas e da Operação: sem a
+     condição eu mudaria Pós-venda e Financeiro junto, que é exatamente o erro
+     que custou as quatro telas hoje de manhã. */
+  termoPrimeiro: { type: Boolean, default: false },
   segundosDeEspera: { type: Number, default: 0 },
 })
 
@@ -216,6 +222,19 @@ defineExpose({ ehExcecao, temOS })
     <!-- LINHA 1 — O CLIENTE. 🔵 Variante C, escolhida por ele em 05/11.
          🚨 Corta em duas linhas, com o nome inteiro no `title`. -->
     <span class="card__linha">
+      <!-- 🔵 25/11 — NO CONTRATUAL, O TERMO ABRE A LINHA. O número é a
+           identidade do contrato; o cliente vem depois dele.
+           ⚠️ Só quando HÁ termo: 1 de cada 7 OS não nasce de termo (venda,
+           cartão RFID, manutenção), e rótulo sem número seria ruído.
+           ⚠️ `title` diz a origem, porque o posto à mão não é o oficial: tela
+           que não distingue os dois é tela mentindo (`M12`). -->
+      <span v-if="termoPrimeiro && card.termo" class="card__termo-ident"
+            :title="card.termo_a_mao
+                    ? 'número posto à mão' + (card.termo_por_nome
+                       ? ' por ' + card.termo_por_nome : '')
+                    : 'número do termo na OS'">
+        TERMO {{ card.termo }}
+      </span>
       <span v-if="card.cliente" class="card__cliente"
             :title="card.cliente">{{ card.cliente }}</span>
       <!-- ⚠️ Cliente sem nome é DITO, não deixado em branco: o `harmonit_id`
@@ -399,6 +418,13 @@ defineExpose({ ehExcecao, temOS })
   color: var(--acento); font-weight: var(--peso-forte); font-size: var(--txt-sm);
 }
 .card__termo { font-size: var(--txt-xs); color: var(--texto-fraco); white-space: nowrap; }
+/* 🔵 25/11 — o TERMO como IDENTIFICADOR da linha 1 do Contratual. Peso de
+   identidade, não de apoio: aqui ele é o que a pessoa procura, ao contrário do
+   `.card__termo` da linha 2, que é referência ao lado da OS. */
+.card__termo-ident {
+  font-size: var(--txt-sm); font-weight: var(--peso-forte);
+  color: var(--texto); white-space: nowrap; flex: none;
+}
 .card__dado { font-size: var(--txt-xs); color: var(--texto-fraco); }
 .card__etapa--parado { color: var(--aviso); font-weight: var(--peso-forte); }
 .card__prazo { display: inline-flex; align-items: center; gap: var(--e-1); }

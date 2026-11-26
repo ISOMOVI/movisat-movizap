@@ -10,6 +10,9 @@ import { createApp } from 'vue'
 import './estilo/tokens.css'
 import './estilo/base.css'
 import './estilo/componentes.css'
+/* 🚨 A FONTE ÚNICA DO CSS DOS PAINÉIS (25/11). Vem DEPOIS do
+   componentes.css de propósito: ela é a casa das regras de painel, e
+   o que estava copiado em quatro `<style scoped>` mora aqui agora. */
 import 'bootstrap-icons/font/bootstrap-icons.css'
 
 import App from './App.vue'

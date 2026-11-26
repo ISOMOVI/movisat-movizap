@@ -881,7 +881,7 @@ onUnmounted(() => document.removeEventListener('keydown', atalho))
       </div>
 
       <div class="linha email__acoes">
-        <button class="botao botao--pequeno botao--acento" type="button" @click="novaMensagem">
+        <button class="botao botao--pequeno" type="button" @click="novaMensagem">
           <i class="bi bi-pencil-square" aria-hidden="true"></i> Nova mensagem
         </button>
         <span class="email__separador" aria-hidden="true"></span>
@@ -950,7 +950,7 @@ onUnmounted(() => document.removeEventListener('keydown', atalho))
       </div>
 
       <div class="linha">
-        <button class="botao botao--pequeno botao--acento" type="button" @click="salvarAssinatura">
+        <button class="botao botao--pequeno" type="button" @click="salvarAssinatura">
           Salvar
         </button>
         <button class="botao botao--pequeno botao--fantasma" type="button"
@@ -1044,7 +1044,7 @@ onUnmounted(() => document.removeEventListener('keydown', atalho))
       </div>
 
       <div class="linha">
-        <button class="botao botao--acento" type="button" :disabled="enviando" @click="mandar">
+        <button class="botao" type="button" :disabled="enviando" @click="mandar">
           <i class="bi bi-send" aria-hidden="true"></i>
           {{ enviando ? 'enviando…' : 'Enviar' }}
         </button>

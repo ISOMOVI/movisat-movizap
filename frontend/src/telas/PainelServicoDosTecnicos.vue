@@ -58,6 +58,7 @@
    ============================================================================ */
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { api, ErroDeApi } from '../api/cliente.js'
+import AjudaDaTela from '../componentes/AjudaDaTela.vue'
 import BarraDeRolagem from '../componentes/BarraDeRolagem.vue'
 import RolagemDaBorda from '../componentes/RolagemDaBorda.vue'
 import { sessao } from '../estado/sessao.js'
@@ -100,6 +101,14 @@ const justificativa = ref('')
 /* 🔵 19/11: os três modais novos. */
 const osAberta = ref(null)
 const comprovando = ref(null)
+/* O anexo do comprovante (25/11): subindo e o motivo da recusa, que vem do
+   servidor — quem sabe a lista de extensões e o teto é ele. */
+const subindoAnexo = ref(false)
+const erroDoAnexo = ref('')
+/* ⚠️ `ref` de template declarada aqui, e não `$refs` no clique: em
+   `<script setup>` o `$refs` não é exposto, e o botão abriria o seletor de
+   arquivo **nunca** — falha calada, que nenhuma trava de atributo pegaria. */
+const inputDoAnexo = ref(null)
 const previa = ref(null)
 
 const TITULOS = {
@@ -303,6 +312,30 @@ const desdeDoQuadro = computed(() => quadro.value?.desde || '')
 const escondidosPelaData = computed(
   () => Number(quadro.value?.escondidos_pela_data) || 0)
 
+/* 🚨 QUANDO O QUADRO FOI VARRIDO — `M12`, e é o par da linha do corte.
+   Dizer "a partir de 16/11" sem dizer **quando se olhou** deixa um quadro de
+   seis dias atrás com a mesma cara de um varrido hoje, agora que a varredura
+   é cron das 05:10. O carimbo vem do `config` do FPSL, em ISO/UTC.
+   ⚠️ **Carimbo torto ou ausente não inventa hora**: devolve vazio e a tela
+   simplesmente não escreve a parte da hora — a mesma régua do `desde`, que
+   cai no padrão em vez de esvaziar a aba. */
+const varridoEm = computed(() => {
+  const bruto = quadro.value?.varrido_em
+  if (!bruto) return ''
+  const d = new Date(String(bruto))
+  if (Number.isNaN(d.getTime())) return ''
+  const hora = `${String(d.getHours()).padStart(2, '0')}:`
+    + `${String(d.getMinutes()).padStart(2, '0')}`
+  const hoje = new Date()
+  const mesmoDia = d.getDate() === hoje.getDate()
+    && d.getMonth() === hoje.getMonth()
+    && d.getFullYear() === hoje.getFullYear()
+  if (mesmoDia) return `hoje às ${hora}`
+  const dia = `${String(d.getDate()).padStart(2, '0')}/`
+    + `${String(d.getMonth() + 1).padStart(2, '0')}`
+  return `em ${dia} às ${hora}`
+})
+
 /* ---------------------------------------------------------------- as datas */
 
 function isoDaData(bruto) {
@@ -468,6 +501,136 @@ function cardsDa(coluna) {
 function moeda(v) {
   return (Number(v) || 0).toLocaleString('pt-BR',
     { style: 'currency', currency: 'BRL' })
+}
+
+/* 🔵 25/11 — os nomes provisórios de um card, sem repetir.
+   📏 Vem do NOSSO agendamento (o backend põe `tecnico_provisorio` em cada
+   artefato que tem). ⚠️ `Set` porque o mesmo técnico pode ter várias OS no
+   card, e repetir o nome cinco vezes não informa mais que uma. */
+function provisoriosDe(card) {
+  const nomes = new Set()
+  for (const a of card.artefatos || []) {
+    if (a.tecnico_provisorio) nomes.add(a.tecnico_provisorio)
+  }
+  return [...nomes]
+}
+
+/* 🔵 25/11 (passo 4b) — as cinco colunas de cadastro do arquivo do Procfy.
+   ⚠️ Os NOMES são os da planilha dele, não os das chaves do `/config`: quem lê
+   vai preencher no Excel, e lá a coluna se chama "Categoria". */
+const CHAVES_DO_PROCFY = ['procfy_categoria', 'procfy_conta_bancaria',
+                          'procfy_modo_pagamento', 'procfy_centro_de_custo',
+                          'procfy_tags']
+const COLUNA_DO_PROCFY = {
+  procfy_categoria: 'Categoria',
+  procfy_conta_bancaria: 'Contas bancárias',
+  procfy_modo_pagamento: 'Modo de pagamento',
+  procfy_centro_de_custo: 'Centro de Custo',
+  procfy_tags: 'Tags (Por Marcação)',
+}
+const configProcfy = ref(Object.fromEntries(
+  CHAVES_DO_PROCFY.map((c) => [c, ''])))
+const salvandoProcfy = ref(false)
+const salvoProcfy = ref(false)
+const erroProcfy = ref('')
+const procfyVazias = computed(() =>
+  CHAVES_DO_PROCFY.filter((c) => !(configProcfy.value[c] || '').trim()))
+
+async function lerConfigProcfy() {
+  try {
+    const r = await api.get('/api/paineis/servico-dos-tecnicos/config-procfy')
+    for (const c of CHAVES_DO_PROCFY) configProcfy.value[c] = r[c] || ''
+  } catch (e) {
+    /* ⚠️ Não derruba a tela: o quadro é o que importa, e as colunas são
+       cadastro. Mas o erro aparece, porque campo vazio por falha de leitura
+       pareceria campo nunca preenchido. */
+    erroProcfy.value = 'Não consegui ler as colunas do Procfy.'
+  }
+}
+
+async function salvarConfigProcfy() {
+  if (salvandoProcfy.value) return
+  salvandoProcfy.value = true
+  erroProcfy.value = ''
+  salvoProcfy.value = false
+  try {
+    const corpo = {}
+    for (const c of CHAVES_DO_PROCFY) corpo[c] = configProcfy.value[c] || ''
+    const r = await api.put(
+      '/api/paineis/servico-dos-tecnicos/config-procfy', corpo)
+    for (const c of CHAVES_DO_PROCFY) configProcfy.value[c] = r[c] || ''
+    salvoProcfy.value = true
+  } catch (e) {
+    erroProcfy.value = e instanceof ErroDeApi
+      ? e.message : 'Não consegui salvar as colunas do Procfy.'
+  } finally {
+    salvandoProcfy.value = false
+  }
+}
+
+/* 🔵 25/11 (passo 5) — A CORRECAO DA SITUACAO NO DATASCOPE.
+   🚨 A chamada ESCREVE EM SISTEMA DE TERCEIRO: dispara os webhooks deles e
+   manda PUSH para o tecnico que enviou a resposta. Esta medido e documentado.
+   Por isso nada aqui acontece num clique so -- e por isso o interruptor nasce
+   desligado e vive nesta tela, nao no `/config`. */
+const escritaDatascope = ref(null)
+const dsArtefato = ref(null)
+const dsFazendo = ref(false)
+const dsErro = ref('')
+const dsFeito = ref('')
+
+async function lerEscritaDatascope() {
+  try {
+    const r = await api.get(
+      '/api/paineis/servico-dos-tecnicos/datascope-escrita')
+    escritaDatascope.value = !!r.ligada
+  } catch (e) {
+    /* ⚠️ `null` e diferente de `false`: nao medido nao e desligado, e a modal
+       diz qual dos dois e. */
+    escritaDatascope.value = null
+  }
+}
+
+async function ligarEscritaDatascope() {
+  dsErro.value = ''
+  try {
+    const r = await api.put(
+      '/api/paineis/servico-dos-tecnicos/datascope-escrita', { ligada: true })
+    escritaDatascope.value = !!r.ligada
+  } catch (e) {
+    dsErro.value = e instanceof ErroDeApi
+      ? e.message : 'Não consegui ligar a escrita no DataScope.'
+  }
+}
+
+/* 🚨 O clique ABRE A MODAL, nunca escreve. */
+function abrirDatascope(a) {
+  dsArtefato.value = a
+  dsErro.value = ''
+  dsFeito.value = ''
+}
+
+function fecharDatascope() {
+  dsArtefato.value = null
+}
+
+async function confirmarDatascope() {
+  if (!dsArtefato.value || dsFazendo.value) return
+  dsFazendo.value = true
+  dsErro.value = ''
+  try {
+    const r = await api.post(
+      `/api/paineis/servico-dos-tecnicos/datascope-aprovar/${dsArtefato.value.id}`)
+    dsFeito.value = r && r.ja_estava
+      ? 'já estava aprovado no DataScope'
+      : 'situação corrigida no DataScope'
+    await carregar()
+  } catch (e) {
+    dsErro.value = e instanceof ErroDeApi
+      ? e.message : 'Não consegui corrigir a situação no DataScope.'
+  } finally {
+    dsFazendo.value = false
+  }
 }
 
 function totalDe(card, visiveis) {
@@ -696,17 +859,78 @@ async function lerDataScope(card) {
    em que nenhum artefato tem comprovante nem dispensa, e nada na tela
    registrava um dos dois.
 
-   ⚠️ O COMPROVANTE É UMA REFERÊNCIA DE TEXTO, não um arquivo subido: o campo
-   do FPSL é `comprovante_arquivo TEXT`, e não existe rota de upload nesta
-   frente. 🔴 Subir o PDF de verdade é a próxima peça e precisa da palavra dele
-   (dono do arquivo, quem pode baixar, e uma migração para guardá-lo). */
+   🔵 25/11: O ANEXO DE VERDADE EXISTE. O arquivo vai para o **MoviZap**
+   (`pagamento_comprovante_arquivo`, migração 119, pasta
+   `/home/claude/movizap_pagamento_comprovantes`) e o FPSL guarda só a
+   referência `anexo:<id>` no `comprovante_arquivo TEXT` que já existe — sem
+   migração daquele lado e **sem bytes atravessando a ponte**, que é JSON
+   servidor-a-servidor. O campo de texto continua aceitando o que se digita:
+   quem já registrou um nome à mão não perde o que escreveu.
+   🔵 24/11: **anexo completo, não só PDF** — a lista é a da observação da
+   Operação. */
 function abrirComprovante(artefato) {
   comprovando.value = {
     artefato,
     arquivo: artefato.comprovante_arquivo || '',
     valor: artefato.valor_do_comprovante ?? null,
     dispensa: artefato.comprovante_dispensa || '',
+    /* O que o quadro já sabe do arquivo (nome e tamanho), para o link de
+       download aparecer sem uma segunda consulta. */
+    anexo: artefato.comprovante_anexo || null,
   }
+  erroDoAnexo.value = ''
+}
+
+/* 🚨 `fetch` cru, não `api.post`: arquivo vai por `FormData` e o navegador
+   precisa montar o `Content-Type` com o boundary. Definir o cabeçalho aqui
+   quebraria o upload **em silêncio** — a Caixa e a Operação já documentam
+   isso, e é o mesmo molde delas. */
+async function subirComprovante(evento) {
+  const arquivo = evento?.target?.files?.[0]
+  if (evento?.target) evento.target.value = ''
+  const c = comprovando.value
+  if (!arquivo || !c) return
+  subindoAnexo.value = true
+  erroDoAnexo.value = ''
+  try {
+    const forma = new FormData()
+    forma.append('arquivo', arquivo)
+    const r = await fetch(`${BASE}/anexo/${c.artefato.id}`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${localStorage.getItem('movizap.token')}` },
+      body: forma,
+    })
+    const texto = await r.text()
+    let corpo = null
+    try { corpo = JSON.parse(texto) } catch { corpo = null }
+    /* 🚨 A RECUSA É RESPOSTA, e com a FRASE do servidor: *"os motivos de
+       recusa devem aparecer descritos ao invés de erro genérico"*. É o
+       servidor que sabe quais extensões aceita e qual é o teto. */
+    if (!r.ok) throw new Error((corpo && corpo.detail)
+                               || `Falha no anexo (${r.status}).`)
+    /* 🔵 *"Após o envio do anexo, abre o campo que pede o valor"* — é esta
+       linha que abre: o campo do valor existe quando há `arquivo`. */
+    c.arquivo = corpo.referencia
+    c.anexo = { id: corpo.id, nome_original: corpo.nome_original,
+                bytes: corpo.bytes }
+  } catch (e) {
+    erroDoAnexo.value = e.message || 'Falha no anexo.'
+  } finally {
+    subindoAnexo.value = false
+  }
+}
+
+function baixarComprovante(anexoId) {
+  /* ⚠️ `window.open`, como o arquivo do Procfy: o navegador é quem salva, e o
+     `Content-Disposition` é o que dá o nome original. */
+  window.open(`${BASE}/anexo/${anexoId}`, '_blank')
+}
+
+function tamanhoCurto(bytes) {
+  const n = Number(bytes) || 0
+  if (n < 1024) return `${n} B`
+  if (n < 1024 * 1024) return `${Math.round(n / 1024)} KB`
+  return `${(n / 1024 / 1024).toFixed(1)} MB`
 }
 
 const comprovantePodeSalvar = computed(() => {
@@ -867,15 +1091,63 @@ function aoTeclar(evento) {
 onMounted(() => {
   window.addEventListener('keydown', aoTeclar)
   carregar()
+  /* ⚠️ Em paralelo, e nao dentro do `carregar`: leitura de cadastro nao
+     pode atrasar o quadro, que e o que a pessoa veio ver. */
+  lerConfigProcfy()
+  /* ⚠️ Lido na abertura: a modal precisa saber se oferece
+     corrigir ou ligar, e descobrir isso no clique faria a modal
+     piscar de um estado para o outro. */
+  lerEscritaDatascope()
 })
 onBeforeUnmount(() => window.removeEventListener('keydown', aoTeclar))
 </script>
 
 <template>
   <section class="painel escala-operacao">
+    <!-- 🔵 25/11: O TOPO NO PADRÃO DA OPERAÇÃO, e é o pedido dele de 05/11
+         (*"o cabeçalho esta porco, organize de forma profissional"*): a
+         IDENTIDADE à esquerda (o que é a tela) e os CONTROLES à direita (o que
+         se faz com ela), em dois blocos que quebram juntos no celular.
+         🔵 *"faltam recursos no topo da aba1 também"* — a mesma mudança chega
+         ao `PainelAba.vue`, que serve os quatro painéis de aba. -->
     <header class="painel__topo">
-      <h1 class="painel__titulo">{{ tituloDoPainel }}</h1>
+      <div class="painel__identidade">
+        <h1 class="painel__titulo">{{ tituloDoPainel }}</h1>
+        <!-- 🚨 O TEXTO NÃO SE PERDE, ELE SE RECOLHE: o balão abre no hover
+             **e** no foco, então quem usa teclado também o lê. -->
+        <AjudaDaTela>
+          Fecha o pagamento dos técnicos: a varredura das <strong>05:10</strong>
+          traz a OS com valor de serviço ou km, o card anda pelas cinco colunas
+          e o arquivo do Procfy sai da Validação.
+          <strong>Só aparece serviço de {{ dataCurta(desdeDoQuadro) }} em
+          diante</strong>, e o que é anterior segue no banco.
+        </AjudaDaTela>
+      </div>
       <div class="painel__medidas">
+        <label class="controles__busca">
+          <span class="so-leitor">
+            Procurar por cliente, número da OS, termo, orçamento ou técnico
+          </span>
+          <input v-model="busca" type="search"
+                 placeholder="cliente, OS, termo, orçamento ou técnico" />
+        </label>
+
+        <label class="controles__ordem">
+          <span class="so-leitor">Ordenar os artefatos dentro do card</span>
+          <select v-model="ordem">
+            <option v-for="(rot, chave) in ROTULO_ORDEM" :key="chave"
+                    :value="chave">{{ rot }}</option>
+          </select>
+        </label>
+
+        <label class="controles__ordem">
+          <span class="so-leitor">Ordenar os cards</span>
+          <select v-model="ordemDosCards">
+            <option v-for="(rot, chave) in ROTULO_ORDEM_CARDS" :key="chave"
+                    :value="chave">{{ rot }}</option>
+          </select>
+        </label>
+
         <span class="pilula">
           {{ artefatosNoQuadro }}
           {{ artefatosNoQuadro === 1 ? 'artefato' : 'artefatos' }}
@@ -906,31 +1178,10 @@ onBeforeUnmount(() => window.removeEventListener('keydown', aoTeclar))
     </nav>
 
     <!-- 🔵 *"regras de ordenamento tbm da etapa de op faltam aqui"*. -->
+    <!-- ⚠️ A busca e os dois ordenadores subiram para o topo (25/11). Esta
+         linha ficou com o que é ESTADO do quadro, não controle: o corte de
+         data e a hora da varredura. -->
     <div class="controles">
-      <label class="controles__busca">
-        <span class="so-leitor">
-          Procurar por cliente, número da OS, termo, orçamento ou técnico
-        </span>
-        <input v-model="busca" type="search"
-               placeholder="cliente, OS, termo, orçamento ou técnico" />
-      </label>
-
-      <label class="controles__ordem">
-        <span class="so-leitor">Ordenar os artefatos dentro do card</span>
-        <select v-model="ordem">
-          <option v-for="(rot, chave) in ROTULO_ORDEM" :key="chave"
-                  :value="chave">{{ rot }}</option>
-        </select>
-      </label>
-
-      <label class="controles__ordem">
-        <span class="so-leitor">Ordenar os cards</span>
-        <select v-model="ordemDosCards">
-          <option v-for="(rot, chave) in ROTULO_ORDEM_CARDS" :key="chave"
-                  :value="chave">{{ rot }}</option>
-        </select>
-      </label>
-
       <!-- 🔵 D6/D7, 23/11: o corte de data, DITO. 🚨 Não é enfeite: sem esta
            linha a aba abriria com 2 cards onde havia 79 e ninguém saberia por
            quê. ⚠️ E diz que eles **continuam no banco**, porque "escondido" e
@@ -943,6 +1194,12 @@ onBeforeUnmount(() => window.removeEventListener('keydown', aoTeclar))
           {{ escondidosPelaData === 1 ? 'artefato anterior' : 'artefatos anteriores' }}
           fora de vista (seguem no banco)
         </template>
+        <!-- 🚨 `M12`: o quadro diz QUANDO olhou. A varredura roda às 05:10 e,
+             sem esta parte, quadro de seis dias atrás tem cara de quadro de
+             hoje. ⚠️ Só aparece quando há carimbo — nunca varrido não é erro. -->
+        <template v-if="varridoEm">
+          &middot; varrido {{ varridoEm }}
+        </template>
       </p>
     </div>
 
@@ -952,6 +1209,47 @@ onBeforeUnmount(() => window.removeEventListener('keydown', aoTeclar))
 
     <BarraDeRolagem v-if="quadro" :rolo="rolo"
                     rotulo="quadro de Serviço dos técnicos" />
+
+    <!-- 🔵 25/11 (passo 4b) — AS CINCO COLUNAS DE CADASTRO DO ARQUIVO.
+         📏 O defeito que isto conserta: as cinco chaves eram LIDAS pelo gerador
+         do arquivo e NENHUMA rota as escrevia -- ninguém conseguia preenchê-las,
+         nem o owner, e o arquivo saía com as cinco colunas em branco sem
+         caminho para mudar isso.
+         🔵 Preencher é OPCIONAL (decisão dele de 18/11: *"pode gerar com elas
+         em branco nesse momento"*), e a frase diz o que acontece quando ficam
+         vazias -- sugerir obrigatoriedade seria a tela mentindo. -->
+    <details v-if="quadro" class="procfy">
+      <summary class="procfy__abrir">
+        <i class="bi bi-table" aria-hidden="true"></i>
+        Colunas do Procfy
+        <span v-if="procfyVazias.length" class="selo selo--amarelo">
+          {{ procfyVazias.length }} em branco
+        </span>
+        <span v-else class="selo selo--verde">as cinco preenchidas</span>
+      </summary>
+      <p class="nota pequeno">
+        Estas cinco colunas do arquivo saem destes campos. O arquivo é gerado
+        mesmo com elas <strong>em branco</strong> — quem importa preenche na
+        planilha.
+      </p>
+      <div class="procfy__grade">
+        <label v-for="c in CHAVES_DO_PROCFY" :key="c" class="procfy__campo">
+          <span class="procfy__rotulo">{{ COLUNA_DO_PROCFY[c] }}</span>
+          <input v-model="configProcfy[c]" type="text" maxlength="200"
+                 :class="'campo campo--' + c.replace(/_/g, '-')"
+                 :disabled="salvandoProcfy" />
+        </label>
+      </div>
+      <div class="procfy__agir">
+        <button class="botao botao--contorno" type="button"
+                :disabled="salvandoProcfy" @click="salvarConfigProcfy">
+          <i class="bi bi-check2" aria-hidden="true"></i>
+          Salvar as colunas
+        </button>
+        <span v-if="erroProcfy" class="nota pequeno erro">{{ erroProcfy }}</span>
+        <span v-else-if="salvoProcfy" class="nota pequeno">salvo</span>
+      </div>
+    </details>
 
     <div v-if="quadro" class="painel__casco">
       <RolagemDaBorda :rolo="rolo" rotulo="quadro" />
@@ -988,13 +1286,27 @@ onBeforeUnmount(() => window.removeEventListener('keydown', aoTeclar))
                         :class="{ 'card__abrir--sem-tecnico': !card.pode_preparar }"
                         @click="abrirCardDoTecnico(card, coluna)">
                   <span class="card__linha">
-                    <span class="card__cliente"
+                    <span class="card__tecnico"
                           :title="card.tecnico_nome || ''">
                       {{ card.tecnico_nome || 'técnico ' + card.tecnico_id }}
                     </span>
                     <span class="card__direita">
                       {{ artefatosVisiveis(card).length }} de
                       {{ (card.artefatos || []).length }}
+                    </span>
+                  </span>
+
+                  <!-- 🔵 25/11: QUEM FOI, no card fechado. O título do card é
+                       FIXO ("não cadastrados no Harmonit"); o nome de quem
+                       atendeu vem do NOSSO agendamento e aparece aqui, porque
+                       *"o card já direciona"* só funciona se der para ver sem
+                       abrir. ⚠️ Vários num card fixo: a lista é separada por
+                       vírgula, e por isso não vai no título. -->
+                  <span v-if="provisoriosDe(card).length"
+                        class="card__linha card__dado">
+                    <span class="selo selo--amarelo" :title="provisoriosDe(card).join(', ')">
+                      <i class="bi bi-person-exclamation" aria-hidden="true"></i>
+                      provisório: {{ provisoriosDe(card).join(', ') }}
                     </span>
                   </span>
 
@@ -1039,7 +1351,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', aoTeclar))
                 <button class="card__abrir card__abrir--botao" type="button"
                         @click="abrirCardDoTecnico(card, coluna)">
                   <span class="card__linha">
-                    <span class="card__cliente" :title="card.tecnico_nome || ''">
+                    <span class="card__tecnico" :title="card.tecnico_nome || ''">
                       {{ card.tecnico_nome || 'técnico ' + card.tecnico_id }}
                     </span>
                     <span class="card__direita">
@@ -1090,14 +1402,35 @@ onBeforeUnmount(() => window.removeEventListener('keydown', aoTeclar))
 
         <!-- ================= COLUNA 1 — Movimentação ================= -->
         <template v-if="colunaAberta === 'movimentacao'">
-          <span class="card__linha card__dado">
-            <span>
-              a pagar <strong>{{ moeda(totalDe(cardAberto)) }}</strong>
-              &middot; serviço
-              {{ moeda(somaDe(cardAberto, 'valor_pagamento')) }}
-              &middot; km {{ moeda(somaDe(cardAberto, 'valor_km')) }}
+          <!-- 🔵 25/11: O RESUMO EM MEDIDAS, e não numa frase corrida. Três
+               números no meio de uma linha de texto obrigam a LER para achar o
+               que importa; em medidas, o olho vai direto. É a mesma forma das
+               pílulas do topo da tela. -->
+          <div class="medidas">
+            <span class="medida">
+              <span class="medida__rotulo">a pagar</span>
+              <strong class="medida__valor">{{ moeda(totalDe(cardAberto)) }}</strong>
             </span>
-          </span>
+            <span class="medida">
+              <span class="medida__rotulo">serviço</span>
+              <span class="medida__valor">
+                {{ moeda(somaDe(cardAberto, 'valor_pagamento')) }}
+              </span>
+            </span>
+            <span class="medida">
+              <span class="medida__rotulo">km</span>
+              <span class="medida__valor">
+                {{ moeda(somaDe(cardAberto, 'valor_km')) }}
+              </span>
+            </span>
+            <span class="medida">
+              <span class="medida__rotulo">artefatos</span>
+              <span class="medida__valor">
+                {{ artefatosVisiveis(cardAberto).length }} de
+                {{ (cardAberto.artefatos || []).length }}
+              </span>
+            </span>
+          </div>
 
                   <!-- 🔵 O FILTRO DE DATAS DENTRO DO CARD: *"só quero fechar
                        de 16-18/11/26 filtro isso e flego"*. ⚠️ A data é a do
@@ -1106,76 +1439,140 @@ onBeforeUnmount(() => window.removeEventListener('keydown', aoTeclar))
                        `filtroDo(cardAberto).de`, e `v-model` exige uma expressão de
                        membro simples — chamada de função no caminho é erro de
                        compilação do template. -->
-                  <div class="card__filtro">
-                    <label>de
-                      <input type="date" :value="filtroDo(cardAberto).de"
-                             @change="definirFiltro(cardAberto, 'de', $event.target.value)" />
-                    </label>
-                    <label>até
-                      <input type="date" :value="filtroDo(cardAberto).ate"
-                             @change="definirFiltro(cardAberto, 'ate', $event.target.value)" />
-                    </label>
-                    <button v-if="filtroDo(cardAberto).de || filtroDo(cardAberto).ate"
-                            class="botao botao--fraco" type="button"
-                            @click="limparFiltro(cardAberto)">
-                      limpar
-                    </button>
-                  </div>
+          <!-- 🔵 25/11: o filtro em QUADRO, com título. Dois `<input
+               type="date">` soltos numa linha não diziam de que data eram --
+               e é a do SERVIÇO, não a do card. -->
+          <div class="acoes">
+            <div class="acoes__grupo">
+              <p class="acoes__titulo">Filtrar pela data do serviço</p>
+              <div class="card__filtro">
+                <label class="campo__rotulo campo__rotulo--lado">
+                  de
+                  <input class="campo" type="date"
+                         :value="filtroDo(cardAberto).de"
+                         @change="definirFiltro(cardAberto, 'de', $event.target.value)" />
+                </label>
+                <label class="campo__rotulo campo__rotulo--lado">
+                  até
+                  <input class="campo" type="date"
+                         :value="filtroDo(cardAberto).ate"
+                         @change="definirFiltro(cardAberto, 'ate', $event.target.value)" />
+                </label>
+                <button v-if="filtroDo(cardAberto).de || filtroDo(cardAberto).ate"
+                        class="botao botao--fantasma" type="button"
+                        @click="limparFiltro(cardAberto)">
+                  <i class="bi bi-x-lg" aria-hidden="true"></i>
+                  Limpar o filtro
+                </button>
+              </div>
+            </div>
+          </div>
 
                   <ul class="artefatos">
+                    <!-- 🔵 25/11 (A23): O ARTEFATO É UM CARD INTERNO, no
+                         vocabulário do `CorpoDoCard` -- o modelo da aba 1, que
+                         agora mora na fonte única. Antes eram cinco campos
+                         numa `<label>` e três parágrafos soltos, tudo no mesmo
+                         peso. ⚠️ A `<label>` em volta FICA: é ela que faz
+                         clicar no texto marcar o item. -->
                     <li v-for="a in artefatosVisiveis(cardAberto)" :key="a.id"
-                        class="artefato">
+                        class="artefato"
+                        :class="{ 'artefato--marcado': estaMarcado(cardAberto, a.id) }">
                       <label class="artefato__marca">
                         <input type="checkbox"
                                :checked="estaMarcado(cardAberto, a.id)"
                                :disabled="!cardAberto.pode_preparar"
                                @change="alternar(cardAberto, a.id)" />
-                        <!-- 🔵 A ordem é a dele: Orçamento — OS — TERMO. -->
-                        <span v-if="a.orcamento_numero"
-                              class="artefato__orcamento">
-                          Orç {{ a.orcamento_numero }}
-                        </span>
-                        <span v-else
-                              class="artefato__orcamento artefato__orcamento--sem">
-                          <i class="bi bi-exclamation-circle" aria-hidden="true"></i>
-                          sem orçamento
-                        </span>
-                        <button class="artefato__os" type="button"
-                                @click.stop.prevent="abrirOs(a)">
-                          OS {{ a.numero_os }}
-                        </button>
-                        <span v-if="a.termo" class="artefato__termo">
-                          TERMO {{ a.termo }}
-                        </span>
-                        <span class="artefato__valor">
-                          {{ moeda(valorDe(a)) }}
+                        <span class="artefato__corpo">
+                          <!-- LINHA 1 — os identificadores e o VALOR à direita.
+                               🔵 A ordem é a dele: Orçamento — OS — TERMO. -->
+                          <span class="card__linha">
+                            <span class="card__ident">
+                              <!-- 🔵 25/11 (passo 4a) — O VÍNCULO DEMONSTRADO.
+                                   Ele: *"orçamento não é impedimento é apenas
+                                   vínculo demonstrado para operador auditar em
+                                   tela"*. Auditar é COMPARAR, então o TOTAL do
+                                   orçamento vem junto do número: só o número
+                                   obrigaria a abrir outra tela para saber
+                                   quanto era. -->
+                              <span v-if="a.orcamento_numero"
+                                    class="artefato__orcamento"
+                                    :title="a.orcamento_total != null
+                                            ? 'orçamento de ' + moeda(a.orcamento_total)
+                                            : 'orçamento sem total medido'">
+                                Orç {{ a.orcamento_numero }}
+                                <template v-if="a.orcamento_total != null">
+                                  ({{ moeda(a.orcamento_total) }})
+                                </template>
+                              </span>
+                              <!-- 🚨 SEM ÍCONE DE ALERTA (25/11): o orçamento
+                                   NÃO impede o pagamento, por decisão dele, e
+                                   alarme para algo que não impede é a tela
+                                   exagerando a gravidade (`M12`). O texto fica,
+                                   porque a ausência continua sendo informação. -->
+                              <span v-else
+                                    class="artefato__orcamento artefato__orcamento--sem">
+                                sem orçamento
+                              </span>
+                              <button class="card__os" type="button"
+                                      @click.stop.prevent="abrirOs(a)">
+                                OS {{ a.numero_os }}
+                              </button>
+                              <span v-if="a.termo" class="card__termo">
+                                TERMO {{ a.termo }}
+                              </span>
+                            </span>
+                            <span class="card__direita card__direita--dado">
+                              <strong>{{ moeda(valorDe(a)) }}</strong>
+                            </span>
+                          </span>
+
+                          <!-- LINHA 2 — de quem é e quando foi.
+                               ⚠️ Cliente sem nome é DITO, não deixado em
+                               branco — a frase é a do card da aba 1. -->
+                          <span class="card__linha card__dado">
+                            <span v-if="a.cliente" class="card__cliente"
+                                  :title="a.cliente">{{ a.cliente }}</span>
+                            <span v-else class="card__cliente card__cliente--sem">
+                              cliente {{ a.cliente_id || '?' }}, fora do nosso cadastro
+                            </span>
+                            <span class="card__direita">
+                              <template v-if="a.tipo_nome">{{ a.tipo_nome }} &middot; </template>
+                              serviço {{ dataCurta(a.data_os) }}
+                            </span>
+                          </span>
+
+                          <!-- LINHA 3 — os selos, e só quando há o que dizer. -->
+                          <span v-if="a.status_str || casouPor(a)
+                                      || a.tecnico_provisorio
+                                      || a.semaforo === 'laranja'"
+                                class="artefato__selos">
+                            <!-- 🔵 25/11: o provisório TAMBÉM por artefato, porque
+                                 o card fixo junta vários e a correção é de UMA
+                                 OS por vez. ⚠️ Amarelo, não verde: identificado
+                                 não é resolvido. -->
+                            <span v-if="a.tecnico_provisorio"
+                                  class="selo selo--amarelo">
+                              <i class="bi bi-person-exclamation" aria-hidden="true"></i>
+                              provisório: {{ a.tecnico_provisorio }}
+                            </span>
+                            <span v-if="a.status_str" class="selo">
+                              {{ a.status_str }}
+                            </span>
+                            <span v-if="casouPor(a)" class="selo">
+                              casou por {{ casouPor(a) }}
+                            </span>
+                            <!-- 🔵 O devolvido é LARANJA e a justificativa fica
+                                 à vista: laranja sem motivo é cor sem
+                                 informação. -->
+                            <span v-if="a.semaforo === 'laranja'"
+                                  class="selo selo--laranja">
+                              <i class="bi bi-arrow-counterclockwise" aria-hidden="true"></i>
+                              devolvido: {{ a.justificativa }}
+                            </span>
+                          </span>
                         </span>
                       </label>
-
-                      <!-- 🔵 19/11: os dados da OS, *"como a aba1 apresenta"*.
-                           ⚠️ Cliente sem nome é DITO, não deixado em branco —
-                           a frase é a mesma do card da aba 1. -->
-                      <p class="artefato__os-dados">
-                        <span v-if="a.cliente" class="artefato__cliente"
-                              :title="a.cliente">{{ a.cliente }}</span>
-                        <span v-else class="artefato__cliente artefato__cliente--sem">
-                          cliente {{ a.cliente_id || '?' }}, fora do nosso cadastro
-                        </span>
-                        <span v-if="a.tipo_nome">&middot; {{ a.tipo_nome }}</span>
-                        <span>&middot; serviço {{ dataCurta(a.data_os) }}</span>
-                        <span v-if="a.status_str">&middot; {{ a.status_str }}</span>
-                      </p>
-
-                      <p v-if="casouPor(a)" class="artefato__casou">
-                        casou por {{ casouPor(a) }}
-                      </p>
-
-                      <!-- 🔵 O devolvido é LARANJA e a justificativa fica à
-                           vista: laranja sem motivo é cor sem informação. -->
-                      <p v-if="a.semaforo === 'laranja'" class="artefato__devolvido">
-                        <i class="bi bi-arrow-counterclockwise" aria-hidden="true"></i>
-                        devolvido: {{ a.justificativa }}
-                      </p>
                     </li>
                   </ul>
 
@@ -1200,21 +1597,78 @@ onBeforeUnmount(() => window.removeEventListener('keydown', aoTeclar))
                        o par `v-if`/`v-else` existia porque os dois moravam no
                        mesmo card; aqui a trava é uma frase e o bloco de ações é
                        outro, e amarrá-los faria um sumir com o outro. -->
-                  <div v-if="cardAberto.pode_preparar" class="card__acoes">
-                    <button class="botao botao--fraco" type="button"
-                            @click="marcarTodosDoCard(cardAberto)">
-                      Marcar todos
-                    </button>
-                    <button v-if="marcadosDo(cardAberto).length"
-                            class="botao botao--fraco" type="button"
-                            @click="limparMarcados(cardAberto)">
-                      Limpar
-                    </button>
-                    <button class="botao" type="button"
-                            :disabled="!marcadosDo(cardAberto).length"
-                            @click="preparar(cardAberto)">
-                      Preparar os marcados ({{ marcadosDo(cardAberto).length }})
-                    </button>
+                  <!-- 🔵 25/11: OS QUADROS DE AÇÃO. Cinco botões de larguras
+                       diferentes numa fileira que quebrava onde dava, e sem
+                       dizer o que fazem, foi o que ele chamou de *"terrível"*.
+                       Agora: grade de larguras IGUAIS, cada ação com uma linha
+                       dizendo o que faz, e separadas por quadro. 🚨 O
+                       agrupamento não é enfeite: "Excluir o card" e
+                       "Atualizar" lado a lado, do mesmo tamanho, é como se
+                       clica no errado. -->
+                  <div v-if="cardAberto.pode_preparar" class="acoes">
+                    <div class="acoes__grupo">
+                      <p class="acoes__titulo">Escolher o que vai pagar</p>
+                      <div class="acoes__grade">
+                        <button class="acao" type="button"
+                                @click="marcarTodosDoCard(cardAberto)">
+                          <span class="acao__nome">
+                            <i class="bi bi-check2-all" aria-hidden="true"></i>
+                            Marcar todos
+                          </span>
+                          <span class="acao__nota">
+                            Marca os {{ artefatosVisiveis(cardAberto).length }}
+                            artefato(s) à vista — o filtro acima manda.
+                          </span>
+                        </button>
+                        <button v-if="marcadosDo(cardAberto).length"
+                                class="acao" type="button"
+                                @click="limparMarcados(cardAberto)">
+                          <span class="acao__nome">
+                            <i class="bi bi-x-lg" aria-hidden="true"></i>
+                            Limpar a marcação
+                          </span>
+                          <span class="acao__nota">
+                            Desmarca os {{ marcadosDo(cardAberto).length }}
+                            marcados. Não mexe em artefato nenhum.
+                          </span>
+                        </button>
+                      </div>
+                    </div>
+                    <div class="acoes__grupo">
+                      <p class="acoes__titulo">Fechar o pagamento</p>
+                      <div class="acoes__grade">
+                        <button class="acao acao--principal" type="button"
+                                :disabled="!marcadosDo(cardAberto).length"
+                                @click="preparar(cardAberto)">
+                          <span class="acao__nome">
+                            <i class="bi bi-box-arrow-right" aria-hidden="true"></i>
+                            Preparar os marcados
+                            ({{ marcadosDo(cardAberto).length }})
+                          </span>
+                          <span class="acao__nota">
+                            Cria o card do técnico na Preparação com os
+                            marcados. O que ficar sem marca permanece aqui.
+                          </span>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- 🚨 O RODAPÉ NUMA FAIXA SÓ, e o `Fechar` mora DENTRO deste
+                       braço: era ele que caía numa segunda faixa abaixo das
+                       ações, com peso de ação principal. ⚠️ Está nos DOIS
+                       braços do diálogo de propósito, e há trava medindo isso
+                       (`aba2_rodape_2511.teste.js`) — braço sem `Fechar` é
+                       diálogo sem porta de saída. -->
+                  <div class="card__rodape">
+                    <span class="nota pequeno">
+                      <i class="bi bi-info-circle" aria-hidden="true"></i>
+                      Só os artefatos marcados vão para a Preparação.
+                    </span>
+                    <div class="modal__acoes">
+                      <button class="botao botao--fantasma" type="button"
+                              @click="fecharCardDoTecnico">Fechar</button>
+                    </div>
                   </div>
         </template>
 
@@ -1274,10 +1728,26 @@ onBeforeUnmount(() => window.removeEventListener('keydown', aoTeclar))
                              mexer no recibo mudaria o que já foi para o
                              Procfy. -->
                         <button v-if="colunaAberta === 'validacao'"
-                                class="botao botao--fraco botao--mini"
+                                class="botao botao--contorno"
                                 type="button" @click="abrirComprovante(a)">
+                          <i class="bi bi-paperclip" aria-hidden="true"></i>
                           {{ a.comprovante_arquivo || a.comprovante_dispensa
                              ? 'Trocar comprovante' : 'Comprovante' }}
+                        </button>
+
+                        <!-- 🔵 25/11 (passo 5) — A CORREÇÃO DA SITUAÇÃO NO
+                             DATASCOPE. 🚨 Só na Validação, pela mesma razão do
+                             comprovante ao lado: *"tem como base as etapas de
+                             validação que permitem o card do pagamento técnico
+                             avançar"*.
+                             ⚠️ O clique ABRE MODAL, nunca escreve: a chamada
+                             dispara os webhooks deles e manda push para o
+                             técnico. -->
+                        <button v-if="colunaAberta === 'validacao'"
+                                class="botao botao--fantasma"
+                                type="button" @click="abrirDatascope(a)">
+                          <i class="bi bi-pencil-square" aria-hidden="true"></i>
+                          Corrigir situação no DataScope
                         </button>
 
                         <!-- 🔵 Tarefa 2.3: remover o item com justificativa
@@ -1290,78 +1760,167 @@ onBeforeUnmount(() => window.removeEventListener('keydown', aoTeclar))
                              dele ("sempre para a coluna 1") fica num lugar
                              só. -->
                         <button v-if="colunaAberta !== 'movimentacao'"
-                                class="botao botao--fraco botao--mini"
+                                class="botao botao--contorno"
                                 type="button" @click="pedirDevolucao(a)">
+                          <i class="bi bi-x-circle" aria-hidden="true"></i>
                           Remover
                         </button>
                       </p>
                     </li>
                   </ul>
 
-                  <div class="card__acoes">
-                    <!-- 🔵 *"todos os cards tem botão de 'atualizar'"*. -->
-                    <button class="botao botao--fraco" type="button"
-                            @click="revalidar(cardAberto)">Atualizar</button>
+                  <!-- 🔵 25/11: OS QUADROS DE AÇÃO (ver o braço da
+                       Movimentação). Os grupos são três: o que só LÊ, o que
+                       FECHA dinheiro e o que DESFAZ. -->
+                  <div class="acoes">
+                    <div class="acoes__grupo">
+                      <p class="acoes__titulo">Conferir — nada se move</p>
+                      <div class="acoes__grade">
+                        <!-- 🔵 *"todos os cards tem botão de 'atualizar'"*. -->
+                        <button class="acao" type="button"
+                                @click="revalidar(cardAberto)">
+                          <span class="acao__nome">
+                            <i class="bi bi-arrow-clockwise" aria-hidden="true"></i>
+                            Atualizar
+                          </span>
+                          <span class="acao__nota">
+                            Roda as verificações deste card de novo, para
+                            ajuste feito depois que ele nasceu. Não move nada.
+                          </span>
+                        </button>
+                        <button v-if="colunaAberta === 'validacao'"
+                                class="acao" type="button"
+                                @click="lerDataScope(cardAberto)">
+                          <span class="acao__nome">
+                            <i class="bi bi-clipboard-data" aria-hidden="true"></i>
+                            Ler DataScope
+                          </span>
+                          <span class="acao__nota">
+                            Busca o formulário do técnico e marca o que ele
+                            respondeu. Só leitura.
+                          </span>
+                        </button>
+                        <button v-if="colunaAberta === 'validacao'
+                                      || colunaAberta === 'procfy'"
+                                class="acao" type="button"
+                                @click="verPrevia(cardAberto)">
+                          <span class="acao__nome">
+                            <i class="bi bi-eye" aria-hidden="true"></i>
+                            Ver prévia
+                          </span>
+                          <span class="acao__nota">
+                            Mostra o que vai para o Procfy e quais colunas
+                            saem em branco, antes de baixar o arquivo.
+                          </span>
+                        </button>
+                      </div>
+                    </div>
 
-                    <button v-if="colunaAberta === 'preparacao'" class="botao"
-                            type="button" @click="abrirConferencia(cardAberto)">
-                      Conferir e auditar
-                    </button>
-
-                    <template v-if="colunaAberta === 'validacao'">
-                      <button class="botao botao--fraco" type="button"
-                              @click="lerDataScope(cardAberto)">
-                        Ler DataScope
-                      </button>
-                      <button class="botao botao--fraco" type="button"
-                              @click="verPrevia(cardAberto)">
-                        Ver prévia
-                      </button>
-                      <button class="botao" type="button"
-                              @click="montarArquivo(cardAberto)">
-                        Montar arquivo
-                      </button>
-                    </template>
-
-                    <!-- 🔵 Tarefa 2.5: reabrir, só na coluna 5. Depois
-                         disso o lote reaparece na Validação e o "Montar
-                         arquivo" de lá serve de novo -- não há botão de
-                         gerar aqui, para não existir um segundo caminho de
-                         montar o arquivo. -->
-                    <button v-if="colunaAberta === 'enviado'"
-                            class="botao" type="button"
-                            @click="reabrirLote(cardAberto)">
-                      Reabrir para gerar de novo
-                    </button>
+                    <div v-if="colunaAberta !== 'movimentacao'" class="acoes__grupo">
+                      <p class="acoes__titulo">Fechar o pagamento</p>
+                      <div class="acoes__grade">
+                        <button v-if="colunaAberta === 'preparacao'"
+                                class="acao acao--principal" type="button"
+                                @click="abrirConferencia(cardAberto)">
+                          <span class="acao__nome">
+                            <i class="bi bi-list-check" aria-hidden="true"></i>
+                            Conferir e auditar
+                          </span>
+                          <span class="acao__nota">
+                            Abre a conferência um a um e leva para a Validação
+                            só os cientes que não foram negados.
+                          </span>
+                        </button>
+                        <button v-if="colunaAberta === 'validacao'"
+                                class="acao acao--principal" type="button"
+                                @click="montarArquivo(cardAberto)">
+                          <span class="acao__nome">
+                            <i class="bi bi-file-earmark-spreadsheet"
+                               aria-hidden="true"></i>
+                            Montar arquivo
+                          </span>
+                          <span class="acao__nota">
+                            Fecha o lote e gera a planilha do Procfy. Artefato
+                            sem comprovante nem dispensa fica para trás.
+                          </span>
+                        </button>
+                        <button v-if="colunaAberta === 'procfy'"
+                                class="acao acao--principal" type="button"
+                                @click="baixar(cardAberto)">
+                          <span class="acao__nome">
+                            <i class="bi bi-download" aria-hidden="true"></i>
+                            Baixar o arquivo
+                          </span>
+                          <span class="acao__nota">
+                            Salva a planilha para importar no Procfy. Pode
+                            baixar quantas vezes precisar.
+                          </span>
+                        </button>
+                        <button v-if="colunaAberta === 'procfy'"
+                                class="acao" type="button"
+                                @click="enviar(cardAberto)">
+                          <span class="acao__nome">
+                            <i class="bi bi-send-check" aria-hidden="true"></i>
+                            Marcar como enviado
+                          </span>
+                          <span class="acao__nota">
+                            Move o card para a última coluna. Diz que o
+                            pagamento saiu — não envia nada por si.
+                          </span>
+                        </button>
+                        <button v-if="colunaAberta === 'enviado'"
+                                class="acao" type="button"
+                                @click="reabrirLote(cardAberto)">
+                          <span class="acao__nome">
+                            <i class="bi bi-arrow-counterclockwise"
+                               aria-hidden="true"></i>
+                            Reabrir para gerar de novo
+                          </span>
+                          <span class="acao__nota">
+                            Devolve o lote à Validação, onde o "Montar
+                            arquivo" serve outra vez.
+                          </span>
+                        </button>
+                      </div>
+                    </div>
 
                     <!-- 🔵 Tarefa 2.4: excluir o card inteiro. Vale de
                          qualquer coluna de lote (2 a 5) -- na coluna 1 o card
                          é o técnico, permanente, e não há lote para excluir.
-                         🚨 Fica junto dos outros gestos do card, e não entre
-                         os itens: o alvo aqui é o CARD. -->
-                    <button v-if="colunaAberta !== 'movimentacao'"
-                            class="botao botao--fraco" type="button"
-                            @click="pedirExclusaoDoCard(cardAberto)">
-                      Excluir o card
-                    </button>
+                         🚨 Fica em QUADRO PRÓPRIO, longe do "Atualizar": era
+                         vizinho dele, do mesmo tamanho e da mesma cor. -->
+                    <div v-if="colunaAberta !== 'movimentacao'" class="acoes__grupo">
+                      <p class="acoes__titulo">Desfazer</p>
+                      <div class="acoes__grade">
+                        <button class="acao acao--perigo" type="button"
+                                @click="pedirExclusaoDoCard(cardAberto)">
+                          <span class="acao__nome">
+                            <i class="bi bi-trash" aria-hidden="true"></i>
+                            Excluir o card
+                          </span>
+                          <span class="acao__nota">
+                            Devolve todos os artefatos à Movimentação, com uma
+                            justificativa única. Pede confirmação.
+                          </span>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
 
-                    <template v-if="colunaAberta === 'procfy'">
-                      <button class="botao botao--fraco" type="button"
-                              @click="verPrevia(cardAberto)">Ver prévia</button>
-                      <button class="botao" type="button" @click="baixar(cardAberto)">
-                        Baixar o arquivo
-                      </button>
-                      <button class="botao botao--fraco" type="button"
-                              @click="enviar(cardAberto)">Marcar como enviado</button>
-                    </template>
+                  <!-- 🚨 O MESMO RODAPÉ DO OUTRO BRAÇO. Ver o comentário de lá:
+                       o `Fechar` mora dentro dos dois, e há trava medindo. -->
+                  <div class="card__rodape">
+                    <span class="nota pequeno">
+                      <i class="bi bi-info-circle" aria-hidden="true"></i>
+                      O arquivo do Procfy só sai com comprovante ou dispensa em
+                      cada artefato.
+                    </span>
+                    <div class="modal__acoes">
+                      <button class="botao botao--fantasma" type="button"
+                              @click="fecharCardDoTecnico">Fechar</button>
+                    </div>
                   </div>
         </template>
-
-        <div class="modal__acoes">
-          <button class="botao" type="button" @click="fecharCardDoTecnico">
-            Fechar
-          </button>
-        </div>
       </div>
     </div>
     <!-- 🔵 O MODAL DE CONFERIR, da coluna 2: *"exibir para o operador
@@ -1383,17 +1942,23 @@ onBeforeUnmount(() => window.removeEventListener('keydown', aoTeclar))
             <span v-if="l.etapa_nossa" class="selo">
               está em Serviço Realizado (etapa nossa)
             </span>
-            <button v-if="!l.ciente_em" class="botao botao--fraco" type="button"
-                    @click="ciente(l)">Ciente</button>
+            <button v-if="!l.ciente_em" class="botao botao--contorno" type="button"
+                    @click="ciente(l)">
+              <i class="bi bi-check2" aria-hidden="true"></i>
+              Ciente
+            </button>
             <span v-else class="selo selo--verde">
               <i class="bi bi-check2" aria-hidden="true"></i> ciente
             </span>
-            <button class="botao botao--fraco" type="button"
-                    @click="pedirDevolucao(l)">Remover</button>
+            <button class="botao botao--contorno" type="button"
+                    @click="pedirDevolucao(l)">
+              <i class="bi bi-x-circle" aria-hidden="true"></i>
+              Remover
+            </button>
           </li>
         </ul>
         <div class="modal__acoes">
-          <button class="botao botao--fraco" type="button"
+          <button class="botao botao--fantasma" type="button"
                   @click="conferindo = null">Fechar</button>
           <!-- 🔵 *"irá mover o card somente com os cientes de situação e não
                negados para a próxima coluna"*. -->
@@ -1431,7 +1996,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', aoTeclar))
         <input v-model="justificativa" class="campo" maxlength="400"
                placeholder="ex.: OS ainda em Agendar serviço" />
         <div class="modal__acoes">
-          <button class="botao botao--fraco" type="button"
+          <button class="botao botao--fantasma" type="button"
                   @click="devolvendo = null">Cancelar</button>
           <button class="botao" type="button" :disabled="!justificativa.trim()"
                   @click="devolver">Remover</button>
@@ -1463,7 +2028,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', aoTeclar))
         <input v-model="justificativa" class="campo" maxlength="400"
                placeholder="ex.: lote montado com o técnico errado" />
         <div class="modal__acoes">
-          <button class="botao botao--fraco" type="button"
+          <button class="botao botao--fantasma" type="button"
                   @click="devolvendoLote = null">Cancelar</button>
           <button class="botao" type="button" :disabled="!justificativa.trim()"
                   @click="devolverLote">Excluir o card</button>
@@ -1483,6 +2048,58 @@ onBeforeUnmount(() => window.removeEventListener('keydown', aoTeclar))
           {{ moeda(comprovando.artefato.valor_km) }}.
         </p>
 
+        <!-- 🔵 25/11 — O ANEXO DE VERDADE: *"o anexo é do MoviZap, no padrão
+             da observação da Operação"*, e **anexo completo, não só PDF**.
+             🚨 O `<input type="file">` fica escondido e quem aparece é o
+             botão: input de arquivo cru não aceita estilo e cada navegador
+             desenha o seu. É o molde da Operação e da Caixa. -->
+        <!-- 🔵 25/11: o anexo vira QUADRO, no mesmo padrão das ações do
+             card, e os passos ficam numerados — o campo do valor continua
+             nascendo só depois do documento. -->
+        <div class="acoes">
+          <div class="acoes__grupo">
+            <p class="acoes__titulo">1. O documento</p>
+            <div class="acoes__grade">
+              <input ref="inputDoAnexo" class="comprovante__arquivo" type="file"
+                     @change="subirComprovante" />
+              <button class="acao" type="button"
+                      :class="{ 'acao--principal': !comprovando.anexo }"
+                      :disabled="subindoAnexo"
+                      @click="inputDoAnexo?.click()">
+                <span class="acao__nome">
+                  <i class="bi bi-paperclip" aria-hidden="true"></i>
+                  {{ subindoAnexo ? 'Enviando…'
+                     : comprovando.anexo ? 'Trocar o arquivo'
+                     : 'Anexar comprovante' }}
+                </span>
+                <span class="acao__nota">
+                  <template v-if="comprovando.anexo">
+                    <strong>{{ comprovando.anexo.nome_original }}</strong>
+                    &middot; {{ tamanhoCurto(comprovando.anexo.bytes) }}
+                  </template>
+                  <template v-else>
+                    PDF, imagem, planilha ou documento, até 10 MB.
+                  </template>
+                </span>
+              </button>
+            </div>
+            <!-- ⚠️ O link de baixar fica FORA do quadro: dentro dele, clicar
+                 no link abriria também o seletor de arquivo do botão. -->
+            <p v-if="comprovando.anexo" class="nota pequeno">
+              <a href="#" @click.prevent="baixarComprovante(comprovando.anexo.id)">
+                <i class="bi bi-file-earmark-arrow-down" aria-hidden="true"></i>
+                baixar {{ comprovando.anexo.nome_original }}
+              </a>
+            </p>
+          </div>
+        </div>
+
+        <!-- 🚨 A FRASE DO SERVIDOR, não um erro genérico: é ele quem sabe
+             quais extensões aceita e qual é o teto. -->
+        <p v-if="erroDoAnexo" class="aviso aviso--erro" role="alert">
+          {{ erroDoAnexo }}
+        </p>
+
         <label class="campo__rotulo">
           Comprovante (link ou nome do arquivo)
           <input v-model="comprovando.arquivo" class="campo" maxlength="400"
@@ -1493,7 +2110,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', aoTeclar))
              no documento"* — o campo do valor só existe quando há comprovante:
              valor sem documento não tem o que conferir. -->
         <label v-if="comprovando.arquivo.trim()" class="campo__rotulo">
-          Valor que está no documento
+          2. Valor que está no documento
           <input v-model="comprovando.valor" class="campo" type="number"
                  step="0.01" min="0" placeholder="0,00" />
         </label>
@@ -1506,16 +2123,18 @@ onBeforeUnmount(() => window.removeEventListener('keydown', aoTeclar))
                  placeholder="ex.: pago em dinheiro, sem recibo" />
         </label>
 
-        <p class="nota pequeno">
-          🚨 Sem comprovante e sem justificativa não há o que registrar — e o
-          artefato fica parado na Validação quando o arquivo for montado.
-        </p>
-
-        <div class="modal__acoes">
-          <button class="botao botao--fraco" type="button"
-                  @click="comprovando = null">Cancelar</button>
-          <button class="botao" type="button" :disabled="!comprovantePodeSalvar"
-                  @click="salvarComprovante">Salvar</button>
+        <div class="card__rodape">
+          <span class="nota pequeno">
+            <i class="bi bi-info-circle" aria-hidden="true"></i>
+            Sem comprovante e sem justificativa não há o que registrar — e o
+            artefato fica parado na Validação quando o arquivo for montado.
+          </span>
+          <div class="modal__acoes">
+            <button class="botao botao--fantasma" type="button"
+                    @click="comprovando = null">Cancelar</button>
+            <button class="botao" type="button" :disabled="!comprovantePodeSalvar"
+                    @click="salvarComprovante">Salvar</button>
+          </div>
         </div>
       </div>
     </div>
@@ -1558,7 +2177,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', aoTeclar))
         </div>
 
         <div class="modal__acoes">
-          <button class="botao botao--fraco" type="button"
+          <button class="botao botao--fantasma" type="button"
                   @click="previa = null">Fechar</button>
           <button v-if="previa.card && previa.card.coluna === 'validacao'"
                   class="botao" type="button"
@@ -1615,10 +2234,62 @@ onBeforeUnmount(() => window.removeEventListener('keydown', aoTeclar))
         </div>
 
         <div class="modal__acoes">
-          <button class="botao botao--fraco" type="button"
+          <button class="botao botao--fantasma" type="button"
                   @click="osAberta = null">Fechar</button>
         </div>
       </div>
+    </div>
+    <!-- 🔵 25/11 (passo 5) — A MODAL ANTES DE ESCREVER, decisao dele de 18/11.
+         🚨 Ela DIZ o que vai acontecer do outro lado, em texto: a chamada
+         dispara os webhooks do DataScope e manda PUSH para o tecnico que
+         enviou a resposta. Confirmar sem saber disso seria a tela escondendo a
+         consequencia. -->
+    <div v-if="dsArtefato" class="modal" @click.self="fecharDatascope">
+      <section class="modal__caixa modal__caixa--curta">
+        <h2>Corrigir a situação no DataScope</h2>
+        <p>
+          A OS <strong>{{ dsArtefato.numero_os }}</strong> passa para
+          <strong>Aprovado análise técnica</strong> no DataScope.
+          <template v-if="dsArtefato.datascope_form_state">
+            Hoje ela está como
+            <strong>{{ dsArtefato.datascope_form_state }}</strong>.
+          </template>
+        </p>
+        <p class="nota">
+          Isto escreve no sistema deles: dispara os <strong>webhooks</strong> do
+          DataScope e manda <strong>push para o técnico</strong> que enviou a
+          resposta. Não volta para o estado vazio.
+        </p>
+
+        <p v-if="escritaDatascope === false" class="nota">
+          A escrita no DataScope está <strong>desligada</strong> nesta tela.
+        </p>
+        <p v-else-if="escritaDatascope === null" class="nota">
+          Não consegui medir se a escrita está ligada.
+        </p>
+
+        <p v-if="dsErro" class="nota erro">{{ dsErro }}</p>
+        <p v-else-if="dsFeito" class="nota">{{ dsFeito }}</p>
+
+        <div class="modal__rodape">
+          <div class="modal__agir">
+            <button v-if="escritaDatascope !== true" class="botao"
+                    type="button" @click="ligarEscritaDatascope">
+              <i class="bi bi-unlock" aria-hidden="true"></i>
+              Ligar a escrita
+            </button>
+            <button v-else class="botao botao--perigo" type="button"
+                    :disabled="dsFazendo" @click="confirmarDatascope">
+              <i class="bi bi-pencil-square" aria-hidden="true"></i>
+              Corrigir situação
+            </button>
+          </div>
+          <div class="modal__acoes">
+            <button class="botao botao--fantasma" type="button"
+                    @click="fecharDatascope">Fechar</button>
+          </div>
+        </div>
+      </section>
     </div>
   </section>
 </template>
@@ -1648,6 +2319,77 @@ onBeforeUnmount(() => window.removeEventListener('keydown', aoTeclar))
   align-items: center; justify-content: space-between;
 }
 .painel__titulo { margin: 0; font-size: var(--txt-lg); }
+/* 🔵 25/11 — a IDENTIDADE da tela: título e ajuda juntos, como na Operação.
+   ⚠️ Nome próprio nesta tela: `cabecalho__identidade` é `scoped` dentro do
+   `PainelOperacao.vue`, e copiar o nome de lá daria marcação SEM ESTILO --
+   a armadilha da `.pilula` de 12/11. */
+.painel__identidade {
+  display: flex; align-items: center; gap: var(--e-2); min-width: 0;
+}
+
+/* 🔵 25/11, dele: *"o nome do tecnico pode ter o mesmo destaque que os cards
+   do OP com o Termo"*. No card do técnico o nome é o IDENTIFICADOR -- é por
+   ele que se cruza com a planilha do Procfy -- então ganha o tratamento que a
+   OS e o TERMO têm lá: acento e peso forte, no mesmo tamanho.
+   ⚠️ Herda a quebra em 2 linhas do `card__cliente`, que é de onde ele saiu. */
+.card__tecnico {
+  font-weight: var(--peso-forte); font-size: var(--txt-sm);
+  color: var(--acento);
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* 🔵 25/11 — OS QUADROS DE AÇÃO, e o rodapé numa faixa só.
+   🚨 O que eles consertam: cinco botões de larguras diferentes, sem dizer o
+   que fazem, com "Excluir o card" vizinho de "Atualizar". A grade dá largura
+   IGUAL e quebra previsível; a nota diz o efeito antes do clique; o grupo
+   separa o que lê, o que fecha dinheiro e o que desfaz. */
+.acoes { display: flex; flex-direction: column; gap: var(--e-3);
+         margin-top: var(--e-3); }
+.acoes__grupo { margin: 0; }
+.acoes__titulo {
+  margin: 0 0 var(--e-2); font-size: var(--txt-xs); color: var(--texto-fraco);
+  text-transform: uppercase; letter-spacing: .04em;
+  font-weight: var(--peso-forte);
+}
+.acoes__grade {
+  display: grid; gap: var(--e-2);
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+}
+.acao {
+  display: flex; flex-direction: column; gap: 2px; text-align: left;
+  padding: var(--e-2) var(--e-3); cursor: pointer; font: inherit;
+  background: var(--superficie); color: var(--texto);
+  border: var(--borda-fina) solid var(--borda-forte);
+  border-radius: var(--r-md);
+  transition: border-color var(--tempo-rapido) var(--curva),
+              box-shadow var(--tempo-rapido) var(--curva);
+}
+.acao:hover { border-color: var(--acento); box-shadow: var(--sombra-1); }
+.acao:focus-visible { outline: none; box-shadow: var(--foco); }
+/* ⚠️ Desabilitado DIZ que está desabilitado: sem isto o quadro cinza continua
+   com cara de clicável e a pessoa clica três vezes achando que travou. */
+.acao:disabled { opacity: .55; cursor: not-allowed; box-shadow: none;
+                 border-color: var(--borda); }
+.acao__nome {
+  display: flex; align-items: center; gap: var(--e-2);
+  font-weight: var(--peso-forte); font-size: var(--txt-sm);
+}
+.acao__nota {
+  font-size: var(--txt-xs); color: var(--texto-fraco);
+  line-height: var(--entrelinha);
+}
+.acao--principal { border-color: var(--acento); background: var(--acento-suave); }
+.acao--perigo:hover { border-color: var(--erro); }
+
+/* A faixa única do rodapé: a regra à esquerda, o `Fechar` à direita.
+   ⚠️ `.modal__acoes` já existe nesta folha e põe os botões à direita. */
+.card__rodape {
+  display: flex; flex-wrap: wrap; gap: var(--e-2);
+  align-items: center; justify-content: space-between;
+  margin-top: var(--e-3); padding-top: var(--e-3);
+  border-top: var(--borda-fina) solid var(--borda);
+}
 .painel__medidas { display: flex; align-items: center; gap: var(--e-2); flex-wrap: wrap; }
 
 /* 🚨 `relative` É A CONDIÇÃO da faixa de rolagem da borda: ela é
@@ -1687,6 +2429,38 @@ onBeforeUnmount(() => window.removeEventListener('keydown', aoTeclar))
   display: flex; align-items: center; gap: var(--e-1); flex-wrap: wrap;
   font-size: var(--txt-xs); color: var(--texto-fraco);
 }
+
+/* O anexo do comprovante (25/11). ⚠️ O `<input type="file">` é escondido por
+   CSS e não por `v-if`: ele tem de existir no DOM para o clique no botão
+   alcançá-lo. `display: none` serve — o elemento continua clicável por
+   programa, e é assim na Operação e na Caixa. */
+/* 🔵 25/11 (passo 4b) — o quadro das colunas do Procfy, fechado por padrão:
+   é cadastro que se preenche uma vez, e aberto roubaria a primeira tela de quem
+   veio ver o quadro. */
+.procfy {
+  border: var(--borda-fina) solid var(--borda);
+  border-radius: var(--r-md); padding: var(--e-2) var(--e-3);
+  background: var(--superficie);
+}
+.procfy__abrir {
+  display: flex; align-items: center; gap: var(--e-2);
+  cursor: pointer; font-weight: var(--peso-forte);
+}
+.procfy__grade {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: var(--e-2); margin: var(--e-2) 0;
+}
+.procfy__campo { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.procfy__rotulo {
+  font-size: var(--txt-xs); color: var(--texto-fraco);
+  text-transform: uppercase; letter-spacing: .04em;
+}
+.procfy__agir { display: flex; align-items: center; gap: var(--e-2); }
+.erro { color: var(--erro); }
+
+.comprovante__anexo { display: flex; flex-direction: column; gap: var(--e-1);
+                      margin-bottom: var(--e-2); }
+.comprovante__arquivo { display: none; }
 
 .painel__quadro {
   display: flex; gap: var(--e-3);
@@ -1792,7 +2566,10 @@ onBeforeUnmount(() => window.removeEventListener('keydown', aoTeclar))
 }
 .artefato__os:hover { text-decoration: underline; }
 .artefato__termo, .artefato__orcamento { color: var(--texto-fraco); }
-.artefato__orcamento--sem { color: var(--aviso); }
+/* 🚨 25/11: era `--aviso` (âmbar de alerta). O orçamento não impede nada, e
+   cor de alarme numa informação neutra faz o operador procurar problema onde
+   não há. Fica no tom de apoio, como os vizinhos. */
+.artefato__orcamento--sem { color: var(--texto-fraco); font-style: italic; }
 .artefato__valor { margin-left: auto; font-weight: var(--peso-forte); }
 .artefato__os-dados {
   margin: 0; color: var(--texto-fraco);
@@ -1835,7 +2612,6 @@ onBeforeUnmount(() => window.removeEventListener('keydown', aoTeclar))
 }
 .pilula--valor { color: var(--texto); }
 
-.botao--mini { font-size: var(--txt-xs); padding: 1px var(--e-2); }
 
 .modal {
   position: fixed; inset: 0; display: grid; place-items: center;
@@ -1920,4 +2696,79 @@ onBeforeUnmount(() => window.removeEventListener('keydown', aoTeclar))
 
 .nota { color: var(--texto-fraco); }
 .pequeno { font-size: var(--txt-xs); }
+
+/* 🔵 25/11 — AS REGRAS QUE NASCERAM DEPOIS DA FONTE ÚNICA e voltaram com ela.
+   ⚠️ Elas ficam NO FIM do bloco de propósito: `.artefato__marca` também existe
+   acima, com o corpo de uma linha só, e o que vale é o último. */
+
+/* 🔵 25/11 (A23) — o artefato como card interno.
+   ⚠️ `align-items: flex-start`: a caixinha alinha com a PRIMEIRA linha do
+   corpo, não no meio do bloco de três linhas. */
+.artefato__marca {
+  display: flex; align-items: flex-start; gap: var(--e-2);
+  width: 100%; cursor: pointer;
+}
+.artefato__marca input[type="checkbox"] { margin-top: 3px; flex: none; }
+/* `min-width: 0` para o nome do cliente poder encurtar em vez de empurrar o
+   valor para fora do card -- a armadilha clássica do flex. */
+.artefato__corpo {
+  display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1 1 auto;
+}
+/* 🚨 O MARCADO SE VÊ, e não só pela caixinha: numa lista de 39 itens, a
+   marcação de um checkbox sozinho se perde. */
+.artefato--marcado {
+  border-color: var(--acento);
+  background: var(--acento-suave);
+}
+
+/* 🔵 25/11 — AS MEDIDAS DO CARD ABERTO: três números que eram uma frase.
+   ⚠️ Rótulo em cima, valor embaixo: o valor é o que se procura. */
+.medidas {
+  display: flex; flex-wrap: wrap; gap: var(--e-3);
+  padding: var(--e-2) var(--e-3);
+  background: var(--superficie-2);
+  border-radius: var(--r-md);
+}
+.medida { display: flex; flex-direction: column; min-width: 0; }
+.medida__rotulo {
+  font-size: var(--txt-xs); color: var(--texto-fraco);
+  text-transform: uppercase; letter-spacing: .04em;
+}
+.medida__valor { font-size: var(--txt-sm); font-weight: var(--peso-forte); }
+
+/* O rótulo do campo de data fica ao LADO, não em cima: numa linha de filtro,
+   "de" e "até" em cima de cada campo dobram a altura da faixa. */
+.campo__rotulo--lado {
+  display: flex; align-items: center; gap: var(--e-1);
+  font-size: var(--txt-xs); color: var(--texto-fraco);
+}
+.campo__rotulo--lado .campo { width: auto; }
+
+/* 🔵 25/11 — O VOCABULÁRIO DO CARD que o artefato (A23) usa, com os corpos da
+   `PainelOperacao.vue` (o modelo que ele validou). ⚠️ É cópia de CSS, e a
+   dívida está declarada no `conferir_css_publicado.mjs`: a casa comum só volta
+   com a palavra dele e com uma forma de medir layout antes de publicar. */
+.card__ident {
+  display: flex; align-items: baseline; gap: var(--e-1);
+  min-width: 0; flex-wrap: wrap;
+}
+.card__os {
+  font-size: var(--txt-md);
+  font-weight: var(--peso-forte);
+  background: none; border: 0; padding: 0;
+  color: var(--texto); cursor: pointer; text-align: left;
+}
+.card__os:focus-visible { outline: 2px solid var(--acento); outline-offset: 2px; }
+/* ⚠️ MAIS FRACO QUE O NÚMERO DA OS de propósito: a OS é a identidade. */
+.card__termo { font-size: var(--txt-xs); color: var(--texto-fraco); white-space: nowrap; }
+.card__direita--dado {
+  min-width: 0; overflow: hidden; text-overflow: ellipsis;
+  font-size: var(--txt-sm);
+}
+/* ⚠️ Cliente sem cadastro não é apoio, é uma FALTA: âmbar legível, não cinza. */
+.card__cliente--sem {
+  font-size: var(--txt-sm);
+  font-weight: var(--peso-normal);
+  color: var(--aviso-texto); font-style: italic;
+}
 </style>

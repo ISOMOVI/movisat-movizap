@@ -8543,3 +8543,732 @@ devolve tudo.
 do conserto** e dois ficaram vermelhos com a queixa dele
 (`expected '…' to contain 'OS 16689'`). Depois do conserto: **25 verdes** no
 arquivo, **946 em 53 arquivos** na suíte inteira, as 9 conferências de CSS.
+
+---
+
+## 25/11/2026 — os 19 botões da aba 2 (`PNL_1.6`) e a trava que impede o terceiro
+
+🚨 **A CAUSA NÃO ERA GOSTO: `botao--fraco` NÃO EXISTE EM CSS NENHUM.** Medido em
+25/11 — não está no `tokens.css`, no `base.css`, no `componentes.css`, no
+`<style scoped>` da tela nem no CSS publicado. Os **19** usos renderizavam como
+`.botao` base, com cara de **primário**: uma tela com 19 primários não diz qual
+é a ação principal de cada bloco. Isso passou por 3.898 testes verdes e pelas 10
+conferências de CSS, porque **classe inexistente não dá erro** — o navegador
+ignora e o `jsdom` não faz layout.
+
+**A regra aplicada, uma só:**
+
+| intenção | classe |
+|---|---|
+| ação que FAZ algo (atualizar, ver prévia, marcar, ciente, anexar, remover) | `botao--contorno` (13 usos) |
+| desistir, fechar, limpar | `botao--fantasma` (8 usos) |
+| **a** ação principal do bloco | `botao` puro (Preparar, Salvar, Baixar o arquivo, o Remover já confirmado) |
+
+E **`botao--mini` saiu** (2 usos + a regra scoped): na aba 1 há **um** tamanho.
+Ícone `bi` antes do texto nos botões de ação dos cards, **com o texto mantido** —
+ícone sozinho exigiria `title` + `aria-label`, e rótulo que some é regressão
+(`M10`).
+
+### A 11ª conferência do `conferir_css_publicado.mjs`
+
+`todaVarianteDeBotaoUsadaTemRegra` — **falha o build** quando um `botao--*` usado
+em `class=`/`:class=` de qualquer `.vue` não tem regra no CSS publicado. É a
+forma da conferência do `var()`: mede a **cadeia**, não uma regra que já quebrou.
+
+⚠️ Ela varre só o que está em `class=`, de propósito: o arquivo inteiro pegaria o
+nome escrito em **comentário** (este projeto documenta o defeito no comentário,
+inclusive o `botao--fraco` que acabou de sair) e reprovaria por causa de texto.
+
+📏 **No primeiro dia ela achou um segundo caso, fora da aba 2:**
+`botao--acento`, 3 usos no `Email.vue` (*Nova mensagem*, *Salvar assinatura*,
+*Mandar*), declarada em lugar nenhum. A classe **saiu** — os três já renderizavam
+como `.botao` base, que é o visual de ação principal desta casa, então tirar o
+nome morto **não muda um pixel**. Se ele quiser um acento próprio ali, é uma
+variante que exista, por botão — decisão dele.
+
+### O que NÃO foi feito, e por quê
+
+🔴 **A toolbar do card aberto continua em duas faixas** (as ações e, abaixo, o
+`Fechar`). O molde citado — `.modal__rodape` + `.modal__agir` — é **`scoped` no
+`PainelOperacao.vue` e no `DialogoDeChamado.vue`**: copiar os nomes para cá daria
+marcação **sem estilo nenhum**, que é a armadilha da `.pilula`. E juntar tudo numa
+faixa exige mover o `Fechar` para **dentro dos dois braços** do diálogo
+(`movimentacao` e o `v-else`) — duas cópias do mesmo botão, e no dia em que
+nascer um terceiro braço o diálogo fica **sem porta de saída**. Fica para quando
+ele olhar a tela e disser se o arranjo atual incomoda.
+
+---
+
+## 25/11/2026, parte 2 — a UX aprovada no mockup: topo, card e quadros de ação
+
+🔵 Ele, depois de ver o `Desktop\Mockup_PNL16_2511.html`: *"Todo proposto está
+ótimo - pode seguir"*, com o retorno bloco por bloco: *"1b igual para ambas"* ·
+*"o nome do tecnico pode ter o mesmo destaque que os cards do OP com o Termo"* ·
+*"os cards fechados na aba1 do financeiro ja tem o modelo ideal"* · *"faltam
+recursos no topo da aba1 tbm"* · sobre as ações do card aberto, *"está terrivel
+kk deixe os botões alinhados, talvez um menu mais bonito ou até com informações
+sobre cada, separado por quadros"*.
+
+🚨 **ISTO SUBSTITUI o "o que NÃO foi feito" da parte 1 deste mesmo dia**, onde eu
+escrevi que a toolbar ficaria em duas faixas. Ela não ficou — o arranjo novo
+está no ar, com a trava que o risco dele pedia.
+
+### O topo (G2) — e ele mudou os QUATRO painéis de aba
+
+| recurso | Operação | aba 1 (antes → agora) | aba 2 (antes → agora) |
+|---|---|---|---|
+| balão de ajuda | tinha | **faltava → tem** | **faltava → tem** |
+| busca | tinha | **faltava → tem** | tinha (linha de baixo) → **no topo** |
+| ordenador | tinha | **faltava → tem** | tinha (linha de baixo) → **no topo** |
+| contagem | por coluna | pílula → **"x de y" quando filtra** | selo + valor |
+
+O arranjo é o que ele aprovou na Operação em 05/11 (*"o cabeçalho esta porco,
+organize de forma profissional"*): `painel__identidade` (título + `AjudaDaTela`)
+à esquerda e `painel__medidas` (busca, ordenador, contagem, Atualizar) à direita.
+
+🚨 **O TEXTO DA AJUDA DA `PainelAba.vue` NÃO CITA PAINEL NENHUM**, e há trava
+cobrando isso (`aba1_topo_recursos_2511.teste.js`): a tela serve `PNL_1.2` a
+`PNL_1.5`, então escrever "Financeiro" ali faria o Pós-venda dizer Financeiro —
+o mesmo defeito do `h1` literal que ele achou em 06/11.
+
+🚨 **A BUSCA PENEIRA NO CLIENTE**, de propósito: o quadro já vem inteiro do
+servidor, então filtrar na tela não esconde nada que não esteja nela e não cobra
+uma segunda volta do banco. Varre os campos **que o card mostra** (cliente, OS,
+termo, placa, formulário, tipo) — buscar no que a tela não mostra faria o card
+casar sem a pessoa ver por quê.
+
+🟡 **Decisão minha, declarada: a ordem padrão é "a ordem do servidor".** Pôr
+"mais recentes" como padrão mudaria a ordem dos cards nos quatro painéis sem
+ninguém pedir, e ordem/filtro/limite são decisão dele. As outras três opções
+("mais recentes", "parado há mais tempo", "cliente A–Z") ficam à mão, e em
+"parado" o card **sem passagem registrada vai para o fim** — "não medido" não é
+"parado há mais tempo", a régua da Operação.
+
+⚠️ **`M12` em duas contagens:** com a busca ativa a pílula diz **"1 de 3"** e a
+coluna diz **"1/3"**; e coluna que ficou sem card por causa do filtro diz
+*"3 cards, nenhum casa com a busca"* em vez de **"Vazia."** — dizer "Vazia"
+quando a peneira escondeu tudo é a tela mentindo por omissão.
+
+### O card fechado da aba 2 — `card__tecnico`
+
+🔵 *"o mesmo destaque que os cards do OP com o Termo"*. No card do técnico o
+nome **é o identificador** (é por ele que se cruza com a planilha do Procfy),
+então ele ganhou o tratamento que a OS e o TERMO têm nos cards do OP: **cor de
+acento** e peso forte, no mesmo `--txt-sm`, herdando a quebra em 2 linhas.
+
+📏 **O resto do card já estava no modelo ideal**, e isto vale registrar: a aba 2
+já usava `card__cliente`/`card__direita`/`card__dado`, as mesmas classes do
+`CorpoDoCard.vue` da aba 1. O que parecia "fonte ruim" era **erro do meu
+mockup**, que usava `card__nome`/`card__valor` — duas classes que não existem em
+CSS nenhum. O mesmo defeito que a 11ª conferência pega no build, cometido por mim
+num arquivo que nenhuma trava olhava; o gerador do mockup passou a ter a sua.
+
+### As ações do card aberto — quadros, e não cinco botões soltos
+
+Cinco botões de larguras diferentes, sem dizer o que fazem, com *"Excluir o
+card"* vizinho de *"Atualizar"*: foi o que ele chamou de *"terrível"*.
+
+Agora `.acoes` → `.acoes__grupo` → `.acoes__grade` com `.acao` (nome + nota):
+
+| grupo | o que entra |
+|---|---|
+| **Escolher o que vai pagar** (coluna 1) | Marcar todos · Limpar a marcação |
+| **Conferir — nada se move** | Atualizar · Ler DataScope · Ver prévia |
+| **Fechar o pagamento** | Conferir e auditar · Montar arquivo · Baixar o arquivo · Marcar como enviado · Reabrir |
+| **Desfazer** | Excluir o card (`acao--perigo`) |
+
+🚨 **O agrupamento não é enfeite:** "Excluir o card" e "Atualizar" lado a lado,
+do mesmo tamanho e da mesma cor, é como se clica no errado. E a **grade** dá
+largura igual com quebra previsível — era o *"deixe os botões alinhados"*.
+⚠️ `.acao:disabled` **diz** que está desabilitado (opacidade e cursor): sem isso
+o quadro cinza continua com cara de clicável e a pessoa clica três vezes achando
+que travou. Há trava medindo que o "Preparar" nasce desabilitado.
+⚠️ Cada coluna tem **uma** `.acao--principal`, e há trava contando isso.
+
+### O rodapé numa faixa só — e a trava do risco que ele cria
+
+`.card__rodape`: a regra do lote à esquerda (*"o arquivo do Procfy só sai com
+comprovante ou dispensa"*), `Fechar` em `botao--fantasma` à direita. Sair de um
+card não é ação principal de nada.
+
+🚨 **O `Fechar` MORA DENTRO DOS DOIS BRAÇOS** do diálogo (o da Movimentação e o
+dos lotes), porque a faixa única exige isso — e são **duas cópias do mesmo
+botão**. O risco é claro: um terceiro braço nascendo sem ele deixaria o diálogo
+**sem porta de saída**. Por isso a trava `aba2_ux_aprovada_2511.teste.js` abre o
+card em **cada uma das cinco colunas**, acha o `Fechar` no rodapé, **clica** e
+exige que o diálogo desapareça. `Escape` continua fechando.
+
+### O comprovante, no mesmo padrão
+
+O anexo virou **quadro** com o arquivo dentro (nome, tamanho e o link de baixar
+fora do quadro, para o clique no link não abrir o seletor de arquivo), os passos
+ficaram **numerados** (1. O documento · 2. Valor que está no documento) e o
+rodapé seguiu o arranjo do card.
+
+### O que isto custou em travas antigas, e a lição
+
+🚨 **Quatro travas de 19 e 23/11 ficaram vermelhas num comportamento CERTO**,
+porque achavam o botão por **texto exato** (`b.text() === 'Ver prévia'`) e o
+quadro passou a trazer nome **e** nota. É a mesma lição do seletor por posição
+que o `<input type="file">` derrubou hoje de manhã: **igualdade de texto inteiro
+é aposta sobre a forma**, não sobre o gesto. Passaram a medir o começo
+(`startsWith`) ou a presença (`includes`) do nome, e continuam reprovando se o
+botão sumir. ⚠️ O botão de **confirmar** dentro do diálogo de justificativa
+segue com `===`: ele não é quadro, e afrouxar ali esconderia o dia em que virasse.
+
+---
+
+## 25/11/2026, parte 3 — a FONTE ÚNICA do CSS dos painéis, e o que ela consertou
+
+🔵 Ele, olhando as telas: *"as fontes ainda estão erradas entre as abas, tamanho,
+proporção"* · *"a proporção e posição dos cabeçalhos tbm está divergindo"* · *"os
+cards fechados não estão como nos mockups"* · *"O card aberto na aba2, coluna
+movimentação permanece feia"* · e, direto: *"porque não está fazendo
+corretamente?"*
+
+### A causa, medida — e ela era minha
+
+| classe | estava declarada em | no CSS global |
+|---|---|---|
+| `card__abrir` | **4** arquivos, com **3 corpos diferentes** | nenhuma |
+| `pilula` | **7** arquivos | nenhuma |
+| `coluna` | **5** arquivos | nenhuma |
+| `tela__cabecalho` | **6 corpos** no CSS publicado | nenhuma |
+
+Eu vinha **copiando valores para dentro de cada tela** em vez de criar uma casa
+comum — e fiz o mesmo com as classes novas de hoje. Cópia diverge: `gap` e-1
+contra e-2, borda `--borda` contra `--borda-forte`, sombra só numa, pílula com e
+sem borda, cabeçalho centrado numa e `flex-end` na outra.
+
+🚨 **E foi isso que fez o mockup "mentir" a favor:** no HTML do mockup as duas
+folhas ficaram empilhadas sem escopo, então o card pegou o corpo do
+`CorpoDoCard` — o modelo ideal. Na tela real, quem vencia era a cópia da aba 2.
+O mockup mostrava o card certo e a tela, outro.
+
+### `estilo/painel.css` — a única casa
+
+Importado no `main.js` **depois** do `componentes.css`. Toda regra vive sob o
+ancestral **`.escala-operacao`**.
+
+🚨 **O ancestral foi medido, não escolhido por gosto:** exatamente as três telas
+de painel o carregam (`PainelAba`, `PainelServicoDosTecnicos`,
+`PainelOperacao`), e o `ChatInterno` e a `CaixaDeEntrada` — que também têm
+`.coluna`, significando outra coisa — **não o carregam**. Sem ele, um `.coluna`
+global invadiria as duas.
+
+⚠️ **A Operação não foi renomeada:** os nomes dela (`tela__cabecalho`,
+`cabecalho__identidade`, `cabecalho__controles`) e os das abas (`painel__topo`,
+`painel__identidade`, `painel__medidas`) são declarados **no mesmo corpo**.
+
+📏 **Os valores canônicos, declarados:** o **card** é o do `CorpoDoCard` (🔵 *"os
+cards fechados na aba1 do financeiro ja tem o modelo ideal"*) — sai a sombra,
+entra a borda fina; o **cabeçalho** é um arranjo para as três, com a identidade
+**em linha** (título e ajuda lado a lado), que é o que ele aprovou no mockup; a
+**pílula** fica com a forma do card (com borda) e o **selo** passa a ter a
+**mesma forma da pílula**, porque eram a mesma ideia com dois nomes e duas
+formas. O título das três telas no mesmo tamanho — a Operação usa `<h1>` cru e
+as abas usam `.painel__titulo`, e sem essa linha uma herdava o `base.css` e a
+outra o token.
+
+⚠️ **Variante de uma tela só ficou onde estava** (`card__abrir--chamado`,
+`coluna--alvo`, `pilula--valor`, `artefato*`…): mover o que não é compartilhado
+só engordaria o arquivo comum.
+
+### A 12ª conferência — o que impede a próxima cópia
+
+`aFamiliaDoPainelTemUmaCasaSO` **falha o build** quando um arquivo de painel
+declara regra da família.
+
+🚨 **Ela mede no FONTE, e só dos arquivos de painel** — e a primeira versão dela,
+que contava corpos no CSS publicado, **não servia**: `.tela__cabecalho` existe em
+**16 outras telas** (Histórico, Solicitações, Atendentes, Canais, …), `.painel`
+no `App.vue`, `.coluna` na Caixa e no Chat interno. São nomes da casa, não do
+painel: contar tudo junto reprovava 9 classes por um defeito que não existia.
+⚠️ Comentário e conteúdo de `@media` saem antes da varredura: o override de
+`prefers-reduced-motion` da Operação declara `.card__abrir, .coluna { transition:
+none }`, que é **legítimo**.
+
+📏 **Provada reprovando:** contra o estado anterior ela acusou **19 classes com
+mais de um corpo** — `tela__cabecalho` com 6, `card__abrir` com 5, `pilula` com
+5, `coluna` com 4.
+
+🚨 **E a 8ª conferência teve a premissa vencida por esta mudança.** Ela exigia que
+*"cada tela que usa a `.pilula` declare a sua base"* — regra certa quando a base
+era scoped, errada agora que a base é global. Ela passa a aceitar a base global
+sob `.escala-operacao`; o risco que guardava (*"selo com cor e sem forma"*)
+continua guardado pela base global e pela 12ª.
+
+### O card aberto da Movimentação
+
+| antes | agora |
+|---|---|
+| o resumo era uma **frase corrida** (*"a pagar X · serviço Y · km Z"*) | **quatro medidas** (a pagar · serviço · km · artefatos), rótulo em cima e valor em baixo, no padrão das pílulas do topo |
+| o filtro eram dois `<input type="date">` **crus numa linha solta** | **quadro com título** *"Filtrar pela data do serviço"*, no vocabulário dos `.acoes__grupo`, com o rótulo ao lado do campo |
+| o "limpar" era um botão minúsculo sem contexto | **`Limpar o filtro`** com ícone, dentro do quadro |
+
+### A validação que ele pediu: as abas
+
+| o que foi medido | resultado |
+|---|---|
+| marcação da tira de abas nas duas telas | **idêntica** — mesmas classes, mesmo `v-if` de "uma aba só não é escolha", mesma ordem |
+| regras no CSS publicado | **uma** para `.abas`, **uma** para `.abas__item`, **uma** para `.abas__item--atual` |
+| suítes | **387** (FPSL) · **2.672** (MoviZap) · **1.036** (JS) · **12** conferências de CSS |
+
+### O que isto custou em travas antigas (a terceira vez no mesmo dia)
+
+Uma trava de 19/11 achava o botão por `b.text() === 'limpar'`. **Igualdade de
+texto inteiro é aposta sobre a forma:** o botão virou "Limpar o filtro" com
+ícone, e ela ficou vermelha num comportamento certo. Passou a medir o começo do
+texto. Hoje isso aconteceu três vezes — com o `<input type="file">` (seletor por
+posição), com os quadros de ação (texto exato) e agora com o filtro.
+
+---
+
+## 25/11/2026, parte 4 — a regressão que eu causei, o Procfy pela ficha e o artefato
+
+### 🔴 EU QUEBREI OS DOIS PAINÉIS DE ABA — e a causa é de uma linha
+
+🔵 Ele, em dois minutos: *"os paineis ainda estão tortos exceto o op"* · *"aba2 do
+fin nem aparece mais"* · *"voce quebrou tudo"*.
+
+🚨 **A CAUSA:** no `painel.css` eu escrevi a regra da raiz como **descendente** —
+`.escala-operacao .painel` — mas os dois nomes estão no **MESMO elemento**
+(`<section class="painel escala-operacao">`). Seletor descendente **não alcança o
+próprio elemento**: a raiz das duas abas perdeu `display: flex`,
+`flex-direction: column` e o `gap`, e a tela desabou. A Operação não quebrou
+porque a raiz dela é `.tela escala-operacao` — e foi exatamente o *"exceto o op"*
+que ele descreveu.
+
+✅ **Conserto:** `.painel.escala-operacao` (mesmo elemento).
+
+🚨 **A AUDITORIA que o conserto exigiu, e o que ela mediu:**
+
+| pergunta | resposta |
+|---|---|
+| há outra regra mirando a RAIZ? | **não** — era a única; todo o resto da família são descendentes (coluna, card, abas, controles, pílula, selo, quadros) |
+| algum diálogo sai do escopo por `Teleport`? | **nenhum** `Teleport` nas três telas nem no `DialogoDeChamado` — todos os modais são descendentes da raiz, então as regras os alcançam |
+| a tira de abas do Financeiro está certa no banco? | **sim**: `PNL_1.4` e `PNL_1.6`, as duas `ativo`, e o registro da 1.6 com `rota` e `aba_de: PNL_1.4` |
+| o bundle publicado tem a tela? | **sim** (`servico-dos-tecnicos`, `Serviço dos técnicos`, `Anexar comprovante`) |
+
+**A lição, e é de CSS:** `.a .b` e `.a.b` são coisas diferentes, e a diferença é
+invisível no diff. Quando a regra sai de um `<style scoped>` (onde ela era só
+`.painel`) para um arquivo global com ancestral, **o alvo que estava no mesmo
+elemento do ancestral muda de forma** — e nenhuma das 12 conferências via, porque
+todas mediam a regra, não a cadeia até o elemento.
+
+### O Procfy pega o que a ficha do técnico sabe
+
+🔵 Ele: *"do procfy da para pegar esses dados da ficha do tecnico se tiver, se não
+sai em branco mesmo"*.
+
+📏 **Medido antes de escrever:** o elo é **`contato.harmonit_tecnico_id`** (liga o
+`tecnico_id` do artefato, que é o `usuarioId` do Harmonit, ao contato do
+MoviZap); a `tecnico_ficha` (**289 linhas**) tem `pagamento_forma` e
+`pagamento_dados`; e **0 das 289** estão preenchidas hoje.
+
+| coluna do Procfy | de onde vem agora |
+|---|---|
+| Modo de pagamento | `tecnico_ficha.pagamento_forma` |
+| Contas bancárias | `tecnico_ficha.pagamento_dados` |
+| Categoria · Centro de Custo | **não existem na ficha** — saem em branco, e a resposta diz quais saíram |
+
+🚨 **A FICHA GANHA DO `/config` GLOBAL**, declarado: ela é por técnico, e dado por
+técnico é mais específico que um valor único para todos. ⚠️ **Campo vazio não
+entra**: se entrasse como `""`, apagaria um valor do `/config` — "não sei" não
+sobrescreve "sei". ⚠️ A **prévia** usa a mesma config do arquivo: prévia que
+mostra coluna vazia e arquivo que sai preenchido seria a tela mentindo sobre o
+que vai acontecer.
+⚠️ **O que isto entrega hoje é o CAMINHO**: com as fichas vazias, o arquivo
+continua saindo em branco nessas duas colunas — e no dia em que alguém preencher
+a ficha, ele sai preenchido **sem ninguém tocar em código**. 7 travas, com o
+dublê na borda (a consulta), não em cima da regra.
+
+### O artefato virou card interno (A23)
+
+| linha | o que tem |
+|---|---|
+| 1 | Orç — OS — TERMO à esquerda, **valor à direita** |
+| 2 | cliente · tipo · data do serviço, em peso fraco |
+| 3 | selos: situação do ERP, *casou por*, *devolvido* — só quando há |
+
+⚠️ A `<label>` em volta do `checkbox` **fica**: é ela que faz clicar no texto
+marcar o item. 🚨 E o **marcado se vê** (borda e fundo de acento): numa lista de
+39 itens, um checkbox marcado sozinho se perde.
+
+### O custo em travas, pela 4ª vez no mesmo dia
+
+Três travas apontavam para `.artefato__os`, e o botão passou a usar `.card__os` —
+o nome do vocabulário compartilhado. Hoje isso aconteceu com **seletor por
+posição**, **texto exato** (duas vezes) e agora **nome de classe**: a trava tem de
+apontar para o PAPEL do elemento, e quando aponta para o nome, ela acompanha o
+rename em vez de reprovar.
+
+📏 **Depois de tudo:** **387** (FPSL) · **2.679** (MoviZap) · **1.036** (JS) ·
+**12** conferências de CSS, backend reiniciado antes do build.
+
+---
+
+## 25/11/2026, parte 5 — a fonte única de CSS foi REVERTIDA, e por quê
+
+🔵 Ele, olhando as telas: *"contratual ainda está desalinhado"* · *"financeiro
+não exibe aba2"* · *"pós venda tbm está assim e não sei o pq mexeu nas outras
+abas"* · *"a metodologia já orienta a SEMPRE validar na tela como realizado e
+não opinião ou registro"*.
+
+### A resposta da terceira pergunta é a causa das três
+
+📏 **A `PainelAba.vue` serve QUATRO telas** — `PNL_1.2` (Treinamentos),
+`PNL_1.3` (Pós-venda), `PNL_1.4` (Financeiro) e `PNL_1.5` (Contratual) — e o
+**`CorpoDoCard.vue`**, que desenha o card fechado, serve as quatro **mais** a
+Operação e a aba 2. A fonte única tirou as declarações do `<style scoped>`
+desses arquivos e as substituiu por corpos que **eu escrevi à mão** no
+`estilo/painel.css`. Medido no conserto:
+
+| arquivo | classes que o `<style>` dele perdeu |
+|---|---|
+| `componentes/CorpoDoCard.vue` | **12** — `card__abrir`, `card__os`, `card__termo`, `card__ident`, `card__linha`, `card__resumo`, `card__cliente*`, `card__dado`, `card__direita*`, `pilula` |
+| `telas/PainelAba.vue` | **22** — a raiz, o casco, o quadro, a coluna inteira, as abas, a pílula |
+| `telas/PainelOperacao.vue` | **18** |
+| `telas/PainelServicoDosTecnicos.vue` | **38** |
+
+🚨 **Eu mexi em quatro telas que ele não pediu, e não disse.** O pedido era o
+alinhamento entre as abas do Financeiro; a troca atingiu Contratual, Pós-venda e
+as duas do Financeiro de uma vez, porque elas são **o mesmo arquivo**.
+
+### E eu não tinha como validar o que mudei
+
+🔵 A exigência dele é a 6ª linha do `M17` e ele a cobrou com razão. 📏 **Medido:
+não há navegador headless nesta VPS** (`chromium`, `google-chrome`, `puppeteer`
+e `playwright` — nenhum instalado). Então **layout não se mede aqui**: as três
+suítes rodam em `jsdom`, que não faz layout, e as conferências de CSS leem
+**regra**, não pixel. Trocar os corpos de 90 regras de forma por corpos escritos
+à mão, sem nada que meça forma, foi a decisão errada.
+
+### A reversão, e o que ela assume
+
+✅ Por arquivo: o bloco `<style>` volta do backup **pré-refatoração**
+(`.bak_2026-11-25_093902_fonte_unica`) e **todo o template atual fica** — as
+entregas de marcação do dia (A23, as medidas, os quadros de ação, o topo)
+são de template e não se perderam. As regras que **nasceram depois** da
+refatoração voltam no fim do bloco (regra igual mais abaixo ganha).
+✅ `import './estilo/painel.css'` sai do `main.js`; a folha fica no disco como
+`painel.css.revertido_<marca>`, para o dia em que ele aprovar o caminho.
+✅ A **12ª conferência antiga** (nenhum arquivo de painel declara a família) sai,
+porque a casa comum que ela guardava saiu — e **o motivo fica escrito no lugar
+dela**, não apagado. A **8ª** volta ao corpo original (a base global da pílula
+que ela passou a aceitar deixou de existir).
+⚠️ **A dívida que a reversão assume, declarada:** a cópia de CSS entre telas
+volta a não ter trava. `card__abrir` tem **5** corpos no CSS publicado outra vez,
+e a divergência de fonte entre as abas que ele vê **continua lá**. Ela não era
+"quebrado": era divergente. A casa comum só volta com a palavra dele **e** com
+uma forma de medir forma antes de publicar.
+
+### O custo escondido da reversão: 5 classes órfãs
+
+🚨 O template do artefato (A23) usa o vocabulário compartilhado — `card__os`,
+`card__termo`, `card__ident`, `card__cliente--sem`, `card__direita--dado` — que
+**só morava na folha comum**. Tirar a folha deixou os cinco **sem regra
+nenhuma**, e isso é o defeito dos 19 `botao--fraco` de manhã: classe que não
+existe **não dá erro**. Os cinco foram declarados no `<style>` da aba 2, com os
+corpos da `PainelOperacao.vue` (o modelo que ele validou), não inventados.
+
+### ✅ A 12ª conferência, agora na forma certa
+
+`todaClasseCompostaUsadaTemRegra` — **toda** classe composta
+(`bloco__elemento` / `bloco--variante`) escrita em `class=`/`:class=` de um
+template tem de ter regra no CSS publicado, senão o **build falha**. É a 11ª
+(que só olhava `botao--*`) estendida a tudo.
+
+🚨 **Provada reprovando:** com um `artefato__forjado--xyz` no template ela
+devolveu **exit 1**, e voltou a passar quando o nome saiu.
+
+⚠️ **Três armadilhas que ela só mostrou rodando**, e as três eram da trava, não
+do código:
+1. **Prefixo dinâmico.** `:class="'selo--' + a.semaforo"` escreve `selo--` no
+   atributo. Nome que **termina em `-`** nunca é classe. 6 falsos positivos.
+2. **São DOIS aplicativos.** `CamposDoFormulario.vue` e 12 classes dele não
+   estão no CSS do painel porque ele é do **formulário público**
+   (`publico/` → `dist_publico`), outro build. Esta conferência lê **as duas**
+   folhas; as outras 11 medem o painel e leem só a dele. É a mesma armadilha da
+   12ª antiga, que media `tela__cabecalho` de 16 telas que não eram donas dele.
+3. **Linha de base declarada.** 📏 Medido antes de escrever: **1.589** classes
+   compostas em uso e **21 sem regra** — dívida anterior a hoje, com
+   `.chip--pequeno` em **11 telas**. A trava reprova o que é **novo**; a lista
+   antiga fica à vista e datada em `ORFAS_CONHECIDAS`, para ele decidir.
+
+🚨 **E um medidor meu mediu frouxo:** o meu primeiro contador, em Python,
+comparava por **substring** — `.menu__sub` casa dentro de `.menu__sub-nome` — e
+por isso **não viu** a órfã `menu__sub` do menu lateral. A conferência em
+JavaScript compara **o nome inteiro** e achou.
+
+### A aba 2 do Financeiro, medida no backend
+
+| pergunta | resposta |
+|---|---|
+| `pipeline.abas('financeiro')` | **duas**: `PNL_1.4` (ordem 1) e `PNL_1.6` "Serviço dos técnicos" (ordem 2), as duas `ativo` |
+| a `PNL_1.6` no catálogo | `rota: /paineis/servico-dos-tecnicos`, `aba_de: PNL_1.4` |
+| quem a tem concedida | **três** atendentes (28684, 123, 122), concedidas em 19/11 por 121 |
+| a raiz das duas abas no CSS publicado | `display:flex; flex-direction:column; gap:var(--e-4)` nos **dois** escopos |
+
+Ou seja: o backend e o registro estão certos, e o que impedia a tira de abas de
+aparecer era a raiz sem `display` — o defeito de CSS acima.
+
+### 📏 Depois de tudo
+
+**1.036** travas de JavaScript (61 arquivos) · **12** conferências de CSS ·
+**0** classes compostas sem regra nas três telas de painel · folha publicada
+`index-CvE07IV6.css` (278.864 bytes). O backend não mudou nesta rodada, então
+não houve reinício a fazer.
+
+---
+
+## 25/11/2026, parte 6 — os dois cards fixos do sem-técnico (aba 2)
+
+🔵 Ele: *"vamos montar cards fixos para esses casos? 'SEM IDENTIFICAÇÃO' como já
+tem e 'NÃO CADASTRADOS NO HARMONIT' para os sem cadastro — o que não impede em
+juntar as demais informações corretamente, pois em caso de correção e
+atualização, o card já direciona"*.
+🔵 Sobre quem tem vínculo mas a OS não: *"iria para o tipo sem técnico que
+coloquei, é como se fosse um provisório que satisfaz mas que não frequenta OS
+harmonit"*.
+🔵 Sobre pagar: *"não conhecidos não paga isso, e nem sem identificação"*.
+
+### Os dois cards
+
+| card | quem cai nele | paga? |
+|---|---|---|
+| `sem técnico identificado` (o que já existia, texto intocado) | nem o Harmonit nem o **nosso** agendamento sabem quem atendeu | **não** |
+| `não cadastrados no Harmonit` | o nosso agendamento sabe quem foi | **não** |
+
+🚨 **O FPSL NÃO MUDA.** O `tecnico_id` do artefato segue **nulo**, que é a
+verdade: o Harmonit não sabe. A divisão é de **apresentação** e vive no MoviZap,
+porque é aqui que o agendamento mora — `agendamento_os.numero_os` →
+`agendamento.tecnico_contato_id` → `contato`.
+
+🚨 **E A CORREÇÃO JÁ TEM CAMINHO SOZINHA:** quando a OS do Harmonit ganhar o
+técnico, a **varredura adota** o artefato órfão (a mesma adoção que consertou a
+OS 17131) e ele troca de card **sem ninguém mexer**. É o *"o card já direciona"*
+dele, sem estado novo em lugar nenhum.
+
+### As decisões de desenho, declaradas
+
+⚠️ **A divisão é por ARTEFATO, não por card.** Um card de sem-técnico pode ter
+OS de origens diferentes; dividir por card deixaria as duas situações juntas, que
+é justamente o que escondia o caso.
+⚠️ **O nome provisório fica no ARTEFATO, e o título do card é FIXO.** O card
+junta vários provisórios, e nome no título mentiria a partir do segundo. No card
+**fechado** a lista aparece numa linha própria (`provisório: A, B`), sem repetir
+— *"direciona"* só funciona se der para ver **sem abrir**.
+⚠️ **Card que fica sem artefato nenhum sai** da coluna: card vazio é tela dizendo
+que há algo ali.
+⚠️ **Os totais são recalculados, não subtraídos:** subtrair arrasta erro de ponto
+flutuante e depende de o total de entrada estar certo.
+🚨 **Banco mudo não derruba o quadro:** se a consulta do agendamento falhar, o
+card antigo fica **inteiro** e a tela segue. Quadro vazio nunca — é a razão de a
+coluna 1 existir.
+⚠️ **Uma consulta para todas as OS**, não uma por artefato — o mesmo motivo do
+`_anexar_comprovantes_no_quadro` e do `_orcamento_por_os`.
+
+### O estado, conferido no quadro de produção
+
+```
+coluna movimentacao -> 2 cards
+   'Franck'                      | 9 OS | paga True  | R$ 570,00
+   'não cadastrados no Harmonit' | 1 OS | paga False | R$  60,00
+        provisório: Jonas Claudio dos Santos | Curitiba - PR
+```
+
+📏 O card `sem técnico identificado` **desapareceu da tela**, e isso é correto: o
+único artefato que ele tinha era a OS 17133, e o nosso agendamento sabe quem foi.
+⚠️ O nome sai com a cidade (`| Curitiba - PR`) porque é assim que o **contato**
+está cadastrado. Não apara: aparar seria eu reescrever o cadastro dele na tela.
+
+**Travas:** `tests/teste_cards_fixos_sem_tecnico.py` (9, com o dublê na borda — a
+consulta — e a regra rodando de verdade) e
+`src/aba2_cards_fixos_2511.teste.js` (5, que prendem o **direcionar**: o card tem
+de dizer quem foi, e nenhum dos dois pode oferecer preparar). As 14 vermelhas
+antes do código.
+
+📏 **Depois dos dois passos:** **393** (FPSL) · **2.688** (MoviZap) · **1.041**
+(JS) · **12** conferências de CSS. Backend do FPSL e do MoviZap reiniciados antes
+do build; folha e bundle publicados conferidos; as rotas respondem 401.
+
+---
+
+## 25/11/2026, parte 7 — o TERMO no card do Contratual (passo 3)
+
+🔵 Ele: *"os cards fechados na aba contratual devem ter o numero do termo antes
+do nome do cliente: TERMO: '12345 - PASTELARIA VELASCO'"* · *"o operador coloca
+a mão no card, pois só depois de assinado que ele será gerado oficialmente"*.
+
+### Por que precisou de coluna nova
+
+📏 O quadro do Contratual tem **6 cards e nenhum com termo**: os seis são
+**solicitações sem OS** (Aditivo contratual, Substituição de veículos). O termo
+**não é campo da OS** — é extraído de dentro do corpo dela. Abri as respostas dos
+formulários uma por uma: CNPJ, placas, endereço, responsável, e **nenhum campo de
+termo**. Entre assinar e gerar a OS, o número não existe em lugar nenhum.
+
+### O que a tela faz agora
+
+| onde | o quê |
+|---|---|
+| card fechado do **Contratual** | linha 1 abre com `TERMO 12345` e o cliente vem depois |
+| as **outras três abas** e a Operação | **nada muda** — o cliente continua abrindo a linha 1 |
+| diálogo do card, só **sem OS** | quadro *"Número do termo"* com campo, botão e a frase que diz por que ele existe |
+| `title` do identificador | diz a origem: *"número posto à mão por Iago"* ou *"número do termo na OS"* |
+
+🚨 **A PROP, e não regra fixa.** O `CorpoDoCard` é instanciado em **dois** lugares
+e um deles (`PainelAba`) serve as **quatro** abas. Mudar a linha 1 sem condição
+mudaria Pós-venda e Financeiro junto — o erro exato que custou as quatro telas
+hoje de manhã. Há trava para o Contratual **mostrar** e trava para as outras
+**não mostrarem**.
+🚨 **O termo da OS GANHA**, e o campo de digitar **só aparece em card sem OS**:
+deixá-lo editável com OS no card faria a tela prometer uma escrita que o servidor
+ignora (`M12`).
+🚨 **O campo entrou no MESMO passo da coluna.** Medido no mesmo dia: as quatro
+chaves `procfy_*` vivem no `/config` e **nenhuma rota as escreve** — ninguém
+consegue preenchê-las, nem o owner. Coluna sem tela é dado inalcançável, e esse
+defeito já existe nesta casa.
+
+### Dois defeitos que só apareceram exercitando
+
+🚨 **1. `could not determine data type of parameter $3`.** As 11 travas passavam e
+a **primeira escrita de verdade falhou**: o Postgres não infere o tipo de um
+parâmetro que aparece só dentro de `CASE WHEN %s IS NULL`. Faltava `::text`. E o
+**dublê de banco não podia pegar** — com o `banco.executar` trocado, o Postgres
+nunca vê a consulta. O limite está escrito dentro do próprio arquivo de travas.
+
+🚨 **2. A 12ª conferência de CSS achou uma órfã minha no dia em que nasceu.** O
+build falhou: `campo--termo` estava no template e não existia em CSS nenhum — a 5ª
+forma do mesmo defeito, cinco horas depois de eu escrever a trava que a pega. O
+conserto que não muda pixel foi declarar a regra **na classe** em vez do
+descendente, e a classe diz o papel, que é o que a trava de tela seleciona
+(`M13`).
+
+### O estado, conferido escrevendo de verdade
+
+```
+grava  -> {'termo': '12345'}
+banco  -> termo='12345', termo_por=121, termo_em preenchido
+quadro -> termo='12345', termo_a_mao=True, termo_por_nome='Iago'
+teto   -> recusou 40 dígitos: "no máximo 20 caracteres"
+limpa  -> termo, termo_por e termo_em todos NULOS (o CHECK satisfeito)
+```
+
+⚠️ **Isso foi escrito e apagado no card 4360 em produção**, de propósito, para
+provar a cadeia inteira — e o card ficou como estava, com os três campos nulos.
+
+📏 **Depois do passo 3:** **2.700** (MoviZap) · **1.047** (JS) · **12**
+conferências de CSS · migração **120** aplicada e documentada no `02_Modelo_Dados`
+(a trava da casa exige, e reprovou até eu escrever). Backend reiniciado antes do
+build; a rota responde **401** sem login.
+
+---
+
+## 25/11/2026, parte 8 — o arquivo do Procfy pela regra, as cinco chaves e o DataScope
+
+🔵 Ele: *"siga com todos - o arquivo precisa ser gerado corretamente - como na
+regra"*.
+
+### O arquivo do Procfy: três defeitos contra a regra
+
+📏 **A regra, que já estava no código:** o modelo
+`modelo_importacao_procfy.xlsx` tem **14 colunas e zero linhas de exemplo**, e a
+ordem foi lida do arquivo (`PROCFY_COLUNAS`). Quem escreve o binário é o
+**MoviZap**, no download — o FPSL fala JSON e nada mais.
+
+| defeito | o que acontecia | conserto |
+|---|---|---|
+| **a ordem vinha do DADO** | o cabeçalho saía de `list(linhas[0].keys())`, a ordem de inserção do primeiro dicionário. Funcionava por coincidência: reordenar o dicionário no FPSL mudaria o arquivo **em silêncio** e o Procfy recusaria a importação | a regra **atravessa a ponte como dado** (`colunas`), e o escritor obedece |
+| **linha que não casa saía torta** | coluna faltando virava célula vazia, coluna sobrando era descartada — e o erro aparecia **no Procfy**, longe daqui | **500 com a frase**, dizendo o que falta ou sobra |
+| **sem linha, arquivo sem cabeçalho** | `linhas` vazia dava `colunas = []` e saía uma planilha sem cabeçalho nenhum | **400** antes de montar |
+| **o nome do arquivo saía cru** | o contato se chama `Franck \| Campinas - SP`, e `\|` é **proibido** em nome de arquivo no Windows; aspas ou quebra de linha quebrariam o próprio `Content-Disposition` | `_nome_de_arquivo` troca o proibido por `_`, apara e limita a 60 — e **mantém o nome**, porque o arquivo é de um técnico |
+
+⚠️ **Copiei a tupla das 14 colunas dentro da trava, de propósito:** trava que
+importa a constante do código medido não mede nada — é ela que reprova se
+alguém mudar a ordem de um lado só.
+🟡 **E uma coisa que eu NÃO mudei, e é decisão dele:** a coluna `Valor` sai como
+**texto com vírgula** (`570,00`). Num `.xlsx` isso vira célula de texto, não
+número. A regra atual diz vírgula (*"o arquivo é lido por uma planilha em
+pt-BR"*), e trocar para número mudaria o que ele importa — fica anotado, não
+alterado.
+
+### As cinco chaves do Procfy ganharam tela (passo 4b)
+
+📏 **O defeito, medido:** as cinco chaves (`procfy_categoria`,
+`procfy_conta_bancaria`, `procfy_modo_pagamento`, `procfy_centro_de_custo`,
+`procfy_tags`) eram **lidas** pelo gerador e **nenhuma rota as escrevia** —
+ninguém conseguia preenchê-las, nem o owner. 🚨 É o mesmo defeito do
+`pipeline_card.termo` do passo 3: **coluna sem tela é dado inalcançável**.
+
+`GET`/`PUT .../config-procfy`, permissão da **própria aba** (quem prepara o
+pagamento é quem sabe esses valores; exigir `CFG_7.1` daria a chave do sistema a
+quem precisa de cinco campos), e um quadro recolhível na tela com os cinco
+campos e a contagem de quantas estão em branco.
+🚨 **Não é gravador genérico de `config`:** só as cinco entram (`extra:
+forbid`), senão uma rota de painel escreveria qualquer chave do sistema.
+⚠️ **Ausente ≠ vazio:** campo que não vem fica como estava; campo que vem vazio
+limpa. 🔵 E preencher continua **opcional** — o arquivo sai mesmo em branco, e a
+tela diz isso.
+
+### O orçamento demonstrado (passo 4a)
+
+🔵 *"orçamento não é impedimento é apenas vínculo demonstrado para operador
+auditar em tela"*. Auditar é **comparar**: o card agora mostra
+`Orç 3 (R$ 175,00)` ao lado do valor a pagar. ⚠️ O total **só acompanha o número
+que a tela mostra** — se o número veio persistido do FPSL e o cruzamento de hoje
+aponta para outro orçamento, mostrar o total do outro seria comparar com o valor
+errado. 🚨 E *"sem orçamento"* **perdeu o ícone de alerta**: alarme para algo que
+não impede faz procurar problema onde não há.
+
+### A correção da situação no DataScope (passo 5)
+
+🔵 *"sim, aprovado - que tem como base as etapas de validação que permitem o
+card do pagamento técnico avançar"*.
+
+📏 **Medido antes de escrever, e desenhou tudo:** `74341` = *"Aprovado análise
+técnica"*; e 🚨 **o nosso cache não tem o `form_code`** (guarda
+`form_answer_id`, `numero_os`, `form_state`, `updated_at`), sem o qual não há
+escrita possível. Li **uma resposta real** do `/v5/answers`: ela traz `code` e
+`form_name`. Então a escrita **lê a resposta antes, e lê fresco** — `code`
+guardado envelheceria e mudaria o estado de uma resposta que não é mais a atual.
+
+🚨 **A chamada dispara os webhooks deles e manda PUSH para o técnico.** Por isso,
+tudo o que foi construído em volta:
+1. **interruptor próprio, que nasce desligado** — na própria tela, não no
+   `/config` global, que é a convenção desta frente;
+2. a tela **não oferece corrigir** com ele desligado: oferece **ligar**;
+3. **modal antes de escrever**, dizendo em texto o que vai acontecer do outro
+   lado;
+4. **idempotente**: já aprovado não escreve de novo — seria notificar sem fato
+   novo;
+5. **só na Validação**, ao lado do comprovante, que tem a mesma razão;
+6. erro deles **não grava** estado nem trilha de sucesso: `ok` nosso não é prova.
+
+✅ `datascope_post` é a **primeira escrita** deste cliente, que era GET-only por
+decisão de projeto. Passa pelo **mesmo disjuntor** do GET, e manda
+`application/x-www-form-urlencoded`, como o doc deles mostra — JSON daria 400 com
+corpo vazio, a recusa que não explica.
+
+### Três defeitos meus que só apareceram rodando
+
+🚨 **1. `import re` faltando no `main.py`.** `py_compile` passou e a **coleta do
+pytest** parou com `NameError`. Compilar confere sintaxe, não nomes.
+🚨 **2. O botão do DataScope no RAMO ERRADO.** O card aberto tem **dois** ramos
+(Movimentação × as outras quatro colunas), cada um com a sua lista de artefatos.
+Pus o botão no ramo da Movimentação com a condição `colunaAberta ===
+'validacao'` — que naquele ramo **nunca é verdadeira**. O botão não aparecia em
+lugar nenhum, e **nada daria erro**: botão ausente é silencioso. Quem achou foi
+a trava de gesto.
+🚨 **3. A 12ª conferência pegou DUAS órfãs minhas no dia em que nasceu:**
+`campo--termo` (passo 3) e `modal__caixa--estreita` (passo 5). Nas duas o
+conserto certo foi **não inventar nome**: declarar a regra na classe, e usar
+`modal__caixa--curta`, que existe com 6 usos.
+
+### 📏 Depois de tudo
+
+**402** (FPSL) · **2.712** (MoviZap, 3 pulados, nenhum meu) · **1.057** (JS) ·
+**12** conferências de CSS. Migração **120** aplicada e documentada. Os dois
+backends reiniciados antes do build. O interruptor do DataScope: **desligado**,
+e a chave nem existe no `config` ainda. Rotas novas respondem **401**.

@@ -1,3 +1,14 @@
+/* 🔴 25/11, A 12ª CONFERÊNCIA SAIU DAQUI, e o motivo tem de ficar escrito.
+   Ela exigia que nenhum arquivo de painel declarasse a família (`card__*`,
+   `coluna*`, `painel__*`) -- guarda certa ENQUANTO a casa comum
+   (`src/estilo/painel.css`) existia. A casa comum foi revertida: ela trocava as
+   declarações de quatro telas de uma vez (a `PainelAba.vue` serve o Contratual,
+   o Pós-venda e as duas do Financeiro) por corpos escritos à mão, e o estrago
+   apareceu na tela dele, não em teste nenhum -- porque não há navegador headless
+   aqui para medir layout.
+   ⚠️ Com isso a CÓPIA de CSS entre telas volta a não ter trava. Isso é dívida
+   declarada, não descuido: a casa comum só volta com aprovação dele e com uma
+   forma de validar layout de verdade antes de publicar. */
 /*
  * CONFERE O CSS QUE O NAVEGADOR RECEBE — roda depois do `vite build`.
  *
@@ -23,7 +34,7 @@
  * se declara verde sem ter medido nada é a pior espécie — e esta casa já tem
  * dois arquivos nesse estado no FPSL, contados no placar sem rodar.
  */
-import { readFileSync, readdirSync, existsSync } from 'node:fs'
+import { readFileSync, readdirSync, existsSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 
 const PASTA = join(process.cwd(), 'dist', 'assets')
@@ -397,6 +408,151 @@ function todoVarUsadoExiste(css) {
   }
 }
 
+/* ------------------------------------------------------------------ 11 */
+function todaVarianteDeBotaoUsadaTemRegra(css) {
+  /* 🚨 O DEFEITO, medido em 25/11: `botao--fraco` usada **19 vezes** na aba 2
+     do Financeiro e declarada em lugar nenhum -- nem no `componentes.css`, nem
+     no `<style scoped>` da tela. Classe que não existe **não dá erro**: o
+     navegador ignora e o botão renderiza como `.botao` base, com cara de
+     primário. Uma tela com 19 primários não diz qual é a ação principal.
+
+     ⚠️ É a mesma forma da conferência 10: o que se mede é a CADEIA (a classe
+     usada no template encontra regra no CSS publicado?), não uma regra que já
+     quebrou. A suíte não alcança isto -- o jsdom não aplica folha de estilo.
+
+     ⚠️ SÓ O QUE ESTÁ EM `class=`/`:class=` conta. Varrer o arquivo inteiro
+     pegaria o nome escrito em COMENTÁRIO (este projeto documenta defeito no
+     comentário, inclusive o `botao--fraco` que acabou de sair) e a trava
+     reprovaria por causa de um texto. */
+  const raiz = join(process.cwd(), 'src')
+  const vues = []
+  const andar = (pasta) => {
+    for (const nome of readdirSync(pasta)) {
+      const caminho = join(pasta, nome)
+      if (statSync(caminho).isDirectory()) andar(caminho)
+      else if (nome.endsWith('.vue')) vues.push(caminho)
+    }
+  }
+  if (!existsSync(raiz)) {
+    falhar(`não achei ${raiz} para conferir as variantes de botão.`)
+    return
+  }
+  andar(raiz)
+
+  const usadas = new Map()
+  for (const caminho of vues) {
+    const texto = readFileSync(caminho, 'utf8')
+    for (const atr of texto.matchAll(/:?class="([^"]*)"/g)) {
+      for (const m of atr[1].matchAll(/botao--[a-z0-9-]+/g)) {
+        if (!usadas.has(m[0])) usadas.set(m[0], new Set())
+        usadas.get(m[0]).add(caminho.split('src').pop())
+      }
+    }
+  }
+  /* Declarada em QUALQUER lugar do CSS publicado conta -- global ou scoped
+     (`.botao--x[data-v-...]`). O que se mede é existir. */
+  const declaradas = new Set(
+    [...css.matchAll(/\.(botao--[a-z0-9-]+)/g)].map((m) => m[1]))
+  const orfas = [...usadas.keys()].filter((n) => !declaradas.has(n)).sort()
+  if (orfas.length) {
+    falhar(`${orfas.length} variante(s) de botão usada(s) em template SEM `
+           + `regra no CSS publicado: `
+           + orfas.map((n) => `${n} (${[...usadas.get(n)].join(', ')})`)
+             .join(' · ')
+           + '. O navegador ignora a classe e o botão sai como `.botao` base — '
+           + 'use uma variante que existe em estilo/componentes.css, ou '
+           + 'declare a regra.')
+  }
+}
+
+/* ------------------------------------------------------------------ 12 */
+/* 📏 A LINHA DE BASE, medida em 25/11: 35 classes compostas em uso sem regra
+   em CSS nenhum, em 24 arquivos. É dívida anterior a esta entrega e está aqui
+   À VISTA, não apagada -- `.chip--pequeno` sozinha aparece em 11 telas. Tirar
+   um nome desta lista é consertar o defeito dele; acrescentar um nome é assumir
+   dívida nova, e isso é decisão dele, não minha. */
+const ORFAS_CONHECIDAS = new Set([
+  'recado--apagada', 'etiqueta--', 'faixa__medida--etapa',
+  'agm__campo--cep', 'agm__campo--num', 'agm__campo--uf', 'agm__itens',
+  'chip--pequeno', 'agd__mes-botao', 'tela__bloco', 'linha--quebra',
+  'balao__ir', 'diario__marca', 'email__assinatura-imagem',
+  'inicio__titulo', 'tela__titulo', 'perm__celula', 'tela__aviso',
+  'grade__linha', 'grade__linha--aberta',
+  /* 25/11: embrulho do subgrupo do menu, sem regra nenhuma. A regra
+     parecida (`menu__sub-nome`) é de OUTRO elemento. O conserto é
+     remover o nome, e mexer no menu lateral não é esta entrega. */
+  'menu__sub',
+])
+
+function todaClasseCompostaUsadaTemRegra(css) {
+  /* 🚨 O DEFEITO DE 25/11: a reversão da folha comum do painel deixou cinco
+     classes do card do artefato sem regra nenhuma, e as 11 conferências, as
+     três suítes e o build passaram. A 11ª mede a mesma cadeia, mas só para
+     `botao--*`; esta mede para TODA classe composta (`bloco__elemento` ou
+     `bloco--variante`), que é a convenção desta casa.
+
+     ⚠️ Classe SEM `__` nem `--` fica fora de propósito: nome de uma palavra é
+     muitas vezes de biblioteca (`bi`, `fade`) ou vem de fora do `src`. */
+  const raiz = join(process.cwd(), 'src')
+  if (!existsSync(raiz)) {
+    falhar(`não achei ${raiz} para conferir as classes compostas.`)
+    return
+  }
+  const vues = []
+  const andar = (pasta) => {
+    for (const nome of readdirSync(pasta)) {
+      const caminho = join(pasta, nome)
+      if (statSync(caminho).isDirectory()) andar(caminho)
+      else if (nome.endsWith('.vue')) vues.push(caminho)
+    }
+  }
+  andar(raiz)
+
+  const usadas = new Map()
+  for (const caminho of vues) {
+    const texto = readFileSync(caminho, 'utf8')
+    /* ⚠️ Só o TEMPLATE: o `<style>` e o `<script>` escrevem nomes em prosa. */
+    const corte = texto.indexOf('<style')
+    const template = corte < 0 ? texto : texto.slice(0, corte)
+    for (const atr of template.matchAll(/:?class="([^"]*)"/g)) {
+      for (const m of atr[1].matchAll(/[A-Za-z_][A-Za-z0-9_-]*/g)) {
+        const nome = m[0]
+        if (!nome.includes('__') && !nome.includes('--')) continue
+        /* ⚠️ Nome que TERMINA em `-` é prefixo montado em tempo de execução
+           (`:class="'selo--' + a.semaforo"`), não classe. A classe final
+           (`selo--laranja`) é medida normalmente. */
+        if (nome.endsWith('-')) continue
+        if (ORFAS_CONHECIDAS.has(nome)) continue
+        if (!usadas.has(nome)) usadas.set(nome, new Set())
+        usadas.get(nome).add(caminho.split('src').pop())
+      }
+    }
+  }
+  /* 🚨 AS DUAS FOLHAS. O `src/componentes/CamposDoFormulario.vue` é do
+     FORMULÁRIO PÚBLICO (`publico/` -> `dist_publico`), um build separado:
+     medi-lo contra a folha do painel acusaria 12 defeitos inexistentes. As
+     outras 11 conferências medem o painel e leem só a dele. */
+  let folhas = css
+  const publico = join(process.cwd(), 'dist_publico', 'assets')
+  if (existsSync(publico)) {
+    for (const f of readdirSync(publico).filter((f) => f.endsWith('.css'))) {
+      folhas += '\n' + readFileSync(join(publico, f), 'utf8')
+    }
+  }
+  const declaradas = new Set(
+    [...folhas.matchAll(/\.([A-Za-z_][A-Za-z0-9_-]*)/g)].map((m) => m[1]))
+  const orfas = [...usadas.keys()].filter((n) => !declaradas.has(n)).sort()
+  if (orfas.length) {
+    falhar(`${orfas.length} classe(s) composta(s) usada(s) em template SEM `
+           + 'regra no CSS publicado: '
+           + orfas.map((n) => `${n} (${[...usadas.get(n)].join(', ')})`)
+             .join(' · ')
+           + '. O navegador ignora a classe EM SILÊNCIO e o elemento sai sem '
+           + 'forma — declare a regra, ou use um nome que existe. Se a falta '
+           + 'for mesmo esperada, o nome entra em ORFAS_CONHECIDAS com a data.')
+  }
+}
+
 const css = cssPublicado()
 if (!erros.length) {
   oDialogoDoPainelNaoHerdaOTeto(css)
@@ -409,6 +565,8 @@ if (!erros.length) {
   todaVarianteDePilulaTemAPilulaBase(css)
   aBarraDeEtapasRolaENaoQuebra(css)
   todoVarUsadoExiste(css)
+  todaVarianteDeBotaoUsadaTemRegra(css)
+  todaClasseCompostaUsadaTemRegra(css)
 }
 
 if (erros.length) {
@@ -416,9 +574,10 @@ if (erros.length) {
   erros.forEach((e, i) => console.error(`  ${i + 1}. ${e}\n`))
   process.exit(1)
 }
-console.log('CSS publicado: as 10 conferências passaram (teto do diálogo, '
+console.log('CSS publicado: as 12 conferências passaram (teto do diálogo, '
             + 'ordem da cascata, tokens no :root, empilhamento dos diálogos, '
             + 'teto e empilhamento do diálogo do chamado, camada dos controles '
             + 'de rolagem, forma do aviso da etapa, lista de etapas com largura estável, '
             + 'pílula com base no mesmo '
-            + 'escopo, todo var() com token declarado)')
+            + 'escopo, todo var() com token declarado, '
+            + 'toda variante de botão usada com regra no CSS, toda classe composta usada com regra no CSS)')

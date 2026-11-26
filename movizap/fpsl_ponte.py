@@ -651,13 +651,22 @@ def _orcamento_por_os() -> dict:
     cobre a 17015 e a 17016). Então a chave é a OS, e o valor é o orçamento --
     nunca o contrário.
     """
-    mapa: dict[int, int] = {}
+    mapa: dict[int, dict] = {}
     for linha in banco.varios(
-            "SELECT numero, ordens_os FROM orcamento "
+            "SELECT numero, ordens_os, total_centavos FROM orcamento "
             " WHERE ordens_os IS NOT NULL ORDER BY numero"):
         for numero_os in (linha["ordens_os"] or []):
             try:
-                mapa[int(numero_os)] = int(linha["numero"])
+                mapa[int(numero_os)] = {
+                    "numero": int(linha["numero"]),
+                    # 🔵 25/11: O TOTAL VEM JUNTO. Ele: *"orcamento nao e
+                    # impedimento e apenas vinculo demonstrado para operador
+                    # auditar em tela"*. Auditar e COMPARAR, e sem o total o
+                    # operador teria de abrir outra tela para saber quanto era.
+                    # ⚠️ O orcamento guarda CENTAVOS; a divisao fica aqui para
+                    # a tela nao precisar saber disso.
+                    "total": float(linha["total_centavos"] or 0) / 100.0,
+                }
             except (TypeError, ValueError):
                 continue
     return mapa
@@ -696,8 +705,16 @@ def quadro_do_pagamento() -> dict:
                 # MANDA: a partir da coluna 2 o número é o que foi usado, e
                 # não o que o cruzamento diria hoje. Orçamento emitido depois
                 # não pode reescrever o que já foi para o arquivo.
+                achado = orcamentos.get(a.get("numero_os")) or {}
                 if a.get("orcamento_numero") is None:
-                    a["orcamento_numero"] = orcamentos.get(a.get("numero_os"))
+                    a["orcamento_numero"] = achado.get("numero")
+                # ⚠️ O total so acompanha o NUMERO que a tela mostra: se o
+                # numero veio persistido do FPSL e o cruzamento de hoje aponta
+                # para outro orcamento, mostrar o total do outro seria a tela
+                # comparando com o valor errado (`M12`).
+                if (a.get("orcamento_numero")
+                        and a.get("orcamento_numero") == achado.get("numero")):
+                    a["orcamento_total"] = achado.get("total")
                 # 🔵 *"Entra, e o card diz que falta"* -- a ausência fica à
                 # vista em amarelo, e não vira artefato inexistente.
                 a["sem_orcamento"] = a.get("orcamento_numero") is None
@@ -727,9 +744,13 @@ def preparar_pagamentos(artefatos: list[int], *, por: str | None = None) -> dict
     por_id = {a["id"]: a for coluna in (quadro.get("colunas") or [])
               for card in (coluna.get("cards") or [])
               for a in (card.get("artefatos") or [])}
+    # ⚠️ O mapa passou a devolver DICIONARIO (o total veio junto), e o FPSL
+    # espera um NUMERO aqui: mandar o dicionario gravaria `{...}` como numero do
+    # orcamento no artefato. Quem devolve -> quem grava -> quem le, os tres no
+    # mesmo patch.
     corpo = [{"id": i,
-              "orcamento_numero": orcamentos.get(
-                  (por_id.get(i) or {}).get("numero_os"))}
+              "orcamento_numero": (orcamentos.get(
+                  (por_id.get(i) or {}).get("numero_os")) or {}).get("numero")}
              for i in artefatos]
     return _pagamento("/preparar", {"artefatos": corpo, "por": por})
 
@@ -781,6 +802,23 @@ def datascope_do_artefato(artefato_id: int) -> dict:
     return _pagamento("/datascope", {"artefato_id": artefato_id})
 
 
+def escrita_no_datascope() -> dict:
+    """O interruptor da escrita no DataScope, lido do FPSL."""
+    return _pagamento_get("/datascope-escrita")
+
+
+def definir_escrita_no_datascope(ligada: bool) -> dict:
+    """🚨 Ligar autoriza escrita em sistema de TERCEIRO (webhook deles + push
+    para o tecnico). Quem liga e quem usa a tela, e a tela avisa antes."""
+    return _pagamento("/datascope-escrita", {"ligada": bool(ligada)})
+
+
+def aprovar_no_datascope(artefato_id: int, *, por: str | None = None) -> dict:
+    """"Aprovado analise tecnica" na resposta do DataScope desta OS."""
+    return _pagamento("/datascope-aprovar",
+                      {"artefato_id": artefato_id, "por": por})
+
+
 def guardar_comprovante(artefato_id: int, *, arquivo=None, valor=None,
                         dispensa=None, por: str | None = None) -> dict:
     return _pagamento("/comprovante", {
@@ -804,32 +842,91 @@ CHAVES_DO_PROCFY = ("procfy_categoria", "procfy_conta_bancaria",
                     "procfy_tags")
 
 
-def _config_do_procfy(cfg: dict | None = None) -> dict:
+def procfy_da_ficha(tecnico_id) -> dict:
+    """O que a FICHA DO TÉCNICO sabe das colunas do Procfy.
+
+    🔵 Ele, 25/11: *"do procfy da para pegar esses dados da ficha do tecnico se
+    tiver, se não sai em branco mesmo"*.
+
+    📏 O elo foi medido: `contato.harmonit_tecnico_id` liga o `tecnico_id` do
+    artefato (que é o `usuarioId` do Harmonit) ao contato do MoviZap, e a ficha
+    é por `contato_id`.
+
+    | coluna do Procfy | de onde vem |
+    |---|---|
+    | Modo de pagamento | `tecnico_ficha.pagamento_forma` |
+    | Contas bancárias | `tecnico_ficha.pagamento_dados` |
+    | Categoria · Centro de Custo | **não existem na ficha** -- saem em branco |
+
+    ⚠️ **Devolve só o que está PREENCHIDO.** Campo vazio não entra no
+    dicionário: se entrasse como `""`, apagaria um valor do `/config` -- e
+    "não sei" não pode sobrescrever "sei".
+    """
+    if not tecnico_id:
+        return {}
+    try:
+        alvo = int(tecnico_id)
+    except (TypeError, ValueError):
+        return {}
+    linha = banco.um(
+        """SELECT f.pagamento_forma, f.pagamento_dados
+             FROM contato c
+             JOIN tecnico_ficha f ON f.contato_id = c.id
+            WHERE c.harmonit_tecnico_id = %s
+            ORDER BY c.id LIMIT 1""", (alvo,))
+    if not linha:
+        return {}
+    achado = {}
+    for chave, campo in (("procfy_modo_pagamento", "pagamento_forma"),
+                         ("procfy_conta_bancaria", "pagamento_dados")):
+        valor = (linha[campo] or "").strip()
+        if valor:
+            achado[chave] = valor
+    return achado
+
+
+def _config_do_procfy(cfg: dict | None = None, tecnico_id=None) -> dict:
     """⚠️ A config chega por PARÂMETRO quando o teste a fornece: a régua de
-    19/10 é que teste não lê nem escreve a `config` real."""
+    19/10 é que teste não lê nem escreve a `config` real.
+
+    🚨 **A FICHA DO TÉCNICO GANHA DO `/config` GLOBAL**, e é declarado: ela é
+    por técnico, e dado por técnico é mais específico que um valor único para
+    todos. O `/config` segue valendo para quem não tem ficha preenchida.
+    """
     if cfg is not None:
-        return {c: (cfg.get(c) or "") for c in CHAVES_DO_PROCFY}
-    linhas = banco.varios(
-        "SELECT chave, valor FROM config WHERE chave = ANY(%s)",
-        (list(CHAVES_DO_PROCFY),))
-    achado = {l["chave"]: (l["valor"] or "") for l in linhas}
-    return {c: achado.get(c, "") for c in CHAVES_DO_PROCFY}
+        base = {c: (cfg.get(c) or "") for c in CHAVES_DO_PROCFY}
+    else:
+        linhas = banco.varios(
+            "SELECT chave, valor FROM config WHERE chave = ANY(%s)",
+            (list(CHAVES_DO_PROCFY),))
+        achado = {l["chave"]: (l["valor"] or "") for l in linhas}
+        base = {c: achado.get(c, "") for c in CHAVES_DO_PROCFY}
+    for chave, valor in procfy_da_ficha(tecnico_id).items():
+        if chave in base:
+            base[chave] = valor
+    return base
 
 
-def previa_do_arquivo(lote_id: int, *, cfg: dict | None = None) -> dict:
+def previa_do_arquivo(lote_id: int, *, cfg: dict | None = None,
+                     tecnico_id=None) -> dict:
     """🔵 *"dentro deles um resumo dos artefatos que vão para pagamento"*.
 
-    ⚠️ NÃO move card: ver o resumo é leitura."""
+    ⚠️ NÃO move card: ver o resumo é leitura.
+    ⚠️ `tecnico_id` entra para a prévia dizer a MESMA coisa que o arquivo vai
+    dizer: prévia que mostra coluna vazia e arquivo que sai preenchido (ou o
+    contrário) é a tela mentindo sobre o que vai acontecer.
+    """
     return _pagamento("/previa-do-arquivo",
-                      {"lote_id": lote_id, "config": _config_do_procfy(cfg)})
+                      {"lote_id": lote_id,
+                       "config": _config_do_procfy(cfg, tecnico_id)})
 
 
 def montar_arquivo(lote_id: int, *, por: str | None = None,
-                   cfg: dict | None = None) -> dict:
+                   cfg: dict | None = None, tecnico_id=None) -> dict:
     """🔵 *"o botão de ação da vez é 'Montar Arquivo'"*."""
     return _pagamento("/montar-arquivo",
                       {"lote_id": lote_id, "por": por,
-                       "config": _config_do_procfy(cfg)})
+                       "config": _config_do_procfy(cfg, tecnico_id)})
 
 
 def enviar_pagamento(lote_id: int, *, por: str | None = None) -> dict:

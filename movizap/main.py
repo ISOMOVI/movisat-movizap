@@ -6,6 +6,7 @@ Sem banco ainda -- ver `auth.buscar_usuario`.
 import asyncio
 import logging
 import pathlib
+import re
 import secrets
 import time
 from contextlib import asynccontextmanager
@@ -29,6 +30,7 @@ from . import cadastro
 from . import canais as registro_canais
 from . import chamado_os
 from . import checklist
+from . import pagamento_anexo
 from . import passagem
 from . import chat
 from . import conversas
@@ -5519,7 +5521,146 @@ def quadro_do_servico(usuario: dict = Depends(auth.requer_tela("PNL_1.6"))):
     quadro["abas"] = [{"codigo_tela": a["codigo_tela"], "titulo": a["titulo"]}
                       for a in pipeline.abas("financeiro")]
     quadro["titulo"] = "Serviço dos técnicos"
+    # 🚨 O NOME E O TAMANHO DO ANEXO SAEM DAQUI, NÃO DE UMA CHAMADA POR CARD.
+    # O FPSL guarda só a referência (`anexo:<id>`) no `comprovante_arquivo`;
+    # quem sabe o nome do arquivo é este lado. Uma consulta para o quadro
+    # inteiro, no molde do `anexos_de` da Operação -- por card seria N+1 num
+    # quadro de 9 cards que vai crescer.
+    # ⚠️ O `caminho` NÃO vai para a tela: quem baixa usa o id.
+    _anexar_comprovantes_no_quadro(quadro)
+    # 🔵 25/11: os DOIS cards fixos do sem-tecnico. Depois do anexo de
+    # proposito -- as duas percorrem os mesmos dicionarios de artefato, e
+    # dividir primeiro nao perderia nada, mas ler o anexo antes mantem a ordem
+    # "enriquecer, depois reorganizar", que e mais facil de seguir.
+    _dividir_sem_tecnico(quadro)
     return quadro
+
+
+def _dividir_sem_tecnico(quadro: dict) -> None:
+    """Parte o card do sem-tecnico em DOIS, fixos (🔵 decisao dele, 25/11).
+
+    🔵 *"vamos montar cards fixos para esses casos? 'SEM IDENTIFICACAO' como ja
+    tem e 'NAO CADASTRADOS NO HARMONIT' para os sem cadastro - o que nao impede
+    em juntar as demais informacoes corretamente, pois em caso de correcao e
+    atualizacao, o card ja direciona"*.
+
+    | card | quem cai nele |
+    |---|---|
+    | `sem técnico identificado` | nem o Harmonit nem o NOSSO agendamento sabem |
+    | `não cadastrados no Harmonit` | o nosso agendamento sabe quem foi |
+
+    🔵 E os dois **nao pagam**: *"nao conhecidos nao paga isso, e nem sem
+    identificacao"*. `pode_preparar` segue falso nos dois, e o `tecnico_id`
+    segue **nulo** -- que e a verdade: o Harmonit nao sabe.
+
+    🚨 O FPSL NAO MUDA. A divisao e de APRESENTACAO e vive deste lado, porque e
+    aqui que o agendamento mora. E quando a OS do Harmonit ganhar o tecnico, a
+    **varredura adota** e o artefato troca de card sozinho -- a mesma adocao que
+    consertou a OS 17131.
+
+    🔵 O caso do meio -- contato COM `harmonit_tecnico_id`, mas a OS do Harmonit
+    sem tecnico -- tambem vem para o card novo: *"e como se fosse um provisorio
+    que satisfaz mas que nao frequenta OS harmonit"*. O que falta nao e o
+    cadastro do tecnico: e o tecnico NA OS.
+
+    ⚠️ O nome provisorio fica no ARTEFATO, nao no titulo do card: o card e fixo
+    e pode juntar provisorios diferentes, e um nome no titulo mentiria a partir
+    do segundo.
+    ⚠️ UMA consulta para todas as OS, nao uma por artefato -- o mesmo motivo do
+    `_anexar_comprovantes_no_quadro` e do `_orcamento_por_os`.
+    🚨 E se a consulta falhar, o card antigo fica INTEIRO: quadro vazio nunca
+    (e a razao de a coluna 1 existir).
+    """
+    for coluna in quadro.get("colunas") or []:
+        cards = coluna.get("cards") or []
+        anonimos = [c for c in cards if not c.get("tecnico_id")]
+        if not anonimos:
+            continue
+        numeros = [a.get("numero_os") for c in anonimos
+                   for a in (c.get("artefatos") or [])
+                   if a.get("numero_os")]
+        if not numeros:
+            continue
+        try:
+            linhas = banco.varios(
+                """SELECT ao.numero_os, ct.nome, ct.harmonit_tecnico_id
+                     FROM agendamento_os ao
+                     JOIN agendamento a ON a.id = ao.agendamento_id
+                     LEFT JOIN contato ct ON ct.id = a.tecnico_contato_id
+                    WHERE ao.numero_os = ANY(%s)""", (numeros,))
+        except Exception:
+            log.exception("quadro da PNL_1.6: nao li os agendamentos; "
+                          "o card do sem-tecnico fica inteiro")
+            continue
+        nomes = {int(l["numero_os"]): (l["nome"] or "").strip()
+                 for l in linhas if l.get("numero_os") and (l.get("nome") or "").strip()}
+        if not nomes:
+            continue
+        for card in anonimos:
+            fica, vai = [], []
+            for a in card.get("artefatos") or []:
+                nome = nomes.get(a.get("numero_os"))
+                if nome:
+                    a["tecnico_provisorio"] = nome
+                    vai.append(a)
+                else:
+                    fica.append(a)
+            if not vai:
+                continue
+            card["artefatos"] = fica
+            _somar_no_card(card)
+            novo = {"tecnico_id": None,
+                    "tecnico_nome": "não cadastrados no Harmonit",
+                    "artefatos": vai, "pode_preparar": False,
+                    "total_pagamento": 0.0, "total_km": 0.0}
+            _somar_no_card(novo)
+            cards.append(novo)
+        # ⚠️ Card que ficou sem artefato nenhum SAI: card vazio e tela mentindo
+        # que ha algo ali.
+        coluna["cards"] = [c for c in cards if c.get("artefatos")]
+
+
+def _somar_no_card(card: dict) -> None:
+    """Refaz os dois totais a partir dos artefatos que sobraram no card.
+
+    ⚠️ Recalcular em vez de subtrair: subtrair arrasta erro de ponto flutuante
+    e, pior, depende de o total de entrada estar certo.
+    """
+    card["total_pagamento"] = sum((a.get("valor_pagamento") or 0)
+                                  for a in card.get("artefatos") or [])
+    card["total_km"] = sum((a.get("valor_km") or 0)
+                           for a in card.get("artefatos") or [])
+
+
+def _anexar_comprovantes_no_quadro(quadro: dict) -> None:
+    """Põe `comprovante_anexo` (nome, bytes) em cada artefato que tem arquivo.
+
+    ⚠️ Referência torta no FPSL **não derruba o quadro**: o artefato fica sem
+    o bloco do anexo e a tela segue mostrando o resto. Quadro que estoura por
+    causa de um campo de texto seria pior que o campo errado.
+    """
+    por_id: dict = {}
+    for coluna in quadro.get("colunas") or []:
+        for card in coluna.get("cards") or []:
+            for a in card.get("artefatos") or []:
+                bruto = str(a.get("comprovante_arquivo") or "")
+                if not bruto.startswith("anexo:"):
+                    continue
+                try:
+                    por_id.setdefault(int(bruto.split(":", 1)[1]), []).append(a)
+                except (TypeError, ValueError):
+                    continue
+    if not por_id:
+        return
+    for linha in banco.varios(
+            """SELECT id, nome_original, bytes, mime
+                 FROM pagamento_comprovante_arquivo WHERE id = ANY(%s)""",
+            (list(por_id),)):
+        for a in por_id.get(linha["id"], []):
+            a["comprovante_anexo"] = {"id": linha["id"],
+                                      "nome_original": linha["nome_original"],
+                                      "bytes": linha["bytes"],
+                                      "mime": linha["mime"]}
 
 
 @app.get("/api/paineis/{painel}")
@@ -6148,6 +6289,25 @@ def finalizar_chamado(card_id: int, dados: FinalizarChamado,
                 usuario)
     return pipeline.finalizar(card_id, dados.desfecho,
                               atendente_id=usuario.get("id"))
+
+
+class TermoDoCard(BaseModel):
+    # ⚠️ Nulo e legitimo: e como o operador LIMPA o campo.
+    termo: str | None = None
+
+
+@app.post("/api/paineis/operacao/chamado/{card_id}/termo")
+def gravar_termo_do_card(card_id: int, dados: TermoDoCard,
+                         usuario: dict = Depends(auth.get_usuario)):
+    """O numero do termo que o operador poe a mao no card (🔵 dele, 25/11).
+
+    🚨 A permissao e a da aba do PROPRIO card, como no `finalizar` e no
+    `reabrir`: quem tem o Pos-venda nao mexe no card do Contratual.
+    """
+    _exigir_aba((pipeline.aba_do_card(card_id) or {}).get("codigo_tela"),
+                usuario)
+    return pipeline.gravar_termo(card_id, dados.termo,
+                                 atendente_id=usuario.get("id"))
 
 
 @app.post("/api/paineis/operacao/chamado/{card_id}/reabrir")
@@ -6963,7 +7123,12 @@ def definir_desde_da_aba2(
 
 @app.post("/api/paineis/servico-dos-tecnicos/varrer")
 def varrer_servicos(usuario: dict = Depends(auth.requer_tela("PNL_1.6"))):
-    """A varredura à mão. 🔵 A automática roda de madrugada.
+    """A varredura à mão. A automática roda às **05:10**, no cron do FPSL
+    (`scripts/varrer_pagamento.py`, 25/11).
+
+    🚨 O HORÁRIO NÃO É ESCOLHA ESTÉTICA: a varredura lê `os_historico`, que o
+    cache WESO escreve às 04:15 e o Harmonit às 04:50. Antes disso ela varreria
+    o cache de ONTEM; em cima, disputaria escrita no mesmo SQLite.
 
     ⚠️ Sem janela de propósito: quem clica quer o que houver, não as últimas
     24h — e a primeira rodada precisa do cache inteiro.
@@ -7085,6 +7250,89 @@ def os_do_artefato(artefato_id: int,
     return _ficha_da_os(int(numero), usuario)
 
 
+def _artefato_no_quadro(artefato_id: int) -> dict:
+    """O artefato de pagamento, achado NO QUADRO — ou 404 com a frase.
+
+    🚨 **O QUADRO É A ÚNICA PORTA.** Não existe consulta por id solto: quem
+    alcança a `PNL_1.6` só mexe no que já está no quadro dela, e é esta função
+    que cobra isso. Sem ela, um id digitado na URL alcançaria artefato de outro
+    corte de data -- e, no caso do anexo, gravaria comprovante num artefato que
+    a tela nem mostra.
+
+    ⚠️ **502, não quadro vazio**, quando o FPSL não responde: vazio silencioso
+    faria o operador concluir que o artefato não existe.
+    """
+    try:
+        quadro = fpsl_ponte.quadro_do_pagamento()
+    except fpsl_ponte.FpslIndisponivel as e:
+        raise HTTPException(status_code=502, detail=str(e))
+    for coluna in quadro.get("colunas") or []:
+        for card in coluna.get("cards") or []:
+            for a in card.get("artefatos") or []:
+                if int(a.get("id") or 0) == artefato_id:
+                    return a
+    raise HTTPException(
+        status_code=404,
+        detail="Este artefato de pagamento não está no quadro.")
+
+
+@app.post("/api/paineis/servico-dos-tecnicos/anexo/{artefato_id}",
+          status_code=201)
+async def anexar_comprovante_do_servico(
+        artefato_id: int, arquivo: UploadFile = File(...),
+        usuario: dict = Depends(auth.requer_tela("PNL_1.6"))):
+    """O comprovante do pagamento, em arquivo.
+
+    🔵 *"haverá campo para que em cada 1 dos artefatos de pagamento seja
+    inserido anexo que comprove o pagamento"*, e 🔵 24/11: **anexo completo,
+    não só PDF**.
+
+    🚨 **A TELA RECEBE UM ID, NUNCA UM CAMINHO** -- a régua dos outros três
+    anexos do projeto: caminho vindo da tela faria `../../.env` virar anexo.
+
+    🚨 **O ARTEFATO É CONFERIDO PELO QUADRO ANTES DE GRAVAR**: ele vive no
+    SQLite do FPSL e esta tabela é Postgres, então não há chave estrangeira
+    para recusar id inventado -- a recusa é esta.
+
+    ⚠️ Devolve também a `referencia` (`anexo:<id>`), que é o que a tela manda
+    no passo seguinte para o `comprovante` guardar no FPSL. Nenhum byte
+    atravessa a ponte.
+    """
+    _artefato_no_quadro(artefato_id)
+    dados = await arquivo.read()
+    linha = pagamento_anexo.guardar(artefato_id, arquivo.filename, dados,
+                                    arquivo.content_type,
+                                    por=usuario.get("nome"))
+    return {"ok": True, "id": linha["id"],
+            "nome_original": linha["nome_original"], "bytes": linha["bytes"],
+            "referencia": pagamento_anexo.referencia(linha["id"])}
+
+
+@app.get("/api/paineis/servico-dos-tecnicos/anexo/{anexo_id}")
+def baixar_comprovante_do_servico(
+        anexo_id: int,
+        usuario: dict = Depends(auth.requer_tela("PNL_1.6"))):
+    """O arquivo do comprovante.
+
+    🚨 **410, NÃO 500, QUANDO O ARQUIVO SUMIU DO DISCO** -- e isso acontece:
+    esta pasta **não tem backup**, como as outras três de anexo. A linha no
+    banco sobrevive ao que o disco perdeu, e a tela precisa dizer "o arquivo
+    não está mais aqui" em vez de estourar. É a régua do
+    `/api/paineis/operacao/anexo/{anexo_id}`.
+    """
+    achado = pagamento_anexo.anexo(anexo_id)
+    if not achado:
+        raise HTTPException(status_code=404, detail="Anexo não encontrado.")
+    caminho = pathlib.Path(achado["caminho"])
+    if not caminho.is_file():
+        raise HTTPException(
+            status_code=410,
+            detail="O arquivo não está mais no disco. Esta pasta não tem "
+                   "backup -- o registro ficou, o arquivo não.")
+    return FileResponse(caminho, filename=achado["nome_original"],
+                        media_type=achado["mime"] or "application/octet-stream")
+
+
 @app.post("/api/paineis/servico-dos-tecnicos/comprovante")
 def comprovante_do_servico(dados: ComprovanteDoArtefato,
                            usuario: dict = Depends(auth.requer_tela("PNL_1.6"))):
@@ -7105,12 +7353,36 @@ def revalidar_servico(lote_id: int,
     return fpsl_ponte.revalidar_lote(lote_id, por=usuario.get("nome"))
 
 
+def _tecnico_do_lote(lote_id: int):
+    """O `tecnico_id` do card daquele lote, lido DO QUADRO.
+
+    🚨 **O QUADRO É A ÚNICA PORTA**, a mesma régua do `_artefato_no_quadro`: o
+    lote vive no SQLite do FPSL e quem opera a `PNL_1.6` só mexe no que está no
+    quadro dela.
+
+    ⚠️ Devolve `None` quando não achar, e quem chama segue sem a ficha: o
+    arquivo do Procfy sai **com a coluna em branco**, que é a decisão dele --
+    *"se não tiver, sai em branco mesmo"*. Falhar aqui impediria o trabalho por
+    causa de um dado que ele já disse ser opcional.
+    """
+    try:
+        quadro = fpsl_ponte.quadro_do_pagamento()
+    except fpsl_ponte.FpslIndisponivel:
+        return None
+    for coluna in quadro.get("colunas") or []:
+        for card in coluna.get("cards") or []:
+            if int(card.get("lote_id") or 0) == lote_id:
+                return card.get("tecnico_id") or None
+    return None
+
+
 @app.get("/api/paineis/servico-dos-tecnicos/previa/{lote_id}")
 def previa_do_servico(lote_id: int,
                       usuario: dict = Depends(auth.requer_tela("PNL_1.6"))):
     """🔵 *"dentro deles um resumo dos artefatos que vão para pagamento"*.
     ⚠️ Leitura: ver o resumo não move card."""
-    return fpsl_ponte.previa_do_arquivo(lote_id)
+    return fpsl_ponte.previa_do_arquivo(
+        lote_id, tecnico_id=_tecnico_do_lote(lote_id))
 
 
 @app.post("/api/paineis/servico-dos-tecnicos/montar-arquivo/{lote_id}")
@@ -7123,7 +7395,161 @@ def montar_arquivo_do_servico(
     preencher a mão por informação confidencial ou depois nos passar"*. A
     resposta diz quais colunas saíram vazias.
     """
-    return fpsl_ponte.montar_arquivo(lote_id, por=usuario.get("nome"))
+    # 🔵 25/11: *"do procfy da para pegar esses dados da ficha do tecnico se
+    # tiver, se não sai em branco mesmo"* -- o Modo de pagamento e a Conta
+    # bancária saem da ficha daquele técnico quando ela estiver preenchida.
+    return fpsl_ponte.montar_arquivo(lote_id, por=usuario.get("nome"),
+                                     tecnico_id=_tecnico_do_lote(lote_id))
+
+
+# 🚨 O NOME DO TECNICO NAO VAI CRU PARA O NOME DO ARQUIVO. O nosso contato se
+# chama `Franck | Campinas - SP`, e `|` e caractere PROIBIDO em nome de arquivo
+# no Windows -- `: * ? " < > / \\` tambem. E aspas ou quebra de linha
+# quebrariam o proprio cabecalho `Content-Disposition`.
+# ⚠️ Nao se apaga o nome: ele continua dizendo de quem e o arquivo, que e o
+# pedido dele (*"o arquivo de cada card - ou seja de cada tecnico"*).
+_PROIBIDO_EM_NOME = re.compile(r'[\\/:*?"<>|\r\n\t]+')
+
+
+def _nome_de_arquivo(texto: str) -> str:
+    limpo = _PROIBIDO_EM_NOME.sub("_", str(texto)).strip(" ._")
+    limpo = re.sub(r"\s+", "_", limpo)
+    limpo = re.sub(r"_+", "_", limpo)
+    return limpo[:60] or "tecnico"
+
+
+# ===========================================================================
+# AS CINCO CHAVES DO PROCFY — a tela que faltava (25/11, passo 4b)
+# ===========================================================================
+# 📏 O DEFEITO, medido: as cinco chaves sao LIDAS pelo gerador do arquivo
+# (`fpsl_ponte.CHAVES_DO_PROCFY`), vivem na tabela `config` -- e **nenhuma rota
+# as escrevia**. Ninguem conseguia preenche-las, nem o owner, e o arquivo saia
+# com as cinco colunas em branco sem caminho para mudar isso.
+#
+# 🚨 E o mesmo defeito do `pipeline_card.termo` no passo 3: **coluna sem tela e
+# dado inalcancavel**. La o campo entrou no mesmo passo da coluna; aqui a coluna
+# existia sozinha havia dias.
+#
+# 🔵 Preencher continua OPCIONAL, decisao dele de 18/11: *"pode gerar com elas
+# em branco nesse momento, pois podem preencher a mao por informacao
+# confidencial ou depois nos passar"*. O que muda e passar a ser POSSIVEL.
+#
+# ⚠️ A permissao e a da PROPRIA ABA (`PNL_1.6`), nao a do `/config`: quem
+# prepara o pagamento e quem sabe esses valores, e exigir `CFG_7.1` daria a
+# chave do sistema a quem so precisa de cinco campos.
+# 🚨 E a rota NAO E UM GRAVADOR GENERICO DE `config`: so as cinco chaves do
+# Procfy entram. Sem essa guarda, uma rota de painel escreveria qualquer chave
+# do sistema -- inclusive interruptores.
+TETO_DA_CHAVE_DO_PROCFY = 200
+
+
+class ConfigDoProcfy(BaseModel):
+    """Os cinco campos, todos opcionais.
+
+    ⚠️ **Ausente e diferente de vazio**, e a diferenca importa: campo que nao
+    veio fica como estava (a tela pode mandar um so), e campo que veio vazio
+    LIMPA. Tratar ausencia como "apague" perderia o que a pessoa ja preencheu.
+    """
+    model_config = {"extra": "forbid"}
+
+    procfy_categoria: str | None = Field(default=None,
+                                         max_length=TETO_DA_CHAVE_DO_PROCFY)
+    procfy_conta_bancaria: str | None = Field(default=None,
+                                              max_length=TETO_DA_CHAVE_DO_PROCFY)
+    procfy_modo_pagamento: str | None = Field(default=None,
+                                              max_length=TETO_DA_CHAVE_DO_PROCFY)
+    procfy_centro_de_custo: str | None = Field(default=None,
+                                               max_length=TETO_DA_CHAVE_DO_PROCFY)
+    procfy_tags: str | None = Field(default=None,
+                                    max_length=TETO_DA_CHAVE_DO_PROCFY)
+
+
+def _config_do_procfy_agora() -> dict:
+    """As cinco, sempre as cinco.
+
+    ⚠️ Chave que nao existe sai como cadeia vazia em vez de desaparecer: a tela
+    precisa desenhar os cinco campos no primeiro acesso -- que e exatamente o
+    estado de hoje, com nenhuma das cinco gravada.
+    """
+    achadas = {l["chave"]: (l["valor"] or "") for l in banco.varios(
+        "SELECT chave, valor FROM config WHERE chave = ANY(%s)",
+        (list(fpsl_ponte.CHAVES_DO_PROCFY),))}
+    return {c: achadas.get(c, "") for c in fpsl_ponte.CHAVES_DO_PROCFY}
+
+
+@app.get("/api/paineis/servico-dos-tecnicos/config-procfy")
+def ler_config_do_procfy(
+        usuario: dict = Depends(auth.requer_tela("PNL_1.6"))):
+    """Os cinco valores que vao para as colunas de cadastro do arquivo."""
+    return _config_do_procfy_agora()
+
+
+@app.put("/api/paineis/servico-dos-tecnicos/config-procfy")
+def gravar_config_do_procfy(
+        dados: ConfigDoProcfy,
+        usuario: dict = Depends(auth.requer_tela("PNL_1.6"))):
+    """Grava o que veio, deixa como estava o que nao veio."""
+    mandados = dados.model_dump(exclude_unset=True)
+    for chave, valor in mandados.items():
+        banco.executar(
+            """INSERT INTO config (chave, valor, descricao, atualizado_em)
+               VALUES (%s, %s, %s, now())
+               ON CONFLICT (chave) DO UPDATE
+                  SET valor = EXCLUDED.valor, atualizado_em = now()""",
+            (chave, (valor or "").strip(),
+             "Coluna de cadastro do arquivo do Procfy (aba 2 do Financeiro, "
+             "PNL_1.6). Vazia e legitimo: o arquivo sai e diz quais colunas "
+             "sairam em branco."))
+    if mandados:
+        log.info("config do Procfy: %s por %s",
+                 ", ".join(sorted(mandados)), usuario.get("nome"))
+    return _config_do_procfy_agora()
+
+
+class EscritaNoDatascope(BaseModel):
+    ligada: bool
+
+
+@app.get("/api/paineis/servico-dos-tecnicos/datascope-escrita")
+def ler_escrita_no_datascope_do_servico(
+        usuario: dict = Depends(auth.requer_tela("PNL_1.6"))):
+    """O interruptor da correcao de situacao, para a tela saber se oferece."""
+    return fpsl_ponte.escrita_no_datascope()
+
+
+@app.put("/api/paineis/servico-dos-tecnicos/datascope-escrita")
+def gravar_escrita_no_datascope_do_servico(
+        dados: EscritaNoDatascope,
+        usuario: dict = Depends(auth.requer_tela("PNL_1.6"))):
+    """🚨 Liga/desliga a ESCRITA em sistema de terceiro.
+
+    ⚠️ O interruptor fica na propria tela, e nao na `CFG_7.1`: e a convencao
+    desta frente, e quem corrige situacao e quem entende a consequencia.
+    """
+    r = fpsl_ponte.definir_escrita_no_datascope(dados.ligada)
+    log.info("escrita no DataScope %s por %s",
+             "ligada" if dados.ligada else "desligada", usuario.get("nome"))
+    return r
+
+
+@app.post("/api/paineis/servico-dos-tecnicos/datascope-aprovar/{artefato_id}")
+def aprovar_no_datascope_do_servico(
+        artefato_id: int,
+        usuario: dict = Depends(auth.requer_tela("PNL_1.6"))):
+    """Corrige a situacao no DataScope para "Aprovado analise tecnica".
+
+    🚨 **ESCREVE EM SISTEMA DE TERCEIRO**: dispara os webhooks deles e manda
+    push para o tecnico que enviou a resposta. A tela abre modal antes
+    (🔵 decisao dele), e o interruptor acima tem de estar ligado.
+    ⚠️ Recusa do FPSL vira **400 com a frase**, nao 500: "está desligada",
+    "está em movimentacao" e "sem resposta no DataScope" sao respostas, nao
+    falhas nossas.
+    """
+    r = fpsl_ponte.aprovar_no_datascope(artefato_id, por=usuario.get("nome"))
+    if not r.get("ok"):
+        raise HTTPException(status_code=400,
+                            detail=r.get("motivo") or "não deu para corrigir")
+    return r
 
 
 @app.get("/api/paineis/servico-dos-tecnicos/arquivo/{lote_id}")
@@ -7147,17 +7573,50 @@ def baixar_arquivo_do_servico(
             status_code=400,
             detail=montado.get("motivo")
             or "não deu para montar o arquivo deste lote")
+    # 🚨 SEM LINHA NENHUMA NAO SAI ARQUIVO. Antes, `linhas` vazia dava
+    # `colunas = []` e a planilha saia SEM CABECALHO -- o Procfy recusaria, e
+    # longe daqui.
+    if not montado.get("linhas"):
+        raise HTTPException(
+            status_code=400,
+            detail="este lote não tem nenhuma linha para o arquivo")
+    # 🚨 A ORDEM DAS COLUNAS VEM DA REGRA, NAO DO DADO (25/11). 🔵 Ele: *"o
+    # arquivo precisa ser gerado corretamente - como na regra"*. O FPSL manda
+    # `colunas` (a ordem lida do `modelo_importacao_procfy.xlsx`, 14 colunas);
+    # antes isto era `list(linhas[0].keys())`, a ordem de insercao do primeiro
+    # dicionario, e bastava reordenar o dicionario do outro lado para o arquivo
+    # mudar em silencio.
+    # ⚠️ A ponte antiga pode nao mandar `colunas`; nesse caso o cabecalho ainda
+    # sai do dado, e e dito no log em vez de parecer normal.
+    colunas = list(montado.get("colunas") or [])
+    if not colunas:
+        colunas = list(montado["linhas"][0].keys())
+        log.warning("arquivo do Procfy: a ponte nao mandou `colunas`; "
+                    "cabecalho saiu da ordem do dado")
     livro = Workbook()
     folha = livro.active
     folha.title = "Lançamentos"
-    colunas = list(montado["linhas"][0].keys()) if montado["linhas"] else []
     folha.append(colunas)
     for linha in montado["linhas"]:
+        # 🚨 LINHA QUE NAO CASA COM A REGRA NAO SAI CALADA. Coluna faltando
+        # viraria celula vazia e coluna sobrando seria descartada -- nos dois
+        # casos o arquivo chega torto ao Procfy e o erro aparece lA, na
+        # importacao, onde ninguem sabe de onde veio.
+        faltando = [c for c in colunas if c not in linha]
+        sobrando = [c for c in linha if c not in colunas]
+        if faltando or sobrando:
+            raise HTTPException(
+                status_code=500,
+                detail="o arquivo não casa com a regra do Procfy: "
+                       + ("faltando " + ", ".join(faltando) + ". "
+                          if faltando else "")
+                       + ("sobrando " + ", ".join(sobrando) + "."
+                          if sobrando else ""))
         folha.append([linha[c] for c in colunas])
     buffer = _io.BytesIO()
     livro.save(buffer)
     buffer.seek(0)
-    tecnico = (montado.get("tecnico") or "tecnico").replace(" ", "_")
+    tecnico = _nome_de_arquivo(montado.get("tecnico") or "tecnico")
     return StreamingResponse(
         buffer,
         media_type="application/vnd.openxmlformats-officedocument."

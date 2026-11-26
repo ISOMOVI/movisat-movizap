@@ -310,6 +310,57 @@ def aba_da_solicitacao(solicitacao_id: int) -> dict | None:
             ORDER BY c.id LIMIT 1""", (int(solicitacao_id),))
 
 
+TETO_DO_TERMO = 20
+
+
+def gravar_termo(card_id: int, termo, atendente_id: int | None) -> dict:
+    """Poe (ou limpa) o numero do termo que o OPERADOR digita no card.
+
+    🔵 Ele, 25/11: *"o operador coloca a mao no card, pois so depois de
+    assinado que ele sera gerado oficialmente"*.
+
+    📏 A razao de existir, medida: o quadro do Contratual tem **6 cards e
+    nenhum com termo**, porque os seis sao solicitacoes **sem OS** -- e o termo
+    nao e campo da OS, e extraido de dentro dela. Entre assinar e gerar a OS o
+    numero nao existe em lugar nenhum do sistema.
+
+    🚨 **NAO GRAVA `pipeline_passagem`.** Medido: o `etapa_desde` do card
+    sai de `max(pipeline_passagem.em)`, e uma passagem a cada digitacao zeraria
+    o contador de "parado nesta etapa desde" -- justamente o que mostra card
+    esquecido. A historia deste campo sao as colunas `termo_por` e `termo_em`.
+
+    ⚠️ **Vazio LIMPA**, e grava NULO nos dois campos: o `CHECK` da migracao
+    120 exige `termo` e `termo_em` nulos juntos, e o operador que digitou errado
+    precisa poder apagar.
+    ⚠️ **Teto de 20 caracteres, SEM MASCARA**: a coluna e `text` e a tela
+    tem largura, mas formato inventado a partir dos dois unicos termos medidos
+    barraria dado verdadeiro.
+    """
+    card = banco.um("SELECT id FROM pipeline_card WHERE id = %s",
+                    (int(card_id),))
+    if not card:
+        raise DadoInvalido("Este card nao existe.")
+    limpo = (termo or "").strip()
+    if len(limpo) > TETO_DO_TERMO:
+        raise DadoInvalido(
+            f"O numero do termo tem no maximo {TETO_DO_TERMO} caracteres.")
+    banco.executar(
+        """UPDATE pipeline_card
+              SET termo = %s, termo_por = %s,
+                  -- 🚨 `::text` NÃO É ENFEITE: sem ele o Postgres devolve
+                  -- `could not determine data type of parameter $3`, porque o
+                  -- parâmetro aparece só dentro de `CASE WHEN ... IS NULL` e
+                  -- nada ali diz o tipo dele. Achado EXERCITANDO: o dublê de
+                  -- banco das travas nunca mostra a consulta ao Postgres.
+                  termo_em = CASE WHEN %s::text IS NULL THEN NULL ELSE now() END
+            WHERE id = %s""",
+        (limpo or None, atendente_id if limpo else None,
+         limpo or None, int(card_id)))
+    log.info("pipeline: termo %s no card %s por %s",
+             limpo or "(limpo)", card_id, atendente_id)
+    return {"id": int(card_id), "termo": limpo or None}
+
+
 def historico(card_id: int) -> list[dict]:
     """As passagens deste card, da mais nova para a mais velha.
 
@@ -453,6 +504,11 @@ def cards_da_aba(aba_id: int, teto: int = 200) -> list[dict]:
                   c.numero_os,
                   c.criado_em, c.desfecho, c.desfecho_em,
                   qa.nome AS desfecho_por_nome,
+                  -- 🔵 25/11: o TERMO POSTO A MAO (migracao 120). Campo novo
+                  -- nao entra sozinho: sem estas tres linhas a coluna existe
+                  -- no banco e a tela nunca a ve.
+                  c.termo, c.termo_em,
+                  qt.nome AS termo_por_nome,
                   s.valores, s.criada_em AS solicitada_em,
                   f.titulo AS formulario, f.slug,
                   -- 🚨 POR SOLICITACAO **OU** POR OS. Ate 12/11 contava so
@@ -482,6 +538,7 @@ def cards_da_aba(aba_id: int, teto: int = 200) -> list[dict]:
                     WHERE p.card_id = c.id) AS etapa_desde
              FROM pipeline_card c
              LEFT JOIN atendente qa ON qa.id = c.desfecho_por
+             LEFT JOIN atendente qt ON qt.id = c.termo_por
              LEFT JOIN formulario_solicitacao s ON s.id = c.solicitacao_id
              LEFT JOIN formulario f ON f.id = s.formulario_id
             WHERE c.aba_id = %s

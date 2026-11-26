@@ -954,7 +954,14 @@ def _card_do_chamado(c: dict, nomes: dict, da_os: dict | None = None) -> dict:
         # ⚠️ E NORMAL vir nulo: 📏 medido em 12/11 nas 19 OS do Financeiro,
         # 17 tem termo e 2 nao -- e as duas sem termo sao exatamente as de
         # RESSARCIMENTO (`problema 7524`). Card sem termo mostra so a OS.
-        "termo": (da_os or {}).get("termo"),
+        # 🚨 O TERMO DA OS GANHA DO POSTO A MAO, e a tela diz QUAL E A
+        # ORIGEM (`termo_a_mao`). Quando a OS existe, o numero dela e o
+        # oficial; o digitado preenche so a janela entre assinar e gerar a OS.
+        # Tela que mostra digitado com cara de oficial e tela mentindo (`M12`).
+        "termo": (da_os or {}).get("termo") or c.get("termo"),
+        "termo_a_mao": bool(not (da_os or {}).get("termo") and c.get("termo")),
+        "termo_por_nome": c.get("termo_por_nome"),
+        "termo_em": c.get("termo_em"),
         # 🔵 O DESFECHO, que e o que faz o card esmaecer e ir para o fim:
         # *"Resolvido encerra o card e ele esmaece e fica no fim da fila
         # arquivado com status de concluido"*.

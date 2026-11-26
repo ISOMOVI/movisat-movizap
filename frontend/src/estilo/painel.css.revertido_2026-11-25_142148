@@ -1,0 +1,404 @@
+/*
+ * A FONTE ÚNICA DO CSS DOS PAINÉIS — 25/11/2026
+ * ============================================================================
+ * 🔵 Ele, olhando as telas: *"as fontes ainda estão erradas entre as abas,
+ * tamanho, proporção"*, *"a proporção e posição dos cabeçalhos tbm está
+ * divergindo"*, *"os cards fechados não estão como nos mockups"*, e direto:
+ * *"porque não está fazendo corretamente?"*
+ *
+ * 🚨 A CAUSA, MEDIDA: `card__abrir` em **4** arquivos com **3 corpos
+ * diferentes**, `pilula` em **7**, `coluna` em **5** — e o CSS global
+ * declarava **nenhum**. Cada tela tinha a sua cópia: `gap` e-1 contra e-2,
+ * borda `--borda` contra `--borda-forte`, sombra só numa, pílula com e sem
+ * borda, cabeçalho centrado numa e `flex-end` na outra. No mockup as duas
+ * folhas ficaram empilhadas e o card pegou o corpo bom — é por isso que o
+ * mockup mostrou o card certo e a tela, outro.
+ *
+ * 🚨 ESTA É A ÚNICA CASA DESSAS REGRAS. Mudar o card de um painel é mudar
+ * aqui, e muda nos quatro — que é o ponto. A **12ª conferência** do
+ * `conferir_css_publicado.mjs` reprova o build se alguma voltar a ser
+ * declarada duas vezes com corpos diferentes.
+ *
+ * 🚨 O ANCESTRAL `.escala-operacao` FOI MEDIDO: exatamente as três telas de
+ * painel o carregam, e o `ChatInterno` e a `CaixaDeEntrada` — que também têm
+ * `.coluna`, significando outra coisa — não. Sem ele, um `.coluna` global
+ * invadiria as duas.
+ *
+ * ⚠️ A OPERAÇÃO NÃO FOI RENOMEADA: os nomes dela (`tela__cabecalho`,
+ * `cabecalho__identidade`, `cabecalho__controles`) e os das abas
+ * (`painel__topo`, `painel__identidade`, `painel__medidas`) são declarados no
+ * MESMO corpo.
+ *
+ * ⚠️ VARIANTE DE UMA TELA SÓ FICOU ONDE ESTAVA (`card__abrir--chamado`,
+ * `coluna--alvo`, `pilula--valor`, …): mover o que não é compartilhado só
+ * engordaria o arquivo comum.
+ */
+
+
+/* ========================================================================
+   O CABEÇALHO — um arranjo para as três
+   ======================================================================== */
+.escala-operacao .painel__topo,
+.escala-operacao .tela__cabecalho {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--e-3);
+}
+.escala-operacao .painel__identidade,
+.escala-operacao .cabecalho__identidade {
+  display: flex;
+  align-items: center;
+  gap: var(--e-2);
+  min-width: 0;
+}
+.escala-operacao .painel__medidas,
+.escala-operacao .cabecalho__controles {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--e-2);
+}
+.escala-operacao .painel__titulo,
+.escala-operacao .painel__identidade h1,
+.escala-operacao .cabecalho__identidade h1 {
+  /* 🚨 O TÍTULO DAS TRÊS TELAS NO MESMO TAMANHO. A Operação usa `<h1>` cru e
+     as abas usam `.painel__titulo`: sem esta linha, uma herdava o `h1` do
+     base.css e a outra o token -- e era parte do *"as fontes ainda estão
+     erradas entre as abas"*. */
+  margin: 0;
+  font-size: var(--txt-lg);
+}
+
+/* ========================================================================
+   O CARD — o modelo da aba 1
+   ======================================================================== */
+.escala-operacao .card {
+  border-radius: var(--r-md);
+  display: block;
+}
+.escala-operacao .card__abrir {
+  display: flex;
+  flex-direction: column;
+  gap: var(--e-1);
+  width: 100%;
+  padding: var(--e-2) var(--e-3);
+  background: var(--superficie);
+  border: var(--borda-fina) solid var(--borda);
+  border-left: 3px solid transparent;
+  border-radius: var(--r-md);
+  text-align: left;
+  cursor: pointer;
+  /* o realce da Operacao, preservado por uniao: era a unica que tinha */
+  transition: box-shadow .15s ease, transform .15s ease,
+              border-color .15s ease;
+}
+.escala-operacao .card__abrir:hover {
+  border-color: var(--acento);
+}
+.escala-operacao .card__linha {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--e-2);
+  width: 100%;
+  min-width: 0;
+}
+.escala-operacao .card__cliente {
+  font-weight: var(--peso-forte);
+  font-size: var(--txt-sm);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  margin: 0;
+  color: var(--texto);
+  line-height: 1.3;
+  min-width: 0;
+}
+.escala-operacao .card__cliente--sem {
+  font-weight: var(--peso-normal);
+  color: var(--texto-fraco);
+  font-size: var(--txt-sm);
+  font-style: italic;
+  -webkit-line-clamp: 3;
+}
+.escala-operacao .card__direita {
+  flex: none;
+  font-size: var(--txt-xs);
+  color: var(--texto-fraco);
+  white-space: nowrap;
+}
+.escala-operacao .card__direita--dado {
+  color: var(--texto);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: var(--txt-sm);
+}
+.escala-operacao .card__dado {
+  font-size: var(--txt-xs);
+  color: var(--texto-fraco);
+  min-width: 0;
+}
+.escala-operacao .card__ident {
+  display: flex;
+  align-items: baseline;
+  gap: var(--e-2);
+  min-width: 0;
+  flex-wrap: wrap;
+  font-size: var(--txt-sm);
+  color: var(--texto-fraco);
+}
+.escala-operacao .card__os {
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  color: var(--acento);
+  font-weight: var(--peso-forte);
+  font-size: var(--txt-sm);
+  font: inherit;
+  text-align: left;
+}
+.escala-operacao .card__termo {
+  font-size: var(--txt-xs);
+  color: var(--texto-fraco);
+  white-space: nowrap;
+}
+.escala-operacao .card__resumo {
+  margin: 0;
+  font-size: var(--txt-xs);
+  color: var(--texto-fraco);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* ========================================================================
+   COLUNA · ABAS · CONTROLES · PÍLULA · SELO · QUADROS DE AÇÃO
+   ======================================================================== */
+/* 🚨 MESMO ELEMENTO, NÃO DESCENDENTE -- e foi o defeito que quebrou as duas
+   abas em 25/11: a raiz da tela é `class="painel escala-operacao"`, os dois
+   nomes no MESMO elemento, então `.escala-operacao .painel` (descendente) não
+   casava com ela. As abas perderam o empilhamento e o espaçamento; a Operação
+   não quebrou porque a raiz dela é `.tela`. */
+.painel.escala-operacao {
+  display: flex;
+  flex-direction: column;
+  gap: var(--e-4);
+}
+.escala-operacao .painel__casco {
+  position: relative;
+}
+.escala-operacao .painel__quadro {
+  display: flex;
+  gap: var(--e-3);
+  overflow-x: auto;
+  padding-bottom: var(--e-2);
+  align-items: flex-start;
+}
+.escala-operacao .coluna {
+  flex: 0 0 360px;
+  background: var(--fundo);
+  border: var(--borda-fina) solid var(--borda);
+  border-top: 3px solid var(--borda-forte);
+  border-radius: var(--r-md);
+  padding: var(--e-3);
+  box-shadow: var(--sombra-1);
+  transition: box-shadow .15s ease;
+}
+.escala-operacao .coluna--vazia {
+  opacity: .8;
+  background: var(--superficie-2);
+  box-shadow: none;
+}
+.escala-operacao .coluna__titulo {
+  margin: 0;
+  font-size: var(--txt-sm);
+}
+.escala-operacao .coluna__botao {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--e-2);
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+  color: var(--texto);
+  padding: 0 0 var(--e-2);
+  text-align: left;
+  min-height: var(--altura-toque);
+  border-bottom: var(--borda-fina) solid var(--borda);
+  border-radius: var(--r-md) var(--r-md) 0 0;
+  font-size: var(--txt-sm);
+  font-weight: var(--peso-forte);
+}
+.escala-operacao .coluna__nome {
+  font-weight: var(--peso-forte);
+  line-height: 1.3;
+}
+.escala-operacao .coluna__conta {
+  flex: 0 0 auto;
+  min-width: 22px;
+  text-align: center;
+  padding: 0 var(--e-1);
+  border-radius: var(--r-full);
+  background: var(--acento);
+  color: #FFFFFF;
+  font-size: var(--txt-xs);
+  font-weight: var(--peso-forte);
+  border: var(--borda-fina) solid var(--texto);
+}
+.escala-operacao .coluna__conta--zero {
+  background: transparent;
+  color: var(--texto-fraco);
+  border: var(--borda-fina) solid var(--borda-forte);
+  border-color: var(--borda-forte);
+  font-weight: var(--peso-normal);
+}
+.escala-operacao .coluna__corpo {
+  display: flex;
+  flex-direction: column;
+  gap: var(--e-2);
+  padding: var(--e-3);
+}
+.escala-operacao .abas {
+  display: flex;
+  gap: var(--e-1);
+  flex-wrap: wrap;
+  border-bottom: var(--borda-fina) solid var(--borda);
+}
+.escala-operacao .abas__item {
+  padding: var(--e-2) var(--e-3);
+  border-bottom: 3px solid transparent;
+  color: var(--texto-fraco);
+  text-decoration: none;
+  font-size: var(--txt-sm);
+  font-weight: var(--peso-forte);
+}
+.escala-operacao .abas__item--atual {
+  color: var(--texto);
+  border-bottom-color: var(--acento);
+}
+.escala-operacao .controles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--e-2);
+  align-items: center;
+}
+.escala-operacao .pilula {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--e-1);
+  align-self: flex-start;
+  padding: 1px var(--e-2);
+  border: var(--borda-fina) solid var(--borda);
+  border-radius: var(--r-full);
+  background: var(--superficie-2);
+  color: var(--texto-fraco);
+  font-size: var(--txt-xs);
+}
+.escala-operacao .selo {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--e-1);
+  padding: 1px var(--e-2);
+  border: var(--borda-fina) solid var(--borda);
+  border-radius: var(--r-full);
+  font-size: var(--txt-xs);
+  color: var(--texto-fraco);
+}
+.escala-operacao .selo--verde {
+  border-color: var(--ok);
+  color: var(--ok);
+}
+.escala-operacao .selo--amarelo {
+  border-color: var(--aviso);
+  color: var(--aviso);
+}
+.escala-operacao .selo--laranja {
+  border-color: var(--aviso);
+  color: var(--aviso);
+}
+.escala-operacao .selo--vermelho {
+  border-color: var(--erro);
+  color: var(--erro);
+}
+.escala-operacao .acoes {
+  display: flex;
+  flex-direction: column;
+  gap: var(--e-3);
+  margin-top: var(--e-3);
+}
+.escala-operacao .acoes__grupo {
+  margin: 0;
+}
+.escala-operacao .acoes__titulo {
+  margin: 0 0 var(--e-2);
+  font-size: var(--txt-xs);
+  color: var(--texto-fraco);
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  font-weight: var(--peso-forte);
+}
+.escala-operacao .acoes__grade {
+  display: grid;
+  gap: var(--e-2);
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+}
+.escala-operacao .acao {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  text-align: left;
+  padding: var(--e-2) var(--e-3);
+  cursor: pointer;
+  font: inherit;
+  background: var(--superficie);
+  color: var(--texto);
+  border: var(--borda-fina) solid var(--borda-forte);
+  border-radius: var(--r-md);
+  transition: border-color var(--tempo-rapido) var(--curva),
+              box-shadow var(--tempo-rapido) var(--curva);
+}
+.escala-operacao .acao__nome {
+  display: flex;
+  align-items: center;
+  gap: var(--e-2);
+  font-weight: var(--peso-forte);
+  font-size: var(--txt-sm);
+}
+.escala-operacao .acao__nota {
+  font-size: var(--txt-xs);
+  color: var(--texto-fraco);
+  line-height: var(--entrelinha);
+}
+.escala-operacao .acao--principal {
+  border-color: var(--acento);
+  background: var(--acento-suave);
+}
+.escala-operacao .card__rodape {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--e-2);
+  align-items: center;
+  justify-content: space-between;
+  margin-top: var(--e-3);
+  padding-top: var(--e-3);
+  border-top: var(--borda-fina) solid var(--borda);
+}
+.escala-operacao .card__acoes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--e-2);
+}
+
+/* ⚠️ A ÚNICA diferença que fica, e é de contexto, não de forma: nas abas o
+   `.painel` é uma coluna `flex` com `gap`, e o cabeçalho não precisa de margem;
+   na Operação ele não está numa coluna, então a margem é dele. */
+.escala-operacao .tela__cabecalho { margin-bottom: var(--e-4); }

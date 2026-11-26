@@ -170,6 +170,46 @@ const temas = computed(() => {
   ]
 })
 
+/* 🔵 25/11 — O TERMO POSTO A MAO (migração 120).
+   📏 A razão, medida: o quadro do Contratual tem 6 cards e nenhum com termo,
+   porque os seis são solicitações SEM OS -- e o termo não é campo da OS, é
+   extraído de dentro dela. Ele: *"o operador coloca a mão no card, pois só
+   depois de assinado que ele será gerado oficialmente"*.
+   ⚠️ O campo só existe no Contratual, pela `aba` que o diálogo já recebe. */
+const termo = ref(props.card.termo || '')
+const salvandoTermo = ref(false)
+const erroDoTermo = ref('')
+
+/* 🚨 SÓ quando o número é do OPERADOR. Com a OS no card o termo é o oficial e
+   não se digita por cima: deixar o campo editável ali faria a tela prometer
+   uma escrita que a regra do servidor ignora (`M12`). */
+const podePorTermo = computed(() =>
+  props.aba === ABA_DO_CONTRATUAL && !props.card.numero_os)
+
+/* ⚠️ Reabrir o diálogo em outro card tem de trazer o número DAQUELE card. */
+watch(() => props.card.id, () => {
+  termo.value = props.card.termo || ''
+  erroDoTermo.value = ''
+})
+
+async function salvarTermo() {
+  if (salvandoTermo.value) return
+  salvandoTermo.value = true
+  erroDoTermo.value = ''
+  try {
+    await api.post(`/api/paineis/operacao/chamado/${props.card.id}/termo`,
+                   { termo: termo.value.trim() })
+    /* `mudou` para o quadro reler: o card fechado mostra o termo na linha 1, e
+       sem reler ele continuaria com o número antigo até a próxima abertura. */
+    emit('mudou')
+  } catch (e) {
+    erroDoTermo.value = e instanceof ErroDeApi
+      ? e.message : 'Não consegui salvar o número do termo.'
+  } finally {
+    salvandoTermo.value = false
+  }
+}
+
 function quando(iso) {
   if (!iso) return '—'
   const d = new Date(iso)
@@ -418,6 +458,33 @@ async function salvarRecado() {
 
       <div class="modal__corpo modal__corpo--duas">
         <div class="modal__coluna">
+          <!-- 🔵 25/11 — O NÚMERO DO TERMO, posto pelo operador. Fica no topo
+               da coluna porque é o identificador do contrato, e é o que ele
+               carrega para o FPSL quando clica "Sim" no Finalizar.
+               ⚠️ A frase diz POR QUE existe o campo: número que ainda não
+               nasceu oficialmente não está em lugar nenhum do sistema. -->
+          <section v-if="podePorTermo" class="modal__painel">
+            <h3>Número do termo</h3>
+            <p class="nota pequeno">
+              O termo oficial só nasce com a OS. Até lá, o número vai aqui.
+            </p>
+            <div class="termo__linha">
+              <input v-model="termo" class="campo campo--termo" type="text"
+                     maxlength="20" placeholder="12345"
+                     :disabled="salvandoTermo" />
+              <button class="botao botao--contorno" type="button"
+                      :disabled="salvandoTermo" @click="salvarTermo">
+                <i class="bi bi-check2" aria-hidden="true"></i>
+                Salvar termo
+              </button>
+            </div>
+            <p v-if="erroDoTermo" class="nota pequeno erro">{{ erroDoTermo }}</p>
+            <p v-else-if="card.termo_a_mao && card.termo_por_nome"
+               class="nota pequeno">
+              posto por {{ card.termo_por_nome }}
+            </p>
+          </section>
+
           <p class="modal__secao">O que o cliente disse</p>
 
           <section class="modal__painel">
@@ -698,6 +765,17 @@ async function salvarRecado() {
   overflow-y: auto;
 }
 .modal__corpo--duas { grid-template-columns: 1.3fr 1fr; }
+/* O campo e o botão na MESMA linha, e o campo cresce: número de 5 dígitos num
+   campo de largura total ao lado de um botão pequeno fica desequilibrado.
+   ⚠️ `min-width: 0` para o campo poder encurtar em coluna estreita em vez de
+   empurrar o botão para fora. */
+.termo__linha { display: flex; gap: var(--e-2); align-items: center; }
+/* ⚠️ A regra e da CLASSE, nao do descendente: a 12ª conferência de CSS
+   reprovou o build porque `campo--termo` estava escrita no template e não
+   existia em CSS nenhum -- a trava achou a própria órfã que eu criei, no
+   dia em que ela nasceu. E a classe diz o PAPEL, que é o que a trava de
+   tela também seleciona (`M13`). */
+.campo--termo { flex: 1 1 auto; min-width: 0; }
 @media (max-width: 760px) {
   .modal__corpo--duas { grid-template-columns: 1fr; }
 }

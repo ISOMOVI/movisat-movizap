@@ -3988,3 +3988,100 @@ passar a aceitar documento quebrado, que é outra decisão.
 ⚠️ Os de **cliente** (`TESTE_GRATUITO`, `FICHA_CADASTRAL`, `FORNECEDORES`)
 **não entraram**: lá o documento é o próprio assunto do formulário, e afrouxar
 seria mudança de régua. Decisão dele nesta rodada.
+
+## Migração 119 — o comprovante de pagamento em arquivo (aba 2, `PNL_1.6`)
+
+🔵 18/11: *"haverá campo para que em cada 1 dos artefatos de pagamento seja
+inserido anexo que comprove o pagamento. Após o envio do anexo, abre o campo que
+pede o valor inserido no documento."* 🔵 24/11: o anexo é **do MoviZap, no padrão
+da observação da Operação**, e é **anexo completo — não só PDF**.
+
+`pagamento_comprovante_arquivo (id, artefato_id, nome_original, caminho, bytes,
+mime, criado_em, por)`, com índice por `artefato_id`.
+
+🚨 **`artefato_id` NÃO É CHAVE ESTRANGEIRA, E ISSO É DESENHO.** O artefato de
+pagamento vive no **SQLite do FPSL** (`pagamento_artefato`, no `fpsl.db`) e esta
+tabela é **Postgres**: não existe FK possível entre os dois bancos. Quem confere
+a existência é a rota, **pelo quadro da ponte** — `_artefato_no_quadro` em
+`main.py` devolve **404 "não está no quadro"** antes de gravar, e **502** quando
+o FPSL não respondeu (dizer "não está no quadro" sem ter lido o quadro mandaria
+o operador procurar defeito no lugar errado). Pôr `REFERENCES` aqui seria mentir
+sobre uma garantia que o banco não dá.
+
+🚨 **A REFERÊNCIA NO FPSL É TEXTO, E NENHUM BYTE ATRAVESSA A PONTE.** O FPSL
+guarda `anexo:<id>` no `comprovante_arquivo TEXT` que **já existe**, pelo
+`guardar_comprovante` que **já existe** — sem migração daquele lado. A ponte é
+JSON servidor-a-servidor (`X-Ponte-Key`), e caminho de disco atravessando-a
+faria o FPSL guardar algo que só este servidor sabe ler. Quem põe nome e tamanho
+no quadro é este lado, numa consulta só para o quadro inteiro
+(`_anexar_comprovantes_no_quadro`) — por card seria N+1.
+
+O molde é o `os_observacao_arquivo` (091): pasta própria
+(`/home/claude/movizap_pagamento_comprovantes`), um diretório sorteado
+(`uuid4().hex`) por arquivo, nome original só para exibir e para o download,
+**lista branca** de extensão — a **mesma** `EXTENSOES_DA_OBS`, importada e não
+recopiada, porque lista duplicada divergiria no dia em que alguém acrescentasse
+um formato num dos dois lugares — e teto de 10 MB. ⚠️ **Recusa antes de escrever
+no disco** (extensão, teto, vazio), para não deixar arquivo solto quando a linha
+não vai existir.
+
+🚨 **ESTA PASTA NÃO TEM BACKUP**, como as outras três de anexo: o backup leva o
+**banco**, então a linha sobrevive e o arquivo não. Por isso
+`GET /api/paineis/servico-dos-tecnicos/anexo/{id}` devolve **410** (não 500)
+quando o arquivo sumiu do disco, com a frase.
+
+---
+
+## Migração 120 — o termo posto à mão no card (Contratual, `PNL_1.5`)
+
+🔵 Ele, 25/11: *"os cards fechados na aba contratual devem ter o numero do termo
+antes do nome do cliente: TERMO: '12345 - PASTELARIA VELASCO'"*; e sobre de onde
+vem o número: *"o operador coloca a mão no card, pois só depois de assinado que
+ele será gerado oficialmente"*.
+
+Três colunas novas no **`pipeline_card`**: `termo` (text), `termo_por` (integer,
+FK para `atendente` com `ON DELETE SET NULL`) e `termo_em` (timestamptz).
+
+📏 **A medição que obrigou a migração.** O quadro do Contratual tem **6 cards e
+nenhum com termo**, porque os seis são **solicitações sem OS** ("Aditivo
+contratual", "Substituição de veículos") — e o termo **não é campo da OS** no
+Harmonit: ele é extraído de dentro do corpo dela (`fpsl_weso/termo_da_os.py`).
+As respostas dos formulários foram abertas uma por uma: há CNPJ, placas,
+endereço e responsável, e **nenhum campo de termo ou contrato**. Entre assinar e
+gerar a OS, o número não existe em lugar nenhum do sistema.
+
+🚨 **O TERMO DA OS CONTINUA GANHANDO.** Quando a OS existe, o número dela é o
+oficial e é ele que a tela mostra; `pipeline_card.termo` preenche só o vazio. O
+card devolve **`termo_a_mao`** para a tela saber a origem — tela que mostra
+número digitado com cara de oficial é tela mentindo (`M12`). E o campo de digitar
+**só aparece em card sem OS**, senão a tela prometeria uma escrita que a regra do
+servidor ignora.
+
+🚨 **NÃO SE GRAVA `pipeline_passagem` AO PÔR O TERMO.** Medido: o `etapa_desde`
+do card sai de `max(pipeline_passagem.em)`, então uma passagem a cada digitação
+zeraria o contador de *"parado nesta etapa desde"* — justamente o que mostra card
+esquecido. Quem conta a história deste campo são as colunas `termo_por` e
+`termo_em`.
+
+⚠️ **`CHECK pipeline_card_termo_tem_data`**: `(termo IS NULL) = (termo_em IS
+NULL)`, a mesma régua que o `desfecho` já usa nesta tabela — data sem valor (ou
+valor sem data) seria estado que a tela não sabe desenhar. Por isso **vazio
+limpa os dois**.
+
+⚠️ **Sem máscara no número**, e é decisão declarada: medi apenas **dois** termos
+reais no Financeiro (8953 e 8958), e inventar formato a partir de dois exemplos
+barraria dado verdadeiro. A coluna é `text`, a rota apara e limita a **20**
+caracteres, e o `<input>` tem o mesmo teto.
+
+🚨 **E o campo de digitar entrou no MESMO passo da coluna**, de propósito: medido
+no mesmo dia, as quatro chaves `procfy_*` vivem no `/config` e **nenhuma rota as
+escreve** — ninguém consegue preenchê-las, nem o owner. Coluna sem tela é dado
+inalcançável, e esse defeito já existe nesta casa.
+
+**Quem lê:** `pipeline.cards_da_aba` (as três colunas mais `qt.nome AS
+termo_por_nome`) e `paineis._card_do_chamado` (a precedência e o `termo_a_mao`).
+**Quem grava:** `pipeline.gravar_termo`, pela rota
+`POST /api/paineis/operacao/chamado/{card_id}/termo`, com a permissão **da aba do
+próprio card** — a mesma régua do `finalizar` e do `reabrir`.
+**Travas:** `tests/teste_termo_posto_a_mao.py` (11) e
+`src/contratual_termo_a_mao_2511.teste.js` (6).

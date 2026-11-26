@@ -336,8 +336,10 @@ describe('o card aberto', () => {
       .find((a) => a.text().includes('lote 7'))
     await card.find('button.card__abrir').trigger('click')
     await flushPromises()
+    /* ⚠️ `startsWith`: o Excluir virou quadro com nota (25/11). O botão de
+       CONFIRMAR, no diálogo de justificativa, segue com `===` logo abaixo. */
     const excluir = dialogo(tela).findAll('button')
-      .find((b) => b.text() === 'Excluir o card')
+      .find((b) => b.text().startsWith('Excluir o card'))
     expect(excluir, 'o card do lote tem de ter Excluir o card').toBeTruthy()
     await excluir.trigger('click')
     await flushPromises()
@@ -404,15 +406,15 @@ describe('o card aberto', () => {
   it('⚠️ 2.4: na coluna 1 não há card de lote para excluir', async () => {
     const tela = await abrirATela()
     const d = await abrirOCard(tela, 'Franck')
-    expect(d.findAll('button').filter((b) => b.text() === 'Excluir o card'))
-      .toHaveLength(0)
+    expect(d.findAll('button')
+      .filter((b) => b.text().includes('Excluir o card'))).toHaveLength(0)
   })
 
   it('⚠️ 2.3: na coluna 1 NÃO há Remover — o item já está lá', async () => {
     const tela = await abrirATela()
     const d = await abrirOCard(tela, 'Franck')
-    expect(d.findAll('button').filter((b) => b.text() === 'Remover'))
-      .toHaveLength(0)
+    expect(d.findAll('button')
+      .filter((b) => b.text().includes('Remover'))).toHaveLength(0)
   })
 
   /* 🚨 A CONSEQUÊNCIA, e é o que a tela tem de dizer: na coluna 4 o arquivo do
