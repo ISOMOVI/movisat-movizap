@@ -850,3 +850,7 @@ desenha, e o **orçamento** é o único dado que nasce deste lado.
 
 ⚠️ Nasce **só owner**, como toda aba nova — e aqui pesa mais: esta tela move
 dinheiro e gera o arquivo que vai ao Procfy.
+
+⚠️ **26/11: a `ATD_7.1` entrou**, com o cabeçalho no padrão (`G2`) — `tela__cabecalho`, `<h1>`, `AjudaDaTela` e o chip do código. São **28 das 41** telas com ajuda.
+
+🚨 **E a faixa de cobertura dela virou o texto do balão.** Era um `aviso--info` de linha inteira, todo dia, dizendo uma coisa que se aprende uma vez: *"aparece aqui o que foi agendado por este painel; serviço combinado por fora, ou marcado direto no Harmonit, não entra nesta lista"*. A frase é a MESMA, e há teste que prende que ela continua no DOM — texto que se recolhe não é texto que se perde.

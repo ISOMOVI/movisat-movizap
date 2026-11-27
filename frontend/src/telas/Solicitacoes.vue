@@ -25,6 +25,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 
 import { api, ErroDeApi } from '../api/cliente.js'
+import { baixarArquivo } from '../util/baixar.js'
 import { sessao } from '../estado/sessao.js'
 import AjudaDaTela from '../componentes/AjudaDaTela.vue'
 
@@ -111,6 +112,24 @@ function resumo(s) {
 
 function valorLegivel(resposta) {
   return Array.isArray(resposta.valor) ? resposta.valor.join(', ') : resposta.valor
+}
+
+/* 🚨 BAIXAR PASSA PELO TOKEN. Ver `util/baixar.js` para o rastro das quatro
+   vezes que este mesmo defeito apareceu. ⚠️ A falha é DITA: antes, o 401 era
+   silencioso -- o clique abria uma aba com o erro da API, ou nada. */
+const baixando = ref(null)
+
+async function baixarAnexo(a) {
+  baixando.value = a.id
+  erro.value = ''
+  try {
+    await baixarArquivo(`/api/solicitacoes/${aberta.value.id}/arquivo/${a.id}`,
+                        a.nome_original)
+  } catch (e) {
+    erro.value = e instanceof ErroDeApi ? e.message : 'Não consegui baixar o anexo.'
+  } finally {
+    baixando.value = null
+  }
 }
 
 function tamanho(bytes) {
@@ -303,7 +322,16 @@ onMounted(async () => {
             <strong>Anexos</strong>
             <ul class="anexos">
               <li v-for="a in aberta.anexos" :key="a.id">
-                <a :href="`/api/solicitacoes/${aberta.id}/arquivo/${a.id}`" target="_blank">
+                <!-- 🚨 O `href` FICA, mas quem baixa é o `@click.prevent`, e isto
+                     era um defeito: a rota é protegida por `Bearer` e **navegação
+                     de link não manda cabeçalho `Authorization`** -- todo clique
+                     era **401**, medido no log (4 pedidos, 4 recusas). 🔵 Ele:
+                     *"quando clico neles, não baixam direto"*.
+                     ⚠️ O mesmo desenho do `ChatInterno`: o `href` continua ali
+                     para o endereço aparecer e para "abrir em nova aba" do menu
+                     do navegador não virar um link morto. -->
+                <a :href="`/api/solicitacoes/${aberta.id}/arquivo/${a.id}`"
+                   @click.prevent="baixarAnexo(a)">
                   {{ a.nome_original }}
                 </a>
                 <span class="apagado pequeno"> · {{ tamanho(a.bytes) }}</span>

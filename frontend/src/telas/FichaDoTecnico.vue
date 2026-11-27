@@ -29,6 +29,12 @@ import { useRoute, useRouter } from 'vue-router'
 
 import { api, ErroDeApi } from '../api/cliente.js'
 import { sessao } from '../estado/sessao.js'
+/* 🚨 26/11: ERA DAQUI. As duas conversões nasceram nesta tela e viraram
+   `util/dinheiro.js` porque o modal do orçamento precisava das MESMAS e não
+   as tinha — e emitir com `60,00` respondia "Erro interno". Nada mudou de
+   comportamento: os 21 testes de 04/11 continuam valendo, inclusive o que
+   prende *"199,90 volta como 19990"*. */
+import { paraCentavos, paraReais } from '../util/dinheiro.js'
 
 const route = useRoute()
 const router = useRouter()
@@ -62,21 +68,6 @@ const UFS = ['AC', 'AL', 'AP', 'AM', 'BA', 'CE', 'DF', 'ES', 'GO', 'MA', 'MT',
   'MS', 'MG', 'PA', 'PB', 'PR', 'PE', 'PI', 'RJ', 'RN', 'RS', 'RO', 'RR', 'SC',
   'SP', 'SE', 'TO']
 
-/* Um lugar só para o dinheiro ir e vir. `Number('199,90')` é NaN e
-   `parseFloat('199,90')` devolve 199 — daí a vírgula trocada antes, e o
-   arredondamento no inteiro para 199,90 não virar 19989 por ponto flutuante. */
-function paraCentavos(texto) {
-  const limpo = String(texto ?? '').replace(/\s/g, '').replace(',', '.')
-  if (!limpo) return null
-  const n = Number(limpo)
-  if (!Number.isFinite(n) || n < 0) return undefined   // undefined = recusar
-  return Math.round(n * 100)
-}
-
-function paraReais(centavos) {
-  if (centavos === null || centavos === undefined) return ''
-  return (centavos / 100).toFixed(2).replace('.', ',')
-}
 
 const titulo = computed(() => {
   if (!dados.value) return 'Ficha do técnico'

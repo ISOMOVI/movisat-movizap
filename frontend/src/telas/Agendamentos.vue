@@ -11,11 +11,28 @@
    🚨 NÃO É O `agenda.py` DA TELA INÍCIO. Aquele é a agenda do Google e o topo
    dele diz, desde que nasceu, que não é um calendário — virar calendário faria
    a Início deixar de ser "o que precisa de você". O calendário é aqui.
+   ----------------------------------------------------------------------------
+   26/11 — A TABELA DE 10 COLUNAS VIROU CARTÃO POR COMPROMISSO. 🔵 Escolha dele
+   entre três mockups. O que mudou e por quê:
+
+   · a célula de "Ações" tinha 4 botões e ia receber o 5º ("Ir para o card").
+     Numa tabela de 10 colunas isso empurrava tudo para fora da tela em
+     qualquer monitor de 1366, e em celular era inutilizável.
+   · **cartão fechado = o que decide** (hora, cliente, estado, o selo do
+     Harmonit, `NOVO`/`Visto`); **aberto = o detalhe e as 5 ações**.
+   · o painel de reenvio, que nascia no PÉ DA TABELA, passa a abrir DENTRO do
+     cartão clicado — antes ele aparecia longe da linha que o gerou.
+
+   🚨 NENHUMA REGRA DE NEGÓCIO MUDOU NESTA VOLTA. Cancelar continua exigindo
+   motivo, reagendar continua mandando ISO, reenviar continua não enviando, e o
+   agrupamento dos irmãos é o mesmo. O que mudou é a forma.
    ============================================================================ */
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 
 import { api } from '../api/cliente.js'
+import { codigosPermitidos } from '../estado/sessao.js'
+import AjudaDaTela from '../componentes/AjudaDaTela.vue'
 import CalendarioMes from '../componentes/CalendarioMes.vue'
 import { agrupar, chaveDoGrupo, dataBr, textosDoGrupo } from '../util/mensagem_agendamento.js'
 
@@ -127,6 +144,123 @@ function irParaHoje() {
   carregar()
 }
 
+/* ---- O CARTÃO QUE ABRE (26/11) -------------------------------------------
+   ⚠️ UM CONJUNTO, e não um id só: dois compromissos da mesma hora são
+   irmãos e quem confere um costuma conferir o outro. Fechar o anterior ao
+   abrir o seguinte faria a pessoa perder o que acabou de ler. */
+const abertos = ref(new Set())
+
+function estaAberto(a) {
+  return abertos.value.has(a.id)
+}
+
+function alternarCartao(a) {
+  const novo = new Set(abertos.value)
+  if (novo.has(a.id)) {
+    novo.delete(a.id)
+  } else {
+    novo.add(a.id)
+    /* 🔵 Decisão dele: abrir o cartão JÁ MARCA como visto *"e avisa que
+       confirmou também"*. Por isso a marca automática sai daqui, e não de um
+       `watch`: o gesto é o clique. */
+    marcarVisto(a, { automatico: true })
+  }
+  abertos.value = novo
+  // Reenvio aberto de um cartão que fechou não pode ficar na tela.
+  if (!novo.has(a.id) && reenvio.value?.agendamento?.id === a.id) {
+    reenvio.value = null
+  }
+}
+
+/* ---- O SELO "VISTO" (26/11, migração 121) --------------------------------
+   🔵 Pedido dele: *"pode ter um flag de 'Visto' para que o usuário saiba o que
+   já viu e o que não, pois podem aparecer agendamentos no dia mesmo"*. E 🔵 a
+   escolha do lugar foi dele: **no banco, por pessoa** — e não no navegador,
+   que é por máquina e faria o selo mentir no celular.
+
+   🚨 `NOVO` É A AUSÊNCIA DE `visto_em`, não "criado hoje". Quem nunca abriu
+   não viu, e é só isso que a tela afirma. */
+const marcandoVisto = ref(null)
+/* Quem o SISTEMA acabou de marcar, para o cartão poder dizer que marcou. ⚠️
+   Vive só nesta visita: recarregar a tela não repete o aviso, porque ele não
+   é sobre o compromisso, é sobre o que acabou de acontecer na mão da pessoa. */
+const avisadosAgora = ref(new Set())
+
+function naoVistos(lista) {
+  return lista.filter((a) => !a.visto_em).length
+}
+
+async function marcarVisto(a, { automatico = false } = {}) {
+  /* ⚠️ Já visto não se remarca: o POST é idempotente do lado de lá, mas um
+     pedido por abertura de cartão enche o log sem mudar nada. */
+  if (a.visto_em) return
+  marcandoVisto.value = a.id
+  acaoErro.value = ''
+  try {
+    const r = await api.post(`/api/agendamentos/${a.id}/visto`, { automatico })
+    a.visto_em = r.visto_em
+    a.visto_automatico = r.visto_automatico
+    if (automatico) {
+      const novo = new Set(avisadosAgora.value)
+      novo.add(a.id)
+      avisadosAgora.value = novo
+    }
+  } catch (e) {
+    /* 🚨 SELO QUE MENTE É PIOR QUE SELO QUE FALTA. Falhou, não marca nada na
+       tela e a frase aparece — e não há `visto_em` local inventado. */
+    acaoErro.value = e?.message || 'Não deu para marcar como visto.'
+  } finally {
+    marcandoVisto.value = null
+  }
+}
+
+async function desmarcarVisto(a) {
+  marcandoVisto.value = a.id
+  acaoErro.value = ''
+  try {
+    await api.del(`/api/agendamentos/${a.id}/visto`)
+    a.visto_em = null
+    a.visto_automatico = false
+    const novo = new Set(avisadosAgora.value)
+    novo.delete(a.id)
+    avisadosAgora.value = novo
+  } catch (e) {
+    acaoErro.value = e?.message || 'Não deu para desfazer.'
+  } finally {
+    marcandoVisto.value = null
+  }
+}
+
+/* ---- "IR PARA O CARD" (26/11) --------------------------------------------
+   🔵 Ele: *"leva para a coluna do clicado em outra aba, só isso, bem simples
+   mesmo, já atende"*.
+
+   🚨 ÂNCORA, E NUNCA `window.open` — a lição está no `ModalKm` e no
+   `DialogoDeChamado`: *"bloqueador de pop-up come `window.open` sem aviso, e
+   aí o clique não faria nada e pareceria defeito"*. A navegação nativa de um
+   `<a target="_blank">` nunca é bloqueada, e `rel="noopener"` evita que a aba
+   do painel ganhe `window.opener` e possa navegar esta.
+
+   🚨 E O BOTÃO SEGUE A REGRA DA `CFG_15.1`, não uma regra minha: ele só é
+   desenhado para quem tem a `PNL_1.1` concedida (medido em 26/11: 8 dos 9
+   ativos). 🔵 Ele: *"PNL_1.1 tem tela de permissões nas configurações já
+   pronta, deve seguir a regra dela mesmo"*. Desenhar para todos levaria quem
+   não tem a uma aba de "Sem permissão", que é tela prometendo o que não
+   entrega. */
+const SITUACAO_AGENDADO = 1316
+const podeVerOQuadro = computed(() => codigosPermitidos.value.has('PNL_1.1'))
+
+function ordensDoCartao(a) {
+  return (a.ordens || []).map((o) => o.numero_os).filter(Boolean).join(',')
+}
+
+function linkDoCard(a) {
+  /* ⚠️ TODAS as OS do compromisso vão na URL, não só a primeira: é o que
+     deixa o quadro dizer, do outro lado, que uma delas não está na coluna
+     esperada. Um compromisso cobre várias OS; o card de lá é por OS. */
+  return `/paineis/operacao?situacao=${SITUACAO_AGENDADO}&os=${ordensDoCartao(a)}`
+}
+
 /* ---- As duas ações que PERGUNTAM (26/10) -----------------------------------
    🚨 SAÍRAM OS DOIS `window.prompt`. Além de não nomear botão, o `prompt` não
    valida enquanto se digita: data errada só virava erro depois de o diálogo
@@ -135,7 +269,12 @@ function irParaHoje() {
    -- em celular, um teclado cego por cima da tela.
 
    ⚠️ A REGRA NÃO MUDOU: cancelar exige motivo (o backend grava em
-   `motivo_cancelamento`) e reagendar manda ISO. Mudou como se pergunta. */
+   `motivo_cancelamento`) e reagendar manda ISO. Mudou como se pergunta.
+
+   🚨 E DESDE 18/11 AS DUAS CHEGAM AO HARMONIT (migração 112): cancelar apaga
+   lá a linha que NÓS criamos, e reagendar leva a data nova. O gesto daqui tem
+   consequência no ERP -- é por isso que os dois modais mostram cliente, data e
+   hora antes de confirmar. */
 const acao = ref(null)        // { tipo: 'cancelar' | 'reagendar', agendamento }
 const motivoDigitado = ref('')
 const quandoDigitado = ref('')
@@ -220,7 +359,7 @@ function escolherDoMes(diaIso) {
 }
 
 /* ---- REENVIAR CONFIRMAÇÃO (ponta 2 do plano, §8) -------------------------
-   A quarta ação da linha. Entregaram-se três em 21/10 (Reagendar, Cancelar,
+   A quarta ação do cartão. Entregaram-se três em 21/10 (Reagendar, Cancelar,
    Abrir conversa) e esta ficou faltando.
 
    🚨 NÃO ENVIA NADA. Decisão 6 dele, ao pé da letra: as duas confirmações
@@ -229,8 +368,8 @@ function escolherDoMes(diaIso) {
 
    🚨 MONTA COM A MESMA REGRA DE AGRUPAMENTO (mesma data e hora => uma
    mensagem só, placas e OS somadas), e por isso junta os compromissos IRMÃOS:
-   o mesmo cliente, na mesma hora, menos os cancelados. Reenviar só a linha
-   clicada mandaria ao cliente um texto diferente do que ele recebeu.
+   o mesmo cliente, na mesma hora, menos os cancelados. Reenviar só o cartão
+   clicado mandaria ao cliente um texto diferente do que ele recebeu.
 
    ⚠️ COMPROMISSO AINDA `aguardando` NÃO TEM RESPONSÁVEL: o texto sai com o
    campo vazio, e a tela diz por quê em vez de deixar o operador descobrir. */
@@ -247,9 +386,9 @@ function irmaosDe(a) {
 
 function reenviarConfirmacao(a) {
   const grupo = irmaosDe(a)
-  // `irmaosDe` exclui cancelado, e a ação não aparece em linha cancelada --
-  // mas se por algum caminho chegar aqui vazia, usa a própria linha em vez de
-  // montar mensagem de lista vazia.
+  // `irmaosDe` exclui cancelado, e a ação não aparece em cartão cancelado --
+  // mas se por algum caminho chegar aqui vazia, usa o próprio compromisso em
+  // vez de montar mensagem de lista vazia.
   const [primeiro] = agrupar(grupo.length ? grupo : [a])
   reenvio.value = {
     agendamento: a,
@@ -257,7 +396,6 @@ function reenviarConfirmacao(a) {
   }
   copiado.value = ''
 }
-
 
 async function copiar(qual, texto) {
   try {
@@ -333,31 +471,40 @@ onMounted(carregar)
 
 <template>
   <section class="agd">
-    <header class="agd__topo">
-      <h1 class="agd__titulo">Agendamentos</h1>
-      <div class="agd__navegacao">
-        <button class="botao botao--fantasma" type="button" @click="andar(-7)">
-          <i class="bi bi-chevron-left" aria-hidden="true"></i> Semana anterior
-        </button>
-        <button class="botao botao--fantasma" type="button" @click="irParaHoje">Hoje</button>
-        <button class="botao botao--fantasma" type="button" @click="andar(7)">
-          Próxima semana <i class="bi bi-chevron-right" aria-hidden="true"></i>
-        </button>
-        <!-- Ponta 3: o mês ao lado, para pular para um dia distante sem andar
-             de sete em sete. Atalho de navegação, não uma segunda lista. -->
-        <button class="botao botao--fantasma agd__mes-botao" type="button"
-                :aria-expanded="mesAberto ? 'true' : 'false'"
-                @click="mesAberto = !mesAberto">
-          <i class="bi bi-calendar3" aria-hidden="true"></i> Mês
-        </button>
+    <!-- 🚨 CABEÇALHO NO PADRÃO DA CASA (`G2`, 26/11): `tela__cabecalho`, `h1`,
+         ajuda e o chip do código, como a `CAD_1.2` e as outras 27. Esta tela
+         era uma das 14 sem `AjudaDaTela` nenhuma.
+         ⚠️ E A FAIXA DE COBERTURA VIROU A AJUDA, não some: era um `aviso--info`
+         ocupando uma linha inteira todo dia para dizer uma coisa que se aprende
+         uma vez. O texto é o MESMO -- quem precisa, passa o mouse. -->
+    <header class="tela__cabecalho">
+      <div>
+        <h1>Agendamentos</h1>
+        <AjudaDaTela>
+          Aparece aqui o que foi agendado <b>por este painel</b>. Serviço
+          combinado por fora, ou marcado direto no Harmonit, não entra nesta
+          lista.
+        </AjudaDaTela>
       </div>
+      <span class="chip chip--codigo chip--acento">ATD_7.1</span>
     </header>
 
-    <!-- 🚨 A faixa de cobertura. Ausência não pode parecer "não tem". -->
-    <p class="aviso aviso--info agd__cobertura">
-      Aparece aqui o que foi agendado <b>por este painel</b>. Serviço combinado
-      por fora, ou marcado direto no Harmonit, não entra nesta lista.
-    </p>
+    <div class="agd__navegacao">
+      <button class="botao botao--fantasma" type="button" @click="andar(-7)">
+        <i class="bi bi-chevron-left" aria-hidden="true"></i> Semana anterior
+      </button>
+      <button class="botao botao--fantasma" type="button" @click="irParaHoje">Hoje</button>
+      <button class="botao botao--fantasma" type="button" @click="andar(7)">
+        Próxima semana <i class="bi bi-chevron-right" aria-hidden="true"></i>
+      </button>
+      <!-- Ponta 3: o mês ao lado, para pular para um dia distante sem andar
+           de sete em sete. Atalho de navegação, não uma segunda lista. -->
+      <button class="botao botao--fantasma" type="button"
+              :aria-expanded="mesAberto ? 'true' : 'false'"
+              @click="mesAberto = !mesAberto">
+        <i class="bi bi-calendar3" aria-hidden="true"></i> Mês
+      </button>
+    </div>
 
     <nav class="agd__carrossel" aria-label="Dias">
       <button
@@ -389,141 +536,210 @@ onMounted(carregar)
     </div>
 
     <p v-if="erro" class="aviso aviso--erro">{{ erro }}</p>
-    <p v-if="acaoErro" class="aviso aviso--erro">{{ acaoErro }}</p>
+    <p v-if="acaoErro" class="aviso aviso--erro" role="alert">{{ acaoErro }}</p>
     <p v-if="carregando" class="agd__vazio">Carregando…</p>
 
     <p v-else-if="!doDia.length" class="agd__vazio">
       Nenhum serviço agendado por este painel neste dia.
     </p>
 
-    <div v-else class="agd__grid">
-      <table class="tabela">
-        <thead>
-          <tr>
-            <th>Hora</th>
-            <th>Cliente</th>
-            <th>Técnico</th>
-            <th>Placas</th>
-            <th>OS</th>
-            <th>Endereço</th>
-            <th>Responsável</th>
-            <th>Orçamento</th>
-            <th>Estado</th>
-            <th>Ações</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="a in doDia" :key="a.id" :class="{ 'agd__linha--cancelada': a.estado === 'cancelado' }">
-            <td>{{ hora(a.inicio) }}</td>
-            <td>{{ a.cliente_nome }}</td>
-            <td>{{ a.tecnico_nome || '—' }}</td>
-            <td>{{ placas(a) }}</td>
-            <td>{{ ordens(a) }}</td>
-            <td>{{ a.endereco || '—' }}</td>
-            <td>{{ a.responsavel_cliente || '—' }}</td>
-            <td>{{ a.orcamento_numero || '—' }}</td>
-            <td>
+    <template v-else>
+      <!-- ⚠️ O "não vistos" é POR PESSOA, como o selo: diz o que FALTA a quem
+           está olhando, e não quantos a equipe deixou de ver. -->
+      <p class="agd__dia-titulo">
+        {{ doDia.length }} {{ doDia.length === 1 ? 'serviço' : 'serviços' }}
+        <template v-if="naoVistos(doDia)">
+          · {{ naoVistos(doDia) }} não {{ naoVistos(doDia) === 1 ? 'visto' : 'vistos' }}
+        </template>
+      </p>
+
+      <ul class="agd__lista">
+        <li v-for="a in doDia" :key="a.id">
+          <article class="agd__cartao"
+                   :class="{ 'agd__cartao--cancelado': a.estado === 'cancelado',
+                             'agd__cartao--aberto': estaAberto(a),
+                             'agd__cartao--novo': !a.visto_em && a.estado !== 'cancelado' }">
+            <!-- 🚨 O CABEÇALHO INTEIRO É O BOTÃO DE ABRIR, e não um ícone de
+                 12px no canto: é o alvo de toque de 44px que o padrão pede, e
+                 em celular um alvo pequeno num cartão grande é o defeito mais
+                 comum de lista que abre. -->
+            <button type="button" class="agd__cartao-topo"
+                    :aria-expanded="estaAberto(a) ? 'true' : 'false'"
+                    @click="alternarCartao(a)">
+              <span class="agd__cartao-hora">{{ hora(a.inicio) }}</span>
+              <span class="agd__cartao-cliente">{{ a.cliente_nome }}</span>
               <span class="agd__estado" :class="`agd__estado--${a.estado}`">
                 {{ ROTULO_ESTADO[a.estado] || a.estado }}
               </span>
-              <small v-if="a.estado === 'cancelado' && a.motivo_cancelamento"
-                     class="agd__motivo">{{ a.motivo_cancelamento }}</small>
-              <!-- 🚨 TELA QUE MENTE É DEFEITO (`M12`). O aviso de "não foi
-                   ao Harmonit" existia só na caixa, logo depois de agendar, e
-                   vivia um instante: dali em diante o erro ficava só na linha
-                   do banco e esta tela mostrava um compromisso que parecia
-                   inteiro. Medido em 18/11: 6 dos 10 ativos estavam assim, e
-                   nada na tela dizia.
-                   ⚠️ NÃO É ERRO DO COMPROMISSO: o dono é o MoviZap (decisão 7
-                   dele) e ele vale aqui. É por isso que o selo fica ao LADO do
-                   estado, e não no lugar dele. -->
-              <small v-if="a.estado !== 'cancelado' && !a.harmonit_agendamento_id
-                           && a.harmonit_erro"
-                     class="agd__sem-harmonit" :title="a.harmonit_erro">
-                Não foi para a OS no Harmonit
-              </small>
-            </td>
-            <td class="agd__acoes">
-              <button v-if="a.estado !== 'cancelado'" class="botao botao--fantasma"
-                      type="button" @click="pedirReagendar(a)">Reagendar</button>
-              <button v-if="a.estado !== 'cancelado'" class="botao botao--fantasma"
-                      type="button" @click="pedirCancelar(a)">Cancelar</button>
-              <button v-if="a.estado !== 'cancelado'" class="botao botao--fantasma"
-                      type="button" @click="reenviarConfirmacao(a)">Reenviar confirmação</button>
-              <button v-if="a.conversa_id" class="botao botao--fantasma"
-                      type="button" @click="abrirConversa(a)">Abrir conversa</button>
-            </td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
+              <!-- `NOVO` é a ausência de `visto_em` desta pessoa; `Visto` traz
+                   a hora, que é a da PRIMEIRA vez (o servidor não reescreve). -->
+              <span v-if="!a.visto_em && a.estado !== 'cancelado'"
+                    class="agd__selo-novo">NOVO</span>
+              <span v-else-if="a.visto_em" class="agd__selo-visto">
+                Visto {{ hora(a.visto_em) }}
+              </span>
+              <i class="bi" :class="estaAberto(a) ? 'bi-chevron-up' : 'bi-chevron-down'"
+                 aria-hidden="true"></i>
+            </button>
 
-    <!-- 🚨 NÃO ENVIA NADA (decisão 6 dele): mostra para copiar e oferece abrir
-         a conversa com o texto no compositor. -->
-    <div v-if="reenvio" class="agd__reenvio">
-      <header class="agd__reenvio-topo">
-        <strong>Confirmação de {{ reenvio.agendamento.cliente_nome }}</strong>
-        <button class="botao botao--fantasma" type="button" @click="reenvio = null">
-          Fechar
-        </button>
-      </header>
+            <p class="agd__cartao-resumo">
+              {{ a.tecnico_nome || 'sem técnico' }} · OS {{ ordens(a) }} ·
+              {{ placas(a) }}
+            </p>
 
-      <p class="aviso aviso--info agd__reenvio-aviso">
-        Isto <b>não envia nada</b>: quem envia é você. Copie o texto, ou abra a
-        conversa com ele já no compositor.
-      </p>
-      <p v-if="reenvio.quantos > 1" class="agd__reenvio-nota">
-        Mesma data e hora: {{ reenvio.quantos }} compromissos entraram numa
-        mensagem só, com as placas e as OS somadas ({{ reenvio.ordens.join(', ') }}).
-      </p>
-      <!-- ⚠️ Compromisso ainda aguardando não tem responsável: o campo sai
-           vazio, e a tela diz por quê. -->
-      <p v-if="reenvio.semResponsavel" class="aviso aviso--atencao agd__reenvio-nota">
-        Este compromisso ainda não foi confirmado pelo cliente, então ninguém
-        disse quem acompanha o técnico — o campo sai vazio. Quem preenche é a
-        aba <b>Confirmar</b>, na conversa do cliente.
-      </p>
+            <small v-if="a.estado === 'cancelado' && a.motivo_cancelamento"
+                   class="agd__motivo">{{ a.motivo_cancelamento }}</small>
+            <!-- 🚨 TELA QUE MENTE É DEFEITO (`M12`). O aviso de "não foi
+                 ao Harmonit" existia só na caixa, logo depois de agendar, e
+                 vivia um instante: dali em diante o erro ficava só na linha
+                 do banco e esta tela mostrava um compromisso que parecia
+                 inteiro. Medido em 18/11: 6 dos 10 ativos estavam assim, e
+                 nada na tela dizia.
+                 ⚠️ NÃO É ERRO DO COMPROMISSO: o dono é o MoviZap (decisão 7
+                 dele) e ele vale aqui. É por isso que o selo fica ao LADO do
+                 estado, e não no lugar dele. -->
+            <small v-if="a.estado !== 'cancelado' && !a.harmonit_agendamento_id
+                         && a.harmonit_erro"
+                   class="agd__sem-harmonit" :title="a.harmonit_erro">
+              Não foi para a OS no Harmonit
+            </small>
 
-      <div class="agd__reenvio-textos">
-        <article>
-          <h3 class="agd__reenvio-rotulo">Para o cliente</h3>
-          <pre class="agd__reenvio-pre">{{ reenvio.doCliente }}</pre>
-          <div class="agd__acoes">
-            <button class="botao botao--fantasma" type="button"
-                    @click="copiar('cliente', reenvio.doCliente)">
-              {{ copiado === 'cliente' ? 'Copiado' : 'Copiar' }}
+            <!-- ⚠️ "Marcar como visto" existe NO CARTÃO FECHADO, 🔵 porque ele
+                 pediu os dois caminhos: dar ciência sem precisar abrir, e a
+                 marca automática ao abrir. -->
+            <button v-if="!a.visto_em && a.estado !== 'cancelado'"
+                    class="botao botao--fantasma agd__visto-botao" type="button"
+                    :disabled="marcandoVisto === a.id"
+                    @click="marcarVisto(a)">
+              <i class="bi bi-check2" aria-hidden="true"></i> Marcar como visto
             </button>
-            <button v-if="reenvio.agendamento.conversa_id" class="botao botao--contorno"
-                    type="button"
-                    @click="abrirConversaComTexto(reenvio.agendamento, reenvio.doCliente)">
-              Abrir conversa com este texto
-            </button>
-          </div>
-        </article>
-        <article>
-          <h3 class="agd__reenvio-rotulo">Para o técnico</h3>
-          <pre class="agd__reenvio-pre">{{ reenvio.doTecnico }}</pre>
-          <div class="agd__acoes">
-            <button class="botao botao--fantasma" type="button"
-                    @click="copiar('tecnico', reenvio.doTecnico)">
-              {{ copiado === 'tecnico' ? 'Copiado' : 'Copiar' }}
-            </button>
-            <button v-if="reenvio.agendamento.conversa_id" class="botao botao--contorno"
-                    type="button"
-                    @click="abrirConversaComTexto(reenvio.agendamento, reenvio.doTecnico)">
-              Abrir conversa com este texto
-            </button>
-          </div>
-        </article>
-      </div>
-      <!-- A conversa de ORIGEM é a do técnico (decisão dele de 07/10: em
-           conversa de técnico o `cliente_id` do contato é nulo). Dizer isso
-           evita o operador achar que "abrir conversa" leva ao cliente. -->
-      <p class="agd__reenvio-nota">
-        “Abrir conversa” leva à conversa de onde este agendamento saiu — a do
-        técnico. A do cliente abre-se pela Caixa.
-      </p>
-    </div>
+
+            <div v-if="estaAberto(a)" class="agd__cartao-corpo">
+              <!-- 🔵 *"ao abrir já confirma e avisa que confirmou também"*. O
+                   aviso é desta visita: recarregar a tela não o repete, porque
+                   ele é sobre o gesto, não sobre o compromisso. -->
+              <p v-if="avisadosAgora.has(a.id)" class="agd__aviso-visto">
+                <i class="bi bi-check2-circle" aria-hidden="true"></i>
+                Marquei como visto agora, porque você abriu este compromisso.
+                <button class="botao botao--fantasma" type="button"
+                        :disabled="marcandoVisto === a.id"
+                        @click="desmarcarVisto(a)">Desfazer</button>
+              </p>
+
+              <dl class="agd__ficha">
+                <dt>Técnico</dt><dd>{{ a.tecnico_nome || '—' }}</dd>
+                <dt>OS</dt><dd>{{ ordens(a) }}</dd>
+                <dt>Placa(s)</dt><dd>{{ placas(a) }}</dd>
+                <dt>Endereço</dt><dd>{{ a.endereco || '—' }}</dd>
+                <dt>Acompanha</dt>
+                <dd>
+                  {{ a.responsavel_cliente || '—' }}
+                  <!-- ⚠️ Vazio aqui tem um motivo, e a tela diz qual em vez de
+                       deixar o operador achar que alguém esqueceu. -->
+                  <span v-if="!a.responsavel_cliente && a.estado === 'aguardando'"
+                        class="agd__ficha-nota">
+                    (ainda não confirmado pelo cliente)
+                  </span>
+                </dd>
+                <dt>Orçamento</dt><dd>{{ a.orcamento_numero || '—' }}</dd>
+              </dl>
+
+              <div class="agd__acoes">
+                <button v-if="a.estado !== 'cancelado'" class="botao botao--fantasma"
+                        type="button" @click="pedirReagendar(a)">Reagendar</button>
+                <button v-if="a.estado !== 'cancelado'" class="botao botao--fantasma"
+                        type="button" @click="pedirCancelar(a)">Cancelar</button>
+                <button v-if="a.estado !== 'cancelado'" class="botao botao--fantasma"
+                        type="button" @click="reenviarConfirmacao(a)">Reenviar confirmação</button>
+                <button v-if="a.conversa_id" class="botao botao--fantasma"
+                        type="button" @click="abrirConversa(a)">Abrir conversa</button>
+                <!-- 🚨 ÂNCORA, NUNCA `window.open` (bloqueador de pop-up come
+                     `window.open` sem aviso). E só para quem tem a `PNL_1.1`
+                     concedida na `CFG_15.1`: compromisso SEM OS também não
+                     desenha, porque não há card para onde ir. -->
+                <a v-if="podeVerOQuadro && ordensDoCartao(a)"
+                   class="botao botao--contorno"
+                   :href="linkDoCard(a)" target="_blank" rel="noopener noreferrer">
+                  Ir para o card
+                  <i class="bi bi-box-arrow-up-right" aria-hidden="true"></i>
+                </a>
+              </div>
+
+              <!-- 🚨 O REENVIO ABRE AQUI DENTRO, e isto é o conserto de uma
+                   distância: até 26/11 ele nascia no PÉ DA TABELA, longe da
+                   linha clicada, e em dia cheio a pessoa clicava e não via
+                   nada acontecer.
+                   🚨 NÃO ENVIA NADA (decisão 6 dele): mostra para copiar e
+                   oferece abrir a conversa com o texto no compositor. -->
+              <div v-if="reenvio && reenvio.agendamento.id === a.id" class="agd__reenvio">
+                <header class="agd__reenvio-topo">
+                  <strong>Confirmação de {{ reenvio.agendamento.cliente_nome }}</strong>
+                  <button class="botao botao--fantasma" type="button" @click="reenvio = null">
+                    Fechar
+                  </button>
+                </header>
+
+                <p class="aviso aviso--info agd__reenvio-aviso">
+                  Isto <b>não envia nada</b>: quem envia é você. Copie o texto, ou abra a
+                  conversa com ele já no compositor.
+                </p>
+                <p v-if="reenvio.quantos > 1" class="agd__reenvio-nota">
+                  Mesma data e hora: {{ reenvio.quantos }} compromissos entraram numa
+                  mensagem só, com as placas e as OS somadas ({{ reenvio.ordens.join(', ') }}).
+                </p>
+                <!-- ⚠️ Compromisso ainda aguardando não tem responsável: o campo sai
+                     vazio, e a tela diz por quê. -->
+                <p v-if="reenvio.semResponsavel" class="aviso aviso--atencao agd__reenvio-nota">
+                  Este compromisso ainda não foi confirmado pelo cliente, então ninguém
+                  disse quem acompanha o técnico — o campo sai vazio. Quem preenche é a
+                  aba <b>Confirmar</b>, na conversa do cliente.
+                </p>
+
+                <div class="agd__reenvio-textos">
+                  <article>
+                    <h3 class="agd__reenvio-rotulo">Para o cliente</h3>
+                    <pre class="agd__reenvio-pre">{{ reenvio.doCliente }}</pre>
+                    <div class="agd__acoes">
+                      <button class="botao botao--fantasma" type="button"
+                              @click="copiar('cliente', reenvio.doCliente)">
+                        {{ copiado === 'cliente' ? 'Copiado' : 'Copiar' }}
+                      </button>
+                      <button v-if="reenvio.agendamento.conversa_id" class="botao botao--contorno"
+                              type="button"
+                              @click="abrirConversaComTexto(reenvio.agendamento, reenvio.doCliente)">
+                        Abrir conversa com este texto
+                      </button>
+                    </div>
+                  </article>
+                  <article>
+                    <h3 class="agd__reenvio-rotulo">Para o técnico</h3>
+                    <pre class="agd__reenvio-pre">{{ reenvio.doTecnico }}</pre>
+                    <div class="agd__acoes">
+                      <button class="botao botao--fantasma" type="button"
+                              @click="copiar('tecnico', reenvio.doTecnico)">
+                        {{ copiado === 'tecnico' ? 'Copiado' : 'Copiar' }}
+                      </button>
+                      <button v-if="reenvio.agendamento.conversa_id" class="botao botao--contorno"
+                              type="button"
+                              @click="abrirConversaComTexto(reenvio.agendamento, reenvio.doTecnico)">
+                        Abrir conversa com este texto
+                      </button>
+                    </div>
+                  </article>
+                </div>
+                <!-- A conversa de ORIGEM é a do técnico (decisão dele de 07/10: em
+                     conversa de técnico o `cliente_id` do contato é nulo). Dizer isso
+                     evita o operador achar que "abrir conversa" leva ao cliente. -->
+                <p class="agd__reenvio-nota">
+                  “Abrir conversa” leva à conversa de onde este agendamento saiu — a do
+                  técnico. A do cliente abre-se pela Caixa.
+                </p>
+              </div>
+            </div>
+          </article>
+        </li>
+      </ul>
+    </template>
   </section>
 
     <!-- Os dois diálogos que substituíram os `window.prompt` (26/10). As
@@ -608,10 +824,7 @@ onMounted(carregar)
 
 <style scoped>
 .agd { display: flex; flex-direction: column; gap: var(--e-3); min-height: 0; }
-.agd__topo { display: flex; align-items: center; justify-content: space-between; gap: var(--e-3); flex-wrap: wrap; }
-.agd__titulo { margin: 0; font-size: var(--txt-lg); }
 .agd__navegacao { display: flex; gap: var(--e-2); flex-wrap: wrap; }
-.agd__cobertura { margin: 0; }
 
 .agd__carrossel { display: flex; gap: var(--e-2); overflow-x: auto; padding-bottom: var(--e-1); }
 .agd__dia {
@@ -648,7 +861,92 @@ onMounted(carregar)
 }
 .agd__dia--ativo .agd__dia-selo { background: rgba(255, 255, 255, .35); }
 
-.agd__grid { overflow-x: auto; }
+/* ---- A LISTA DE CARTÕES (26/11) ---------------------------------------- */
+.agd__dia-titulo {
+  margin: 0;
+  color: var(--texto-fraco);
+  font-size: var(--txt-sm);
+  text-transform: uppercase;
+  letter-spacing: .02em;
+}
+.agd__lista { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--e-2); }
+.agd__cartao {
+  display: flex;
+  flex-direction: column;
+  gap: var(--e-1);
+  padding: var(--e-3);
+  border: var(--borda-fina) solid var(--borda);
+  border-left: 3px solid var(--borda);
+  border-radius: var(--r-md);
+  background: var(--superficie-2);
+}
+/* ⚠️ A borda da esquerda é o que distingue de longe sem contar casa por casa:
+   acento para o que esta pessoa ainda não viu. */
+.agd__cartao--novo { border-left-color: var(--acento); }
+.agd__cartao--aberto { background: var(--superficie); }
+.agd__cartao--cancelado { opacity: .65; }
+/* 🚨 44px de alvo de toque: é tela de celular, e o padrão visual é explícito
+   em que "16px e 44px não são estética". */
+.agd__cartao-topo {
+  display: flex;
+  align-items: center;
+  gap: var(--e-2);
+  flex-wrap: wrap;
+  min-height: 44px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.agd__cartao-hora { font-size: var(--txt-lg); font-weight: var(--peso-forte); }
+.agd__cartao-cliente { flex: 1 1 auto; font-weight: var(--peso-forte); }
+.agd__cartao-resumo { margin: 0; color: var(--texto-fraco); font-size: var(--txt-sm); }
+.agd__cartao-corpo {
+  display: flex;
+  flex-direction: column;
+  gap: var(--e-2);
+  margin-top: var(--e-2);
+  padding-top: var(--e-2);
+  border-top: var(--borda-fina) solid var(--borda);
+}
+/* O detalhe em duas colunas: rótulo estreito, valor quebrando à vontade. */
+.agd__ficha {
+  display: grid;
+  grid-template-columns: minmax(84px, auto) 1fr;
+  gap: var(--e-1) var(--e-3);
+  margin: 0;
+  font-size: var(--txt-sm);
+}
+.agd__ficha dt { color: var(--texto-fraco); }
+.agd__ficha dd { margin: 0; overflow-wrap: anywhere; }
+.agd__ficha-nota { color: var(--texto-fraco); }
+
+/* Os dois selos. ⚠️ Classe própria no padrão `agd__`, e NUNCA `.pilula`:
+   `.pilula` é `scoped` por componente e não existe em `estilo/*.css` -- o selo
+   nasceria sem estilo nenhum e nenhuma trava pegaria, porque o jsdom não faz
+   layout. */
+.agd__selo-novo {
+  padding: 2px var(--e-2);
+  border-radius: 999px;
+  background: var(--acento);
+  color: #fff;
+  font-size: var(--txt-xs);
+  font-weight: var(--peso-forte);
+  letter-spacing: .04em;
+}
+.agd__selo-visto { color: var(--texto-fraco); font-size: var(--txt-xs); }
+.agd__visto-botao { align-self: flex-start; }
+.agd__aviso-visto {
+  display: flex;
+  align-items: center;
+  gap: var(--e-2);
+  flex-wrap: wrap;
+  margin: 0;
+  color: var(--ok);
+  font-size: var(--txt-sm);
+}
 
 /* O mês ao lado (ponta 3) */
 .agd__mes {
@@ -711,18 +1009,12 @@ onMounted(carregar)
 }
 .agd__vazio { color: var(--texto-fraco); font-size: var(--txt-sm); }
 .agd__acoes { display: flex; gap: var(--e-1); flex-wrap: wrap; }
-.agd__linha--cancelada { opacity: .65; }
-.agd__motivo { display: block; color: var(--texto-fraco); }
+.agd__motivo { color: var(--texto-fraco); }
 .agd__estado { font-size: var(--txt-xs); font-weight: var(--peso-forte); }
 .agd__estado--confirmado { color: var(--ok); }
 .agd__estado--aguardando { color: var(--aviso); }
 .agd__estado--cancelado { color: var(--erro); }
-/* 🚨 Classe própria no padrão `agd__` deste arquivo, e NUNCA `.pilula`:
-   `.pilula` é `scoped` por componente e não existe em `estilo/*.css` — o selo
-   nasceria sem estilo nenhum e nenhuma trava pegaria, porque o jsdom não faz
-   layout. */
 .agd__sem-harmonit {
-  display: block;
   color: var(--aviso);
   font-size: var(--txt-xs);
   font-weight: var(--peso-forte);

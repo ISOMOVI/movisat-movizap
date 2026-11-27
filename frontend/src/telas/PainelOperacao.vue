@@ -30,7 +30,7 @@
    do FPSL -- *"o estado continua legível pela etiqueta"*.
    ============================================================================ */
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 
 import { api, ErroDeApi } from '../api/cliente.js'
 import AjudaDaTela from '../componentes/AjudaDaTela.vue'
@@ -42,6 +42,7 @@ import CorpoDoCard from '../componentes/CorpoDoCard.vue'
 import RolagemDaBorda from '../componentes/RolagemDaBorda.vue'
 
 const router = useRouter()
+const route = useRoute()
 const quadro = ref(null)
 const carregando = ref(true)
 const erro = ref('')
@@ -1285,8 +1286,121 @@ function devolverFoco() {
   requestAnimationFrame(() => alvo.focus())
 }
 
-onMounted(() => {
+/* ============================================================================
+   O FOCO QUE VEM DA URL — 26/11
+   ----------------------------------------------------------------------------
+   🔵 Pedido dele na `ATD_7.1`: *"o botão no card do agendamento leva para a
+   coluna do clicado em outra aba, só isso, bem simples mesmo, já atende"*. A
+   âncora de lá abre `/paineis/operacao?situacao=1316&os=17140,17141`.
+
+   🚨 AGE UMA VEZ SÓ, e isto não é detalhe: o `carregar()` roda a cada filtro e
+   a cada atualização, e refocar em cada um puxaria a rolagem de volta no meio
+   do trabalho de quem opera. A consulta é consumida na primeira leitura.
+
+   ⚠️ SEM QUERY, NADA MUDA. Quem abre o quadro pelo menu não vê diferença
+   nenhuma -- 10 arquivos de teste pisam nesta tela, e o arrasto daqui escreve
+   no ERP.
+
+   🚨 E A CLASSE É NOVA (`coluna--apontada`), NÃO a `coluna--alvo`: aquela
+   significa *"destino do arrasto"*, e emprestá-la faria o quadro mentir sobre
+   onde o card vai cair.
+   ============================================================================ */
+const colunaApontada = ref('')
+const apontado = ref(null)   // o diálogo de "não está na coluna correta"
+let jaFocou = false
+
+function focarColuna(coluna) {
+  if (!coluna) return
+  colunaApontada.value = coluna.chave
+  /* Coluna fechada não tem corpo (ver o `v-if` do `coluna__corpo`), então
+     abrir vem antes de rolar. ⚠️ `abertas` só é escrito quando `undefined`
+     no `carregar()`, então isto sobrevive à atualização seguinte. */
+  abertas.value[coluna.chave] = true
+  /* ⚠️ `nextTick` não basta aqui: a coluna pode ter acabado de ganhar corpo, e
+     o `scrollIntoView` precisa do elemento já medido. O `requestAnimationFrame`
+     entrega isso sem número mágico de milissegundos. */
+  requestAnimationFrame(() => {
+    const alvo = rolo.value?.querySelector(
+      `[data-situacao="${coluna.situacao_id}"]`)
+    /* ⚠️ `scrollIntoView` CONFERIDO ANTES DE CHAMAR: o jsdom não o implementa,
+       e sem esta guarda a trava de gesto estouraria por um método do
+       navegador em vez de medir o foco. A coluna já está aberta e com a
+       classe -- rolar é o acabamento, não o conserto. */
+    if (alvo?.scrollIntoView) {
+      alvo.scrollIntoView({ inline: 'center', block: 'nearest' })
+    }
+  })
+}
+
+function ondeCadaOsEsta() {
+  const mapa = new Map()
+  for (const coluna of quadro.value?.colunas || []) {
+    for (const card of coluna.cards || []) {
+      if (card.numero_ordem) mapa.set(Number(card.numero_ordem), coluna)
+    }
+  }
+  return mapa
+}
+
+function focarDoLink() {
+  if (jaFocou) return
+  jaFocou = true
+  const pedida = Number(route.query.situacao)
+  if (!pedida) return
+
+  const colunas = quadro.value?.colunas || []
+  const coluna = colunas.find((c) => c.situacao_id === pedida)
+  if (!coluna) {
+    /* 🚨 DIZ, em vez de rolar para lugar nenhum: situação que não é coluna
+       deste quadro é link velho ou errado, e silêncio aqui pareceria defeito
+       do clique. */
+    erro.value = `Não achei a coluna da situação ${pedida} neste quadro.`
+    return
+  }
+  focarColuna(coluna)
+
+  const pedidas = String(route.query.os || '')
+    .split(',').map((n) => Number(n)).filter((n) => Number.isInteger(n) && n > 0)
+  if (!pedidas.length) return
+
+  const onde = ondeCadaOsEsta()
+  const fora = pedidas
+    .filter((n) => onde.has(n) && onde.get(n).situacao_id !== pedida)
+    .map((n) => ({ os: n, coluna: onde.get(n) }))
+  const ausentes = pedidas.filter((n) => !onde.has(n))
+  if (fora.length || ausentes.length) {
+    /* 🔵 Ele: *"pode aparecer caixa de diálogo, 'O card do agendamento não está
+       na coluna correta' e depois do 'OK' abrir com a coluna que ele estiver em
+       foco - ou até já com o filtro da OS"*. As duas coisas: foca onde está E
+       põe a OS na busca. */
+    apontado.value = { fora, ausentes, pedida }
+  }
+}
+
+function fecharApontado() {
+  const dados = apontado.value
+  apontado.value = null
+  if (!dados) return
+  if (dados.fora.length) {
+    const primeiro = dados.fora[0]
+    focarColuna(primeiro.coluna)
+    /* ⚠️ A BUSCA ENTRA DEPOIS DO FOCO, e recarrega: com o quadro filtrado por
+       uma OS só, as outras colunas mostram 0 -- e é justamente isso que faz o
+       card saltar à vista. Quem quiser o quadro inteiro limpa a busca. */
+    busca.value = String(primeiro.os)
+    carregar()
+  }
+}
+
+function desligarSoAbertas() {
+  apontado.value = null
+  soAbertas.value = false
   carregar()
+}
+
+onMounted(async () => {
+  await carregar()
+  focarDoLink()
   window.addEventListener('keydown', aoTeclar)
   /* 🔵 O tique da trava de 1 minuto. ⚠️ 1 segundo e só isso: não recarrega o
      quadro, não fala com a rede -- só move o relógio para a contagem do selo
@@ -1476,7 +1590,9 @@ onBeforeUnmount(() => {
           class="coluna"
           :class="{ 'coluna--fechada': !abertas[coluna.chave],
                     'coluna--vazia': !coluna.total,
-                    'coluna--alvo': colunaAlvo === coluna.chave }"
+                    'coluna--alvo': colunaAlvo === coluna.chave,
+                    'coluna--apontada': colunaApontada === coluna.chave }"
+          :data-situacao="coluna.situacao_id"
           :style="{ borderTopColor: corDaEtapa(indice) }"
           :aria-label="coluna.titulo"
           @dragover.prevent="sobreAColuna(coluna)"
@@ -1753,6 +1869,52 @@ onBeforeUnmount(() => {
         </div>
       </div>
     </div>
+
+      <!-- ====== O CARD DO AGENDAMENTO NÃO ESTÁ NA COLUNA CORRETA (26/11) ======
+           🔵 Ele, ao desenhar o "Ir para o card" da `ATD_7.1`: *"se tiver
+           fora, ao clicar no botão, pode aparecer caixa de diálogo ... e depois
+           do 'OK' abrir com a coluna que ele estiver em foco - ou até já com o
+           filtro da OS"*.
+           🚨 DIZER ONDE ESTÁ É O PONTO. Levar calado para outra coluna faria o
+           operador achar que o agendamento está em "Serviço Agendado" quando
+           não está -- e a `ATD_7.1` manda o link justamente porque é de lá que
+           o compromisso saiu. -->
+      <div v-if="apontado" class="modal modal--aviso" role="dialog"
+           aria-modal="true" aria-label="O card não está na coluna esperada">
+        <div class="modal__caixa modal__caixa--curta">
+          <header class="modal__topo">
+            <strong>O card do agendamento não está na coluna correta</strong>
+          </header>
+          <div class="modal__corpo">
+            <p v-for="f in apontado.fora" :key="f.os">
+              A <strong>OS {{ f.os }}</strong> está em
+              <strong>{{ f.coluna.titulo }}</strong>.
+            </p>
+            <!-- ⚠️ OS que não está em coluna NENHUMA é outro caso, e tem outra
+                 saída: o filtro "só abertas" nasce ligado, então OS fechada
+                 simplesmente não está no quadro. -->
+            <p v-if="apontado.ausentes.length">
+              <span v-if="apontado.ausentes.length === 1">
+                A <strong>OS {{ apontado.ausentes[0] }}</strong> não está neste
+                quadro.
+              </span>
+              <span v-else>
+                As OS <strong>{{ apontado.ausentes.join(', ') }}</strong> não
+                estão neste quadro.
+              </span>
+              O filtro <strong>só abertas</strong> esconde OS já fechada.
+            </p>
+          </div>
+          <div class="modal__rodape">
+            <button v-if="apontado.ausentes.length" class="botao botao--contorno"
+                    type="button" @click="desligarSoAbertas">
+              Mostrar também as fechadas
+            </button>
+            <button class="botao botao--primario" type="button"
+                    @click="fecharApontado">Ok</button>
+          </div>
+        </div>
+      </div>
 
       <!-- ============ O AVISO AO ENTRAR NA ETAPA (Área B) ============ -->
     <div v-if="avisoDaEtapa" class="modal modal--aviso" role="dialog"
@@ -2232,6 +2394,11 @@ onBeforeUnmount(() => {
 }
 .coluna__botao--fixo { cursor: default; }
 .coluna--sem-os .coluna__botao { background: var(--acento-suave); color: var(--acento); }
+/* 🚨 A COLUNA APONTADA PELO LINK (26/11). Classe PRÓPRIA, e não a
+   `coluna--alvo`: aquela quer dizer "destino do arrasto", e o quadro mentiria
+   sobre onde o card vai cair. ⚠️ Só a borda: fundo diferente competiria com o
+   realce do arrasto, que é o que importa quando há card na mão. */
+.coluna--apontada { border-color: var(--acento); box-shadow: 0 0 0 2px var(--acento-suave); }
 .coluna--sem-situacao .coluna__botao { background: var(--aviso-suave); color: var(--aviso); }
 /* Cheio = tem card. Ver o comentário no `template`. */
 .coluna__conta {

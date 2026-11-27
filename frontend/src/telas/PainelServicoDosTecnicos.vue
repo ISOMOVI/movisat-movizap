@@ -58,6 +58,7 @@
    ============================================================================ */
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { api, ErroDeApi } from '../api/cliente.js'
+import { baixarArquivo } from '../util/baixar.js'
 import AjudaDaTela from '../componentes/AjudaDaTela.vue'
 import BarraDeRolagem from '../componentes/BarraDeRolagem.vue'
 import RolagemDaBorda from '../componentes/RolagemDaBorda.vue'
@@ -920,10 +921,19 @@ async function subirComprovante(evento) {
   }
 }
 
-function baixarComprovante(anexoId) {
-  /* ⚠️ `window.open`, como o arquivo do Procfy: o navegador é quem salva, e o
-     `Content-Disposition` é o que dá o nome original. */
-  window.open(`${BASE}/anexo/${anexoId}`, '_blank')
+/* 🚨 26/11: ERA `window.open`, E O COMENTÁRIO ANTIGO ESTAVA ERRADO. Ele dizia
+   que *"o navegador é quem salva, e o `Content-Disposition` é o que dá o nome
+   original"* -- verdade para rota aberta, e esta é `requer_tela("PNL_1.6")`.
+   `window.open` não manda `Authorization`, então o `Content-Disposition` nunca
+   chegava: medido no log, **2 cliques e 2 × 401**. É a mesma causa do anexo das
+   Solicitações, achada na mesma varredura. Ver `util/baixar.js`. */
+async function baixarComprovante(anexoId, nome) {
+  erroDoAnexo.value = ''
+  try {
+    await baixarArquivo(`${BASE}/anexo/${anexoId}`, nome || `comprovante-${anexoId}`)
+  } catch (e) {
+    erroDoAnexo.value = e?.message || 'Não consegui baixar o comprovante.'
+  }
 }
 
 function tamanhoCurto(bytes) {
@@ -981,8 +991,24 @@ async function montarArquivo(card) {
 }
 
 function baixar(card) {
-  /* ⚠️ `window.open` e não `fetch`: o navegador é quem salva o arquivo, e o
-     cabeçalho `Content-Disposition` é o que dá o nome. */
+  /* 🔴 ESTA ROTA TAMBÉM VOLTA 401, E ISTO AQUI AINDA NÃO É O CONSERTO.
+     `window.open` não manda `Authorization`, e a rota é
+     `requer_tela("PNL_1.6")` -- lido na definição em 26/11, na varredura que
+     achou o anexo das Solicitações (4 × 401) e o comprovante (2 × 401). Este
+     caminho nunca foi clicado, então não há 401 no log: a falta de evidência
+     é de USO, não de defeito.
+
+     ⚠️ POR QUE NÃO CONSERTEI JUNTO: o nome do arquivo é `procfy_<técnico>.xlsx`
+     e o saneamento dele é REGRA DO SERVIDOR (25/11). Baixar por blob obriga a
+     tela a dizer o nome, e recriar a regra aqui seria a mesma divergência que
+     este dia inteiro veio corrigir. São duas saídas, e a escolha é dele:
+     (a) `pedirArquivo` nova no `api/cliente.js`, que lê o nome do
+         `Content-Disposition` e o devolve junto do blob -- o nome continua
+         vindo do servidor;
+     (b) a tela nomeia, e aí o nome do arquivo deixa de ser o que o Procfy
+         recebe hoje.
+     Enquanto não decidir, fica como está: quebrado e DITO, não quebrado e
+     calado. */
   window.open(`${BASE}/arquivo/${card.lote_id}`, '_blank')
 }
 
@@ -2086,7 +2112,8 @@ onBeforeUnmount(() => window.removeEventListener('keydown', aoTeclar))
             <!-- ⚠️ O link de baixar fica FORA do quadro: dentro dele, clicar
                  no link abriria também o seletor de arquivo do botão. -->
             <p v-if="comprovando.anexo" class="nota pequeno">
-              <a href="#" @click.prevent="baixarComprovante(comprovando.anexo.id)">
+              <a href="#" @click.prevent="baixarComprovante(comprovando.anexo.id,
+                                              comprovando.anexo.nome_original)">
                 <i class="bi bi-file-earmark-arrow-down" aria-hidden="true"></i>
                 baixar {{ comprovando.anexo.nome_original }}
               </a>

@@ -31,6 +31,7 @@
 import { ref, computed, onMounted } from 'vue'
 
 import { api, ErroDeApi } from '../api/cliente.js'
+import { comoNumero } from '../util/dinheiro.js'
 
 const props = defineProps({
   /* A conversa. 🚨 De quem é a origem é o SERVIDOR que descobre, por ela: com
@@ -72,7 +73,7 @@ const temMinimo = computed(() =>
 /* O número que vai para a linha do orçamento: o calculado, ou o digitado. */
 const kmFinal = computed(() => {
   if (resultado.value && resultado.value.km != null) return resultado.value.km
-  const n = Number(String(kmManual.value).replace(',', '.'))
+  const n = comoNumero(kmManual.value)
   return Number.isFinite(n) && n > 0 ? n : null
 })
 

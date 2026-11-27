@@ -1361,10 +1361,16 @@ def calcular_km(entrada: KmEntrada,
 @app.get("/api/agendamentos")
 def agendamentos_do_periodo(de: date, ate: date,
                             usuario: dict = Depends(auth.requer_tela("ATD_7.1"))):
-    """O carrossel e o grid da tela `ATD_7.1`."""
+    """O carrossel e o grid da tela `ATD_7.1`.
+
+    🔵 26/11: cada compromisso volta com o `visto_em` DE QUEM PEDIU (migração
+    121). ⚠️ Campo novo é aditivo -- quem não o lê não muda de comportamento.
+    """
     if (ate - de).days > 93:
         raise HTTPException(status_code=400, detail="Período longo demais.")
-    return {"de": de, "ate": ate, "agendamentos": agendamento.do_periodo(de, ate)}
+    return {"de": de, "ate": ate,
+            "agendamentos": agendamento.do_periodo(
+                de, ate, visto_por=usuario.get("id"))}
 
 
 @app.get("/api/agendamentos/{agendamento_id}")
@@ -1560,6 +1566,46 @@ def reagendar_agendamento(agendamento_id: int, entrada: ReagendamentoEntrada,
         raise HTTPException(status_code=409,
                             detail="Agendamento cancelado não se reagenda.")
     return agendamento.por_id(agendamento_id)
+
+
+class VistoEntrada(BaseModel):
+    """⚠️ `automatico` é o ÚNICO campo, e diz COMO a marca nasceu: `false` é o
+    botão *"Marcar como visto"*, `true` é o cartão que a pessoa abriu. A tela
+    só pode dizer *"marquei porque você abriu"* se o pedido disser isso."""
+    automatico: bool = False
+
+
+@app.post("/api/agendamentos/{agendamento_id}/visto")
+def marcar_agendamento_visto(
+        agendamento_id: int, entrada: VistoEntrada,
+        usuario: dict = Depends(auth.requer_tela("ATD_7.1"))):
+    """🔵 O selo *"Visto"* da `ATD_7.1`, por pessoa (migração 121).
+
+    🚨 QUEM VÊ É QUEM PEDE. O id do atendente sai da sessão, nunca do corpo --
+    com ele no corpo, qualquer um com a tela marcaria como visto em nome de
+    outro, e o selo deixaria de valer como informação.
+
+    ⚠️ IDEMPOTENTE: marcar de novo devolve a marca que já existia, com a hora
+    original. Ver `agendamento.marcar_visto`.
+    """
+    marca = agendamento.marcar_visto(agendamento_id, usuario.get("id"),
+                                     automatico=entrada.automatico)
+    if marca is None:
+        raise HTTPException(status_code=404,
+                            detail="Agendamento não encontrado.")
+    return {"visto_em": marca["visto_em"],
+            "visto_automatico": bool(marca["automatico"])}
+
+
+@app.delete("/api/agendamentos/{agendamento_id}/visto")
+def desmarcar_agendamento_visto(
+        agendamento_id: int,
+        usuario: dict = Depends(auth.requer_tela("ATD_7.1"))):
+    """O *"Desfazer"* do selo. ⚠️ Responde 200 mesmo quando não havia marca:
+    desfazer o que já está desfeito entrega o estado que a pessoa queria, e um
+    409 aqui faria a tela mostrar erro vermelho numa ação que deu certo."""
+    agendamento.desmarcar_visto(agendamento_id, usuario.get("id"))
+    return {"visto_em": None, "visto_automatico": False}
 
 
 @app.get("/api/conversas/buscar-empresa")

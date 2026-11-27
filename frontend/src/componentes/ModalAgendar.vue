@@ -23,6 +23,12 @@ import { api } from '../api/cliente.js'
 import { agrupar, dataBr, horaBr, textosDoGrupo } from '../util/mensagem_agendamento.js'
 import CalendarioMes from './CalendarioMes.vue'
 import ModalKm from './ModalKm.vue'
+/* 🚨 26/11: a conversão de pt-BR saiu de dentro deste arquivo (estava inline,
+   em seis lugares, com três formas diferentes) e virou `util/dinheiro.js`, a
+   mesma que a ficha do técnico já usava. O defeito que isso corrige: emitir
+   com `60,00` respondia *"Erro interno"* — a tela validava a vírgula e o POST
+   mandava a vírgula, que o `Decimal` do servidor não lê. */
+import { comoNumero, paraCanonico, paraCentavos } from '../util/dinheiro.js'
 
 const props = defineProps({
   conversaId: { type: Number, required: true },
@@ -162,7 +168,7 @@ function linhaDaOrigem(o) {
 const kmDoOrcamento = computed(() => {
   const linha = linhas.value.find((l) => l.unidade === 'km')
   if (!linha) return null
-  const n = Number(String(linha.quantidade).replace(',', '.'))
+  const n = comoNumero(linha.quantidade)
   return Number.isFinite(n) && n > 0 ? n : null
 })
 
@@ -194,11 +200,21 @@ function trocarServico(linha) {
   }
 }
 
-const totalCentavos = computed(() => linhas.value.reduce((soma, l) => {
-  const preco = Math.round((Number(String(l.preco_unit).replace(',', '.')) || 0) * 100)
-  const qtd = Number(String(l.quantidade).replace(',', '.')) || 0
-  return soma + Math.round(preco * qtd)
-}, 0))
+/* 🚨 A CONTA DA LINHA, NUM LUGAR SÓ E NA MESMA ORDEM DO SERVIDOR. Até 26/11
+   ela existia duas vezes com ordens diferentes: o total somava
+   `arredonda(preço) × quantidade` e a célula da linha fazia
+   `arredonda(preço × quantidade)` — e o papel sai do `orcamento.calcular`, que
+   arredonda o preço PRIMEIRO. Duas ordens de arredondamento no mesmo documento
+   é uma delas errada, e a que mente é a da tela. */
+function centavosDaLinha(l) {
+  const preco = paraCentavos(l.preco_unit)
+  const qtd = comoNumero(l.quantidade)
+  if (preco === null || preco === undefined || !Number.isFinite(qtd)) return 0
+  return Math.round(preco * qtd)
+}
+
+const totalCentavos = computed(
+  () => linhas.value.reduce((soma, l) => soma + centavosDaLinha(l), 0))
 
 function emReais(centavos) {
   return (centavos / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2 })
@@ -215,16 +231,16 @@ function emReais(centavos) {
    ⚠️ `Number('')` é 0, então o campo VAZIO passaria — daí o teste de vazio ser
    explícito, antes da conversão. */
 function precoValido(valor) {
-  const texto = String(valor ?? '').trim()
-  if (!texto) return false
-  const n = Number(texto.replace(',', '.'))
-  return Number.isFinite(n) && n >= 0
+  /* ⚠️ `null` do `paraCentavos` é VAZIO e `undefined` é NÃO É NÚMERO — os dois
+     recusam aqui, e por motivos diferentes. Zero passa, que é a cortesia. */
+  const c = paraCentavos(valor)
+  return c !== null && c !== undefined
 }
 
 const podeEmitir = computed(() =>
   linhas.value.length > 0 &&
   linhas.value.every((l) => l.servico && precoValido(l.preco_unit)
-                            && Number(String(l.quantidade).replace(',', '.')) > 0))
+                            && comoNumero(l.quantidade) > 0))
 
 async function emitirOrcamento() {
   ocupado.value = true
@@ -232,9 +248,37 @@ async function emitirOrcamento() {
   try {
     const ordens = osDoOrcamento.value
       .split(/[\s,;]+/).map((n) => Number(n)).filter((n) => Number.isInteger(n) && n > 0)
+    /* 🚨 AQUI ESTAVA O DEFEITO DE 26/11: ia `linhas.value.map((l) => ({...l}))`,
+       ou seja, a linha CRUA, com o `60,00` que a pessoa digitou. O servidor lê
+       preço e quantidade com `Decimal`, que não conhece vírgula, e respondia
+       500 — *"Erro interno"* na tela da Aline, duas vezes.
+
+       ⚠️ O CAMPO CONTINUA COM VÍRGULA: quem converte é a saída. E a recusa é
+       dita por linha ANTES do POST, porque a frase do servidor chegaria depois
+       de uma ida e volta para dizer a mesma coisa.
+
+       ⚠️ E vão só os quatro campos que o `ItemDeOrcamento` declara. Os outros
+       (`daFicha`, `preco_unit_centavos`, `harmonit_id`) o Pydantic já
+       descartava — mandá-los dava a impressão falsa de que contavam. */
+    const itens = []
+    for (const [i, l] of linhas.value.entries()) {
+      const preco_unit = paraCanonico(l.preco_unit)
+      const quantidade = paraCanonico(l.quantidade)
+      if (preco_unit === undefined) {
+        erro.value = `O preço da linha ${i + 1} não é um número. `
+          + 'Use vírgula só para os centavos, como 60,00.'
+        return
+      }
+      if (quantidade === undefined || comoNumero(l.quantidade) <= 0) {
+        erro.value = `A quantidade da linha ${i + 1} tem de ser um número `
+          + 'maior que zero.'
+        return
+      }
+      itens.push({ servico: l.servico, unidade: l.unidade, preco_unit,
+                   quantidade })
+    }
     orcamentoEmitido.value = await api.post(
-      `/api/conversas/${props.conversaId}/orcamento`,
-      { ordens, itens: linhas.value.map((l) => ({ ...l })) })
+      `/api/conversas/${props.conversaId}/orcamento`, { ordens, itens })
     proximoNumero.value = orcamentoEmitido.value.numero + 1
   } catch (e) {
     erro.value = e?.message || 'Não deu para emitir o orçamento.'
@@ -909,9 +953,7 @@ onMounted(() => {
                   </td>
                   <td>{{ l.unidade }}</td>
                   <td>
-                    R$ {{ emReais(Math.round(
-                      (Number(String(l.preco_unit).replace(',', '.')) || 0) * 100
-                      * (Number(String(l.quantidade).replace(',', '.')) || 0))) }}
+                    R$ {{ emReais(centavosDaLinha(l)) }}
                   </td>
                   <td>
                     <button class="botao botao--fantasma botao--icone" type="button"

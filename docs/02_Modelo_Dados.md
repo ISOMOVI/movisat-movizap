@@ -4085,3 +4085,57 @@ termo_por_nome`) e `paineis._card_do_chamado` (a precedência e o `termo_a_mao`)
 próprio card** — a mesma régua do `finalizar` e do `reabrir`.
 **Travas:** `tests/teste_termo_posto_a_mao.py` (11) e
 `src/contratual_termo_a_mao_2511.teste.js` (6).
+
+---
+
+### `agendamento_visto` — o selo "Visto" por pessoa na `ATD_7.1` (migração 121, 26/11)
+
+🔵 *"pode ter um flag de 'Visto' para que o usuário saiba o que já viu e o que
+não, pois podem aparecer agendamentos no dia mesmo"*.
+
+| Tabela | O quê |
+|---|---|
+| `agendamento_visto` | `agendamento_id`, `atendente_id`, `visto_em`, `automatico`. PK `(agendamento_id, atendente_id)`, que é o que faz o carimbo ser o da **primeira** vez |
+
+- 🔵 **No banco, e não no `localStorage`** — escolha dele. O navegador guardaria
+  por **máquina**: quem abre a tela no PC e depois no celular veria tudo como
+  não visto outra vez, e aí o selo mentiria na segunda máquina.
+- 🚨 **`NOVO` é a AUSÊNCIA de linha**, não um campo. Compromisso criado antes
+  desta migração nasce "não visto" para todo mundo, que é a verdade: não havia
+  registro. E um `visto boolean` em `agendamento` seria por **compromisso** e
+  não por pessoa — o que a Aline viu apagaria o aviso do Thiago.
+- 🚨 **`ON CONFLICT DO NOTHING`, nunca `DO UPDATE`.** O selo diz *"Visto
+  08:12"*, e 08:12 é quando a pessoa viu **da primeira vez**; reabrir o cartão
+  não reescreve a hora. E um visto que ela **marcou** não é rebaixado a
+  `automatico` porque o cartão abriu depois.
+- ⚠️ **`automatico` separa "eu disse que vi" de "abri e o sistema marcou"**, e
+  existe porque 🔵 ele pediu os dois caminhos: o botão no cartão fechado, e a
+  marca ao abrir *"que já confirma e avisa que confirmou também"*. A tela só
+  pode dizer *"marquei porque você abriu"* se o dado souber a diferença.
+- ⚠️ **O molde é a `nota_leitura` da 065**, de propósito: PK composta, `visto_em`
+  com `now()` e o índice do caminho inverso (`atendente_id, visto_em DESC`).
+  Inventar outra forma para a mesma pergunta — *"o que esta pessoa já viu"* —
+  faria as duas divergirem na primeira mudança.
+- ⚠️ **`ON DELETE CASCADE` nos dois lados**: compromisso apagado não deixa marca
+  órfã, e atendente desligado não segura linha de histórico de leitura.
+
+**Quem lê:** `agendamento._com_visto`, chamada por `agendamento.do_periodo` com
+`visto_por` — **uma** consulta para a semana inteira, nunca uma por cartão (a
+mesma régua do `_anexar_comprovantes_no_quadro`).
+🚨 **E o visto NÃO entra no `_CAMPOS`/`_DE`**: esses fragmentos são
+compartilhados por `do_dia`, `por_id` e `aguardando_do_cliente`, e a última serve
+a aba **Confirmar** do `ModalAgendar`, que não tem atendente no contexto. A
+fusão é em Python.
+⚠️ **Sem `visto_por`, as chaves nem aparecem na resposta** — nulo diria *"esta
+pessoa não viu"*, e a verdade é *"ninguém perguntou por pessoa"*.
+
+**Quem grava:** `agendamento.marcar_visto` e `agendamento.desmarcar_visto`, pelas
+rotas `POST` e `DELETE /api/agendamentos/{id}/visto`, as duas com
+`requer_tela("ATD_7.1")`. 🚨 O id do atendente sai **da sessão**, nunca do corpo:
+com ele no corpo, qualquer um com a tela marcaria em nome de outro e o selo
+deixaria de valer como informação.
+⚠️ O `DELETE` responde **200 mesmo sem marca**: desfazer o que já está desfeito
+entrega o estado que a pessoa queria, e um 409 faria a tela mostrar erro
+vermelho numa ação que deu certo.
+
+**Travas:** `tests/teste_agendamento_visto.py`.

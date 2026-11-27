@@ -9272,3 +9272,354 @@ conserto certo foi **não inventar nome**: declarar a regra na classe, e usar
 **12** conferências de CSS. Migração **120** aplicada e documentada. Os dois
 backends reiniciados antes do build. O interruptor do DataScope: **desligado**,
 e a chave nem existe no `config` ainda. Rotas novas respondem **401**.
+
+---
+
+## 26/11 — O orçamento recusava a vírgula com um 500 (e a tela dizia "Erro interno")
+
+🔵 Achado por ELE, no mesmo dia: *"erro no movizap, evolution thiago e aline já
+apontaram"* e depois *"'Erro interno' a tentativa da Aline de agendar no movizap,
+ela chegou na tela das OS e km do técnico"*.
+
+### O que aconteceu, medido no log
+
+```
+POST /api/conversas/32613/orcamento → 500   (09:34:04 e 09:34:14, IP da Aline)
+movizap/orcamento.py:177  preco = centavos(item.get("preco_unit") ...)
+movizap/orcamento.py:141  Decimal(str(valor))
+decimal.InvalidOperation: ConversionSyntax
+```
+
+Ela tentou **duas vezes**, desistiu às 09:34:36 e foi ao chat interno. Não
+emitiu nada.
+
+### A causa: o campo aceita a vírgula que todo brasileiro digita, e o servidor não
+
+A cadeia inteira, em três passos:
+
+1. A tela validava com `Number(texto.replace(',', '.'))` — `"60,00"` passa, e o
+   botão **Gerar e anexar** acende.
+2. O POST mandava a linha **CRUA**: `itens: linhas.value.map((l) => ({ ...l }))`.
+   O modelo aceita (`ItemDeOrcamento.preco_unit: str`).
+3. `Decimal("60,00")` estoura.
+
+🚨 **E O 500 É UM DETALHE DE HERANÇA.** A rota de emitir já tem
+`except ValueError → 400` com a frase que o operador lê. Mas
+`decimal.InvalidOperation` herda de **`ArithmeticError`**, não de `ValueError` —
+então passava reto pelo `except`, subia até o middleware e chegava como *"Erro
+interno"*. O defeito não estava na conta: estava no tipo da exceção.
+
+### 🚨 A conversão certa já existia no projeto — em dois lugares, e nenhum era este
+
+- `FichaDoTecnico.vue:67` tinha `paraCentavos`, com o comentário exato
+  (*"`Number('199,90')` é NaN e `parseFloat('199,90')` devolve 199"*) e o
+  arredondamento no inteiro para 199,90 não virar 19989.
+- **O próprio `ModalAgendar`** já normalizava o `km` que vai para o compromisso
+  (`kmDoOrcamento`), e por isso o POST do **agendamento** nunca sofreu disto.
+
+Só o payload do **orçamento** ficou de fora. É o mesmo defeito que a
+`util/mensagem_agendamento.js` veio corrigir em 21/10: a mesma regra escrita em
+dois lugares divergiu no primeiro ajuste.
+
+### O conserto: a vírgula é da pessoa, o ponto é do protocolo
+
+🔵 Decisão dele: *"util compartilhada, e a ficha passa a usá-la"*.
+
+| onde | o quê |
+|---|---|
+| `util/dinheiro.js` (**novo**) | `paraCentavos`, `paraReais`, `comoNumero` e `paraCanonico` — a fonte única |
+| `FichaDoTecnico.vue` | passa a importar; as duas cópias locais saíram, comportamento idêntico |
+| `ModalAgendar.vue` | as **seis** conversões inline (que tinham **três** formas diferentes) passam a chamar o util, e `emitirOrcamento` **normaliza antes do POST** |
+| `ModalKm.vue` | o km digitado à mão usa o util |
+| `orcamento.py` | `_em_decimal` novo: converte ou levanta **`ValueError`** dizendo o campo **e a linha** |
+
+⚠️ **O CAMPO CONTINUA COM VÍRGULA**, e a calculadora de km continua escrevendo
+`"77,7"` nele. Quem converte é a **saída** — converter enquanto se digita
+tiraria a vírgula da mão da pessoa no meio do número.
+
+⚠️ **E NADA ADIVINHA O FORMATO.** `"1.000"` é mil reais para quem digita e
+**1** para o `Decimal`. Os dois lados **recusam**: a tela não acende o botão, o
+servidor responde 400 com frase. Aceitar o palpite trocaria um 500 por um
+orçamento com valor errado em silêncio, que é pior que o 500.
+
+### 🚨 Dois achados de brinde
+
+**1. A conta da linha existia duas vezes, com ordens de arredondamento
+diferentes.** O rodapé somava `arredonda(preço) × quantidade`; a célula da linha
+fazia `arredonda(preço × quantidade)`. O papel sai do `orcamento.calcular`, que
+arredonda o **preço primeiro** — então a que divergia era a da tela. Agora há
+`centavosDaLinha()`, uma só, na mesma ordem do servidor.
+
+**2. O preço pré-preenchido da ficha vem com vírgula** (`orcamento.py:110`
+devolve `reais()` → `"1,00"`). Com o POST cru, **técnico com preço cadastrado
+daria 500 sem ninguém digitar nada**. ⚠️ Não foi o caso da Aline — medido: o
+técnico da conversa 32613 (Felipe Aguilar) não tem preço na ficha, ela digitou à
+mão. Mas estava armado, e a normalização na saída desarma os dois caminhos.
+
+### ⚠️ Por que a suíte estava verde
+
+Todos os casos de `tests/teste_orcamento.py` usavam **ponto** (`"1.00"`,
+`"33.33"`). E o pior: o helper `emitir()` do `agendar_2110.teste.js` **já
+digitava `'1,00'` e `'77,7'` desde 21/10** — e passava, porque **nenhum teste
+lia o corpo do POST**, só o que a tela desenhava depois da resposta. Teste que
+não olha o que atravessa a ponte não vê a ponte quebrar.
+
+Entraram: **11 casos** em `TestOFormatoBrasileiroNaoVIRA500` (Python),
+**8** no describe do corpo do POST, e o arquivo `dinheiro_2611.teste.js` com a
+função medida direto.
+
+### 🚨 O que isto diz, e é maior que o defeito
+
+**A Aline foi a primeira pessoa além dele a emitir um orçamento de verdade** — os
+4 que existem são todos da conversa 12845, de 21/10 a 04/11 — e bateu no erro na
+primeira tentativa. Caminho escrito e nunca exercitado é caminho sem prova
+(`M5`). O resto da cadeia foi auditado na mesma passagem e está limpo: os 7
+campos de endereço batem exatamente entre tela e modelo, o `inicio` é ISO, a
+confirmação é texto puro com escrita idempotente no Harmonit, e o km do
+`rotas.py` vem da API do Google e nunca da tela.
+
+---
+
+## 26/11 — Anexo de rota protegida não baixava: 401 em todo clique
+
+🔵 Ele, no mesmo dia da vírgula: *"os formulários que têm anexo, na página das
+'Solicitações' quando clico neles, não baixam direto"*.
+
+### Medido no log, não suposto
+
+```
+GET /api/solicitacoes/6254/arquivo/14  →  401   (3 ×)
+GET /api/solicitacoes/6253/arquivo/13  →  401   (1 ×)
+```
+
+E a varredura da mesma causa achou um segundo, que ninguém havia reportado:
+
+```
+GET /api/paineis/servico-dos-tecnicos/anexo/N  →  401   (2 ×)
+```
+
+### A causa: navegação de link não manda cabeçalho
+
+As rotas são protegidas por `Bearer` e **nada mais** — `requer_tela("FRM_1.1")`
+e `requer_tela("PNL_1.6")`. O token vive no `localStorage` e vai no cabeçalho
+`Authorization`, que o `api/cliente.js` põe em cada chamada.
+
+🚨 **Mas `<a href="/api/...">` e `window.open('/api/...')` são NAVEGAÇÃO, e
+navegação não carrega cabeçalho.** Então o pedido chega sem token, volta 401, e
+o navegador não baixa nada: some, ou abre uma aba com o JSON do erro. Quem opera
+lê isso como *"o arquivo não abre"*, nunca como *"não estou autenticado"* — e é
+por isso que o defeito fica em pé por semanas.
+
+⚠️ **O `FileResponse(filename=...)` estava certo o tempo todo.** O
+`Content-Disposition: attachment` saía como devia; só nunca chegou, porque a
+resposta era 401. O defeito estava três camadas antes do que o sintoma sugeria.
+
+### 🚨 Esta é a QUARTA vez que a mesma causa aparece
+
+| quando | onde | como se soube |
+|---|---|---|
+| 27/08 | `<img src>` da mídia na Caixa | *"o atendente veria um ícone quebrado sem explicação"* — nasceu a `pedirBlob` |
+| — | anexo do recado do painel | 401 em todo clique, e **ninguém notou porque `os_observacao_arquivo` tinha ZERO linhas** |
+| 26/11 | anexo da **`FRM_1.1`** | 🔵 ele clicou; 4 × 401 no log |
+| 26/11 | comprovante da **`PNL_1.6`** | achado na varredura; 2 × 401 no log |
+
+⚠️ **E o padrão de como se descobre é sempre o mesmo:** o caminho de volta nunca
+foi percorrido. O que estava escrito era a subida do arquivo; a descida só
+acontece quando alguém de fora clica.
+
+### O conserto, e por que é uma TRAVA e não quatro consertos
+
+| onde | o quê |
+|---|---|
+| `util/baixar.js` (**novo**) | `baixarArquivo(rota, nome)` — `pedirBlob` com o token, `<a download>` com o nome original, e o `blob:` revogado 10 s depois do clique |
+| `Solicitacoes.vue` | o `href` **fica** (para "abrir em nova aba" do menu do navegador não virar link morto) e quem baixa é o `@click.prevent` — o desenho que o `ChatInterno` já usava |
+| `PainelServicoDosTecnicos.vue` | o comprovante passa pelo util, e o comentário antigo — que dizia *"o navegador é quem salva, e o `Content-Disposition` é o que dá o nome"* — foi corrigido: era verdade para rota aberta, e esta não é |
+| `BalaoDeRecado.vue` | a implementação que vivia ali virou o util; uma só, não duas |
+| `baixar_protegido_2611.teste.js` (**novo**) | a trava: nenhum `<a href="/api/…">` sem `@click.prevent` e nenhum `window.open` para a API |
+
+🚨 **Quatro ocorrências da mesma causa dizem que consertar caso a caso não para
+a quinta.** A trava lê o **template**, não a função: o defeito é a marcação, e
+seletor é suposição minha sobre a marcação (`M13`).
+
+### ⚠️ A trava aprendeu reprovando — e o primeiro vermelho dela era falso
+
+Na primeira execução ela acusou `ChatInterno.vue` e `Email.vue`. **Os dois
+estavam certos:** o que ela leu foi o *comentário* que explica *"não dá para
+usar `<a href="/api/...">`: o token vive no cabeçalho"*. Ela passou a limpar
+comentário de template e de bloco antes de medir — trava que acusa quem
+documentou o conserto é trava que todo mundo aprende a ignorar.
+
+E a prova de que ela reprova de verdade: rodada contra o
+`Solicitacoes.vue.bak_2026-11-26_baixar`, acusa **1**; contra o arquivo no ar,
+**0**.
+
+### 🔴 Um caso FICA quebrado, de propósito, e espera decisão dele
+
+O **`.xlsx` do Procfy** (`PainelServicoDosTecnicos.baixar`) tem a mesma causa —
+lido na definição da rota, `requer_tela("PNL_1.6")` — e **nunca foi clicado**,
+então não há 401 no log: a falta de evidência aqui é de **uso**, não de defeito.
+
+⚠️ **Por que não consertei junto:** o nome do arquivo é `procfy_<técnico>.xlsx`
+e **o saneamento dele é regra do servidor** (25/11). Baixar por blob obriga a
+tela a dizer o nome, e recriar essa regra no navegador seria a mesma divergência
+que este dia inteiro veio corrigir. Duas saídas, e a escolha é dele:
+
+1. uma `pedirArquivo` nova no `api/cliente.js`, que lê o nome do
+   `Content-Disposition` e o devolve junto do blob — **o nome continua vindo do
+   servidor**;
+2. a tela nomeia — e aí o nome do arquivo deixa de ser o que o Procfy recebe
+   hoje.
+
+Enquanto não decidir, fica **quebrado e DITO**, com o nome na linha de base da
+trava (`CONHECIDOS`) e o porquê escrito na própria função. Tirar um nome dessa
+lista é consertar o defeito dele; acrescentar é assumir dívida nova.
+
+⚠️ **E a `FRM_1.1` não tem arquivo de teste nenhum** — o que prova o anexo dela
+hoje é a trava de marcação, não um exercício da tela.
+
+---
+
+## 26/11 — A `ATD_7.1` em cartões, o selo "Visto" e o "Ir para o card"
+
+🔵 Pedido dele: *"proponha os próximos passos de ajuste de UX/UI decente para a
+página, pode fazer mockup — tbm insira um botão 'Ir para o card' junto dos
+botões do agendamento, abrindo em outra aba mesmo com a coluna que de 'Serviço
+Agendado' em foco"*, com a ressalva que governou o plano inteiro: *"proponha com
+calma para que não tenhamos atropelamento ou redundância com quebra no código,
+pois outros recursos avançaram sobre essa tela já"*.
+
+### Por que a tabela tinha de sair
+
+A tela nasceu em 19/10 com uma tabela de **10 colunas** e **4 botões** numa
+célula de ações. O 5º botão não caberia: em monitor de 1366 a tabela já
+escapava, e em celular era inutilizável.
+
+🚨 **E dois recursos avançaram por cima dela sem que o layout acompanhasse:**
+
+| quando | o quê |
+|---|---|
+| **18/11** | `reagendar` e `cancelar` passaram a **escrever no Harmonit** (migração 112) e a tela ganhou o selo *"Não foi para a OS no Harmonit"* — 6 dos 10 ativos estavam assim e **nada dizia** |
+| **25/11** | a **`PNL_1.6`** passou a **ler o agendamento desta tela** (`main.py:5587`) para dividir os dois cards do sem-técnico |
+
+Ou seja: a tela virou elo de operação **e** de fechamento financeiro.
+
+### O desenho, escolhido por ele entre três mockups
+
+- **Cartão fechado = o que decide**: hora, cliente, estado, o selo do Harmonit e
+  `NOVO`/`Visto HH:MM`.
+- **Aberto = o detalhe e as 5 ações.** O cabeçalho inteiro é o botão de abrir
+  (alvo de 44 px) — ícone de 12 px no canto é o defeito mais comum de lista que
+  abre.
+- 🚨 **O painel de reenvio passou a abrir DENTRO do cartão.** Até aqui ele
+  nascia no **pé da tabela**, longe da linha clicada: em dia cheio a pessoa
+  clicava e não via nada acontecer.
+- ⚠️ **Abrir um não fecha o irmão**: dois compromissos da mesma hora são
+  irmãos, e quem confere um confere o outro.
+- 🚨 **Nenhuma regra de negócio mudou.** Cancelar continua exigindo motivo,
+  reagendar continua mandando ISO, reenviar continua não enviando, e o
+  agrupamento dos irmãos é o mesmo. Mudou a forma.
+
+### O cabeçalho entrou no padrão (`G2`)
+
+`tela__cabecalho` + `<h1>` + `AjudaDaTela` + `chip chip--codigo chip--acento`,
+como a `CAD_1.2`. Esta tela era uma das 14 sem ajuda nenhuma; agora são **28 de
+41**.
+
+⚠️ **E a faixa de cobertura virou a ajuda — o texto não se perdeu.** Ela era um
+`aviso--info` ocupando uma linha todo dia para dizer uma coisa que se aprende
+uma vez. A frase é a MESMA, e há teste que prende que ela continua no DOM.
+
+### O selo "Visto" (migração 121)
+
+🔵 *"pode ter um flag de 'Visto' para que o usuário saiba o que já viu e o que
+não, pois podem aparecer agendamentos no dia mesmo"*. Detalhe do modelo em
+`docs/02`, seção `agendamento_visto`.
+
+- 🔵 **No banco, por pessoa** — escolha dele. `localStorage` seria por máquina:
+  quem abre no PC e depois no celular veria tudo como não visto outra vez.
+- 🚨 **`NOVO` é a ausência de `visto_em`**, não "criado hoje".
+- 🔵 **Os dois caminhos de marcar:** o botão *"Marcar como visto"* no cartão
+  fechado, e a marca automática ao abrir — *"já confirma e avisa que confirmou
+  também"*. O aviso é desta visita: recarregar não o repete, porque ele é sobre
+  o gesto e não sobre o compromisso.
+- 🚨 **Pedido que falha não marca nada na tela, e a frase aparece.** Selo que
+  mente é pior que selo que falta.
+- ⚠️ **O contador do dia** (*"3 serviços · 2 não vistos"*) é por pessoa, como o
+  selo: diz o que falta a quem está olhando, não o que a equipe deixou de ver.
+
+### "Ir para o card" — a âncora, e a permissão dele
+
+```
+/paineis/operacao?situacao=1316&os=17140,17141
+```
+
+- 🚨 **ÂNCORA, nunca `window.open`** — *"bloqueador de pop-up come `window.open`
+  sem aviso, e aí o clique não faria nada e pareceria defeito"* (lição do
+  `ModalKm`), com `rel="noopener"`.
+- 🚨 **Segue a regra da `CFG_15.1`, não uma minha.** 🔵 Ele: *"PNL_1.1 tem tela
+  de permissões nas configurações já pronta, deve seguir a regra dela mesmo"*.
+  O botão só é desenhado quando `codigosPermitidos` tem `PNL_1.1` — medido em
+  26/11: **8 dos 9 ativos** (só a Ludmila fora).
+  ⚠️ **E eu havia dito errado nesta mesma sessão:** afirmei que o quadro era
+  `owner` e que só 1 de 9 abriria. O `permissao: "owner"` é o **padrão do
+  registro**; a concessão real vive em `tela_concedida`, lida a cada
+  requisição. Ele corrigiu, e a medição confirmou.
+- ⚠️ **TODAS as OS do compromisso vão na URL**, não só a primeira: um
+  compromisso cobre várias OS, e o card de lá é por OS. É o que deixa o quadro
+  dizer qual delas não está na coluna esperada.
+- ⚠️ Compromisso **sem OS** não desenha o botão: não há card para onde ir.
+
+### O outro lado: o foco de coluna na `PNL_1.1`
+
+- 🚨 **Age UMA vez só.** O `carregar()` roda a cada filtro; refocar em cada um
+  puxaria a rolagem de volta no meio do trabalho de quem opera.
+- 🚨 **Sem query, nada muda** — e isto era o requisito mais duro: **10 arquivos
+  de teste** pisam nessa tela e o arrasto dela **escreve no ERP**.
+- 🚨 **Classe nova `coluna--apontada`, e NÃO a `coluna--alvo`:** aquela
+  significa *"destino do arrasto"*, e emprestá-la faria o quadro mentir sobre
+  onde o card vai cair.
+- A rolagem acha a coluna por **`data-situacao` no DOM**, não por um `ref` por
+  coluna — 17 `ref` para um gesto que acontece uma vez.
+- 🔵 **OS fora da coluna:** diálogo *"O card do agendamento não está na coluna
+  correta"* dizendo **onde ela está**; no Ok, foca essa coluna e põe a OS na
+  busca. Levar calado faria o operador achar que o compromisso está em *Serviço
+  Agendado* quando não está.
+- ⚠️ **OS que não está em coluna nenhuma é outro caso**, com outra saída: o
+  filtro *"só abertas"* nasce ligado, então OS fechada simplesmente não está no
+  quadro — e o diálogo oferece desligá-lo.
+
+### ⚠️ Os quatro ajustes que a revalidação pediu ANTES do código
+
+Medidos antes de escrever, e é o que evitou a entrega pela metade:
+
+1. **`agendar_2110.teste.js` monta esta tela 9 vezes.** Um teste lia
+   `tbody tr`, e o helper `abrirReenvio` procurava *"Reenviar confirmação"*
+   **solto na tela** — com cartão fechado o botão não existe, e caíam os 10
+   testes da ponta 2. Uma linha no helper consertou os dez, **mantendo a
+   intenção** de cada um.
+2. 🚨 **Um teste da ponta 2 afirmava *"nenhum POST: a ação é de leitura"*** — e
+   agora abrir o cartão marca o visto, que É um POST. A intenção dele era
+   *"nada foi enviado ao cliente"*, então a medida passou a ser **precisa** em
+   vez de ampla: nenhum POST **fora** do `/visto`. Medir "zero pedidos" era
+   medir o acidente de a tela não ter nenhum outro.
+3. **A 12ª conferência de CSS** reprova classe composta sem regra, e
+   `npm run build` **é publicação**: as 17 classes `agd__` novas nasceram com
+   regra, e nenhum `var()` novo entrou.
+4. **O visto não entrou no `_CAMPOS`/`_DE`** de `agendamento.py`: os dois são
+   compartilhados por `do_dia`, `por_id` e `aguardando_do_cliente`, e a última
+   serve a aba **Confirmar**, que não tem atendente no contexto.
+
+### ⚠️ E um teste meu que não media nada
+
+A primeira versão de `painel_link_do_card_2611.teste.js` tinha um caso com
+`expect(true).toBe(true)` e um comentário bonito no lugar da asserção — placar
+verde comprado. Virou a medida de verdade: as três colunas têm de sair com
+`data-situacao` igual ao `situacao_id`. Se esse atributo sair do template, o
+foco para de funcionar **em silêncio**: a coluna abre, a classe entra, e a tela
+simplesmente não rola.
+
+### 🔴 O que falta, e é dele (`M17` linha 6)
+
+Abrir a `ATD_7.1`, ver `NOVO` nos de hoje, marcar um **sem abrir**, abrir outro
+e ler o aviso de que foi marcado, desfazer, e clicar **"Ir para o card"** em
+dois casos: uma OS em *Serviço Agendado* e uma fora dela.

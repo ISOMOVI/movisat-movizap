@@ -22,7 +22,7 @@ centavos, e só vira texto na hora de imprimir.
 """
 import logging
 from datetime import datetime
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from pathlib import Path
 
 from . import banco
@@ -136,9 +136,34 @@ def definir_proximo_numero(numero: int, *, cur=None) -> None:
         raise SemNumeracao(f"a chave {CHAVE_NUMERO} não está no config")
 
 
-def centavos(valor) -> int:
+def _em_decimal(valor, oque: str) -> Decimal:
+    """Texto, float ou Decimal -> Decimal, ou `ValueError` dizendo o que faltou.
+
+    🚨 POR QUE ESTA FUNÇÃO EXISTE, medido em 26/11. A Aline emitiu um
+    orçamento digitando `60,00` -- a vírgula que todo brasileiro escreve -- e
+    leu *"Erro interno"* duas vezes. `Decimal("60,00")` levanta
+    `decimal.InvalidOperation`, que herda de `ArithmeticError` e **não** de
+    `ValueError`: escapava do `except ValueError -> 400` da rota de emitir e
+    chegava como 500. O defeito não era a conta, era a herança.
+
+    ⚠️ E ELA NÃO ADIVINHA O FORMATO. `"1.000"` é mil reais para quem digita e
+    **1** para o `Decimal`; aceitar o palpite trocaria um 500 por um orçamento
+    com valor errado, em silêncio -- que é pior. Quem normaliza é a tela, onde
+    se sabe que o campo é pt-BR (`util/dinheiro.js`); aqui entra o formato
+    canônico, e o que não entra é recusado por extenso.
+    """
+    try:
+        return Decimal(str(valor))
+    except (InvalidOperation, ArithmeticError, TypeError, ValueError):
+        raise ValueError(
+            f"{oque} não é um número ({valor!r}). O separador decimal aqui é o "
+            "ponto (1.5), e não a vírgula (1,5).") from None
+
+
+def centavos(valor, oque: str = "o valor") -> int:
     """Reais (texto, float ou Decimal) -> centavos inteiros, meio pra cima."""
-    return int((Decimal(str(valor)) * 100).quantize(Decimal("1"), ROUND_HALF_UP))
+    return int((_em_decimal(valor, oque) * 100)
+               .quantize(Decimal("1"), ROUND_HALF_UP))
 
 
 def reais(valor_centavos: int) -> str:
@@ -174,9 +199,20 @@ def calcular(itens: list[dict]) -> tuple[list[dict], int]:
         unidade = (item.get("unidade") or "un").strip()
         if unidade not in UNIDADES:
             raise ValueError(f"unidade inválida na linha {ordem}: {unidade!r}")
-        preco = centavos(item.get("preco_unit") if "preco_unit" in item
-                         else Decimal(item["preco_unit_centavos"]) / 100)
-        quantidade = Decimal(str(item.get("quantidade", 1)))
+        # ⚠️ A FRASE DIZ A LINHA. Com 30 linhas no máximo por documento,
+        # "o preço não é um número" obrigaria a pessoa a conferir todas.
+        oque_preco = f"o preço da linha {ordem}"
+        if "preco_unit" in item:
+            preco = centavos(item["preco_unit"], oque_preco)
+        else:
+            # ⚠️ A divisão por 100 FICA, e a conta continua a mesma de antes:
+            # este ramo recebe centavos inteiros (o que a ficha do técnico
+            # manda), e o `centavos` acima volta a multiplicar.
+            preco = centavos(
+                _em_decimal(item["preco_unit_centavos"], oque_preco) / 100,
+                oque_preco)
+        quantidade = _em_decimal(item.get("quantidade", 1),
+                                 f"a quantidade da linha {ordem}")
         if quantidade <= 0:
             raise ValueError(f"quantidade tem de ser positiva na linha {ordem}")
         valor = int((Decimal(preco) * quantidade).quantize(Decimal("1"), ROUND_HALF_UP))

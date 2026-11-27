@@ -321,6 +321,94 @@ describe('🚨 emitido e NÃO enviado é um terceiro caso', () => {
   })
 })
 
+describe('🚨 o corpo do POST do orçamento — o defeito de 26/11', () => {
+  /* A Aline digitou `60,00` no preço e leu *"Erro interno"*, duas vezes, na
+     conversa 32613. O `Decimal` do servidor não lê vírgula, e
+     `InvalidOperation` não é `ValueError`: escapava do 400 e virava 500.
+
+     🚨 E O HELPER `emitir()` LOGO ACIMA JÁ DIGITAVA `'1,00'` E `'77,7'` DESDE
+     21/10. A suíte ficou verde porque nenhum teste lia `estado.posts[0].corpo`
+     -- só o que a tela desenhava DEPOIS da resposta. É esse buraco que estes
+     testes fecham: o que atravessa a ponte passa a ser medido. */
+  async function emitirCom(preco, quantidade) {
+    estado.respostas['/api/conversas/1/orcamento'] = {
+      id: 9, numero: 1668, total_centavos: 7770, enviado: { ok: true } }
+    const tela = montarModal()
+    await flushPromises()
+    await tela.findAll('tbody input')[0].setValue(preco)
+    await tela.findAll('tbody input')[1].setValue(quantidade)
+    const botao = tela.findAll('button')
+      .find((b) => b.text().includes('Gerar e anexar'))
+    await botao.trigger('click')
+    await flushPromises()
+    return { tela, botao }
+  }
+
+  function corpoDoOrcamento() {
+    return estado.posts.find((p) => p.rota === '/api/conversas/1/orcamento')?.corpo
+  }
+
+  it('🚨 a VÍRGULA NÃO ATRAVESSA: 1,00 e 77,7 saem como 1 e 77.7', async () => {
+    await emitirCom('1,00', '77,7')
+    const corpo = corpoDoOrcamento()
+    expect(corpo).toBeTruthy()
+    expect(corpo.itens[0].preco_unit).toBe('1')
+    expect(corpo.itens[0].quantidade).toBe('77.7')
+    expect(JSON.stringify(corpo)).not.toContain(',00')
+    expect(JSON.stringify(corpo.itens)).not.toMatch(/\d,\d/)
+  })
+
+  it('o preço do cliente que digita centavos chega inteiro', async () => {
+    await emitirCom('60,50', '2')
+    expect(corpoDoOrcamento().itens[0].preco_unit).toBe('60.5')
+  })
+
+  it('🔵 preço ZERO atravessa — é a cortesia, não um vazio', async () => {
+    await emitirCom('0,00', '1')
+    expect(corpoDoOrcamento().itens[0].preco_unit).toBe('0')
+  })
+
+  it('⚠️ vão só os quatro campos que o servidor declara', async () => {
+    await emitirCom('1,00', '77,7')
+    expect(Object.keys(corpoDoOrcamento().itens[0]).sort())
+      .toEqual(['preco_unit', 'quantidade', 'servico', 'unidade'])
+  })
+
+  it('a unidade da linha vai junto, senão o PDF imprime "77.7 un"', async () => {
+    await emitirCom('1,00', '77,7')
+    expect(corpoDoOrcamento().itens[0].unidade).toBe('km')
+  })
+
+  it('⚠️ "1.000,00" não emite e não posta: entre recusar e adivinhar, recusa',
+     async () => {
+    const { botao } = await emitirCom('1.000,00', '1')
+    expect(botao.attributes('disabled')).toBeDefined()
+    expect(corpoDoOrcamento()).toBeUndefined()
+  })
+
+  it('⚠️ "R$ 60,00" também não atravessa', async () => {
+    const { botao } = await emitirCom('R$ 60,00', '1')
+    expect(botao.attributes('disabled')).toBeDefined()
+    expect(corpoDoOrcamento()).toBeUndefined()
+  })
+
+  it('🚨 o total da LINHA e o do RODAPÉ saem da mesma conta', async () => {
+    /* Até 26/11 eram duas: o rodapé somava `arredonda(preço) × quantidade` e a
+       célula fazia `arredonda(preço × quantidade)`. O papel sai do
+       `orcamento.calcular`, que arredonda o preço primeiro -- então a da tela
+       era a que mentia. */
+    const tela = montarModal()
+    await flushPromises()
+    await tela.findAll('tbody input')[0].setValue('1,00')
+    await tela.findAll('tbody input')[1].setValue('77,7')
+    await flushPromises()
+    const celula = tela.findAll('tbody td').map((n) => n.text())
+      .find((t) => t.startsWith('R$'))
+    expect(celula).toContain('77,70')
+    expect(tela.text()).toContain('77,70')
+  })
+})
+
 describe('aba Agendar', () => {
   it('não avança do passo 1 sem data e hora', async () => {
     const tela = montarModal()
@@ -447,7 +535,11 @@ describe('tela ATD_7.1 Agendamentos', () => {
     expect(tela.findAll('.agd__dia--hoje')).toHaveLength(1)
   })
 
-  it('a linha traz placa, OS e estado — e "sem placa registrada" quando não há',
+  /* 🚨 26/11: A TABELA VIROU CARTAO. Este teste lia `tbody tr`; agora abre o
+     cartao e mede o mesmo que media -- placa, OS e estado. A INTENCAO e a de
+     21/10, e foi ela que se preservou: "OS sem oficina diz 'sem placa
+     registrada', nunca em branco". */
+  it('o cartão traz placa, OS e estado — e "sem placa registrada" quando não há',
      async () => {
     const hoje = new Date()
     const iso = `${hoje.getFullYear()}-${String(hoje.getMonth() + 1).padStart(2, '0')}-${String(hoje.getDate()).padStart(2, '0')}`
@@ -461,10 +553,33 @@ describe('tela ATD_7.1 Agendamentos', () => {
     }
     const tela = mount(Agendamentos)
     await flushPromises()
-    const linha = tela.find('tbody tr').text()
-    expect(linha).toContain('16548')
-    expect(linha).toContain('sem placa registrada')
-    expect(linha).toContain('Confirmado')
+    const cartao = tela.find('.agd__cartao')
+    expect(cartao.exists()).toBe(true)
+    // Fechado já diz o que decide: hora, cliente, estado e o resumo.
+    expect(cartao.text()).toContain('16548')
+    expect(cartao.text()).toContain('sem placa registrada')
+    expect(cartao.text()).toContain('Confirmado')
+    // E aberto traz a ficha inteira.
+    await cartao.find('.agd__cartao-topo').trigger('click')
+    await flushPromises()
+    expect(cartao.find('.agd__ficha').text()).toContain('Rua Um')
+    expect(cartao.find('.agd__ficha').text()).toContain('Maria')
+  })
+
+  it('🔵 o cartão nasce FECHADO: o detalhe é escolha, não despejo', async () => {
+    const hoje = new Date()
+    const iso = `${hoje.getFullYear()}-${String(hoje.getMonth() + 1).padStart(2, '0')}-${String(hoje.getDate()).padStart(2, '0')}`
+    estado.respostas['/api/agendamentos'] = {
+      agendamentos: [
+        { id: 1, inicio: `${iso}T09:00:00`, cliente_nome: 'VELASCO',
+          tecnico_nome: 'Franck', endereco: 'Rua Um', estado: 'confirmado',
+          ordens: [{ numero_os: 16548, placa: 'FZU5D16' }] },
+      ],
+    }
+    const tela = mount(Agendamentos)
+    await flushPromises()
+    expect(tela.find('.agd__cartao-corpo').exists()).toBe(false)
+    expect(tela.findAll('button').some((b) => b.text() === 'Reagendar')).toBe(false)
   })
 })
 
@@ -603,6 +718,12 @@ describe('ponta 2 — reenviar confirmação NÃO envia', () => {
     estado.respostas['/api/agendamentos'] = { agendamentos: lista }
     const tela = mount(Agendamentos)
     await flushPromises()
+    /* 🚨 26/11: O CARTAO ABRE PRIMEIRO. As acoes sairam da celula da tabela e
+       passaram a viver no cartao aberto -- antes elas estavam sempre no DOM,
+       e era isso que este helper assumia. Uma linha aqui conserta os DEZ
+       testes desta ponta, e a intencao de cada um deles nao muda. */
+    await tela.find('.agd__cartao-topo').trigger('click')
+    await flushPromises()
     await tela.findAll('button').find((b) => b.text() === 'Reenviar confirmação')
       .trigger('click')
     await flushPromises()
@@ -618,8 +739,14 @@ describe('ponta 2 — reenviar confirmação NÃO envia', () => {
     expect(blocos[0]).not.toContain('ORÇAMENTO')
     expect(blocos[1]).toMatch(/OS \.+ 16548/)
     expect(blocos[1]).toMatch(/ORÇAMENTO \.+ 1668/)
-    // 🚨 Nenhum POST: a ação é de leitura.
-    expect(estado.posts).toHaveLength(0)
+    /* 🚨 NADA FOI ENVIADO AO CLIENTE -- a intencao deste teste desde 21/10,
+       e ela nao mudou. O que mudou em 26/11 e que abrir o cartao marca o
+       selo "Visto", e ISSO e um POST: entao a medida passou a ser precisa em
+       vez de ampla. "Zero pedidos" media o acidente de a tela nao ter nenhum
+       outro; o que se guarda e que o reenvio nao manda mensagem. */
+    const naoSaoVisto = estado.posts.filter((p) => !p.rota.endsWith('/visto'))
+    expect(naoSaoVisto).toHaveLength(0)
+    expect(estado.posts.every((p) => p.rota.endsWith('/visto'))).toBe(true)
   })
 
   it('🚨 junta os IRMÃOS da mesma hora — o cliente recebeu uma mensagem só',
@@ -650,13 +777,20 @@ describe('ponta 2 — reenviar confirmação NÃO envia', () => {
       .toMatch(/ACOMPANHA \.+/)
   })
 
-  it('a ação não aparece em linha cancelada', async () => {
+  it('a ação não aparece em cartão cancelado — nem com ele aberto', async () => {
+    /* ⚠️ ABRE O CARTAO DE PROPOSITO: so medir a tela fechada passaria por
+       acidente agora que as acoes vivem no corpo. O que se guarda e que
+       cancelado NAO reenvia, e isso tem de valer com o corpo a vista. */
     estado.respostas['/api/agendamentos'] = {
       agendamentos: [linha({ estado: 'cancelado', motivo_cancelamento: 'cliente pediu' })] }
     const tela = mount(Agendamentos)
     await flushPromises()
+    await tela.find('.agd__cartao-topo').trigger('click')
+    await flushPromises()
+    expect(tela.find('.agd__cartao-corpo').exists()).toBe(true)
     expect(tela.findAll('button').some((b) => b.text() === 'Reenviar confirmação'))
       .toBe(false)
+    expect(tela.text()).toContain('cliente pediu')
   })
 
   it('abrir a conversa deixa o texto no rascunho DELA, e navega', async () => {

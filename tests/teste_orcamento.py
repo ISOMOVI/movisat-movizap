@@ -158,6 +158,85 @@ class TestAConta:
             orcamento.calcular(ruim)
 
 
+class TestOFormatoBrasileiroNaoVIRA500:
+    """🚨 O DEFEITO DE 26/11, reproduzido. A Aline emitiu um orçamento digitando
+    `60,00` e leu *"Erro interno"* -- duas vezes, às 09:34:04 e 09:34:14, na
+    conversa 32613.
+
+    A tela validava com `Number(texto.replace(',', '.'))` e o POST mandava a
+    linha CRUA; `Decimal("60,00")` levanta `decimal.InvalidOperation`, que herda
+    de `ArithmeticError` e **não** de `ValueError` -- e por isso escapava do
+    `except ValueError -> 400` da rota de emitir e virava 500.
+
+    ⚠️ E ESTA SUÍTE FICOU VERDE COM PRODUÇÃO QUEBRADA porque todos os casos
+    anteriores usam ponto (`"1.00"`, `"33.33"`). Um formato nunca exercitado é
+    um formato sem trava: é o que estes testes passam a cobrir.
+    """
+
+    @pytest.mark.parametrize("item, oque", [
+        ({"servico": "X", "preco_unit": "60,00", "quantidade": "1"}, "preço"),
+        ({"servico": "X", "preco_unit": "R$ 60,00", "quantidade": "1"}, "preço"),
+        ({"servico": "X", "preco_unit": "1.000,00", "quantidade": "1"}, "preço"),
+        ({"servico": "X", "preco_unit": "", "quantidade": "1"}, "preço"),
+        ({"servico": "X", "preco_unit": "abc", "quantidade": "1"}, "preço"),
+        ({"servico": "X", "preco_unit": "1.00", "quantidade": "77,7",
+          "unidade": "km"}, "quantidade"),
+    ])
+    def test_formato_que_o_Decimal_nao_le_e_ValueError_nunca_ArithmeticError(
+            self, item, oque):
+        """🚨 O TIPO DA EXCEÇÃO É O CONSERTO. `ValueError` a rota transforma em
+        400 com frase; `ArithmeticError` passa reto e chega como 500."""
+        with pytest.raises(ValueError) as e:
+            orcamento.calcular([item])
+        assert oque in str(e.value), "a frase tem de dizer QUAL campo"
+        assert "linha 1" in str(e.value), "e QUAL linha"
+
+    def test_a_frase_ensina_o_separador(self):
+        """⚠️ O exemplo da frase NÃO é de dinheiro: a mesma recusa vale para a
+        quantidade em km, e "use 60.00" ali leria como conselho errado."""
+        with pytest.raises(ValueError) as e:
+            orcamento.calcular([{"servico": "X", "preco_unit": "60,00",
+                                 "quantidade": "1"}])
+        assert "ponto (1.5)" in str(e.value)
+        assert "vírgula (1,5)" in str(e.value)
+
+    def test_a_linha_certa_e_nomeada_entre_varias(self):
+        """Com 30 linhas por documento, "o preço não é um número" obrigaria a
+        pessoa a conferir todas."""
+        with pytest.raises(ValueError) as e:
+            orcamento.calcular([
+                {"servico": "A", "preco_unit": "1.00", "quantidade": "1"},
+                {"servico": "B", "preco_unit": "2.00", "quantidade": "1"},
+                {"servico": "C", "preco_unit": "3,50", "quantidade": "1"},
+            ])
+        assert "linha 3" in str(e.value)
+
+    def test_o_formato_canonico_continua_passando(self):
+        """⚠️ A recusa não pode ter custado o caminho que funciona."""
+        itens, total = orcamento.calcular([
+            {"servico": "KM DESLOCAMENTO", "preco_unit": "1.00",
+             "quantidade": "77.7", "unidade": "km"},
+            {"servico": "PAGAMENTO DE TECNICO", "preco_unit": "100.00",
+             "quantidade": "1", "unidade": "un"},
+        ])
+        assert total == 17770
+
+    def test_centavos_inteiros_tambem_continuam_passando(self):
+        """O ramo `preco_unit_centavos`, que é o que a ficha do técnico manda."""
+        itens, total = orcamento.calcular([
+            {"servico": "Instalação", "preco_unit_centavos": 18000,
+             "quantidade": "1", "unidade": "un"},
+        ])
+        assert total == 18000
+
+    def test_centavos_inteiros_ilegiveis_tambem_recusam_com_frase(self):
+        with pytest.raises(ValueError) as e:
+            orcamento.calcular([{"servico": "X",
+                                 "preco_unit_centavos": "18.000,00",
+                                 "quantidade": "1"}])
+        assert "preço da linha 1" in str(e.value)
+
+
 class TestOCatalogo:
     """🚨 ATÉ 04/11 ESTA CLASSE DIZIA "lista fechada", e deixou de ser verdade.
 

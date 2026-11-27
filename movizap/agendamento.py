@@ -548,13 +548,98 @@ def do_dia(dia) -> list[dict]:
     ))
 
 
-def do_periodo(inicio, fim) -> list[dict]:
-    """Os compromissos entre duas datas, inclusive — o carrossel da semana."""
-    return _montar(banco.varios(
+def do_periodo(inicio, fim, visto_por: int | None = None) -> list[dict]:
+    """Os compromissos entre duas datas, inclusive — o carrossel da semana.
+
+    🔵 `visto_por` (26/11): o selo **Visto** da pessoa que pediu. Pedido dele:
+    *"pode ter um flag de 'Visto' para que o usuário saiba o que já viu e o que
+    não, pois podem aparecer agendamentos no dia mesmo"*.
+
+    🚨 O VISTO É FUNDIDO AQUI, EM PYTHON, E NÃO ENTRA NO `_CAMPOS`/`_DE`. Esses
+    dois fragmentos são compartilhados por `do_dia`, `por_id` e
+    `aguardando_do_cliente` -- e a última serve a aba **Confirmar** do
+    `ModalAgendar`, que não tem atendente no contexto. Pôr o `LEFT JOIN` no SQL
+    comum obrigaria os três a carregar um parâmetro que só um deles tem.
+
+    ⚠️ UMA consulta para a semana inteira, nunca uma por cartão -- a mesma
+    régua do `_anexar_comprovantes_no_quadro` e do `_orcamento_por_os`.
+    """
+    linhas = _montar(banco.varios(
         f"SELECT {_CAMPOS} {_DE} "
         " WHERE a.inicio::date BETWEEN %s AND %s ORDER BY a.inicio",
         (inicio, fim),
     ))
+    return _com_visto(linhas, visto_por)
+
+
+def _com_visto(linhas: list[dict], atendente_id: int | None) -> list[dict]:
+    """Pendura `visto_em` e `visto_automatico` em cada compromisso.
+
+    ⚠️ SEM `atendente_id` OS CAMPOS NEM APARECEM, e isso é de propósito: nulo
+    diria *"esta pessoa não viu"*, e a verdade é *"ninguém perguntou por
+    pessoa"*. Chave ausente é a única resposta honesta.
+
+    🚨 E SE A CONSULTA FALHAR, A LISTA VOLTA INTEIRA, sem selo: perder o
+    *"Visto"* é aceitável, perder a agenda do dia não é.
+    """
+    if not atendente_id or not linhas:
+        return linhas
+    ids = [x["id"] for x in linhas]
+    try:
+        vistos = {
+            v["agendamento_id"]: v
+            for v in banco.varios(
+                "SELECT agendamento_id, visto_em, automatico "
+                "  FROM agendamento_visto "
+                " WHERE atendente_id = %s AND agendamento_id = ANY(%s)",
+                (atendente_id, ids))
+        }
+    except Exception:
+        log.exception("nao li o visto do atendente %s; a lista vai sem selo",
+                      atendente_id)
+        return linhas
+    for x in linhas:
+        marca = vistos.get(x["id"])
+        x["visto_em"] = marca["visto_em"] if marca else None
+        x["visto_automatico"] = bool(marca["automatico"]) if marca else False
+    return linhas
+
+
+def marcar_visto(agendamento_id: int, atendente_id: int, *,
+                 automatico: bool = False) -> dict | None:
+    """Carimba que ESTA pessoa viu ESTE compromisso. Idempotente.
+
+    🚨 `ON CONFLICT DO NOTHING`, E NÃO `DO UPDATE`. Reabrir o cartão não pode
+    reescrever a hora em que a pessoa viu -- o selo diz *"Visto 08:12"*, e
+    08:12 é quando ela viu da primeira vez. E um visto que ela MARCOU não pode
+    ser rebaixado a `automatico` só porque o cartão abriu depois.
+
+    ⚠️ Devolve a linha que VALE (a de antes, quando já havia), não a que se
+    tentou gravar: a tela mostra o que está no banco, nunca o que se pediu.
+    """
+    if not banco.um("SELECT id FROM agendamento WHERE id = %s",
+                    (agendamento_id,)):
+        return None
+    banco.executar(
+        "INSERT INTO agendamento_visto (agendamento_id, atendente_id, automatico) "
+        "VALUES (%s, %s, %s) ON CONFLICT DO NOTHING",
+        (agendamento_id, atendente_id, bool(automatico)))
+    return banco.um(
+        "SELECT visto_em, automatico FROM agendamento_visto "
+        " WHERE agendamento_id = %s AND atendente_id = %s",
+        (agendamento_id, atendente_id))
+
+
+def desmarcar_visto(agendamento_id: int, atendente_id: int) -> bool:
+    """Desfaz o visto DESTA pessoa. 🔵 Ele pediu o desfazer junto do botão.
+
+    ⚠️ Volta `False` quando não havia marca -- e a rota responde 200 do mesmo
+    jeito: desfazer o que já está desfeito é o estado que a pessoa queria.
+    """
+    return banco.executar(
+        "DELETE FROM agendamento_visto "
+        " WHERE agendamento_id = %s AND atendente_id = %s",
+        (agendamento_id, atendente_id)) > 0
 
 
 def por_id(agendamento_id: int) -> dict | None:

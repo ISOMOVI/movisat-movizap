@@ -21,7 +21,7 @@
    a um recado humano faria parecer que alguém digitou aquilo.
    ============================================================================ */
 import { computed, ref } from 'vue'
-import { pedirBlob } from '../api/cliente.js'
+import { baixarArquivo } from '../util/baixar.js'
 
 const props = defineProps({
   recado: { type: Object, required: true },
@@ -89,29 +89,19 @@ const erroDoAnexo = ref('')
 async function baixar(anexo) {
   baixando.value = anexo.id
   erroDoAnexo.value = ''
-  let url = null
   try {
-    const blob = await pedirBlob(`/api/paineis/operacao/anexo/${anexo.id}`)
-    url = URL.createObjectURL(blob)
-    /* ⚠️ `download` com o nome ORIGINAL: sem ele o navegador salvaria o
-       arquivo com o nome do `blob:`, que e um UUID. */
-    const l = document.createElement('a')
-    l.href = url
-    l.download = anexo.nome_original || 'anexo'
-    l.rel = 'noopener'
-    document.body.appendChild(l)
-    l.click()
-    l.remove()
+    /* 🚨 26/11: ERA AQUI QUE O CONSERTO VIVIA, inteiro. Virou
+       `util/baixar.js` porque o mesmo defeito apareceu em mais duas telas
+       (anexo das Solicitacoes, comprovante da PNL_1.6) -- e a terceira copia
+       feita a mao e que faz as tres divergirem. */
+    await baixarArquivo(`/api/paineis/operacao/anexo/${anexo.id}`,
+                        anexo.nome_original || 'anexo')
   } catch (e) {
     /* 🚨 A FALHA E DITA. Antes o 401 era silencioso: o clique abria uma aba
        com a mensagem de erro da API, ou nada. */
     erroDoAnexo.value = e?.message || 'Nao consegui baixar o anexo.'
   } finally {
     baixando.value = null
-    /* ⚠️ Solta o `blob:` depois do clique -- cada download reservaria memoria
-       para sempre. O atraso existe porque revogar antes do navegador comecar a
-       baixar cancela o download. */
-    if (url) setTimeout(() => URL.revokeObjectURL(url), 10000)
   }
 }
 </script>
