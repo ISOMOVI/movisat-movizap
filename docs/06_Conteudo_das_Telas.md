@@ -9623,3 +9623,325 @@ simplesmente não rola.
 Abrir a `ATD_7.1`, ver `NOVO` nos de hoje, marcar um **sem abrir**, abrir outro
 e ler o aviso de que foi marcado, desfazer, e clicar **"Ir para o card"** em
 dois casos: uma OS em *Serviço Agendado* e uma fora dela.
+
+---
+
+## `PNL_1.7` — Compras
+
+🔵 Ele, 27/11: *"proponha um novo de compras, sem vinculo de OS somente por
+formularios"*, *"nao precisa propor colunas alem da primeira: nova
+solicitacoes"*, *"sera somente interno"*. E, ao perguntar para que serviria o
+campo Setor: *"não precisa de setor, só de um campo de justificativa e um campo
+com anexo para Sugestão de compras - por enquanto"*.
+
+**Uma coluna: `Nova solicitação`.** Grafia dele, singular e com acento. Card em
+coluna única não tem para onde ir — o `<select>` de mover não tem destino. Não é
+defeito: é o painel no primeiro dia, como Contratual e Financeiro nasceram em
+06/11.
+
+🚨 **NENHUM `.vue` DE PAINEL NASCEU POR CAUSA DESTA TELA.** Compras é a
+`PainelAba.vue` com outro `meta.aba` — ela lê `rota.meta.aba` e busca
+`/api/paineis/aba/PNL_1.7`. É daí que vêm, inteiros e sem uma linha copiada, o
+cabeçalho (dialeto `painel__*` / `controles__*`), a coluna, o card fechado
+(`CorpoDoCard.vue`), o card aberto (`DialogoDeChamado.vue`) e o CSS. Em 25/11
+editar aquele arquivo mexeu em quatro painéis dele sem pedir (*"não sei o pq
+mexeu nas outras abas"*); aqui ele não é editado.
+
+⚠️ **Compras nasce com a divergência de cabeçalho que já existe:** `h1` de
+16px, como as outras quatro de painel, contra os 20px da Operação. É o `G2` dos
+Próximos Passos, e consertá-lo mudaria quatro painéis dele de uma vez — fora
+deste pedido.
+
+**O card não tem OS, e isso não é exceção construída.**
+`paineis._card_do_chamado` devolve `os_id`, `numero_ordem`, `situacao_id` e
+`situacao_em` **fixos em nulo** para card de solicitação — e são exatamente
+esses quatro campos que a tela lê para não oferecer arrastar para o ERP nem o
+`<select>` de mover situação. O *"sem vínculo de OS"* dele é o estado natural
+deste caminho.
+
+🚨 **O título do card fechado é o SOLICITANTE.** `_nome_do_chamado` lê só
+`COMPANY_TITLE` e `CONTACT_NAME`; Compras não tem cliente, tem quem pediu. Com
+os dois vazios o card escreveria literalmente `cliente ?, fora do nosso
+cadastro`, que é `M12` — tela que mente. O campo se chama `CONTACT_NAME` por
+isso, e **nenhuma linha de `paineis.py` ou `CorpoDoCard.vue` mudou**.
+
+⚠️ **E o solicitante não é pergunta:** a rota interna injeta o nome de quem está
+logado em `valores` **antes** do `validar()`, e a tela o mostra travado pela
+prop `travados` do `CamposDoFormulario`. Se ela confiasse no que o navegador
+manda, bastaria abrir o inspetor para registrar outra pessoa como quem pediu.
+
+**O formulário tem três campos para preencher**: justificativa (texto,
+obrigatório), **valor estimado** (texto, opcional) e anexo (arquivo, opcional).
+
+🔵 **O valor entrou em 27/11, depois do mockup** — *"só o campo"*: o painel
+**não soma nem ordena** por ele, e isso é decisão dele. Quem quiser o total
+soma à mão, e a tela não promete o contrário.
+⚠️ **Não é obrigatório**, de propósito: quem pede nem sempre sabe o preço, e
+campo obrigatório que ninguém consegue preencher vira número inventado — pior
+que vazio, porque tem cara de dado.
+⚠️ Item, quantidade e prazo seguem **fora, por enquanto** — a palavra é dele.
+
+🚨 **E aqui eu me corrijo.** Esta seção dizia que *"acrescentar campo depois é
+linha em tabela, não migração nem deploy"*. 📏 Medido em 27/11: **não existe**
+rota, tela nem script que acrescente campo a formulário que não vem do Bitrix —
+o `gravar_definicao()` monta campos do bruto do loader e o `COMPRAS` tem
+`bitrix_id NULL`. Para este formulário, *"é dado"* significaria **SQL sem
+rastro**. O campo entrou na **migração 123**, e é lá que alguém o acha.
+
+**Os dois vazios da coluna continuam distintos** (`M12`): `Vazia.` quando não há
+card, e `N cards, nenhum casa com a busca.` quando a busca filtrou tudo. No
+primeiro dia a coluna diz `Vazia.`, e é o certo — não parecer quebrada.
+
+### Quem vê, e quem pede — o desencontro é de propósito
+
+O painel nasce **`owner`**, como toda aba nova. O botão **Solicitar**, no
+compositor do chat interno, é **`ATD_6.1`** (atendimento). Quem pede compra não
+precisa ver o painel de compras — e é isso que se quer: com os dois em `owner`,
+nove de dez não poderiam pedir. Conceder a `PNL_1.7` a alguém é gesto dele na
+`CFG_15.1`, onde ela aparece sozinha porque aquela tela deriva de
+`grupo_da(t) == "Painéis"`.
+
+### 🔴 O que falta, e é dele (`M17` linha 6)
+
+Ligar o formulário na `FRM_1.1` (ele nasce `ativo = false`), abrir o chat
+interno, clicar em **Solicitar**, enviar, abrir `/paineis/compras`, ver o card e
+abri-lo. **Placar verde e build limpo não são esta linha.**
+
+---
+
+## 27/11 — o OBS do card nos quatro painéis: permissão, anexo e o anexo do formulário
+
+🔵 Ele, 27/11, sobre Compras: *"ja pode colocar o campo de OBS nas mesmas
+regras dos demais paineis - com anexo, historico"*; e depois, decidindo a
+permissão: *"permissões dessa tela devem ficar com as mesmas das demais --
+**quem ve usa tudo**. E as permissões ficam com a das demais em `CFG_15.1`"*.
+
+🚨 **MEDIR O PEDIDO MOSTROU QUE *"as mesmas regras dos demais painéis"* NÃO
+INCLUÍA ANEXO.** Três achados, e nenhum era de Compras — eram dos quatro
+painéis que compartilham o `DialogoDeChamado.vue`.
+
+### Achado 1 — anexar observação existia só na Operação
+
+O controle de subir arquivo estava escrito **só** em `PainelOperacao.vue`. O
+diálogo compartilhado — Compras, Contratual, Financeiro e Pós-venda — **baixava**
+anexo que já existisse e não tinha como anexar. A rota existia desde 25/11; o
+que faltava era a tela.
+
+**Entrou:** o `Anexar` no rodapé das Observações, com rótulo visível, a pílula
+do arquivo escolhido e o `✕` para desistir. Sem texto, o texto é inventado com
+o nome do arquivo (*"(anexo) orcamento.pdf"*) — a rota recusa texto vazio, e
+anexo solto não se explica daqui a três meses. É a mesma frase da Operação.
+
+🚨 **E UMA REGRESSÃO MINHA, PEGA POR TRAVA ANTIGA.** Eu troquei a atualização
+local da lista por uma releitura da ficha, e o
+`painel_chamados_0511.teste.js` reprovou: *"a observação salva aparece **sem
+recarregar a ficha**"* é garantia desta tela desde 05/11. Agora a lista vem da
+resposta da rota (garantia preservada) e a releitura acontece **só quando houve
+anexo** — porque os anexos de cada observação não vêm na resposta, só na ficha.
+
+### Achado 2 — porta trancada: três rotas exigiam a tela da Operação
+
+Em 05/11 as rotas de card passaram a conferir **a aba do próprio card** em vez
+de `PNL_1.1` fixo. O conserto pegou as de escrever e deixou **três** para trás:
+anexar na observação, apagar a observação e baixar o anexo.
+
+📏 As observações **1718** e **1912** são de cards do Contratual: quem tivesse
+aquele painel **escrevia** observação e tomava **403** nos outros três gestos.
+Ficava invisível porque owner passa por tudo — e apareceria no instante em que
+ele concedesse um painel a alguém.
+
+**Entrou:** `_aba_da_observacao`, que resolve a aba pela solicitação ou pela OS
+do card, e `_exigir_aba_da_observacao` nas três rotas.
+
+🚨 **O RECUO PARA `PNL_1.1` NÃO É PREGUIÇA, É MEDIÇÃO.** As observações
+recentes de OS (**90990**, **90996**, **17151**) **não têm linha em
+`pipeline_card`** — a OS existe no Harmonit e o card nunca foi semeado. Sem
+esse recuo elas virariam 403 **para o owner também**, e anexar na Operação
+pararia de funcionar.
+
+⚠️ **O CHECKLIST FICOU DE FORA, e é medição:** aquelas rotas são chaveadas por
+`numero_os` + `situacao_id`, e card de solicitação não tem OS. Checklist é
+recurso de OS; passá-lo à aba do card não daria checklist a Compras, daria uma
+rota que não resolve nada.
+
+### Achado 3 — o anexo do formulário nunca chegava ao card
+
+`paineis._card_do_chamado` devolvia **`"anexos": 0` fixo**, enquanto os dois
+construtores de card mais antigos já contavam de `formulario_arquivo`.
+
+📏 O card **4360** (Contratual) tem **1** anexo e o card dizia **0**; o
+**4134** tem **2**. Depois do conserto, medido em produção: **8 dos 12** cards
+do Contratual passaram a mostrar a pílula *"N anexo(s)"* — oito documentos que
+o cliente anexou e que estavam invisíveis no quadro. Financeiro: 1 de 19.
+
+**Entrou:** a contagem em `pipeline.cards_da_aba`, o `c.get("anexos")` no card,
+e a seção **Anexos do formulário** no card aberto, com o nome, o tamanho e o
+botão de baixar — pelo `util/baixar.js`, nunca por `<a href>` cru, que não leva
+o cabeçalho de sessão e abre aba em branco no 401.
+
+🚨 **E A ROTA DO ARQUIVO GANHOU A SEGUNDA PORTA.**
+`GET /api/solicitacoes/{id}/arquivo/{id}` exigia `FRM_1.1`, que é **owner** —
+mostrar o anexo no card com aquele link daria 403 a quem tem o painel. Agora
+vale `FRM_1.1` **ou** a tela da aba do card daquela solicitação.
+⚠️ **Nenhuma porta fechou:** quem entrava pela `FRM_1.1` continua entrando, e
+solicitação que nunca virou card não tem aba — aí a `FRM_1.1` segue sendo a
+única porta, e *"não achei aba"* **não** vira *"deixa passar"*.
+
+### As travas
+
+`tests/teste_obs_permissao_por_aba.py` (10),
+`tests/teste_anexo_do_formulario_no_card.py` (6 + 1 pulada),
+`src/obs_anexo_no_dialogo_2711.teste.js` (10) e
+`src/anexo_do_formulario_no_card_2711.teste.js` (6).
+
+⚠️ Em cada um dos quatro há trava para o caminho **novo** e trava para o
+caminho **antigo** — porque este diálogo serve quatro telas dele, e foi o erro
+de 25/11 (mexer no arquivo compartilhado mudou quatro painéis sem ele pedir)
+que põe essa exigência aqui.
+
+---
+
+## 27/11 — Compras ganha três colunas, e a ajuda da tela deixa de mentir
+
+🔵 Ele, depois de ver o mockup: as colunas são *"Em cotação + Aprovado +
+Comprado"*, o valor estimado entra como *"só o campo"*, e sobre a ajuda:
+*"Sim, texto por painel"*.
+
+### As quatro colunas, e o que elas mudam no gesto
+
+| ordem | coluna | `final` |
+|---|---|---|
+| 1 | Nova solicitação | não — é onde o card nasce |
+| 2 | Em cotação | não |
+| 3 | Aprovado | não |
+| 4 | **Comprado** | **sim** |
+
+🚨 **`final` só na última, e é o que dá desfecho ao card.** Sem ele o Finalizar
+não tem para onde levar e o contador de *"parado nesta etapa desde"* nunca
+fecha. Marcar `Em cotação` como final faria o quadro tratar o meio do caminho
+como conclusão.
+
+🚨 **E ISTO MUDA O GESTO, não só o dado.** A tela só desenha o `<select>` de
+mover com mais de uma etapa (`etapas.length > 1`). Com uma coluna ele não
+aparecia — e o arrasto não tinha destino. Agora os dois existem.
+
+⚠️ `depois_da_situacao` e `recebe_situacao` ficam **nulas** nas quatro:
+preencher qualquer uma ligaria o semeador de OS a este painel, e o painel é
+*"sem vínculo de OS"*.
+
+### 🚨 `M12` — a ajuda prometia o que Compras não podia fazer
+
+O balão `?` é desenhado pela **mesma** `PainelAba.vue` nas cinco telas, e dizia
+*"Clique nele para abrir a ficha, os recados e o **checklist**"*.
+
+📏 **Checklist é recurso de OS**: as rotas são chaveadas por `numero_os` +
+`situacao_id`, e card de solicitação não tem OS. Em Compras a promessa era
+impossível, não apenas imprecisa.
+
+📏 **E nenhum teste prendia esse texto** — 0 ocorrências de *"Arraste o card"*
+em `tests/` e nos `*.teste.js`. Texto sem trava não acusa quando a entrega
+seguinte o deixa mentindo, e foi assim que ele ficou.
+
+**O que mudou:** dois blocos de marcação no mesmo lugar — `v-if` para a
+`PNL_1.7`, `v-else` para as outras quatro.
+
+🚨 **E o recado dos quatro painéis antigos é o MESMO NÓ, palavra por palavra.**
+Um mapa de strings perderia os `<strong>` ou pediria `v-html`; trocar o texto
+deles por uma variável é o tipo de mexida que em 25/11 mudou quatro painéis sem
+ele pedir. A trava é nominal: uma asserção por painel, as quatro antigas medidas
+contra o texto de hoje (`ajuda_por_painel_2711.teste.js`).
+
+⚠️ **O que eu NÃO mudei, e fica dito:** nos outros quatro painéis a frase do
+checklist continua como está. Lá ela é **às vezes verdadeira** — card que veio
+de OS reendereçada tem checklist —, e ele pediu os quatro **verbatim**. Deixar
+a frase mais exata (*"nos cards que vieram de OS"*) é uma linha, e é decisão
+dele.
+
+### A trava
+
+`ajuda_por_painel_2711.teste.js` (10): cinco painéis por nome, as quatro
+antigas verbatim, a `PNL_1.7` sem a palavra *checklist*, e uma tela
+desconhecida caindo no texto de sempre — degrada com recado genérico, nunca com
+balão vazio.
+
+---
+
+## 27/11 — o Salvar da observação não salvava em card de OS (reportado pela Karla)
+
+🔵 Ele: *"verifique o pq o OBS dos cards do financeiro nao esta salvando ao
+clicar em salvar - reportado por Karla"*.
+
+🚨 **DUAS CAMADAS, E A DE CIMA ERA SILENCIOSA.**
+
+### Camada 1 — a tela retornava sem fazer nada
+
+`salvarRecado`, no `DialogoDeChamado.vue`, lia **só**
+`ficha.chamado.solicitacao_id`. Num card de **OS** o servidor **não monta
+`chamado`** — ele só o faz quando o card tem `solicitacao_id` —, então o `sid`
+vinha vazio e a função caía no `return`. **Nenhum pedido, nenhuma mensagem,
+nenhum erro no console.** O botão parecia morto.
+
+📏 **O dado que explica por que apareceu no Financeiro e não no Contratual:**
+
+| aba | cards só de OS | de solicitação |
+|---|---|---|
+| `PNL_1.4` Financeiro | **13** | 6 |
+| `PNL_1.5` Contratual | **0** | 13 |
+| `PNL_1.1` Operação | 2 | 12 |
+
+O Contratual tem **zero** card só de OS. O defeito estava lá o tempo todo e não
+havia como vê-lo naquele painel.
+
+⚠️ **É anterior à entrega de hoje**, e eu conferi contra o arquivo de antes: o
+mesmo `if (!texto || !sid) return`.
+
+**O conserto:** a função passou a escolher a rota pelo card — `solicitacao_id`
+vai para `/chamado/observacao`, `numero_os` vai para `/observacao`. 🚨 E card
+**sem os dois** não manda pedido nenhum: o CHECK `os_observacao_tem_um_dono`
+recusaria, e tela que manda o que o banco recusa troca um silêncio por um erro.
+
+### Camada 2 — a quarta rota da família da porta trancada
+
+`POST /api/paineis/operacao/observacao` exigia `requer_tela("PNL_1.1")`, e quem
+relatou tem o **Financeiro**. É a quarta rota que 05/11 deixou para trás, junto
+com anexar, apagar e baixar.
+
+🚨 **Consertar só a tela trocaria o silêncio por um 403.** As duas camadas
+foram na mesma passagem, por isso.
+
+### 🚨 E a medição derrubou o meu próprio modelo: uma OS pode estar em DUAS abas
+
+Eu havia escrito o resolvedor no singular, com `ORDER BY c.id LIMIT 1`. A minha
+própria trava caiu: 📏 as OS **17120** e **17141** têm card na **Operação e no
+Financeiro ao mesmo tempo** — são reendereçadas da migração 106. O `LIMIT 1`
+escolhia a mais antiga, e quem tinha a outra aba tomava **403 num card que está
+no painel dele**.
+
+Virou `_abas_da_os` (lista) e `_exigir_qualquer_aba`: **a observação pertence à
+OS, não a um dos cards dela**, então qualquer aba onde ela apareça autoriza.
+📏 E solicitação **não** atravessa aba — 0 casos medidos —, então ali a lista
+tem no máximo um item.
+
+⚠️ O recuo para `PNL_1.1` continua, pelo mesmo motivo medido: há OS com recado
+e **sem linha em `pipeline_card`**. Lista vazia é 403 — *"não achei aba"* nunca
+vira *"deixa passar"*.
+
+### E uma correção num comentário meu do mesmo dia
+
+Eu havia escrito que as observações vinham *"da mais antiga para a mais nova"*.
+📏 Erradas as duas consultas: `passagem.observacoes` e
+`observacoes_da_solicitacao` ordenam `o.em DESC, o.id DESC` — **da mais nova
+para a mais velha**. Quem inverte é o **template**, na hora de desenhar. O
+`[0]` é o recado novo, e é por ele que o anexo sobe quando a rota não devolve
+`id` (a da OS não devolve).
+
+### As travas
+
+`tests/teste_obs_do_card_de_os.py` (5) · `src/obs_do_card_de_os_2711.teste.js`
+(5) · e `tests/teste_anexo_do_envio_interno.py` (8), que fechou o caminho do
+**anexo no envio interno** — ele estava no ar sem trava, e é o segundo gesto do
+MVP: as duas listas paralelas (`campos` e `arquivos`), a recusa de arquivo em
+campo que não aceita, e o obrigatório cobrado pelo servidor.
+
+⚠️ Em cada arquivo há trava para o caminho **novo** e para o **antigo** — este
+diálogo serve quatro painéis dele.

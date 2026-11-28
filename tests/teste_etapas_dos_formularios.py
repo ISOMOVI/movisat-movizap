@@ -37,8 +37,25 @@ def base():
 
 
 def formularios():
+    """Os formularios DE CLIENTE -- os que vieram do Bitrix.
+
+    🔵 27/11: `AND NOT interno`. Nasceu o `COMPRAS` (migracao 122), interno,
+    `classico` e sem etapas -- e ele fez SETE travas deste arquivo reprovarem
+    de uma vez, inclusive a contagem de 16.
+
+    🚨 **O ESCOPO ERA O DEFEITO, NAO A TRAVA.** Afrouxar a contagem para 17 ou
+    tirar a cobranca do formato apagaria o que este arquivo existe para medir:
+    que os DEZESSEIS do cliente estao todos no formato novo, com etapas, e sem
+    pergunta fora de etapa. Formulario interno nao tem pagina publica, nao
+    passa pelo carregador do Bitrix e nao usa o formato por etapas -- ele nao
+    e um dos 16, e contar junto era a pergunta errada.
+
+    ⚠️ E a contagem FICA EM 16 de proposito: ela e a trava de que nenhum dos
+    quinze (mais o Contato) desapareceu.
+    """
     return banco.varios(
-        "SELECT id, slug, formato, etapas FROM formulario ORDER BY slug")
+        """SELECT id, slug, formato, etapas FROM formulario
+            WHERE NOT interno ORDER BY slug""")
 
 
 def campos(form_id):
@@ -175,7 +192,18 @@ class TestAValidacaoContinuaDePE:
         # sugestoes") com 11 campos -- 235 + 11 = 246. ⚠️ A trava continua
         # valendo pelo que ela mede: campo criado ou removido por acidente.
         # O que mudou foi o numero, e mudou porque um formulario NASCEU.
-        assert banco.um("SELECT count(*) n FROM formulario_campo")["n"] == 246
+        #
+        # 🔵 27/11: `WHERE NOT interno`, e o numero FICA EM 246. O `COMPRAS`
+        # (migracao 122) trouxe 3 campos e a contagem crua passou a 249 --
+        # mas esta trava mede *"nao inventar - So ajustar"* nos formularios
+        # DO CLIENTE, e um formulario interno novo nao e campo criado por
+        # acidente num deles. Trocar 246 por 249 seria deixar a trava medir a
+        # soma de dois conjuntos diferentes, que e como ela deixaria de
+        # acusar o acidente que existe para acusar.
+        assert banco.um(
+            """SELECT count(*) n FROM formulario_campo c
+                JOIN formulario f ON f.id = c.formulario_id
+               WHERE NOT f.interno""")["n"] == 246
 
 
 def _carregador():

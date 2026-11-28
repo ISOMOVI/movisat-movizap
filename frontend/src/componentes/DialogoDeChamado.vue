@@ -29,6 +29,10 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { api, ErroDeApi } from '../api/cliente.js'
+/* 🚨 O HELPER COMPARTILHADO, e nao um `<a href>` cru: link cru nao leva o
+   cabecalho de sessao, e o 401 abria uma aba em branco EM SILENCIO. O
+   `util/baixar.js` existe porque o mesmo defeito apareceu em tres telas. */
+import { baixarArquivo } from '../util/baixar.js'
 import BalaoDeRecado from './BalaoDeRecado.vue'
 import { sessao } from '../estado/sessao.js'
 
@@ -104,6 +108,48 @@ const ABA_DO_CONTRATUAL = 'PNL_1.5'
 const URL_DO_FPSL_OPERACOES = 'https://fpsl.movisat.com.br/painel/operacoes'
 
 const observacoes = computed(() => ficha.value?.observacoes || [])
+
+/* 🔵 27/11, ele: *"quem ve usa tudo"* · *"pode subir tudo"*.
+
+   🚨 **A FICHA JA TRAZIA ISTO E A TELA NAO DESENHAVA.**
+   `chamado.anexos` sao os arquivos que a pessoa anexou NO FORMULARIO. Eles
+   chegavam ao servidor, ficavam em `formulario_arquivo`, apareciam na
+   `FRM_1.1` -- e no card nao havia sinal deles. Campo que o servidor devolve e
+   a tela nunca mostra e dado inalcancavel.
+
+   ⚠️ SAO DUAS PASTAS E DUAS ROTAS: `formulario_arquivo` (o envio) e
+   `os_observacao_arquivo` (o que alguem juntou numa observacao). Trocar uma
+   pela outra da 404. */
+const anexosDoFormulario = computed(() => ficha.value?.chamado?.anexos || [])
+const baixandoAnexo = ref(null)
+const erroDoAnexo = ref('')
+
+/* ⚠️ KB e MB com uma casa, porque o que a pessoa decide com este numero e
+   *"vale abrir agora ou espero o wi-fi"*. Byte cru nao responde isso. */
+function tamanhoLegivel(bytes) {
+  const n = Number(bytes) || 0
+  if (n < 1024) return `${n} B`
+  if (n < 1024 * 1024) return `${Math.round(n / 1024)} KB`
+  return `${(n / 1024 / 1024).toFixed(1)} MB`
+}
+
+async function baixarAnexoDoFormulario(anexo) {
+  const sid = ficha.value?.chamado?.solicitacao_id
+  if (!anexo || !sid) return
+  baixandoAnexo.value = anexo.id
+  erroDoAnexo.value = ''
+  try {
+    await baixarArquivo(`/api/solicitacoes/${sid}/arquivo/${anexo.id}`,
+                        anexo.nome_original || 'anexo')
+  } catch (e) {
+    /* 🚨 A FALHA E DITA. Esta pasta nao tem backup: 410 acontece, e a tela
+       precisa dizer *"o arquivo nao esta mais aqui"* em vez de nao fazer
+       nada. */
+    erroDoAnexo.value = e?.message || 'Nao consegui baixar este anexo.'
+  } finally {
+    baixandoAnexo.value = null
+  }
+}
 const etapas = computed(() => ficha.value?.etapas || [])
 const etapaAtual = computed(() => ficha.value?.card?.etapa_id ?? null)
 
@@ -365,21 +411,135 @@ function abrirConversa() {
   router.push(`/atendimento?numero=${encodeURIComponent(tel)}`)
 }
 
+/* 🔵 27/11, ele: *"ja pode colocar o campo de OBS nas mesmas regras dos demais
+   paineis - com anexo, historico"*.
+
+   🚨 **O QUE A MEDIÇÃO MOSTROU, E MUDOU O PEDIDO:** subir arquivo numa
+   observação estava escrito **só** na `PainelOperacao.vue`. Este diálogo --
+   o de Compras, Contratual, Financeiro e Pós-venda -- baixava anexo que já
+   existisse e **não tinha como anexar**. Então *"as mesmas regras dos demais
+   painéis"* era, até hoje, SEM anexo.
+
+   ⚠️ **ESTE ARQUIVO SERVE QUATRO TELAS DELE.** O caminho antigo -- salvar
+   observação sem anexo -- não muda em nada, e é a primeira coisa que o
+   `obs_anexo_no_dialogo_2711.teste.js` mede. Foi o erro de 25/11 (mexer na
+   tela compartilhada mudou quatro painéis sem ele pedir) que põe essa trava
+   aqui. */
+const anexoEscolhido = ref(null)
+
+function escolherAnexo(evento) {
+  anexoEscolhido.value = evento.target.files?.[0] || null
+  erroDoRecado.value = ''
+}
+
+function tirarAnexo() {
+  anexoEscolhido.value = null
+  /* ⚠️ Limpa o `<input type=file>` também: sem isto, escolher o MESMO arquivo
+     de novo não dispara `change` e a tela ficaria sem o anexo em silêncio. */
+  const campo = document.getElementById(`obs-anexo-${props.card.id}`)
+  if (campo) campo.value = ''
+}
+
+/* 🚨 `fetch` cru, e não `api.post`: arquivo vai por `FormData`, e o navegador
+   precisa montar o `Content-Type` com o boundary. Definir o cabeçalho na mão
+   quebra o upload EM SILÊNCIO, com o servidor recebendo corpo vazio. */
+async function subirAnexoDaObservacao(observacaoId, arquivo) {
+  const forma = new FormData()
+  forma.append('arquivo', arquivo)
+  const r = await fetch(
+    `/api/paineis/operacao/observacao/${observacaoId}/anexo`,
+    { method: 'POST',
+      headers: { Authorization: `Bearer ${localStorage.getItem('movizap.token')}` },
+      body: forma })
+  const texto = await r.text()
+  let corpo = null
+  try { corpo = JSON.parse(texto) } catch { corpo = null }
+  if (!r.ok) {
+    throw new Error((corpo && corpo.detail) || `Falha no anexo (${r.status}).`)
+  }
+  return corpo
+}
+
 async function salvarRecado() {
   const texto = (recado.value || '').trim()
+  const arquivo = anexoEscolhido.value
   const sid = ficha.value?.chamado?.solicitacao_id
-  if (!texto || !sid) return
+  /* 🔵 27/11 -- O DEFEITO QUE A KARLA ACHOU, e ele era SILÊNCIOSO.
+     Esta função lia **só** `ficha.chamado.solicitacao_id`. Num card de **OS** a
+     ficha não traz `chamado` nenhum -- o servidor só o monta quando o card tem
+     `solicitacao_id` --, então o `sid` vinha vazio e a função **retornava sem
+     fazer nada**: nenhum pedido, nenhuma mensagem, nenhum erro no console. O
+     botão Salvar parecia morto.
+     📏 Medido: o Financeiro tem **13 cards que são só OS** de 19, e o
+     Contratual tem **zero** -- é por isso que ela viu lá e ninguém viu aqui.
+     ⚠️ É ANTERIOR à entrega de hoje: o arquivo de antes tem o mesmo
+     `if (!texto || !sid) return`. */
+  const numeroOs = props.card?.numero_os
+    || ficha.value?.card?.numero_os || null
+  /* 🚨 SEM DONO NÃO SE MANDA: o CHECK `os_observacao_tem_um_dono` exige OS
+     **ou** chamado. Card sem os dois não deveria existir, e se existir a tela
+     não pode mandar um pedido que o banco vai recusar. */
+  if ((!texto && !arquivo) || (!sid && !numeroOs)) return
   enviandoRecado.value = true
   erroDoRecado.value = ''
   try {
-    const r = await api.post('/api/paineis/operacao/chamado/observacao',
-                             { solicitacao_id: sid, texto })
+    /* ⚠️ O anexo pende de uma observação, então ela vem primeiro. Sem texto,
+       um é inventado com o nome do arquivo -- a rota recusa texto vazio (422),
+       e anexo solto não se explica sozinho daqui a três meses. É a mesma frase
+       da Operação. */
+    const corpo = { texto: texto || `(anexo) ${arquivo.name}` }
+    /* 🚨 SÃO DUAS ROTAS, E A DIFERENÇA NÃO É ESTILO: a do chamado grava
+       `solicitacao_id`, a da OS grava `numero_os`. Mandar uma pela outra dá
+       recado sem dono, que o CHECK recusa. */
+    const r = sid
+      ? await api.post('/api/paineis/operacao/chamado/observacao',
+                       { ...corpo, solicitacao_id: sid })
+      : await api.post('/api/paineis/operacao/observacao',
+                       { ...corpo, numero_os: numeroOs })
+    /* 🚨 A LISTA VEM DA RESPOSTA DA ROTA, e isto é GARANTIA ANTIGA desta
+       tela: a observação aparece **sem recarregar a ficha**. Eu a troquei por
+       uma releitura ao por o anexo e o `painel_chamados_0511.teste.js` me
+       pegou -- entrega que muda comportamento garantido sem ele pedir é o
+       mesmo defeito da `M12`, pelo avesso. */
     ficha.value = { ...ficha.value, observacoes: r.observacoes || [] }
+
+    /* 🚨 AS DUAS RESPOSTAS TÊM FORMAS DIFERENTES: a do chamado devolve
+       `{id, observacoes}`; a da OS devolve `{numero_os, observacoes}`, **sem
+       `id`**. Então o id do recado novo é o da resposta, ou o `[0]` da lista.
+       ⚠️ E `[0]` É O NOVO: as duas consultas de `passagem` ordenam
+       `o.em DESC, o.id DESC` -- da mais nova para a mais velha. Eu havia
+       escrito aqui, hoje, que vinham da mais antiga para a mais nova; errado.
+       Quem inverte é o TEMPLATE, na hora de desenhar. */
+    const idDoRecado = r?.id ?? (r?.observacoes || [])[0]?.id ?? null
+
+    if (arquivo && idDoRecado) {
+      try {
+        await subirAnexoDaObservacao(idDoRecado, arquivo)
+      } catch (e) {
+        /* 🚨 A OBSERVAÇÃO JÁ ESTÁ GRAVADA, e a tela tem de dizer isso: sem a
+           primeira frase, quem lê o erro acha que nada foi salvo e escreve
+           tudo de novo. ⚠️ O arquivo não fica solto no disco -- a rota recusa
+           extensão e tamanho ANTES de escrever. */
+        erroDoRecado.value = 'A observação foi salva, mas o anexo não: '
+          + (e?.message || 'falha ao anexar.')
+        await carregarFicha()
+        emit('mudou')
+        return
+      }
+      /* ⚠️ E SÓ COM ANEXO SE RELÊ: os anexos de cada observação não vêm na
+         resposta da rota, só na ficha. Sem anexo, a releitura seria uma ida à
+         rede para não mudar nada -- e mataria a garantia de cima. */
+      await carregarFicha()
+    }
+
     recado.value = ''
+    anexoEscolhido.value = null
+    tirarAnexo()
     emit('mudou')
   } catch (e) {
     erroDoRecado.value = e instanceof ErroDeApi
-      ? e.message : 'Não deu para salvar a observação.'
+      ? e.message
+      : (e?.message || 'Não deu para salvar a observação.')
   } finally {
     enviandoRecado.value = false
   }
@@ -506,6 +666,28 @@ async function salvarRecado() {
             <p v-else class="nota pequeno">
               Este card não veio de formulário.
             </p>
+
+            <!-- 🔵 27/11: OS ANEXOS DO FORMULÁRIO.
+                 🚨 `v-if` na lista, e não um cabeçalho fixo: card sem anexo
+                 ganharia um título com nada embaixo, que é o que parece
+                 defeito -- a mesma régua da caixa "A OS no Harmonit" logo
+                 abaixo. -->
+            <div v-if="anexosDoFormulario.length" class="anexo__bloco">
+              <p class="anexo__titulo">Anexos do formulário</p>
+              <ul class="anexo__lista">
+                <li v-for="a in anexosDoFormulario" :key="a.id">
+                  <button class="anexo__baixar" type="button"
+                          :disabled="baixandoAnexo === a.id"
+                          @click="baixarAnexoDoFormulario(a)">
+                    <i class="bi bi-download" aria-hidden="true"></i>
+                    {{ a.nome_original || 'anexo' }}
+                    <span class="anexo__peso">{{ tamanhoLegivel(a.bytes) }}</span>
+                  </button>
+                </li>
+              </ul>
+              <p v-if="erroDoAnexo" class="aviso aviso--erro pequeno"
+                 role="alert">{{ erroDoAnexo }}</p>
+            </div>
           </section>
 
           <section class="modal__painel">
@@ -522,9 +704,32 @@ async function salvarRecado() {
               <textarea v-model="recado" rows="2" :disabled="enviandoRecado"
                         placeholder="o que a análise deste card precisa registrar"
                         aria-label="Escrever observação"></textarea>
+
+              <!-- 🔵 27/11: o anexo da observação, que até hoje só existia na
+                   Operação. 🚨 BOTÃO COM RÓTULO, não só ícone: `title` não é
+                   rótulo -- o balão do navegador demora cerca de um segundo e
+                   não existe em toque. -->
               <div class="modal__pe">
-                <button class="botao" type="button"
-                        :disabled="enviandoRecado || !recado.trim()"
+                <label class="botao botao--contorno obs__anexar"
+                       :class="{ 'botao--ocupado': enviandoRecado }">
+                  <i class="bi bi-paperclip" aria-hidden="true"></i>
+                  Anexar
+                  <input :id="`obs-anexo-${card.id}`" class="so-leitor"
+                         type="file" :disabled="enviandoRecado"
+                         @change="escolherAnexo" />
+                </label>
+
+                <span v-if="anexoEscolhido" class="obs__escolhido">
+                  {{ anexoEscolhido.name }}
+                  <button class="obs__tirar" type="button"
+                          :disabled="enviandoRecado"
+                          aria-label="Tirar o anexo escolhido"
+                          @click="tirarAnexo">✕</button>
+                </span>
+
+                <button class="botao obs__salvar" type="button"
+                        :disabled="enviandoRecado
+                                   || (!recado.trim() && !anexoEscolhido)"
                         @click="salvarRecado">
                   {{ enviandoRecado ? 'Salvando…' : 'Salvar' }}
                 </button>
@@ -831,6 +1036,57 @@ async function salvarRecado() {
 }
 .recados { list-style: none; margin: 0 0 var(--e-3); padding: 0;
            display: flex; flex-direction: column; gap: var(--e-2); }
+/* 🔵 27/11 -- os anexos do formulário no card aberto. 🚨 Toda classe composta
+   usada no template precisa de regra publicada, senão o navegador a ignora EM
+   SILÊNCIO: é a 12ª conferência do `npm run build`. */
+.anexo__bloco { margin-top: var(--e-3); }
+.anexo__titulo {
+  margin: 0 0 var(--e-2);
+  font-size: var(--txt-xs); font-weight: var(--peso-forte);
+  letter-spacing: .04em; text-transform: uppercase;
+  color: var(--texto-apagado);
+}
+.anexo__lista {
+  list-style: none; margin: 0; padding: 0;
+  display: flex; flex-wrap: wrap; gap: var(--e-2);
+}
+.anexo__baixar {
+  display: inline-flex; align-items: center; gap: var(--e-1);
+  max-width: 260px; padding: var(--e-1) var(--e-2);
+  font: inherit; font-size: var(--txt-sm);
+  color: var(--acento); background: var(--acento-suave);
+  border: var(--borda-fina) solid var(--acento-borda);
+  border-radius: var(--r-full);
+  cursor: pointer;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.anexo__baixar:hover:not(:disabled) { background: var(--superficie-2); }
+.anexo__baixar:disabled { color: var(--texto-fraco); cursor: progress; }
+.anexo__peso { flex-shrink: 0; font-size: var(--txt-xs); color: var(--texto-fraco); }
+
+/* 🔵 27/11 -- o anexo da observação. 🚨 Toda classe composta usada no
+   template precisa de regra publicada, senão o navegador a ignora EM SILÊNCIO
+   e o elemento sai sem forma: é a 12ª conferência do `npm run build`, e ela já
+   me pegou uma órfã hoje. */
+.obs__anexar { cursor: pointer; }
+.obs__escolhido {
+  display: inline-flex; align-items: center; gap: var(--e-1);
+  max-width: 220px; padding: 2px var(--e-2);
+  font-size: var(--txt-sm); color: var(--texto-fraco);
+  background: var(--superficie-2);
+  border: var(--borda-fina) solid var(--borda);
+  border-radius: var(--r-full);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.obs__tirar {
+  flex-shrink: 0; padding: 0 2px; border: 0; background: transparent;
+  color: var(--texto-fraco); font: inherit; line-height: 1; cursor: pointer;
+}
+.obs__tirar:hover:not(:disabled) { color: var(--erro); }
+/* ⚠️ Piso de largura porque o rótulo troca para *"Salvando…"*, que é mais
+   curto: sem ele o botão encolhe debaixo do dedo no instante do clique. */
+.obs__salvar { min-width: 10ch; }
+
 .modal__passagens {
   list-style: none; margin: 0; padding: 0;
   display: flex; flex-direction: column; gap: var(--e-2);

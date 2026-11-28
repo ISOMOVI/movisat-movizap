@@ -5906,13 +5906,25 @@ def pousar_os_na_etapa_nossa(
 
 @app.post("/api/paineis/operacao/observacao")
 def observar_o_card(dados: ObservacaoDoCard,
-                    usuario: dict = Depends(auth.requer_tela("PNL_1.1"))):
+                    usuario: dict = Depends(auth.get_usuario)):
     """A observação do painel sobre a OS — Bloco F, fase 1.
 
     🔵 *"observação do painel, com autor e hora, **no MoviZap**. Não vai para a
     `solucaoTecnica`"*. 🚨 Não se apaga e não se edita: reescrever recado é
     reescrever a história que a operação leu.
+
+    🔵 **27/11 — A QUARTA ROTA DA MESMA FAMÍLIA, e a Karla achou.** Ela exigia
+    `requer_tela("PNL_1.1")`, e quem relatou tem o **Financeiro**. 📏 Medido:
+    o `PNL_1.4` tem **13 cards que são só OS** (sem `solicitacao_id`) de 19, e
+    o Contratual tem **zero** -- é por isso que o defeito apareceu lá e ficou
+    invisível aqui. Agora a permissão é **a da aba do próprio card**, como no
+    `finalizar`, no `reabrir` e no `termo`.
+
+    ⚠️ E o 403 estava ESCONDIDO atrás de um silêncio da tela: o
+    `DialogoDeChamado` nem chegava a chamar esta rota em card de OS. Consertar
+    só a porta trocaria o silêncio por um 403; as duas camadas foram juntas.
     """
+    _exigir_qualquer_aba(_abas_da_os(dados.numero_os), usuario)
     passagem.observar(dados.numero_os, dados.texto,
                       atendente_id=usuario.get("id"))
     return {"numero_os": dados.numero_os,
@@ -6127,8 +6139,11 @@ def mudar_prioridade_do_card(
           status_code=201)
 async def anexar_na_observacao(
         observacao_id: int, arquivo: UploadFile = File(...),
-        usuario: dict = Depends(auth.requer_tela("PNL_1.1"))):
+        usuario: dict = Depends(auth.get_usuario)):
     """Sobe um anexo para um recado do card.
+
+    🔵 27/11: a permissão passou a ser **a da aba do card**, e não `PNL_1.1`
+    fixo — *"quem vê usa tudo"*. Ver `_aba_da_observacao`.
 
     🚨 A TELA RECEBE UM ID, NUNCA UM CAMINHO -- a mesma régua do anexo de
     e-mail: caminho vindo da tela faria `../../.env` virar anexo.
@@ -6137,6 +6152,7 @@ async def anexar_na_observacao(
     do projeto: o teto é 10 MB, e streaming aqui só acrescentaria caminho de
     erro sem resolver problema que exista.
     """
+    _exigir_aba_da_observacao(observacao_id, usuario)
     dados = await arquivo.read()
     return passagem.guardar_anexo(observacao_id, arquivo.filename, dados,
                                   arquivo.content_type)
@@ -6145,8 +6161,13 @@ async def anexar_na_observacao(
 @app.post("/api/paineis/operacao/observacao/{observacao_id}/apagar")
 def apagar_observacao_do_card(
         observacao_id: int,
-        usuario: dict = Depends(auth.requer_tela("PNL_1.1"))):
+        usuario: dict = Depends(auth.get_usuario)):
     """Apaga a observação, mantendo o log.
+
+    🔵 27/11: a permissão é **a da aba do card**, e não `PNL_1.1` fixo.
+    ⚠️ A decisão dele de 11/11 segue de pé e é a que esta rota aplica: quem
+    apaga são *"todos que tem acesso a visualização do painel"* — só que
+    *"o painel"* passou a querer dizer **o painel daquele card**.
 
     🔵 Decisão dele (11/11): quem pode apagar são *"todos que tem acesso a
     visualização do painel"* — por isso a permissão é **a da tela**, e não a do
@@ -6160,6 +6181,10 @@ def apagar_observacao_do_card(
     tela não precisar de uma segunda leitura e nunca receber conteúdo que não
     pode mostrar.
     """
+    # 🚨 O PORTÃO VEM ANTES DA ESCRITA. `apagar_observacao` já devolve de
+    # qual card era -- mas conferir depois seria apagar primeiro e recusar
+    # depois, que é recusa que não recusa nada.
+    _exigir_aba_da_observacao(observacao_id, usuario)
     r = passagem.apagar_observacao(observacao_id, usuario.get("id"))
     eu = usuario.get("id")
     resposta = {"ok": True, "id": r["id"]}
@@ -6173,8 +6198,12 @@ def apagar_observacao_do_card(
 
 @app.get("/api/paineis/operacao/anexo/{anexo_id}")
 def baixar_anexo_da_observacao(
-        anexo_id: int, usuario: dict = Depends(auth.requer_tela("PNL_1.1"))):
+        anexo_id: int, usuario: dict = Depends(auth.get_usuario)):
     """O arquivo de um recado.
+
+    🔵 27/11: a permissão é **a da aba do card**, e não `PNL_1.1` fixo.
+    ⚠️ O caminho é mais longo que nas outras duas: do anexo para a observação,
+    e só então para a aba.
 
     🚨 **410, NÃO 500, quando o arquivo sumiu do disco** -- e isso acontece:
     esta pasta **não tem backup**, como as outras duas de anexo. A linha no
@@ -6185,6 +6214,10 @@ def baixar_anexo_da_observacao(
     achado = passagem.anexo(anexo_id)
     if not achado:
         raise HTTPException(status_code=404, detail="Anexo não encontrado.")
+    # 🚨 O PORTAO DEPOIS DE SABER DE QUEM E O ANEXO, e nao antes: sem a
+    # observacao nao da para saber a aba. ⚠️ Anexo que nao existe continua
+    # 404 acima -- id de anexo nao conta de quem e o card.
+    _exigir_aba_da_observacao(achado["observacao_id"], usuario)
     # 🚨 ANEXO DE RECADO APAGADO NÃO SAI, a não ser para o owner -- a mesma
     # régua da lista, e sem isto o apagar seria de mentira (o id do anexo
     # esteve na tela de quem viu o recado antes).
@@ -6262,6 +6295,99 @@ class FinalizarChamado(BaseModel):
 class ObservacaoDoChamado(BaseModel):
     solicitacao_id: int
     texto: str
+
+
+def _abas_da_os(numero_os: int) -> list[str]:
+    """TODAS as abas onde aquela OS tem card -- e são mais de uma às vezes.
+
+    🔵 27/11, ele: *"quem vê usa tudo"*.
+
+    🚨 **PLURAL, E A MEDIÇÃO ME OBRIGOU.** Eu escrevi isto no singular, com
+    `ORDER BY c.id LIMIT 1`, e a minha própria trava caiu: 📏 as OS **17120** e
+    **17141** têm card na **Operação E no Financeiro ao mesmo tempo** (as
+    reendereçadas da migração 106). O `LIMIT 1` escolhia a mais antiga, e quem
+    tinha a outra aba tomava 403 num card que está no painel dele.
+    ⚠️ A observação pertence à **OS**, não a um dos cards dela. Então qualquer
+    aba onde a OS aparece autoriza.
+    📏 E solicitação **não** atravessa aba: 0 casos medidos. Só OS atravessa.
+
+    🚨 **O RECUO PARA `PNL_1.1` É MEDIÇÃO, NÃO PREGUIÇA**: há OS com recado e
+    **sem linha em `pipeline_card`** -- a OS existe no Harmonit e o card nunca
+    foi semeado. Devolver lista vazia faria o portão responder 403 **para o
+    owner também**, e a Operação perderia o recado que ela sempre pôde
+    escrever. OS sem card vive na Operação.
+    """
+    linhas = banco.varios(
+        """SELECT DISTINCT a.codigo_tela
+             FROM pipeline_card c
+             JOIN painel_aba a ON a.id = c.aba_id
+            WHERE c.numero_os = %s
+            ORDER BY a.codigo_tela""", (int(numero_os),))
+    return [l["codigo_tela"] for l in linhas] or ["PNL_1.1"]
+
+
+def _exigir_qualquer_aba(codigos: list[str], usuario: dict) -> None:
+    """403 a não ser que a pessoa tenha PELO MENOS UMA das abas.
+
+    ⚠️ Lista vazia é 403, e é o lado seguro: *"não achei aba"* nunca vira
+    *"deixa passar"*.
+    """
+    for codigo in codigos or []:
+        if codigo and registro_telas.pode_acessar(usuario, codigo):
+            return
+    raise HTTPException(status_code=403,
+                        detail="Sem permissão para este card.")
+
+
+def _abas_da_observacao(observacao_id: int) -> list[str]:
+    """O `codigo_tela` da aba do card a que a observação pertence.
+
+    🔵 27/11, ele: *"permissões dessa tela devem ficar com as mesmas das demais
+    -- quem vê usa tudo"*.
+
+    🚨 **POR QUE ISTO EXISTE.** Em 05/11 as rotas de card passaram a conferir a
+    aba do PRÓPRIO card em vez de `PNL_1.1` fixo, e o conserto pegou as de
+    escrever — deixando três para trás: anexar, apagar e baixar o anexo. Quem
+    tinha Contratual, Financeiro ou Pós-venda **escrevia** observação e tomava
+    **403** nos outros três gestos. 📏 As observações 1718 e 1912 são de cards
+    do Contratual e provam que o caso não era hipotético; ficava invisível
+    porque owner passa por tudo.
+
+    🚨 **O RECUO PARA `PNL_1.1` NÃO É PREGUIÇA, É MEDIÇÃO.** Em 27/11 as
+    observações recentes de OS (90990, 90996, 17151) **não têm linha em
+    `pipeline_card`** — a OS existe no Harmonit e o card nunca foi semeado.
+    Devolver `None` nesses casos faria `_exigir_aba` responder 403 **para o
+    owner também**, e anexar na Operação pararia de funcionar. OS sem card
+    vive na Operação, e é para lá que ela recua.
+
+    ⚠️ Observação que não existe devolve `None`, e o portão vira isso em 403 —
+    nunca 404: dizer *"não existe"* a quem não pode ver já conta que existe.
+    """
+    linha = banco.um(
+        "SELECT numero_os, solicitacao_id FROM os_observacao WHERE id = %s",
+        (int(observacao_id),))
+    if not linha:
+        return []
+    if linha["solicitacao_id"]:
+        # 📏 Solicitação não atravessa aba -- 0 casos medidos em 27/11 --,
+        # então aqui a lista tem no máximo um item.
+        uma = (pipeline.aba_da_solicitacao(linha["solicitacao_id"])
+               or {}).get("codigo_tela")
+        return [uma] if uma else []
+    if linha["numero_os"]:
+        # ⚠️ Mesma resolução da rota de observar, e por isso é UMA função: duas
+        # cópias da regra do recuo divergiriam na primeira mudança.
+        return _abas_da_os(linha["numero_os"])
+    return []
+
+
+def _exigir_aba_da_observacao(observacao_id: int, usuario: dict) -> None:
+    """403 se quem pede não tem NENHUMA das abas daquela observação.
+
+    ⚠️ Plural porque a OS pode estar em duas abas ao mesmo tempo -- ver
+    `_abas_da_os`.
+    """
+    _exigir_qualquer_aba(_abas_da_observacao(observacao_id), usuario)
 
 
 def _exigir_aba(codigo_tela: str | None, usuario: dict) -> None:
@@ -6751,13 +6877,32 @@ def _publico_do_formulario(d: dict, ip: str | None) -> dict:
     }
 
 
-@app.get("/api/publico/formulario/{slug}")
-def formulario_publico(slug: str, request: Request):
+def _definicao_publica(slug: str) -> dict:
+    """A definição que a INTERNET pode ver. 🔵 27/11.
+
+    🚨 **A RECUSA DO FORMULÁRIO INTERNO É A MESMA DE SLUG INEXISTENTE**, e é de
+    propósito: recusa diferente conta de fora que o formulário existe. Quem
+    varresse `/f/<palpite>` separaria *"não existe"* de *"existe e é interno"*
+    só pela resposta.
+
+    ⚠️ As duas rotas públicas passam por aqui para a frase ter **um** dono. Até
+    27/11 ela estava escrita duas vezes, e eu mesmo citei no plano a frase da
+    rota de CONVITE (*"Este formulário não está publicado agora."*) achando que
+    era desta -- texto repetido é texto que diverge.
+    """
     try:
         d = formularios_mod.definicao(slug)
     except formularios_mod.FormularioNaoExiste:
         raise HTTPException(status_code=404, detail="Formulário não encontrado.")
-    return _publico_do_formulario(d, ratelimit.ip_do_cliente(request))
+    if d.get("interno"):
+        raise HTTPException(status_code=404, detail="Formulário não encontrado.")
+    return d
+
+
+@app.get("/api/publico/formulario/{slug}")
+def formulario_publico(slug: str, request: Request):
+    return _publico_do_formulario(_definicao_publica(slug),
+                                  ratelimit.ip_do_cliente(request))
 
 
 @app.post("/api/publico/formulario/{slug}/cliente")
@@ -6869,10 +7014,9 @@ async def enviar_formulario_publico(
     import json
 
     ip = ratelimit.ip_do_cliente(request)
-    try:
-        d = formularios_mod.definicao(slug)
-    except formularios_mod.FormularioNaoExiste:
-        raise HTTPException(status_code=404, detail="Formulário não encontrado.")
+    # 🚨 A PORTA DE ESCRITA TAMBÉM, e é a que importa: um GET recusado com o
+    # POST aberto deixaria a trava do `interno` valendo nada.
+    d = _definicao_publica(slug)
 
     # 🚨 A ISCA RECUSA EM SILÊNCIO, e responde o mesmo "recebemos" de sempre:
     # robô que toma erro aprende a tentar de outro jeito. Nada é gravado.
@@ -6987,6 +7131,175 @@ async def enviar_formulario_publico(
     return {"ok": True, "id": r["id"], "mensagem": r["mensagem"]}
 
 
+# ---- o caminho INTERNO do formulário (27/11) ----
+#
+# 🔵 Dele, 27/11: o painel de Compras *"sera somente interno"*, e o envio
+# *"talvez um botao de acao no chat interno? para forms internos igual no chat
+# com clientes"*.
+#
+# 🚨 POR QUE DUAS ROTAS NOVAS, E NÃO UM PARÂMETRO NA PÚBLICA. A pública é
+# protegida por isca, token de abertura, desafio e rate-limit -- e por NADA que
+# exija login. Um painel "somente interno" alimentado por ela seria interno só
+# por não ser divulgado, e `M7` diz que trava mede uso, não palavra.
+#
+# ⚠️ O que estas duas fazem DIFERENTE da pública, e só isso: exigem a tela
+# `ATD_6.1`; dispensam isca, abertura e desafio (há login); aceitam **só**
+# formulário `interno`; injetam o solicitante; e dão autoria ao card. A cadeia
+# de gravação é a MESMA, na mesma ordem.
+
+
+@app.get("/api/interno/formularios")
+def formularios_internos(usuario: dict = Depends(auth.requer_tela("ATD_6.1"))):
+    """A lista do botão **Solicitar** do chat interno.
+
+    ⚠️ `ATD_6.1` e não `FRM_1.1`: a tela dos formulários é `owner`, e pedir
+    compra não é tarefa de owner. Pendurar esta lista na permissão da `FRM_1.1`
+    seria a porta trancada de sempre -- tela certa, permissão de outro.
+    """
+    return formularios_mod.internos()
+
+
+@app.get("/api/interno/formulario/{slug}")
+def definicao_do_formulario_interno(
+        slug: str, usuario: dict = Depends(auth.requer_tela("ATD_6.1"))):
+    """A definição que o modal do chat interno desenha.
+
+    🚨 **NÃO SERVE `/api/formularios/{slug}/definicao`**, que já existe: aquela
+    pede `FRM_1.1`, que é **owner**. Quem pede compra não é owner, e pendurar
+    o modal naquela rota seria a porta trancada de sempre -- tela certa,
+    permissão de outro ([[feedback_permissao_esconde_tela_nova]]).
+
+    ⚠️ E ela recusa formulário que não é `interno` com a mesma frase das
+    outras: esta porta é a do caminho interno, inteira, e não meio caminho.
+    """
+    try:
+        d = formularios_mod.definicao(slug)
+    except formularios_mod.FormularioNaoExiste:
+        raise HTTPException(status_code=404, detail="Formulário não encontrado.")
+    if not d.get("interno"):
+        raise HTTPException(status_code=404, detail="Formulário não encontrado.")
+    # ⚠️ A MESMA FORMA DA PÁGINA PÚBLICA, menos a `abertura` e o `desafio`:
+    # aqui há login, e os dois existem para separar gente de robô anônimo.
+    # 🚨 E **sem** o `id` do formulário nem o `bitrix_id`: quem tem o chat
+    # interno não precisa deles, e campo a mais é campo a mais exposto.
+    return {
+        "slug": d["slug"], "titulo": d["titulo"], "setor": d["setor"],
+        "botao": d["botao"], "descricao": d["descricao"],
+        "formato": d["formato"], "etapas": d["etapas"],
+        "busca_cliente": d["busca_cliente"],
+        "campos": [{"nome": c["nome"], "rotulo": c["rotulo"], "tipo": c["tipo"],
+                    "obrigatorio": c["obrigatorio"], "multiplo": c["multiplo"],
+                    "visivel": c["visivel"], "opcoes": c["opcoes"],
+                    "ajuda": c["ajuda"], "validacao": c.get("validacao"),
+                    "fantasma": c.get("fantasma"), "linhas": c.get("linhas"),
+                    "fonte": c.get("fonte")}
+                   for c in d["campos"]],
+        "regras": [{"lista": r["lista"]} for r in d["regras"]],
+        # 🚨 O SOLICITANTE VEM DAQUI, JÁ PREENCHIDO, e a tela o mostra
+        # TRAVADO. ⚠️ Mas quem manda é a rota de envio, que o injeta de novo a
+        # partir da sessão: este campo é conveniência da tela, nunca a fonte.
+        "solicitante": usuario["nome"],
+    }
+
+
+@app.post("/api/interno/formulario/{slug}", status_code=201)
+async def enviar_formulario_interno(
+        slug: str,
+        valores: str = Form("{}"),
+        campos: list[str] = Form(default=[]),
+        arquivos: list[UploadFile] = File(default=[]),
+        usuario: dict = Depends(auth.requer_tela("ATD_6.1"))):
+    """O envio autenticado. A validação continua sendo a do SERVIDOR.
+
+    🚨 Login diz QUEM, não diz que o dado presta. Em 22/10 o Bitrix aceitou
+    `values=[]` e criou o registro 15620 porque lá a validação toda era no
+    navegador -- e navegador é do cliente, logado ou não.
+    """
+    import json
+
+    try:
+        d = formularios_mod.definicao(slug)
+    except formularios_mod.FormularioNaoExiste:
+        raise HTTPException(status_code=404, detail="Formulário não encontrado.")
+    # 🚨 A PORTA INTERNA SERVE SÓ FORMULÁRIO INTERNO, e não é simetria
+    # decorativa: sem esta recusa, quem tem o chat interno enviaria por aqui um
+    # formulário de CLIENTE -- sem isca, sem desafio, sem rate-limit, e com o
+    # nome dele injetado no lugar do nome do cliente.
+    if not d.get("interno"):
+        raise HTTPException(status_code=404, detail="Formulário não encontrado.")
+
+    try:
+        enviados = json.loads(valores or "{}")
+    except ValueError:
+        raise operacao.DadoInvalido("Não entendi os dados enviados.")
+    if not isinstance(enviados, dict):
+        raise operacao.DadoInvalido("Não entendi os dados enviados.")
+
+    # 🚨 O SOLICITANTE É INJETADO AQUI, DEPOIS DE LER O ENVIO E ANTES DO
+    # `validar` -- e sobrescreve o que o navegador mandou.
+    #
+    # `CONTACT_NAME` é o TÍTULO do card fechado (`paineis._nome_do_chamado` lê
+    # só `COMPANY_TITLE` e `CONTACT_NAME`). Se a rota confiasse na tela,
+    # bastaria abrir o inspetor para registrar outra pessoa como quem pediu a
+    # compra, e o card mostraria o nome dela.
+    #
+    # ⚠️ Só quando o formulário TEM esse campo: pôr chave que a definição não
+    # conhece faria o `validar` descartá-la e gravaria nada -- mas um dia pode
+    # existir formulário interno sem solicitante, e a rota não tem de supor.
+    if any(c["nome"] == "CONTACT_NAME" for c in d["campos"]):
+        enviados["CONTACT_NAME"] = usuario["nome"]
+
+    de_arquivo = {c["nome"] for c in d["campos"] if c["tipo"] == "file"}
+    guardados: list[dict] = []
+    por_campo: dict = {}
+    total = 0
+    for i, enviado in enumerate(arquivos or []):
+        campo = campos[i] if i < len(campos) else ""
+        if campo not in de_arquivo:
+            raise operacao.DadoInvalido("Anexo em campo que não aceita arquivo.")
+        dados = await enviado.read()
+        total += len(dados)
+        if total > formularios_mod.TETO_ENVIO:
+            raise operacao.DadoInvalido(
+                f"Os anexos somam mais de "
+                f"{formularios_mod.TETO_ENVIO // (1024 * 1024)} MB.")
+        guardado = formularios_mod.guardar_arquivo(
+            enviado.filename or "arquivo", dados)
+        guardado["campo"] = campo
+        guardado["mime"] = enviado.content_type
+        guardados.append(guardado)
+        por_campo.setdefault(campo, []).append(guardado)
+
+    limpo = formularios_mod.validar(d, enviados, por_campo)
+    r = formularios_mod.registrar(d, limpo, guardados, ip=None)
+
+    # 🚨 A MESMA ORDEM DELIBERADA DA ROTA PÚBLICA: gravar primeiro, card
+    # depois, e o card NUNCA derruba o envio. O pior caso vira *"está no banco
+    # e não aparece na coluna"*, e nunca *"leu recebemos e nada foi gravado"*.
+    card = None
+    try:
+        destino = formularios_mod.etapa_de_destino(d["slug"])
+        if destino:
+            # ⚠️ `cliente_id=None`: Compras não tem cliente, tem solicitante.
+            # ⚠️ E `atendente_id` É QUEM CLICOU -- a rota pública manda `None`
+            # porque não há quem. É em `pipeline_card.criado_por` que essa
+            # autoria mora; `formulario_solicitacao` não tem coluna de autor
+            # (medido em 27/11), e inventar uma guardaria o mesmo fato 2x.
+            card = pipeline.criar(destino["aba_id"], destino["id"],
+                                  solicitacao_id=r["id"],
+                                  cliente_id=None,
+                                  atendente_id=usuario["id"])
+    except Exception:  # noqa: BLE001 -- ver a advertência acima
+        log.exception("solicitacao interna %s gravada e o card estourou",
+                      r["id"])
+
+    # ⚠️ Devolve QUAL CARD NASCEU E EM QUE PAINEL: o modal diz isso à pessoa,
+    # senão ela envia e não tem como saber se a sugestão chegou a algum lugar.
+    return {"ok": True, "id": r["id"], "mensagem": r["mensagem"],
+            "card_id": (card or {}).get("id"),
+            "painel": d.get("painel")}
+
+
 # ---- o painel (FRM_1.1) ----
 
 @app.get("/api/formularios")
@@ -7056,9 +7369,22 @@ def mudar_estado_da_solicitacao(solicitacao_id: int, dados: EstadoDaSolicitacao,
 
 @app.get("/api/solicitacoes/{solicitacao_id}/arquivo/{arquivo_id}")
 def baixar_anexo_da_solicitacao(solicitacao_id: int, arquivo_id: int,
-                                usuario: dict = Depends(auth.requer_tela("FRM_1.1"))):
+                                usuario: dict = Depends(auth.get_usuario)):
     """🚨 O HOST PÚBLICO NUNCA SERVE ANEXO -- quem envia é a internet, quem lê
-    é a casa. E o caminho vem do BANCO, nunca da URL."""
+    é a casa. E o caminho vem do BANCO, nunca da URL.
+
+    🔵 27/11, ele: *"quem vê usa tudo"*. Até hoje esta rota exigia `FRM_1.1`,
+    que é **owner** -- então mostrar o anexo no card daria 403 a quem tem o
+    painel, a porta trancada de sempre: tela certa, permissão de outro.
+
+    🚨 **DUAS PORTAS, E NENHUMA FECHOU.** Vale `FRM_1.1` (quem já entrava
+    continua entrando) **ou** a tela da aba do card daquela solicitação.
+    ⚠️ Solicitação que nunca virou card não tem aba: aí a única porta continua
+    sendo a `FRM_1.1`, e "não achei aba" **não** vira "deixa passar".
+    """
+    if not registro_telas.pode_acessar(usuario, "FRM_1.1"):
+        _exigir_aba((pipeline.aba_da_solicitacao(solicitacao_id) or {}).get(
+            "codigo_tela"), usuario)
     r = formularios_mod.arquivo(solicitacao_id, arquivo_id)
     if not r:
         raise HTTPException(status_code=404, detail="Anexo não encontrado.")

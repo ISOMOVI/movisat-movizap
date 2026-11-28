@@ -525,6 +525,19 @@ def cards_da_aba(aba_id: int, teto: int = 200) -> list[dict]:
                             AND o.solicitacao_id = c.solicitacao_id)
                            OR (c.numero_os IS NOT NULL
                                AND o.numero_os = c.numero_os))) AS observacoes,
+                  -- 🔵 27/11: OS ANEXOS DO FORMULARIO. 🚨 O
+                  -- `_card_do_chamado` devolvia `"anexos": 0` FIXO, enquanto os
+                  -- dois construtores de card mais antigos ja contavam de
+                  -- `formulario_arquivo`. 📏 Medido: o card 4360 (Contratual)
+                  -- tem 1 anexo e o card dizia 0; o 4134 tem 2. Nos quatro
+                  -- paineis que usam este quadro a pilula "N anexo(s)" nunca
+                  -- aparecia, e o orcamento que o cliente anexou ficava
+                  -- invisivel.
+                  -- ⚠️ So por solicitacao: anexo de formulario pende da
+                  -- SOLICITACAO, e card de OS nao tem nenhuma.
+                  (SELECT count(*) FROM formulario_arquivo x
+                    WHERE c.solicitacao_id IS NOT NULL
+                      AND x.solicitacao_id = c.solicitacao_id) AS anexos,
                   -- 🚨 QUANDO A ETAPA ATUAL COMEÇOU, e é o que faz o contador
                   -- do card parar de dizer "não medido". O dado sempre
                   -- existiu: a `pipeline_passagem` ganha linha na CRIAÇÃO

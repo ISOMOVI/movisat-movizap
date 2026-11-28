@@ -19,6 +19,11 @@ import { marcar } from '../util/destaque.js'
 import { reagirOtimista, acertosForaDaTela } from '../util/reacao_chat.js'
 import { corDoEstado, rotuloDoEstado, tempoNoEstado } from '../util/estado.js'
 import BotaoMensagensRapidas from '../componentes/BotaoMensagensRapidas.vue'
+// 🔵 27/11, ele: *"talvez um botao de acao no chat interno? para forms
+// internos igual no chat com clientes"*. 🚨 Componente NOVO, e nao uma
+// mudanca no `BotaoFormulario.vue` da Caixa: aquele depende de
+// `conversaId` e das rotas de conversa, e o chat interno tem SALA.
+import BotaoFormularioInterno from '../componentes/BotaoFormularioInterno.vue'
 
 const salas = ref([])
 const contatos = ref([])
@@ -1798,6 +1803,12 @@ function quando(iso) {
               </div>
 
               <BotaoMensagensRapidas onde="interno" @inserir="inserirNoTexto" />
+
+              <!-- 🔵 27/11: o botao Solicitar, ao lado dos vizinhos e com
+                   RoTULO visivel, como eles. 🚨 Ele NAO manda mensagem:
+                   depois do envio escreve a linha no campo, e quem manda
+                   e a pessoa -- a mesma regra dos dois botoes ao lado. -->
+              <BotaoFormularioInterno @inserir="inserirNoTexto" />
 
               <!-- 🚨 BOTÃO COM RÓTULO, não só ícone. `title` não é rótulo: o
                    balão do navegador demora cerca de um segundo e não existe

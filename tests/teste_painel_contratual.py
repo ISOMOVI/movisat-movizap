@@ -198,14 +198,23 @@ def teste_sem_login_e_401(cliente):
 # ============================================================================
 # OS CINCO PAINÉIS, JUNTOS
 # ============================================================================
-def teste_os_quatro_paineis_do_vocabulario_existem_agora():
+def teste_os_cinco_paineis_do_vocabulario_existem_agora():
     """🚨 O `paineis.PAINEIS` declarava quatro desde 22/10 e três não tinham
     tela. Com 096 e 097, os quatro têm. ⚠️ `COM_TELA` continua sendo só
     `operacao` de propósito: ele governa o `quadro()`, que fala com o Harmonit
     -- e os três novos passam pelo `quadro_da_aba`, que não fala."""
     abas = {r["painel"] for r in banco.varios(
         "SELECT DISTINCT painel FROM painel_aba WHERE ativo")}
-    assert abas == {"operacao", "pos_venda", "contratual", "financeiro"}
+    # 🔵 27/11: entrou `compras` (migração 122, `PNL_1.7`).
+    # 🚨 E ESTA TRAVA FOI A QUE ME CORRIGIU. Eu havia concluído que
+    # `paineis.PAINEIS` não precisava de `'compras'`, porque o
+    # `quadro_da_aba` monta sem ele -- e monta mesmo. O que eu não vi é que a
+    # igualdade abaixo é o que faz deste dicionário o VOCABULÁRIO declarado:
+    # painel ativo no banco e ausente dele é divergência, e é justamente isso
+    # que a linha pega. ⚠️ O teste mudou de NOME junto com o número, porque
+    # deixá-lo chamando-se "os quatro" seria o nome mentindo.
+    assert abas == {"operacao", "pos_venda", "contratual", "financeiro",
+                    "compras"}
     assert set(paineis.PAINEIS) == abas
 
 
@@ -219,8 +228,12 @@ def teste_o_contratual_aparece_na_aba_de_permissao_sem_uma_linha_de_codigo():
     # (*"Serviço dos técnicos"*). ⚠️ UMA ENTRADA POR ABA porque a
     # permissão é campo da entrada -- 🔵 *"a Karla tera permissao para ver
     # o 'Financeiro' e todas as abas. A Erika, apenas a aba 3"*.
+    # 🔵 27/11: entrou a `PNL_1.7`, Compras -- e OUTRA VEZ sem uma linha de
+    # código na `CFG_15.1`: a lista sai do REGISTRO, e Compras nasce lá
+    # porque `grupo_da(t) == "Painéis"`. 🔵 Ele, no mesmo dia: *"inserir na
+    # tela de permissoes de acesso e depois eu defino quem verá"*.
     assert codigos == ["PNL_1.1", "PNL_1.2", "PNL_1.3", "PNL_1.4",
-                       "PNL_1.5", "PNL_1.6"]
+                       "PNL_1.5", "PNL_1.6", "PNL_1.7"]
     contratual = [t for t in grade["telas"] if t["codigo"] == CODIGO][0]
     assert contratual["aba_titulo"] == "Contratual"
     donos = [p for p in grade["pessoas"] if p["owner"]]
@@ -236,14 +249,19 @@ def teste_os_cinco_paineis_tem_item_de_menu_proprio_para_o_owner():
     # Financeiro, *"Serviço dos técnicos"*. São SEIS
     # entradas de menu agora, e uma por ABA porque a
     # permissão é campo da entrada.
-    assert len(pnl) == 6
+    # 🔵 27/11: SETE entradas -- entrou a `PNL_1.7` (Compras).
+    assert len(pnl) == 7
     sem_aba_de = [t["codigo"] for t in pnl if not t["aba_de"]]
     # 🚨 A `PNL_1.6` NÃO entra aqui, e eu errei isso primeiro: ela é a
     # SEGUNDA aba do Financeiro, então leva `aba_de: PNL_1.4` -- 🔵 *"só
     # aba principal no menu. As demais são dentro dela já"*. Sem o
     # campo, o Financeiro ganharia dois itens de menu, que é o que ele
     # mandou não fazer em 05/11.
-    assert sem_aba_de == ["PNL_1.1", "PNL_1.2", "PNL_1.4", "PNL_1.5"]
+    # 🔵 27/11: CINCO itens de menu -- Compras entra como item porque não
+    # tem `aba_de`. As duas sem item continuam sendo a `PNL_1.3` (dentro do
+    # Pós-venda) e a `PNL_1.6` (dentro do Financeiro).
+    assert sem_aba_de == ["PNL_1.1", "PNL_1.2", "PNL_1.4", "PNL_1.5",
+                          "PNL_1.7"]
     # 🚨 A `PNL_1.3` é a única com `aba_de`, e é a de dentro do Pós-venda.
     # 🔵 18/11: passaram a ser DUAS as telas de painel com `aba_de` -- a
     # `PNL_1.3` (aba 2 do Pós-venda) e a `PNL_1.6` (aba 2 do Financeiro,

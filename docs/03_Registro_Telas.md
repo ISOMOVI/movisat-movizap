@@ -101,6 +101,7 @@ aparecem todos.
 | `PNL_1.4` | Financeiro | `/paineis/financeiro` | `owner` | 1 |
 | `PNL_1.5` | Contratual | `/paineis/contratual` | `owner` | 1 |
 | `PNL_1.6` | Serviço dos técnicos | `/paineis/servico-dos-tecnicos` | `owner` | 1 |
+| `PNL_1.7` | Compras | `/paineis/compras` | `owner` | 1 |
 
 ### 🚨 `PNL_1.1` mudou de natureza em 29/10 — o card é a OS
 
@@ -290,6 +291,7 @@ O campo **`icone`** deste registro é o que o menu desenha, e ele é **a fonte
 | `PNL_1.6` Serviço dos técnicos | `bi-cash-coin` | menu (grupo Painéis) |
 | `PNL_1.2` Pós-venda | `bi-clipboard-check` | menu (grupo Painéis) |
 | `PNL_1.3` Pós-venda | `bi-clipboard-check` | **sem item** — tem `aba_de` |
+| `PNL_1.7` Compras | `bi-cart` | menu (grupo Painéis) |
 | `CAD_1.1` Clientes | `bi-building` | menu |
 | `CAD_1.2` Contatos | `bi-person-lines-fill` | menu |
 | `CAD_2.1` Atendentes | `bi-people` | menu |

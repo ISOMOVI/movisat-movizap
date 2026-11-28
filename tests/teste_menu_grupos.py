@@ -105,8 +105,12 @@ class TestDeclaracaoDosGrupos:
         # quatro paineis do `paineis.PAINEIS` passaram a ter tela.
         # 🔵 18/11: a `PNL_1.6`, segunda aba do Financeiro. 🚨 Uma entrada
         # por ABA porque a permissão é campo da entrada.
+        # 🔵 27/11: a `PNL_1.7`, Compras -- *"sem vinculo de OS somente por
+        # formularios"* e *"sera somente interno"*. 🚨 SEM `aba_de`: ele
+        # escolheu item próprio no menu, porque Compras não é desdobramento de
+        # painel nenhum.
         assert dentro == ["PNL_1.1", "PNL_1.2", "PNL_1.3", "PNL_1.4",
-                          "PNL_1.5", "PNL_1.6"]
+                          "PNL_1.5", "PNL_1.6", "PNL_1.7"]
         # 🚨 MAS O MENU DESENHA DOIS ITENS, E NAO TRES, e e correcao dele no
         # mesmo dia: *"so aba principal no menu. As demais sao dentro dela
         # ja"*. A `PNL_1.3` leva `aba_de`, e o `MenuLateral` pula toda tela
@@ -116,10 +120,14 @@ class TestDeclaracaoDosGrupos:
         # 🔵 06/11: QUATRO itens, e cinco telas -- a `PNL_1.3` continua
         # sendo a unica com `aba_de`, porque e a aba de dentro do Pos-venda.
         # O Financeiro e o Contratual sao paineis proprios, com item proprio.
+        # 🔵 27/11: CINCO itens, e sete telas -- Compras entra como item
+        # porque não tem `aba_de`; as duas sem item continuam sendo a
+        # `PNL_1.3` (dentro do Pós-venda) e a `PNL_1.6` (dentro do Financeiro).
         assert ([t["codigo"] for t in itens]
-                == ["PNL_1.1", "PNL_1.2", "PNL_1.4", "PNL_1.5"])
+                == ["PNL_1.1", "PNL_1.2", "PNL_1.4", "PNL_1.5", "PNL_1.7"])
         assert ([t["titulo"] for t in itens]
-                == ["Operação", "Pós-venda", "Financeiro", "Contratual"])
+                == ["Operação", "Pós-venda", "Financeiro", "Contratual",
+                    "Compras"])
 
 
 class TestGrupoNaoMexeEmPermissao:

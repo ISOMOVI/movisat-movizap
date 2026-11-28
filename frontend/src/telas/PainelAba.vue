@@ -300,7 +300,34 @@ async function soltarNaColuna(coluna) {
            06/11. -->
       <div class="painel__identidade">
         <h1 class="painel__titulo">{{ tituloDoPainel }}</h1>
-        <AjudaDaTela>
+        <!-- 🔵 27/11, ele: *"Sim, texto por painel"*.
+             🚨 **O `M12` COBROU AQUI: varrer o que a tela diz de si.** Este
+             balão é o MESMO nas cinco telas que esta `PainelAba` serve, e
+             prometia *"a ficha, os recados e o checklist"*. Em Compras o
+             checklist **não existe** -- aquelas rotas são chaveadas por
+             `numero_os` + `situacao_id`, e card de solicitação não tem OS. A
+             tela prometia um recurso impossível naquele painel.
+             📏 E nenhum teste prendia este texto (0 ocorrências de "Arraste o
+             card" em `tests/` e nos `*.teste.js`), que é por isso que ele pôde
+             apodrecer. Agora prende: `ajuda_por_painel_2711.teste.js`.
+
+             🚨 **DOIS BLOCOS DE MARCAÇÃO, E NÃO UM MAPA DE TEXTO**, e é
+             escolha: assim o recado dos quatro painéis antigos continua sendo
+             o MESMO NÓ, palavra por palavra e com os mesmos `<strong>`. Um
+             mapa de strings perderia a marcação ou pediria `v-html`, e trocar
+             o texto deles por uma variável é exatamente o tipo de mexida que
+             em 25/11 mudou quatro painéis dele sem pedir.
+             ⚠️ `codigo` já existe neste arquivo (`rota.meta.aba`) -- não entra
+             prop nova, e o roteador não ganha cópia de texto de tela. -->
+        <AjudaDaTela v-if="codigo === 'PNL_1.7'">
+          As <strong>sugestões de compra</strong> que chegam pelo botão
+          <strong>Solicitar</strong> do chat interno — <strong>sem OS</strong>,
+          e por isso o card não vai para o ERP. <strong>Arraste o card</strong>
+          para mudar de coluna: isso grava no nosso banco e registra quem fez.
+          Clique nele para ver a justificativa, o valor estimado, os anexos e
+          as observações.
+        </AjudaDaTela>
+        <AjudaDaTela v-else>
           Os cards deste painel em colunas, pelas <strong>etapas
           nossas</strong> — as que a Movisat definiu, e não as situações do
           Harmonit. <strong>Arraste o card</strong> para mudar de etapa: isso

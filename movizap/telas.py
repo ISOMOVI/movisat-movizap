@@ -305,6 +305,38 @@ TELAS = [
         "fase": 1,
     },
     {
+        # 🔵 27/11, dele: *"proponha um novo de compras, sem vinculo de OS
+        # somente por formularios e controle de compras, nao precisa propor
+        # colunas alem da primeira: nova solicitacoes"*, e depois *"sera
+        # somente interno"*.
+        #
+        # 🚨 ITEM PRÓPRIO NO MENU, escolha dele perguntada e respondida em
+        # 27/11 -- por isso **sem `aba_de`**. Compras não é desdobramento de
+        # painel nenhum: não é aba do Financeiro nem do Contratual.
+        #
+        # ⚠️ AS COLUNAS NÃO MORAM AQUI, moram no banco (`pipeline_etapa`,
+        # migração 122) -- e é UMA só, "Nova solicitação". Esta entrada é a
+        # PORTA: código, rota e quem entra.
+        #
+        # ⚠️ Código conferido contra `CODIGOS_APOSENTADOS` (só `ATD_4.1`) e
+        # contra os códigos em uso: `PNL_1.7` estava livre. As seis anteriores
+        # vão da `PNL_1.1` à `PNL_1.6`.
+        #
+        # 🚨 NASCE SÓ OWNER, como toda aba nova -- e aqui há um desencontro
+        # DELIBERADO de permissão: quem **pede** compra usa o botão do Chat
+        # interno (`ATD_6.1`, permissão `atendimento`); quem **vê o painel** é
+        # owner. Se os dois fossem owner, nove de dez não poderiam pedir.
+        "codigo": "PNL_1.7",
+        "titulo": "Compras",
+        "rota": "/paineis/compras",
+        "icone": "bi-cart",
+        "descricao": "Compras: a sugestão interna que chega pelo formulário, "
+                     "sem OS.",
+        "grupo": "Painéis",
+        "permissao": "owner",
+        "fase": 1,
+    },
+    {
         # 🔵 22/10: a tela que recebe o que chega pelos formularios proprios
         # (`forms.movisat.com.br`). Modulo `FRM`, nao ATD: formulario nao e
         # conversa -- tem definicao, tem campo obrigatorio e tem anexo, e

@@ -4139,3 +4139,145 @@ entrega o estado que a pessoa queria, e um 409 faria a tela mostrar erro
 vermelho numa ação que deu certo.
 
 **Travas:** `tests/teste_agendamento_visto.py`.
+
+---
+
+## Migração 122 — Compras: a aba sem OS e a marca de formulário interno (27/11)
+
+🔵 Ele, 27/11: um painel de Compras *"sem vinculo de OS somente por
+formularios"* e *"somente interno"*.
+
+| O quê | Onde |
+|---|---|
+| `formulario.interno` | **coluna nova**, `boolean NOT NULL DEFAULT false`. Formulário interno **não tem página pública** |
+| `painel_aba` | uma linha: `compras` / `PNL_1.7` / *Compras* / ordem 1 / ativa |
+| `pipeline_etapa` | **uma** coluna: `Nova solicitação`, ordem 1, `ativo`, `final = false` (não é desfecho: é onde o card nasce) |
+| `formulario` + `formulario_campo` | o `COMPRAS` / slug `compras` / *Sugestão de compras*, com **três** campos |
+
+🚨 **Dois CHECK foram alargados, e eram dois, não um:**
+`painel_aba_painel_conhecido` (migração 092) e `formulario_painel_check`
+(migração 075) listavam os mesmos quatro painéis. Sem **os dois**, nem a aba nem
+o formulário aceitam `'compras'`.
+
+⚠️ **`interno` é trava, não combinação.** Com a coluna, `GET` e
+`POST /api/publico/formulario/{slug}` recusam formulário interno com **a mesma
+frase que a rota pública já usa para slug inexistente** — *"Formulário não
+encontrado."*, idêntica de propósito: a recusa não conta de fora que o
+formulário existe. Sem ela, *"interno"* seria só não divulgar a URL, e `M7` diz
+que **trava mede uso, não palavra**.
+
+⚠️ **O formulário nasce `ativo = false` e `gera_os = false`.** O primeiro é a
+regra da casa: quem liga é ele, pela tela. O segundo é o *"sem vínculo de OS"*
+escrito no banco. E **`etapa_destino_id` é a única coluna que faz o envio virar
+card** — apontada para a etapa acima no fim da própria migração.
+
+⚠️ **Não passou pelo `formularios.gravar_definicao()`, e é escolha.** Aquela
+função exige um `bruto` no formato do loader do Bitrix e é idempotente pelo
+`bitrix_id`; este formulário **não vem do Bitrix**, e fabricar um "bruto" falso
+apagaria o sentido daquele arquivo, que é procedência. Daí o `INSERT` direto, e
+`bitrix_id NULL`.
+
+### 🚨 O campo chama `SUGESTAO` porque `jsonb` REORDENA as chaves
+
+O resumo do card fechado (`paineis._resumo`) são as duas primeiras respostas de
+texto **na ordem em que vêm de `formulario_solicitacao.valores`** — e aquela
+coluna é `jsonb`, que **não guarda a ordem de inserção nem olha
+`formulario_campo.ordem`**: ordena por **tamanho da chave**, depois por bytes.
+Medido:
+
+```
+'{"JUSTIFICATIVA":1,"CONTACT_NAME":2}'::jsonb  ->  {"CONTACT_NAME": 2, "JUSTIFICATIVA": 1}
+```
+
+Com o nome `JUSTIFICATIVA` (13 letras), `CONTACT_NAME` (12) passava na frente e
+o resumo saía repetindo o solicitante — que **já é o título do card**. Com
+`SUGESTAO` (8), o resumo diz o que se quer comprar, que é o que faz reconhecer a
+sugestão na coluna.
+
+⚠️ **O rótulo na tela continua "Justificativa"** — palavra dele. Só a chave
+interna mudou. Provado numa cópia do esquema antes de ir a produção: o card saiu
+com `cliente = 'Iago (do login)'` e
+`resumo = 'Cabo de rede cat6, 20 metros… · Iago (do login)'`.
+
+🚨 **E o campo NÃO pode ser `visivel = false` para esconder o solicitante:**
+`validar()` descarta valor de campo fora do visível — *"escondido SOME, não vira
+vazio"* — e o card voltaria a mentir. Ele é **travado** na tela, não escondido.
+
+### Uma boa notícia que a medição trouxe
+
+`pipeline.criar` é **idempotente por solicitação**: `ux_pipeline_card_solicitacao`
+é único e a colisão devolve o card que já existe. Quem clicar duas vezes em
+Enviar não cria dois cards de compra — não há proteção a construir.
+
+⚠️ **`paineis.PAINEIS` não ganhou `'compras'`, e é escolha.** Aquele dicionário
+serve só a rota antiga `/api/paineis/{painel}`; Compras usa
+`/api/paineis/aba/{codigo}`, que não o consulta. Medido na cópia:
+`quadro_da_aba('PNL_1.7')` montou o quadro sem ele.
+
+---
+
+## Migração 123 — Compras: as três colunas seguintes e o campo de valor (27/11)
+
+🔵 Ele, depois do mockup: *"Em cotação + Aprovado + Comprado"* e, sobre o
+valor, *"só o campo"*.
+
+| O quê | Onde |
+|---|---|
+| `pipeline_etapa` | **+3 linhas** na aba `PNL_1.7`: `Em cotação` (2), `Aprovado` (3), `Comprado` (4, `final = true`) |
+| `formulario_campo` | **+1 linha** no `COMPRAS`: `VALOR` / *Valor estimado* / `string` / não obrigatório / ordem 2 |
+| `formulario_campo` | a `ordem` do `ANEXO` vai a 3 e a do `CONTACT_NAME` a 4 |
+
+🚨 **ESTA MIGRAÇÃO NÃO TOCA ESTRUTURA.** Nenhum `CREATE`, `ALTER`, CHECK ou
+índice — só linhas de configuração. 📏 Provado: o `pg_dump --schema-only` de
+antes e de depois deu **diff vazio**, fora o token aleatório que o `pg_dump`
+põe em cada execução.
+
+⚠️ **E o campo de formulário entrou na migração, não como `INSERT` solto.**
+📏 Medido: não existe rota, tela nem script que acrescente campo a formulário
+que **não vem do Bitrix** — o `gravar_definicao()` monta campos a partir do
+bruto do loader e é idempotente pelo `bitrix_id`, e o `COMPRAS` tem
+`bitrix_id NULL`. Para este formulário, *"campo é dado"* significaria SQL sem
+rastro.
+
+### 🚨 Por que a chave chama `VALOR`, com 5 letras
+
+A mesma armadilha do `SUGESTAO`, e ela cobra sempre:
+`formulario_solicitacao.valores` é `jsonb`, e `jsonb` **ordena a chave por
+TAMANHO** — não pela coluna `ordem`. O resumo do card fechado são as duas
+primeiras respostas de texto nessa ordem. Com
+
+```
+VALOR (5)  <  SUGESTAO (8)  <  CONTACT_NAME (12)
+```
+
+o resumo passa a liderar com o preço. 📏 Provado em cópia, com dado real:
+
+```
+resumo = 'R$ 184,00 · Cabo de rede cat6, 20 metros, para o rack da sala 2'
+```
+
+`VALOR_ESTIMADO` (15 letras) cairia para o fim e **não apareceria no resumo**,
+exatamente como o `JUSTIFICATIVA` (13), que perdia para o `CONTACT_NAME` e
+fazia o card repetir o nome que já é o título.
+
+⚠️ **`tipo = 'string'`, não `double`.** O `double` da casa é CNPJ, CPF, RG e
+quantidade, e valida como número: *"R$ 184,00"* seria recusado.
+
+### A conferência que importa é POR ABA
+
+📏 Antes e depois, em produção:
+
+```
+PNL_1.1  2    PNL_1.2  4    PNL_1.3  4
+PNL_1.4  10   PNL_1.5  6    PNL_1.7  1 -> 4
+```
+
+🚨 **Só a `PNL_1.7` mudou.** O risco de um `INSERT` com `JOIN` errado é pôr
+coluna no Financeiro, e o total geral **não acusaria isso** — só a contagem por
+aba acusa.
+
+⚠️ E `formulario.etapa_destino_id` **não** foi tocado: continua em
+`Nova solicitação`. Apontado para `Comprado`, todo envio nasceria concluído.
+
+**Travas:** `tests/teste_painel_compras.py` (8, com a lista de colunas e a de
+campos inteiras) e `src/ajuda_por_painel_2711.teste.js` (10).

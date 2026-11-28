@@ -274,6 +274,26 @@ const rotas = [
     meta: { codigo: 'PNL_1.6', aba: 'PNL_1.6',
             titulo: 'Serviço dos técnicos', largo: true },
   },
+  {
+    // 🔵 27/11, ele: um painel de Compras *"sem vinculo de OS somente por
+    // formularios"*, *"nao precisa propor colunas alem da primeira: nova
+    // solicitacoes"*, e *"sera somente interno"*.
+    // 🚨 A `PainelAba` OUTRA VEZ, e é o ponto: nenhum `.vue` de painel nasceu
+    // por causa desta tela. O cabeçalho, a coluna, o card fechado
+    // (`CorpoDoCard`), o card aberto (`DialogoDeChamado`) e o CSS vêm inteiros
+    // daqui -- a única coluna vive no banco (`pipeline_etapa`), como nas
+    // outras três. Em 25/11 EDITAR aquele arquivo mexeu em quatro painéis
+    // dele sem pedir; reusá-lo sem tocar nele é o contrário disso.
+    // 🚨 REGISTRO E ROTEADOR ANDAM JUNTOS: a `PNL_1.7` entrou no
+    // `movizap/telas.py` primeiro e o `teste_router.py` ficou VERMELHO até
+    // esta linha existir -- era a trava funcionando, e é o mesmo defeito da
+    // `ATD_5.1` em 06/08.
+    path: '/paineis/compras',
+    name: 'PNL_1.7',
+    component: PainelAba,
+    meta: { codigo: 'PNL_1.7', aba: 'PNL_1.7',
+            titulo: 'Compras', largo: true },
+  },
 
   // 🔵 22/10: a FRM_1.1, o que chega pelos formularios proprios.
   // 🚨 REGISTRO E ROTEADOR ANDAM JUNTOS: tela registrada no backend e ausente

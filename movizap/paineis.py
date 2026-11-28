@@ -143,6 +143,19 @@ SITUACOES_REENDERECADAS = (15746, 15695, 16492)
 # quando houver o que dizer. Com zero, não escreve nada.
 
 PAINEIS = {
+    # 🔵 27/11: `compras`, o painel da PNL_1.7 -- *"sem vinculo de OS somente
+    # por formularios"*.
+    # 🚨 EU HAVIA CONCLUIDO QUE ESTA LINHA ERA DISPENSAVEL, e medi errado o
+    # que a tornava necessaria. O `quadro_da_aba('PNL_1.7')` monta SEM ela
+    # (provado em copia), porque le o titulo do `painel_aba` -- essa parte
+    # estava certa. O que eu nao vi e que o `teste_painel_contratual` prende
+    # `set(PAINEIS) == ` os paineis ATIVOS em `painel_aba`: este dicionario e
+    # o VOCABULARIO declarado dos paineis, e painel no banco e fora dele e
+    # divergencia, que e exatamente o que aquela trava existe para pegar.
+    # ⚠️ `COM_TELA` continua SEM `compras`, e isso segue sendo escolha: ele
+    # governa a rota antiga `/api/paineis/{painel}`, que fala com o Harmonit
+    # -- Compras passa pelo `quadro_da_aba`, que nao fala.
+    "compras": "Compras",
     "operacao": "Operação",
     # Declarados porque o mapa do formulário já aponta para eles (migração
     # 075) e porque a rota recusa painel desconhecido. ⚠️ Ter nome aqui não
@@ -896,7 +909,13 @@ def _card_do_chamado(c: dict, nomes: dict, da_os: dict | None = None) -> dict:
                     or nomes.get(str(c.get("cliente_id")))),
         "cliente_id": c.get("cliente_id"),
         "resumo": _resumo(valores) or None,
-        "anexos": 0,
+        # 🔵 27/11: era `0` FIXO, e a pílula de anexo nunca aparecia nos quatro
+        # painéis deste quadro. A contagem vem da consulta
+        # (`pipeline.cards_da_aba`), de `formulario_arquivo`.
+        # ⚠️ `or 0` porque há chamador que não passa a chave -- card sem a
+        # contagem mostra zero, que degrada escondendo a pílula, e nunca
+        # inventa um anexo que não existe.
+        "anexos": c.get("anexos") or 0,
         # 🚨 A CHAVE DE EXIBICAO DA OS, e ela e SEPARADA do `numero_ordem`
         # de proposito (11/11): desde a migracao 106 ha card COM OS em etapa
         # nossa -- as OS reenderecadas para os paineis Financeiro, Pos-venda e

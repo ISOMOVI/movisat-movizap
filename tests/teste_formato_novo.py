@@ -198,7 +198,15 @@ def test_os_quinze_de_producao_estao_TODOS_em_novo():
     decisão dele, e hoje a decisão é **todos**. Se um voltar para `classico`,
     isto fica vermelho -- e aí alguém mexeu sem ele pedir.
     """
-    linhas = banco.varios("SELECT codigo, formato FROM formulario")
+    # 🔵 27/11: `WHERE NOT interno`, e o número FICA EM 16.
+    # 🚨 O ESCOPO ERA O DEFEITO, NÃO A TRAVA. Nasceu o `COMPRAS` (migração
+    # 122): interno, `classico`, com dois campos a preencher. Afrouxar esta
+    # trava para aceitar um `classico` apagaria o que ela existe para medir --
+    # que os DEZESSEIS do cliente estão todos no formato novo, decisão dele de
+    # 11/11. Formulário interno não vem do carregador do Bitrix, não tem
+    # página pública e não usa o formato por etapas: ele não é um dos 16.
+    linhas = banco.varios(
+        "SELECT codigo, formato FROM formulario WHERE NOT interno")
     classicos = sorted(l["codigo"] for l in linhas
                        if l["formato"] != "novo")
     assert classicos == [], classicos

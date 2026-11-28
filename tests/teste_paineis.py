@@ -375,8 +375,10 @@ def teste_o_grupo_paineis_deixou_de_nascer_vazio():
     # PRÓPRIA e não a `PainelAba`: as cinco colunas não são etapas nossas
     # nem situações do ERP, e sim estados do artefato de pagamento, que
     # vive no FPSL.
+    # 🔵 27/11: a `PNL_1.7`, Compras. 🚨 SEM `aba_de` -- ele escolheu item
+    # proprio no menu, porque Compras nao e desdobramento de painel nenhum.
     assert dentro == ["PNL_1.1", "PNL_1.2", "PNL_1.3", "PNL_1.4",
-                      "PNL_1.5", "PNL_1.6"]
+                      "PNL_1.5", "PNL_1.6", "PNL_1.7"]
     # ⚠️ E a nova nasce SÓ OWNER como as outras, e aqui pesa mais: esta
     # tela move dinheiro e gera o arquivo que vai ao Procfy.
     assert telas.por_codigo("PNL_1.6")["permissao"] == "owner"

@@ -140,7 +140,13 @@ def definicao(slug: str, so_ativo: bool = True) -> dict:
     linha = banco.um(
         """SELECT id, codigo, slug, titulo, setor, botao, descricao, ativo,
                   gera_os, problema_id, tipo_os_id, prioridade_id,
-                  formato, etapas, busca_cliente
+                  formato, etapas, busca_cliente,
+                  -- 🔵 27/11: a marca de formulario INTERNO (migracao 122).
+                  -- 🚨 Sem ela no SELECT as rotas publicas leriam KeyError ao
+                  -- conferir a trava, e o `try` da rota de envio engoliria
+                  -- isso em silencio -- o mesmo buraco do `NameError` do
+                  -- `formularios_mod` em 11/11.
+                  interno
              FROM formulario WHERE slug = %s""", (slug,))
     if not linha or (so_ativo and not linha["ativo"]):
         raise FormularioNaoExiste(slug)
@@ -1283,6 +1289,13 @@ def criar_convite(slug: str, valores: dict | None = None,
     com cara de dado.
     """
     d = definicao(slug)  # levanta FormularioNaoExiste; `so_ativo` por padrao
+    # 🚨 27/11, A TERCEIRA PORTA DO FORMULARIO INTERNO. O convite e um bilhete
+    # opaco que abre a PAGINA PUBLICA -- se um formulario interno pudesse
+    # virar convite, a trava das duas rotas publicas seria contornada por um
+    # link. A recusa e a MESMA de slug que nao existe, pelo mesmo motivo de
+    # sempre: recusa diferente conta de fora que o formulario existe.
+    if d.get("interno"):
+        raise FormularioNaoExiste(slug)
     nomes = {c["nome"] for c in d["campos"]}
     limpos = {}
     for nome, valor in (valores or {}).items():
@@ -1401,10 +1414,31 @@ def ativos_para_convite() -> list[dict]:
     contagem de solicitacoes nem de formato, e cada campo a mais aqui e um
     campo a mais exposto a quem so atende.
     """
+    # 🚨 27/11: `AND NOT interno`. Formulario interno nao tem pagina publica,
+    # e convite abre a pagina publica -- oferece-lo aqui seria montar um link
+    # que morre na cara do cliente, e pior: um caminho para fora da trava.
     return banco.varios(
         """SELECT slug, titulo, setor
              FROM formulario
-            WHERE ativo
+            WHERE ativo AND NOT interno
+            ORDER BY ordem, lower(titulo)""")
+
+
+def internos() -> list[dict]:
+    """Os formularios INTERNOS e ligados -- a lista do botao do chat interno.
+
+    🚨 So os ATIVOS, pela mesma regra do `ativos_para_convite`: formulario
+    desligado nesta lista abriria um modal que recusa o envio depois de a
+    pessoa preencher.
+
+    ⚠️ So `slug`, `titulo`, `setor` e `botao`: o menu mostra o titulo e o modal
+    precisa do rotulo do botao de enviar. Campo a mais aqui e campo a mais
+    exposto a quem so tem o chat interno.
+    """
+    return banco.varios(
+        """SELECT slug, titulo, setor, botao
+             FROM formulario
+            WHERE ativo AND interno
             ORDER BY ordem, lower(titulo)""")
 
 
